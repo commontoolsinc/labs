@@ -26,6 +26,28 @@ export interface FrameLog {
   logIncoming(message: unknown, bytes: number): void;
 }
 
+const TEXT_ENCODER = new TextEncoder();
+
+/**
+ * The UTF-8 size of `value` as JSON, which is what the transport sends, or
+ * `undefined` for a value JSON cannot write — a `bigint` among the Fabric
+ * primitives. A size the log cannot compute is left absent rather than
+ * allowed to stop the frame it describes.
+ */
+const jsonBytes = (value: unknown): number | undefined => {
+  try {
+    return TEXT_ENCODER.encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The top-level keys of a document's value, or its type when it has none. */
+const docKeys = (value: unknown): string[] | string =>
+  value !== null && typeof value === "object"
+    ? Object.keys(value as object).slice(0, 12)
+    : typeof value;
+
 const hashString = (text: string): string => {
   // FNV-1a over UTF-16 code units: a stable short key for deduplicating
   // selectors within one log, not a content address anything else reads.
@@ -94,10 +116,10 @@ const summarizeCommit = (commit: unknown): unknown => {
     operations: operations.map((operation) => {
       const entry = operation as Record<string, unknown>;
       return {
-        type: entry.type,
+        op: entry.op,
         id: entry.id,
         scope: entry.scope,
-        bytes: JSON.stringify(operation).length,
+        bytes: jsonBytes(operation),
       };
     }),
     confirmedReads: confirmed.length,
@@ -129,14 +151,33 @@ const summarizeSync = (sync: unknown): unknown => {
         scope: entry.scope,
         seq: entry.seq,
         deleted: entry.deleted,
-        bytes: doc === undefined ? 0 : JSON.stringify(doc).length,
-        keys: value !== null && typeof value === "object"
-          ? Object.keys(value as object).slice(0, 12)
-          : typeof value,
+        bytes: doc === undefined ? 0 : jsonBytes(doc),
+        keys: docKeys(value),
       };
     }),
     removes: removes.length,
   };
+};
+
+/**
+ * The entities a `graph.query` response carries: one per snapshot, with the
+ * document's size and keys, and `absent` for a snapshot naming a document
+ * the space does not hold.
+ */
+const summarizeEntities = (entities: unknown): unknown => {
+  if (!Array.isArray(entities)) return undefined;
+  return entities.map((snapshot) => {
+    const entry = snapshot as Record<string, unknown>;
+    const doc = entry.document as Record<string, unknown> | null | undefined;
+    return {
+      id: entry.id,
+      scope: entry.scope,
+      seq: entry.seq,
+      ...(doc === null || doc === undefined
+        ? { absent: true }
+        : { bytes: jsonBytes(doc), keys: docKeys(doc.value) }),
+    };
+  });
 };
 
 /**
@@ -189,83 +230,114 @@ export function createFrameLog(write: (line: string) => void): FrameLog {
       };
     });
   };
+  // A summary is built under the same protection as its write: a value the
+  // summary cannot describe is the log's problem, never the frame's.
+  const guarded = (build: () => Record<string, unknown>): void => {
+    let summary: Record<string, unknown>;
+    try {
+      summary = build();
+    } catch (error) {
+      summary = {
+        dir: "error",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+    append(summary);
+  };
+  const outgoing = (message: unknown, bytes: number) => {
+    const record = message as Record<string, unknown>;
+    const summary: Record<string, unknown> = {
+      dir: "out",
+      type: record.type,
+      requestId: record.requestId,
+      bytes,
+    };
+    if (record.type === "transact") {
+      summary.commit = summarizeCommit(record.commit);
+    } else if (
+      record.type === "session.watch.add" ||
+      record.type === "session.watch.set"
+    ) {
+      summary.watches = summarizeWatches(record.watches);
+    } else if (record.type === "graph.query") {
+      summary.query = summarizeWatches([{ query: record.query }]);
+    }
+    return summary;
+  };
+  const incoming = (message: unknown, bytes: number) => {
+    const record = message as Record<string, unknown>;
+    const summary: Record<string, unknown> = {
+      dir: "in",
+      type: record.type,
+      requestId: record.requestId,
+      bytes,
+    };
+    const result = record.ok as Record<string, unknown> | undefined;
+    if (record.error !== undefined) {
+      summary.error = record.error;
+    }
+    if (result !== undefined && typeof result === "object") {
+      if (result.sync !== undefined) {
+        summary.sync = summarizeSync(result.sync);
+      }
+      if (result.entities !== undefined) {
+        summary.entities = summarizeEntities(result.entities);
+      }
+      if (result.seq !== undefined) summary.seq = result.seq;
+      if (result.serverSeq !== undefined) {
+        summary.serverSeq = result.serverSeq;
+      }
+    }
+    if (record.type === "session/effect") {
+      const effect = record.effect as Record<string, unknown> | undefined;
+      summary.effectType = effect?.type;
+      summary.sync = summarizeSync(effect);
+    }
+    return summary;
+  };
   return {
-    logOutgoing(message, bytes) {
-      const record = message as Record<string, unknown>;
-      const summary: Record<string, unknown> = {
-        dir: "out",
-        type: record.type,
-        requestId: record.requestId,
-        bytes,
-      };
-      if (record.type === "transact") {
-        summary.commit = summarizeCommit(record.commit);
-      } else if (
-        record.type === "session.watch.add" ||
-        record.type === "session.watch.set"
-      ) {
-        summary.watches = summarizeWatches(record.watches);
-      } else if (record.type === "graph.query") {
-        summary.query = summarizeWatches([{ query: record.query }]);
-      }
-      append(summary);
-    },
-    logIncoming(message, bytes) {
-      const record = message as Record<string, unknown>;
-      const summary: Record<string, unknown> = {
-        dir: "in",
-        type: record.type,
-        requestId: record.requestId,
-        bytes,
-      };
-      const result = record.ok as Record<string, unknown> | undefined;
-      if (record.error !== undefined) {
-        summary.error = record.error;
-      }
-      if (result !== undefined && typeof result === "object") {
-        if (result.sync !== undefined) {
-          summary.sync = summarizeSync(result.sync);
-        }
-        if (result.seq !== undefined) summary.seq = result.seq;
-        if (result.serverSeq !== undefined) {
-          summary.serverSeq = result.serverSeq;
-        }
-      }
-      if (record.type === "session/effect") {
-        const effect = record.effect as Record<string, unknown> | undefined;
-        summary.effectType = effect?.type;
-        summary.sync = summarizeSync(effect);
-      }
-      append(summary);
-    },
+    logOutgoing: (message, bytes) => guarded(() => outgoing(message, bytes)),
+    logIncoming: (message, bytes) => guarded(() => incoming(message, bytes)),
   };
 }
 
-const envLog: FrameLog | undefined = (() => {
-  if (!isDeno()) return undefined;
+/**
+ * The frame log the environment asks for: one appending to the file
+ * `CF_MEMORY_FRAME_LOG` names, or none. `readEnv` and `appendTo` are what a
+ * Deno process supplies and a test replaces.
+ */
+export function frameLogFromEnvironment(
+  readEnv: (name: string) => string | undefined,
+  appendTo: (path: string, line: string) => void,
+): FrameLog | undefined {
   let path: string | undefined;
   try {
-    const raw = Deno.env.get("CF_MEMORY_FRAME_LOG");
+    const raw = readEnv("CF_MEMORY_FRAME_LOG");
     path = raw === undefined || raw === "" ? undefined : raw;
   } catch {
     return undefined;
   }
   if (path === undefined) return undefined;
   const target = path;
-  return createFrameLog((line) =>
-    Deno.writeTextFileSync(target, line + "\n", { append: true })
-  );
-})();
+  return createFrameLog((line) => appendTo(target, line));
+}
+
+const envLog: FrameLog | undefined = isDeno()
+  ? frameLogFromEnvironment(
+    (name) => Deno.env.get(name),
+    (path, line) => Deno.writeTextFileSync(path, line + "\n", { append: true }),
+  )
+  : undefined;
 
 /** Whether frames are being recorded. Read once; a process opts in at start. */
 export const frameLogEnabled = envLog !== undefined;
 
-/** Record a frame this client is sending. `bytes` is its encoded length. */
+/** Record a frame this client is sending. `bytes` is its encoded UTF-8 size. */
 export function logOutgoingFrame(message: unknown, bytes: number): void {
   envLog?.logOutgoing(message, bytes);
 }
 
-/** Record a decoded frame this client received. `bytes` is its encoded length. */
+/** Record a decoded frame this client received. `bytes` is its encoded UTF-8 size. */
 export function logIncomingFrame(message: unknown, bytes: number): void {
   envLog?.logIncoming(message, bytes);
 }

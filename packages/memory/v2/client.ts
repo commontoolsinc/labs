@@ -46,6 +46,7 @@ import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { logIncomingFrame, logOutgoingFrame } from "./frame-log.ts";
+import { memoryMessageFrameBytes } from "./message-compression.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 const logger = getLogger("memory.v2.client", {
@@ -346,7 +347,7 @@ export class Client {
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
     const encoded = encodeMemoryBoundary(message);
-    logOutgoingFrame(message, encoded.length);
+    logOutgoingFrame(message, memoryMessageFrameBytes(encoded));
     await this.#transport.send(encoded);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
@@ -506,7 +507,7 @@ export class Client {
       const decodeStart = performance.now();
       message = decodeMemoryBoundary(payload);
       logger.time(decodeStart, "receive", "decodeBoundary");
-      logIncomingFrame(message, payload.length);
+      logIncomingFrame(message, memoryMessageFrameBytes(payload));
       // A frame whose raw text lacks every reserved reference prefix cannot
       // carry a schema reference (strings serialize verbatim — see the note
       // on encodeMemoryBoundary), so the expansion walk over its upserts is

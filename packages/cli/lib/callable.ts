@@ -1618,25 +1618,29 @@ export async function executeResolvedCallable(
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
-    const dispatchStart = performance.now();
-    const tx = await new Promise<IExtendedStorageTransaction>(
-      (resolve, reject) => {
-        try {
-          if (invocation !== undefined) {
-            resolved.callableCell.send(dispatchInput, resolve, {
-              // The id and the session that chose it travel together: an id
-              // is the caller's own word, and only the pair decides which
-              // receipt this handling files under.
-              eventId: invocation.id,
-              session: invocation.session,
-            });
-          } else {
-            resolved.callableCell.send(dispatchInput, resolve);
+    // The span runs from the send to the handling's final commit callback:
+    // the dispatch-to-commit time the `--verbose` phases report, beside the
+    // readback spans below.
+    const tx = await timeCliPhase(
+      "executeCallable.dispatch",
+      () =>
+        new Promise<IExtendedStorageTransaction>((resolve, reject) => {
+          try {
+            if (invocation !== undefined) {
+              resolved.callableCell.send(dispatchInput, resolve, {
+                // The id and the session that chose it travel together: an
+                // id is the caller's own word, and only the pair decides
+                // which receipt this handling files under.
+                eventId: invocation.id,
+                session: invocation.session,
+              });
+            } else {
+              resolved.callableCell.send(dispatchInput, resolve);
+            }
+          } catch (error) {
+            reject(error);
           }
-        } catch (error) {
-          reject(error);
-        }
-      },
+        }),
     );
     // Acknowledgment is transaction-local (verb contract, Settlement): the
     // commit callback above fires on THIS handling's final commit. Awaiting
@@ -1644,11 +1648,6 @@ export async function executeResolvedCallable(
     // already-committed write hostage to every derived recomputation it
     // triggered elsewhere in the graph.
     deps.onPhase?.("committed");
-    await timeCliPhase("executeCallable.dispatch", () => {
-      // Already awaited above; recorded here so the trace carries the
-      // dispatch-to-commit span alongside the readback spans below.
-      return performance.now() - dispatchStart;
-    });
 
     const txStatus = tx.status();
     const deduplicated = txStatus.status === "error" &&
