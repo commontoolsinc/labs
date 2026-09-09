@@ -89,6 +89,24 @@ The event-handler commit path classifies each commit result and acts on it
   failure, which is long enough to outlast a rehydration burst. `idle()` and
   `settled()` already wait for a parked head event, so a write that converges
   still completes within a settle.
+
+  The re-run needs the fresh state it is re-running against, so the requeue
+  waits for it before the event re-enters the queue: the replica's catch-up
+  to the conflict point (the rejection's `readyToRetry` gate, which the wire
+  attaches to a `ConflictError`) and a pull of the document the conflict
+  names (`Runtime.awaitCommitRetryReadiness`, the readiness `editWithRetry`
+  and the reactive path await before their own re-runs). The backoff step is
+  the pacing floor under that wait: the step's `notBefore` is fixed when the
+  rejection is classified, so a readiness that outlasts the delay dispatches
+  the re-run as soon as it resolves, and one that resolves sooner leaves the
+  event parked until the step elapses. The retry window is unaffected either
+  way, since the deadline rides the requeued event. The wait is part of the
+  commit's tracked chain, so the pending-commit barrier
+  (`idleWithPendingCommits`, and `settled()` through it) stays open until the
+  event is back in the queue rather than releasing between the rejection and
+  its requeue. A runtime that begins tearing down its writes during the wait
+  ends the retry instead: no re-run is coming, so the event's commit callback
+  and staged work settle as they do on the give-up path.
 - **Window elapsed without converging** — a terminal `CommitConvergenceError` is
   surfaced through the scheduler error channel (`scheduler.onError`). The write
   fails loudly rather than disappearing. This is the bounded-resource backstop:
@@ -199,9 +217,10 @@ registered `scheduler.onError` handlers as a `CommitConvergenceError`.
 ## The reactive-action path
 
 The reactive path (`scheduler/run.ts`) does not need this backpressure.
-Both paths window a stale basis, but they recover from a `ConflictError`
-differently: the event path re-queues it with backoff, while the reactive path
-re-arms its subscription and waits for the catch-up. A reactive action is a
+Both paths window a stale basis and both wait for the conflict's catch-up
+before re-running, but they differ in what surrounds that wait: the event path
+re-queues with backoff inside a bounded window, while the reactive path re-arms
+its subscription and re-queues at once. A reactive action is a
 re-derivation: its
 output is a function of its inputs. On a conflict it does not enter the bounded
 retry budget — instead it re-arms its subscription, waits for
@@ -254,6 +273,12 @@ must be actively retried rather than recovered by re-derivation.
   three whole-array appends (`list = [...list, value]`, the profile-append shape)
   survive a conflict storm so the durable count reaches three. This
   deterministically reproduces the silent-loss bug and proves the fix.
+- `packages/runner/test/scheduler-event-retry-readiness.test.ts` — the wait
+  ahead of the re-run. A refusal carrying a test-held `readyToRetry` gate
+  shows no re-dispatch while the gate is held, once logical time has passed
+  every backoff step, and exactly one once it opens; the pending-commit
+  barrier stays open for the same hold; and the document the conflict names
+  is synced before the handler runs again.
 - `packages/runner/test/mergeable-append-multispace-conflict.test.ts` — a
   mergeable append survives a `StorageTransactionInconsistent` storm (windowed),
   and an `AuthorizationError` on the same commit fails fast without entering the
