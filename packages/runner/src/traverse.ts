@@ -2888,7 +2888,10 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   if (isObjectOrArray(obj) && "schemaHash" in obj) {
     const schemaHash = obj["schemaHash"];
     if (typeof schemaHash === "string" && schemaHash.length > 0) {
-      return linkRefFrom<CellLinkRefPayload>({ id: `cid:${schemaHash}` });
+      return linkRefFrom<CellLinkRefPayload>({
+        id: `cid:${schemaHash}`,
+        scope: "space",
+      });
     }
   }
   return undefined;
