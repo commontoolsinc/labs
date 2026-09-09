@@ -909,7 +909,7 @@ being imposed.
 - Suites that are not `deno test` need no mechanism. Every one of their
   invocation units holds a single identity, so skipping it is declining to
   invoke it.
-- The drift guard is unchanged.
+- Skipping does not reach the drift guard.
 - A repeat names an identity and invokes its file with every other
   identity in that file skipped.
 
