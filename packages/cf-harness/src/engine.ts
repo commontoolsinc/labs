@@ -1651,6 +1651,20 @@ export class CfHarnessEngine {
       return;
     }
     const recorded = this.#runState.sandboxOutputRoot;
+    // A record is data, not authority. The path a resume reads out of one
+    // arrives from disk, and a record naming a directory the family layout
+    // would never choose — inside the workspace, say — is self-consistent
+    // about a directory that was never this family's. Where the directory
+    // BELONGS is recomputed here by the same derivation creation uses, and
+    // the record is only allowed to say which directory at that path it was.
+    if (recorded !== undefined && recorded.hostPath !== hostPath) {
+      this.#sandboxOutputRootFailure =
+        `the run this resumes recorded its output directory at ` +
+        `${recorded.hostPath}, which is not where this family's output ` +
+        `directory goes (${hostPath}); nothing at the recorded path can be ` +
+        `attributed to this family`;
+      return;
+    }
     try {
       // A run that already recorded one — a resume, or a delegated child
       // whose parent made it — restores it rather than making it again.

@@ -13,16 +13,29 @@
  * are different filesystems, and a symlink inside it still resolves outside
  * its real path and is refused.
  *
- * The host directory lives under the run's artifact root rather than the
- * workspace, so nothing the sandbox can write reaches it except through the
- * mount. A run with no artifact root has nowhere to put one and cannot
- * ingest; that is the same fail-closed answer a workspace that cannot hold
- * one gets.
+ * Where the host directory goes is chosen rather than fixed, because the
+ * mount's SOURCE has to be somewhere the sandbox cannot reach by another
+ * route: mounting a directory twice does not stop a workload writing it
+ * through the first mount. The family's directory sits under the run's
+ * artifact root when that is itself outside every writable mount, and beside
+ * the workspace when it is not — which is the ordinary case, since the CLI's
+ * artifact root defaults to a directory under the working directory and the
+ * workspace defaults to that same directory. A run with neither has nowhere
+ * to put one and cannot ingest, the same fail-closed answer a directory that
+ * cannot be created gets.
+ *
+ * Only ONE child of that family directory is mounted. Everything else the
+ * harness keeps for the family — its taint record among them — sits beside
+ * that child and is therefore out of the sandbox's reach even though its
+ * sibling is bound in read-write.
  *
  * The root belongs to the run FAMILY rather than to one engine. A delegated
  * child shares its parent's sandbox, so a child's sandbox write and its
  * parent's ingest have to meet in one directory and under one taint
- * accumulator; keying by the root run's id is what makes them the same.
+ * accumulator; keying by the root run's id is what makes them the same. That
+ * derivation is also what a resume is checked against: the path in a
+ * persisted record is data, and where the directory belongs is recomputed
+ * rather than read.
  */
 
 import {
@@ -48,7 +61,7 @@ export const SANDBOX_OUTPUT_MOUNT_PATH = "/cf-harness/out";
 /** The mount's name, for the runtime's own mount bookkeeping. */
 export const SANDBOX_OUTPUT_MOUNT_NAME = "cf-harness-out";
 
-/** The directory's name inside the run family's own artifact directory. */
+/** The mounted directory's name inside the run family's own directory. */
 const OUTPUT_ROOT_NAME = "sandbox-out";
 
 /**

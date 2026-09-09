@@ -142,14 +142,16 @@ readiness.
   from the run family's own output directory on that same trusted side and
   writes it into a cell labelled with the confidentiality runsc reported for the
   family's sandbox invocations; it reads from nowhere else. That directory is a
-  mount of its own, created fresh under the family's artifact directory and
-  never reused, which is what distinguishes a file this run produced from one
-  that merely sits in the workspace the sandbox can write. Neither surface
-  admits arbitrary host commands, and every fabric-session tool is present only
-  when a fabric session is configured. Dedicated Loom tools additionally invoke
-  three fixed command ids through an operator-configured host CLI, using argv
-  and stdin with pinned routing and attribution. This is an authority-only host
-  boundary, not a new flow-aware store commit gate; see
+  mount of its own, created fresh and never reused, placed where the sandbox
+  cannot reach it by another route — under the run's artifact root when that is
+  outside every writable mount, and beside the workspace when it is not, which
+  is what the CLI's defaults produce. That is what distinguishes a file this run
+  produced from one that merely sits in the workspace the sandbox can write.
+  Neither surface admits arbitrary host commands, and every fabric-session tool
+  is present only when a fabric session is configured. Dedicated Loom tools
+  additionally invoke three fixed command ids through an operator-configured
+  host CLI, using argv and stdin with pinned routing and attribution. This is an
+  authority-only host boundary, not a new flow-aware store commit gate; see
   [LOOM_AUTHORING.md](LOOM_AUTHORING.md).
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles

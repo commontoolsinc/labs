@@ -246,92 +246,109 @@ The current package provides:
   never the bytes, applying the confidentiality that family's sandbox work
   accumulated. Three things have to hold before that label means anything, and
   each is a refusal rather than a caveat. PROVENANCE: it reads only from the run
-  family's own output directory — a host directory under the family's own
-  artifact directory, mounted read-write into the sandbox at `/cf-harness/out`
-  and named there by `CF_HARNESS_OUTPUT_DIR` on every invocation, created fresh
-  at family start and refused if one is already there. Its own MOUNT is what
-  carries the claim: a mount point cannot be replaced from inside, a hard link
-  cannot cross into it from the workspace because the two are different
-  filesystems, and a symlink inside it resolves outside its real path. On top of
-  that the directory's identity is recorded when it is made and checked before
-  every read: device and inode, and a nonce written inside it, because device
-  and inode alone do not identify a directory across time — on ext4 and tmpfs a
-  directory remade at the same path frequently gets its inode back; a candidate
-  whose real path is not under the root's is refused; and a candidate carrying
-  more than one name is refused, since a hard link is a second entry for bytes
-  the family never wrote. Being in the workspace is not evidence that this run
-  wrote a file, while a directory nothing predates is. A run with nowhere to put
-  one — no artifact root, or a directory that cannot be created — loses its
-  ingest, not its tools. EVIDENCE: the label is the join of the container taints
-  runsc reported for the family's sandbox invocations, collected at the
+  family's own output directory — a host directory of the harness's own, mounted
+  read-write into the sandbox at `/cf-harness/out` and named there by
+  `CF_HARNESS_OUTPUT_DIR` on every invocation, created fresh at family start and
+  refused if one is already there. Its own MOUNT is what carries the claim: a
+  mount point cannot be replaced from inside, a hard link cannot cross into it
+  from the workspace because the two are different filesystems, and a symlink
+  inside it resolves outside its real path. On top of that the directory's
+  identity is recorded when it is made and checked before every read: device and
+  inode, and a nonce written inside it, because device and inode alone do not
+  identify a directory across time — on ext4 and tmpfs a directory remade at the
+  same path frequently gets its inode back; a candidate whose real path is not
+  under the root's is refused; and a candidate carrying more than one name is
+  refused, since a hard link is a second entry for bytes the family never wrote.
+  Being in the workspace is not evidence that this run wrote a file, while a
+  directory nothing predates is. Where that directory goes is chosen rather than
+  fixed, because the mount's SOURCE has to be somewhere the sandbox cannot reach
+  by another route — mounting a directory twice does not stop a workload writing
+  it through the first mount. The family's directory sits under the run's
+  artifact root when that is itself outside every writable mount, and beside the
+  workspace when it is not, which is what the CLI's defaults produce. Only one
+  child of it is mounted, so the family's taint record beside that child is out
+  of reach. A run with neither place, or whose directory cannot be created,
+  loses its ingest, not its tools. On resume the path in a persisted record is
+  treated as data: where the directory belongs is recomputed by the same
+  derivation creation uses, and a record naming anywhere else is refused before
+  its identity is even read. EVIDENCE: the label is the join of the container
+  taints runsc reported for the family's sandbox invocations, collected at the
   invocation boundary so no tool can drop one, and an invocation that returned
   no readable result poisons the family to `unknown` for the rest of the run —
-  there is no recovery, because nothing later can establish what it wrote. That
-  includes a result the runtime SYNTHESIZED because it could not read the
-  sidecar: an unsupported version, a container mismatch, a missing taint, a read
-  or parse failure, or a taint whose shape this build cannot represent, such as
-  a confidentiality clause that is a string rather than a list. Each is rendered
-  as a denial carrying an empty label, shaped exactly like a public container,
-  so only its recorded origin tells the two apart. A run configured without the
-  runsc CFC result transport therefore ingests nothing, which is the intended
-  reading: no trusted taint source, no honest label. A resumed run seeds this
-  state from its own record, and a record that says nothing about it is
-  `unknown` rather than clean; it also restores its recorded output directory
-  rather than making it again, refusing when what stands at the recorded path is
-  no longer the directory that was recorded. Every record the family writes — a
-  delegated child's and its parent's alike — carries the family's state, so a
-  child's taint cannot leave a parent's record saying the family was clean.
-  BYTES: the file is decoded strictly, and one that is not valid UTF-8 is
-  refused rather than repaired, and a byte-order mark is kept as content rather
-  than stripped — dropping it would take three bytes out of the value while the
-  reported length still counted them. Nothing reaches a cell that was not in the
-  file.
+  there is no recovery, because nothing later can establish what it wrote. Only
+  a COMPLETE result runsc reported counts: one missing an observation, naming a
+  policy or channel that is not defined, or whose three observations disagree
+  about the container's label describes no container. So does a result the
+  runtime SYNTHESIZED because it could not read the sidecar: an unsupported
+  version, a container mismatch, a missing taint, a read or parse failure, or a
+  taint whose shape this build cannot represent, such as a confidentiality
+  clause that is a string rather than a list. Each is rendered as a denial
+  carrying an empty label, shaped exactly like a public container, so only its
+  recorded origin tells the two apart. A run configured without the runsc CFC
+  result transport therefore ingests nothing, which is the intended reading: no
+  trusted taint source, no honest label. The family's state lives in one record
+  of its own, beside the output mount and out of the sandbox's reach, rewritten
+  atomically whenever an invocation adds to it and read by every engine in the
+  family; a run's own record carries a copy for a reader. That is what makes the
+  answer independent of which engine wrote last, or at all — a child's taint
+  cannot be lost by a parent that crashed before persisting again. A resume
+  prefers that record, falls back to its own when there is none to read, and
+  treats a record that says nothing about the taint as `unknown` rather than
+  clean. It restores its output directory rather than making it again, refusing
+  when what stands at the recomputed path is no longer the directory that was
+  recorded. BYTES: the file is decoded strictly, and one that is not valid UTF-8
+  is refused rather than repaired, and a byte-order mark is kept as content
+  rather than stripped — dropping it would take three bytes out of the value
+  while the reported length still counted them. Nothing reaches a cell that was
+  not in the file.
 
   Both sidecar transports are held to the boundary the label rests on:
   `resolveDockerRunscSandboxConfig` refuses a result or invocation-context
-  directory whose real path lies inside the workspace or any writable extra
-  mount, both are held to being absolute before anything else reads them — on
-  the environment fallback as much as on the flag — and the CLI refuses a
-  relative `--cfc-result-dir` rather than resolving it against a working
-  directory that is the workspace's own default. A container able to write its
-  own result sidecar could name its own taint. What the harness cannot check
-  from this side is whether the runtime is registered to read the directory
-  named here, or how the container's own view maps it; that residual belongs to
-  the `runsc-cfc` registration. The label is the family's rather than the
-  file's, and it over-approximates: gVisor does label sandbox output per file,
-  in a `trusted.cfc.contentLabel` xattr, but that xattr does not cross the gofer
-  and every channel that could carry it out of the container is one the workload
-  writes, so per-file precision waits on an out-of-band channel from `runsc-cfc`
-  itself. The tool takes a path and nothing else: a label has no property in its
-  schema to arrive in. Without the session configuration all three tools are
-  absent from the tool surface, for a `default`- or `pattern-author`-profile
-  subagent as much as for the parent — a child shares the one session the parent
-  built; `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
-  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
-  set the session runtime's CFC dials, so with labels persisted a
-  confidentiality-tainted pattern write is refused at commit under strict, and
-  `--fabric-cfc-posture max-enforcement` opts the session runtime into the
-  runner's named posture bundle (every staged enforcement dial on, the standard
-  prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
-  with the two per-dial flags applying over it — these are the fabric session's
-  dials, independent of the harness's own `--cfc-enforcement-mode` up to one tie
-  — under a session raised to `enforce-strict` a harness dial nobody set follows
-  the session, and one stated weaker refuses startup naming both flags — and the
-  resolved posture (each dial's value and whether the operator, the named
-  bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
-  state and the run report, and printed in the operator summary — the whole
-  posture record with it, which a delegated child carries from its parent
-  stamped `inherited` because it runs on that parent's session; the session
-  runtime can further run under a read ceiling — the `--max-confidentiality`
-  flag, or `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest,
-  met when both are given — that bounds every `db.query` the run issues, a
-  query's own declaration met with it rather than replacing it; the ceiling
-  governs only query results declared per session (`PerSession<>`,
-  `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
-  runtime refuses any other query under it, so a pattern authored for a bounded
-  run declares its results per session; it is refused without a fabric session,
-  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
-  printed in the operator summary, and inherited unchanged by a delegated child;
+  directory whose real path lies inside the workspace, the run's output mount,
+  any other writable mount, or the artifact root that holds the record a run
+  writes about itself, both are held to being absolute before anything else
+  reads them — on the environment fallback as much as on the flag — and the CLI
+  refuses a relative `--cfc-result-dir` rather than resolving it against a
+  working directory that is the workspace's own default. A container able to
+  write its own result sidecar could name its own taint. What the harness cannot
+  check from this side is whether the runtime is registered to read the
+  directory named here, or how the container's own view maps it; that residual
+  belongs to the `runsc-cfc` registration. The label is the family's rather than
+  the file's, and it over-approximates: gVisor does label sandbox output per
+  file, in a `trusted.cfc.contentLabel` xattr, but that xattr does not cross the
+  gofer and every channel that could carry it out of the container is one the
+  workload writes, so per-file precision waits on an out-of-band channel from
+  `runsc-cfc` itself. The tool takes a path and nothing else: a label has no
+  property in its schema to arrive in. Without the session configuration all
+  three tools are absent from the tool surface, for a `default`- or
+  `pattern-author`-profile subagent as much as for the parent — a child shares
+  the one session the parent built; `--fabric-cfc-enforcement-mode` (raise-only:
+  `enforce-explicit` or `enforce-strict`) and `--fabric-cfc-flow-labels`
+  (`off`/`observe`/`persist`) set the session runtime's CFC dials, so with
+  labels persisted a confidentiality-tainted pattern write is refused at commit
+  under strict, and `--fabric-cfc-posture max-enforcement` opts the session
+  runtime into the runner's named posture bundle (every staged enforcement dial
+  on, the standard prompt-caveat policy loaded, public-only ceilings on the
+  network-fetch sinks), with the two per-dial flags applying over it — these are
+  the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode` up to one tie — under a session raised to
+  `enforce-strict` a harness dial nobody set follows the session, and one stated
+  weaker refuses startup naming both flags — and the resolved posture (each
+  dial's value and whether the operator, the named bundle, or the default
+  supplied it) is recorded as `fabricSessionCfc` in run state and the run
+  report, and printed in the operator summary — the whole posture record with
+  it, which a delegated child carries from its parent stamped `inherited`
+  because it runs on that parent's session; the session runtime can further run
+  under a read ceiling — the `--max-confidentiality` flag, or
+  `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest, met when
+  both are given — that bounds every `db.query` the run issues, a query's own
+  declaration met with it rather than replacing it; the ceiling governs only
+  query results declared per session (`PerSession<>`, `scope: "session"`,
+  `.asScope("session")`, or a session-scoped db) and the runtime refuses any
+  other query under it, so a pattern authored for a bounded run declares its
+  results per session; it is refused without a fabric session, recorded with its
+  source as `readMaxConfidentiality` in `fabricSessionCfc`, printed in the
+  operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity

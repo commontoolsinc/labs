@@ -1081,6 +1081,48 @@ describe("ingest_sandbox_file", () => {
     );
   });
 
+  it("refuses a resumed record that names a directory the layout would not choose", async () => {
+    // The record arrives from disk, so it is data. One redirected into the
+    // workspace can be perfectly self-consistent — a real directory with a
+    // matching inode and its own marker — and still name a directory that was
+    // never this family's. Where the directory belongs is recomputed, and the
+    // record is only allowed to say which directory at that path it was.
+
+    await withRun(
+      { taint: {}, outputFiles: { "total.txt": TOTAL_TEXT } },
+      async ({ engine, workspace, artifactRoot, runId }) => {
+        const planted = join(workspace, "planted-out");
+        const plantedRoot = await createSandboxOutputRoot(planted, runId);
+        await Deno.writeTextFile(join(planted, "total.txt"), "not ours");
+        const redirected = {
+          ...engine.getRunState(),
+          sandboxOutputRoot: plantedRoot,
+        };
+        forgetWorkspaceTaintForTesting(runId);
+
+        const resumed = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandbox(sandboxResult({})),
+          runState: redirected,
+          workspaceHostPath: workspace,
+          artifactRoot,
+          fabricSessionFactory: () =>
+            Promise.reject(new Error("no session should be opened")),
+        });
+        await resumed.ensureSandboxOutputRoot();
+
+        expect(resumed.sandboxOutputRootFailure).toMatch(
+          /is not where this family's output directory goes/,
+        );
+        const output = await resumed.invokeBuiltinTool("ingest_sandbox_file", {
+          path: `${SANDBOX_OUTPUT_MOUNT_PATH}/total.txt`,
+        });
+        expect(
+          failure(output.output as IngestSandboxFileToolOutput).message,
+        ).toContain("has no output directory of this run's own");
+      },
+    );
+  });
+
   it("refuses to restore a directory whose marker is not the recorded one", async () => {
     // The case device and inode cannot answer, and the reason the marker
     // exists: a directory that IS the same inode, because a filesystem handed
