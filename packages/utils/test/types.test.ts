@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  type Constructor,
   isBoolean,
   isFiniteNumber,
   isFunction,
@@ -68,6 +69,42 @@ describe("types", () => {
       const _: Mutable<null> = null;
       const __: Mutable<number> = 5;
       const ___: Mutable<string> = "hi";
+    });
+  });
+
+  describe("Constructor", () => {
+    class Donut {
+      readonly glaze = "plain";
+    }
+
+    abstract class Fryer {
+      abstract fry(): void;
+    }
+
+    it("admits a concrete class and an abstract one", () => {
+      const concrete: Constructor<Donut> = Donut;
+      const abstractOne: Constructor<Fryer> = Fryer;
+      expect(concrete).toBe(Donut);
+      expect(abstractOne).toBe(Fryer);
+    });
+
+    it("types `.prototype` as the instance type", () => {
+      const ctor: Constructor<Donut> = Donut;
+      const proto: Donut = ctor.prototype;
+      expect(proto).toBe(Donut.prototype);
+    });
+
+    it("types `.prototype` as `unknown` given no instance type", () => {
+      const ctor: Constructor = Donut;
+      // @ts-expect-error `unknown` is not assignable to `Donut`.
+      const proto: Donut = ctor.prototype;
+      expect(proto).toBe(Donut.prototype);
+    });
+
+    it("refuses a class whose instances are not `T`", () => {
+      // @ts-expect-error a `Fryer` is not a `Donut`.
+      const ctor: Constructor<Donut> = Fryer;
+      expect(ctor).toBe(Fryer);
     });
   });
 

@@ -439,6 +439,10 @@ describe("prompt-loop address handles", () => {
       workspaceHostPath: workspace,
       runId,
       model: "gpt-5.4",
+      // `view_image` is a read, which this rung admits without direct-command
+      // authorization; the assertions below read the tool's own result, so
+      // the tool has to have run.
+      cfcEnforcementMode: "enforce-explicit",
     });
     await engine.recordHandleTable(minted.table);
     const loop = new CfHarnessPromptLoop({

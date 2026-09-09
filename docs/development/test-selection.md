@@ -477,7 +477,7 @@ itself.
   whether it ran the test, which is the only thing that settles it, and
   the manifest it resolved says why it did not. Ran and passed is a flake
   or an interaction between changes. Withheld is the store holding the
-  test back as too flaky or as already failing. Not selected is the
+  test back as too flaky to judge a change by. Not selected is the
   expected cost of selection: the coverage this design traded away, so
   nothing was missed. A test the packing reached, or one the store has
   never seen, with no record either way is a run that recorded less than

@@ -595,7 +595,6 @@ export async function publish(
 
   const manifest = buildManifest({
     states,
-    mainRed: folded.mainRed,
     surfaces: placed,
     today,
     generatedAt: startedAt.toISOString(),

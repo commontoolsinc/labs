@@ -38,6 +38,22 @@ describe("selection", () => {
         .toBe(false);
     });
 
+    it("drops a withheld reason it does not honor, keeping the rest", () => {
+      // Manifests already in the store hold tests back for reasons this
+      // reader has since stopped acting on. Refusing one of those would
+      // withhold nothing and make the whole corpus mandatory instead.
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      object.withheld = [
+        { test: TEST, suite: "workspace-unit", reason: "main-red" },
+        { test: TEST, suite: "workspace-unit", reason: "flaky" },
+      ];
+      const parsed = parseManifest(JSON.stringify(object));
+      expect(parsed).toBeDefined();
+      expect(parsed!.withheld).toEqual([
+        { test: TEST, suite: "workspace-unit", reason: "flaky" },
+      ]);
+    });
+
     it("returns undefined for a schema version it does not know", () => {
       const ahead = {
         ...sampleManifest(),
@@ -152,11 +168,11 @@ describe("selection", () => {
       ["entries that are not a list", withField("entries", {})],
       ["withheld that is not a list", withField("withheld", {})],
       [
-        "a withheld reason nobody wrote",
+        "a withheld reason that is not a string",
         withField("withheld", [{
           test: { k: "a", s: "b", n: "c" },
           suite: "s",
-          reason: "why",
+          reason: 7,
         }]),
       ],
       [
@@ -460,7 +476,7 @@ describe("selection", () => {
         withheld: [{
           test: TEST,
           suite: "workspace-unit",
-          reason: "main-red",
+          reason: "flaky",
         }],
         unschedulable: [{
           test: TEST,
