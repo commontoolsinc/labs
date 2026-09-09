@@ -31,10 +31,7 @@ score and its cost, the catches behind that score and how many distinct
 sources they came from, when the most recent one was, its churn and flake
 rate, and whether it is withheld and why. An identity the store has never
 seen is reported as mandatory, which is what an identity with no history
-is — unless it sits in a unit the topology declares unavailable, and then
-the answer is that nothing runs it, with the reason the suite gave. Such
-a unit has no record for the same reason it has no lane, so reading its
-silence as a new test would say the opposite of what happens.
+is.
 
 The identity resolves through `tasks/test-identity-aliases.jsonl` first,
 so asking about a renamed test under either name finds the joined history.

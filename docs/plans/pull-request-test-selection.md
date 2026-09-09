@@ -988,14 +988,6 @@ is either a test that never runs or a mapping that is wrong, and both are
 worth knowing about without blocking anybody. Entries in its unavailable
 list are reported separately and do not count as missing records.
 
-What the store half asks of a recorded identity holds for every record a
-run writes, including the ones no lane produced, and the answer for a
-job of the run rather than a test in it is to record none. The coverage
-gate is the case: it joins every lane's coverage report, so it can only
-start once the lanes have finished, and no lane can be asked to run it.
-It runs directly rather than through the recording wrapper, so it writes
-no identity and the guard never meets one.
-
 Together these are what make "no continuous-integration change needed" a
 checked property rather than a hope.
 
