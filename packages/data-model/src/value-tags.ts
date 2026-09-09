@@ -151,11 +151,11 @@ export function tagFromFabricValueElseNull(
  * Maps a constructor to its tag, for the native JS builtins alone. Returns
  * `null` for anything else, a fabric class included.
  *
- * Answering this needs no class this system defines, which is what lets code
- * layered below the fabric classes ask it at all: recognizing a `FabricBytes`
- * would mean holding that class, and a concrete fabric class reaches the
- * codecs and, through them, the instance bases. Nothing here may import a
- * module that knows a fabric class, for that reason.
+ * Answering this needs no class this system defines, and this function holds
+ * none. A concrete fabric class reaches the codecs and, through them, the
+ * instance bases, so a module holding one in order to recognize it would close
+ * a cycle with everything layered below those bases. A fabric primitive is
+ * recognized by the tag its instance carries instead.
  *
  * Recognition is by constructor identity, which is a per-realm question:
  * another realm's `Date` is a different `Date`, and is not this one. Values

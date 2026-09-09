@@ -27,7 +27,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
-import { VALUE_TAGS, ValueTag } from "@/value-tags.ts";
+import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
 
 /**
  * The encoded state of a {@link FabricHash}: the algorithm tag, and the digest

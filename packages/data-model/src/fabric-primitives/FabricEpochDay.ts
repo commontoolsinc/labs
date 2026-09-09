@@ -23,7 +23,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { VALUE_TAGS, ValueTag } from "@/value-tags.ts";
+import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
 
 /**
  * Temporal type representing a particular day, as a count of days from the

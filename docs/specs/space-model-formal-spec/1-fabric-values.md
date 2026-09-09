@@ -3832,23 +3832,26 @@ export function fabricFromNativeValue(
 | `FabricValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
-> **Implementation: tag-based type dispatch.** The conversion functions use a
-> tag-based dispatch mechanism (`tagFromNativeValueElseNull()` in
-> `packages/data-model/src/value-tags.ts`) to classify values in O(1) via a
-> `switch` on the value's constructor. This replaces sequential `instanceof`
-> chains with a single constructor lookup that returns a tag string (e.g.,
-> `"Error"`, `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
-> `"FabricInstance"`). The conversion function then switches on the tag to route
-> to the appropriate wrapping logic. An array is the exception to the
-> constructor lookup: `Array.isArray()` is consulted first and returns `"Array"`
-> unconditionally, so a subclass instance, a severed-prototype array, and a
-> cross-realm array all reach array handling and are handled by the array rule
-> of Section 1.5, rather than being rejected as some unrecognized class or
-> routed elsewhere by something the array carries. Fallback paths handle exotic
-> Error subclasses (via `Error.isError()`) and null-prototype objects. Tagging a
-> null-prototype object `"Object"` classifies more broadly than the type admits,
-> for the same reason the array tag does: it is what lets the object rule of
-> Section 1.5 reject the value by name rather than as some unrecognized class.
+> **Implementation: tag-based type dispatch.** The conversion functions
+> classify a value through `tagFromNativeValueElseNull()` (in
+> `packages/data-model/src/value-tags.ts`), which returns a tag string from the
+> `VALUE_TAGS` vocabulary -- `"Array"`, `"Object"`, `"Error"`, `"Map"`, `"Set"`,
+> `"Date"`, `"Uint8Array"`, `"RegExp"`, one tag per `FabricPrimitive` class,
+> `"FabricInstance"`, and `"Primitive"` -- or `null` for a value it does not
+> recognize. The conversion function then switches on the tag to route to the
+> appropriate wrapping logic. The dispatch asks its questions in a fixed order.
+> An array is tagged first, by `Array.isArray()`, so a subclass instance, a
+> severed-prototype array, and a cross-realm array all reach array handling and
+> are handled by the array rule of Section 1.5, rather than being rejected as
+> some unrecognized class or routed elsewhere by something the array carries.
+> An error is tagged next, by `Error.isError()`, which likewise holds through a
+> severed prototype and across realms. A `FabricPrimitive` is tagged by the tag
+> its instance carries, and a `FabricInstance` by class. A null-prototype
+> object is tagged `"Object"`, which classifies more broadly than the type
+> admits, for the same reason the array tag does: it is what lets the object
+> rule of Section 1.5 reject the value by name rather than as some unrecognized
+> class. What remains is decided by its class, read from its prototype, by a
+> `switch` on constructor identity.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

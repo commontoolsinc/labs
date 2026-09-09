@@ -147,6 +147,13 @@ describe("value-tags", () => {
       expect(tabled).toEqual(new Set(codecClasses()));
     });
 
+    it("returns a distinct tag for each registered primitive class", () => {
+      const tags = PRIMITIVE_TAGS.map(([value]) =>
+        tagFromFabricPrimitive(value)
+      );
+      expect(new Set(tags).size).toBe(PRIMITIVE_TAGS.length);
+    });
+
     it("returns the tag a subclass reports, whatever its class", () => {
       expect(tagFromFabricPrimitive(new TaggedProbe())).toBe(VALUE_TAGS.Hash);
     });

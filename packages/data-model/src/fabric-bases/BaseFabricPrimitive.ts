@@ -1,6 +1,6 @@
 /**
  * The implementation side of the primitive hierarchy: the base class that
- * concrete primitives extend, and the symbol seeding its plumbing members.
+ * concrete primitives extend, and the symbol keying the tag each one reports.
  *
  * `FabricPrimitive` is the contract external code is written against, and this
  * is where the shared implementation behind it lives. The split is held by
@@ -14,7 +14,9 @@ import { toCompactDebugString } from "@/value-debug.ts";
 import type { ValueTag } from "@/value-tags.ts";
 
 /**
- * Well-known symbol used for the `FabricPrimitive` getter defined below.
+ * Well-known symbol keying the getter through which a concrete primitive
+ * reports its `ValueTag`. A symbol rather than a name, so that the member is
+ * implementation plumbing and no part of a primitive's client-facing surface.
  */
 export const VALUE_TAG: unique symbol = Symbol("data-model.valueTag");
 
@@ -25,8 +27,8 @@ export const VALUE_TAG: unique symbol = Symbol("data-model.valueTag");
  * against, while `BaseFabricPrimitive` is the designated home for shared
  * implementation. Its counterpart `BaseFabricInstance` carries the
  * `shallowClone()` template method; this class carries the construction-time
- * freeze, the static invariant guard, and a placeholder seed member (see
- * `[EXAMPLE_METHOD]`).
+ * freeze, the static invariant guard, and the `[VALUE_TAG]` getter that each
+ * subclass supplies.
  */
 export abstract class BaseFabricPrimitive extends FabricPrimitive {
   /** Constructs an instance. */
