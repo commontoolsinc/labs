@@ -9631,7 +9631,7 @@ supply; OW29/OW32/OW34 closed):
     cell must arrive through the same consumer — watched red against
     the no-containment base validator (the board's exact doc pair as
     an unhandled rejection, then the liveness timeout), green at
-    head with the computed doc quarantined, the request path
+    head with a cid-mentioning doc quarantined, the request path
     answering ok, and the ensure completing.
     Subscriber-shape finding (the owner's cf-harness question,
     verified): ALL THREE named production space-cell-only

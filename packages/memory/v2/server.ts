@@ -4470,7 +4470,7 @@ export class Server {
         message.watches,
         { principal: session.principal, sessionId: message.sessionId },
       );
-      this.#addUndeliveredToTrackedIds(session.trackedIds, graphs.values());
+      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
@@ -4694,10 +4694,10 @@ export class Server {
         entities.set(key, entry);
       }
       // Rebuilt from provenance — entities, operation watches, and every
-      // graph's undelivered interests — never unioned from the previous
-      // set: an interest a refresh RETIRED (a manifest entry dropped, its
-      // registration released) must leave the wake set with it, or every
-      // later commit to the orphaned document keeps waking this session.
+      // graph's misses — never unioned from the previous set: an interest
+      // a refresh RETIRED (a link edited away, its miss released) must
+      // leave the wake set with it, or every later commit to the orphaned
+      // document keeps waking this session.
       const trackedIds = addOperationWatchTrackedIds(
         trackedIdsFromEntries(entities.values()),
         nextWatches,
@@ -4706,7 +4706,7 @@ export class Server {
           sessionId: message.sessionId,
         },
       );
-      this.#addUndeliveredToTrackedIds(trackedIds, graphs.values());
+      this.#addMissedToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
         fromSeq,
@@ -5104,25 +5104,20 @@ export class Server {
    * are wake-reactivity only — they are never delivered, so they flow
    * into `trackedIds` beside the delivered entities at every site that
    * rebuilds or folds that set. */
-  #addUndeliveredToTrackedIds(
+  #addMissedToTrackedIds(
     trackedIds: Set<string>,
     graphs: Iterable<TrackedGraphState>,
   ): void {
-    // Missed and lazily registered documents are dirty interest exactly
-    // like delivered ones: a commit touching either must wake the session
-    // — to heal the miss, or to promote and deliver the lazy document.
-    const add = (key: string) => {
-      let parsed: { id: string; scopeKey: ScopeKey };
-      try {
-        parsed = fromDocKey(key as QueryDocKey);
-      } catch {
-        return;
-      }
-      trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
-    };
     for (const graph of graphs) {
-      for (const [key] of graph.missed) add(key);
-      for (const key of graph.lazy) add(key);
+      for (const [key] of graph.missed) {
+        let parsed: { id: string; scopeKey: ScopeKey };
+        try {
+          parsed = fromDocKey(key as QueryDocKey);
+        } catch {
+          continue;
+        }
+        trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+      }
     }
   }
 
@@ -5404,8 +5399,8 @@ export class Server {
               // session's tracked set is a demand change; notify so the
               // demand pass sees it without waiting for the next input.
               // The set is rebuilt rather than grown, so the change can
-              // be a same-size swap (a crossing manifest rewritten from
-              // one lazy target to another) or a shrink — compared by
+              // be a same-size swap (a link retargeted from one absent
+              // document to another) or a shrink — compared by
               // membership, exactly as the full-evaluation branch below
               // does, and like there the O(tracked) scan runs only when
               // a demand observer is attached (the serving posture; its
@@ -5417,11 +5412,10 @@ export class Server {
                 session.entities.set(key, entry);
               }
               // Rebuilt from provenance rather than grown in place: the
-              // refresh above may have RETIRED interests (a manifest
-              // entry dropped releases its registration), and a retired
-              // interest must leave the wake set with it — while a
-              // re-walk's new absent dead-ends and registrations are
-              // wake-reactivity the next commit needs.
+              // refresh above may have RETIRED interests (a link edited
+              // away releases its miss), and a retired interest must
+              // leave the wake set with it — while a re-walk's new absent
+              // dead-ends are wake-reactivity the next commit needs.
               session.trackedIds = addOperationWatchTrackedIds(
                 trackedIdsFromEntries(session.entities.values()),
                 session.watches,
@@ -5430,7 +5424,7 @@ export class Server {
                   sessionId: session.id,
                 },
               );
-              this.#addUndeliveredToTrackedIds(
+              this.#addMissedToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
               );
@@ -5546,7 +5540,7 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
-          this.#addUndeliveredToTrackedIds(
+          this.#addMissedToTrackedIds(
             evaluatedTrackedIds,
             graphs.values(),
           );
@@ -5941,7 +5935,7 @@ export class Server {
       // the graph-only provenance from delivered entries plus traversal misses
       // before producing demand rows.
       const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
-      this.#addUndeliveredToTrackedIds(
+      this.#addMissedToTrackedIds(
         graphTrackedIds,
         session.graphs.values(),
       );
