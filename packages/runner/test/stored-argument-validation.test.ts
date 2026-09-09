@@ -1,3 +1,9 @@
+/**
+ * Checks stored-argument validation and its fallback with real storage graphs.
+ * Direct overlay cases supply cyclic snapshots that eager reads reject before
+ * the fallback can exercise its own termination and cache guards.
+ */
+
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
@@ -8,7 +14,19 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { extractDefaultValues } from "../src/runner-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { storedArgumentValidationIssue } from "../src/stored-argument-validation.ts";
+import {
+  overlayUnreadableLinkPlaceholders,
+  storedArgumentValidationIssue,
+} from "../src/stored-argument-validation.ts";
+
+/** Materialized snapshot whose back edge remains observable by identity. */
+interface MaterializedNode {
+  /** Linked value that materialization could not read. */
+  pending: unknown;
+
+  /** Optional back edge through the materialized graph. */
+  next?: MaterializedNode;
+}
 
 const signer = await Identity.fromPassphrase("stored-argument-validation");
 const space = signer.did();
@@ -104,6 +122,72 @@ describe("stored-argument-validation", () => {
       absent.set(42);
       expect(storedArgumentValidationIssue(argument, schema, defaults, tx))
         .toContain("pending: value does not match type string");
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("rebuilds each cyclic descent without reusing a partial sibling overlay", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const a = runtime.getCell(space, "cycle-a", undefined, tx);
+      const b = runtime.getCell(space, "cycle-b", undefined, tx);
+      a.set({ next: b, pending: absent });
+      b.set({ next: a, pending: absent });
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ first: a, second: b });
+      const node: MaterializedNode = { pending: undefined };
+      node.next = node;
+      const snapshot = { first: node, second: node };
+      const result = overlayUnreadableLinkPlaceholders(
+        tx,
+        argument.getAsNormalizedFullLink(),
+        argument.getRaw(),
+        snapshot,
+      ) as typeof snapshot;
+
+      for (const entry of [result.first, result.second]) {
+        expect(entry.pending).toBeDefined();
+        expect(entry.next?.pending).toBeDefined();
+        expect(entry.next?.next).toBe(node);
+      }
+      expect(node.pending).toBeUndefined();
+      expect(node.next).toBe(node);
+      expect(snapshot.first).toBe(node);
+      expect(snapshot.second).toBe(node);
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("revisits an alias whose first resolution reaches an active ancestor", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const a = runtime.getCell(space, "cycle-a", undefined, tx);
+      const alias = runtime.getCell(space, "cycle-alias", undefined, tx);
+      a.set({ next: alias, pending: absent });
+      alias.set(a);
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ first: a, second: alias });
+      const node: MaterializedNode = { pending: undefined };
+      node.next = node;
+      const snapshot = { first: node, second: node };
+      const result = overlayUnreadableLinkPlaceholders(
+        tx,
+        argument.getAsNormalizedFullLink(),
+        argument.getRaw(),
+        snapshot,
+      ) as typeof snapshot;
+
+      expect(result.first.pending).toBeDefined();
+      expect(result.first.next).toBe(node);
+      expect(result.second.pending).toBeDefined();
+      expect(result.second.next).toBe(node);
+      expect(node.pending).toBeUndefined();
+      expect(snapshot.first).toBe(node);
+      expect(snapshot.second).toBe(node);
     } finally {
       tx.abort();
     }

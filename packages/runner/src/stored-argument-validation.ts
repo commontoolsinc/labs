@@ -186,8 +186,28 @@ export function readStoredLinkChainRaw(
  * resolution — so every home bricked with `profiles: 0: name: value does
  * not match type string` on the first pattern-identity move after the
  * profile was written.
+ *
+ * The caller supplies an already-materialized snapshot. Exported from this
+ * module for direct cycle tests: eager materialization can reject a cyclic
+ * graph before this walk gets to exercise its own termination guards.
  */
-function overlayUnreadableLinkPlaceholders(
+export function overlayUnreadableLinkPlaceholders(
+  tx: IExtendedStorageTransaction,
+  base: NormalizedFullLink,
+  raw: unknown,
+  materialized: unknown,
+): unknown {
+  return overlayUnreadableLinkPlaceholdersInternal(
+    tx,
+    base,
+    raw,
+    materialized,
+    { chain: new Set(), results: new Map(), cycleVersion: 0 },
+  );
+}
+
+/** Helper for `overlayUnreadableLinkPlaceholders()`, which tracks one descent. */
+function overlayUnreadableLinkPlaceholdersInternal(
   tx: IExtendedStorageTransaction,
   base: NormalizedFullLink,
   raw: unknown,
@@ -218,7 +238,7 @@ function overlayUnreadableLinkPlaceholders(
       if (reading.cyclic) context.cycleVersion++;
       const result = reading.value === undefined
         ? materialized
-        : overlayUnreadableLinkPlaceholders(
+        : overlayUnreadableLinkPlaceholdersInternal(
           tx,
           reading.base,
           reading.value,
@@ -238,7 +258,7 @@ function overlayUnreadableLinkPlaceholders(
   if (Array.isArray(raw) && Array.isArray(materialized)) {
     let result: unknown[] | undefined;
     for (let i = 0; i < raw.length; i++) {
-      const child = overlayUnreadableLinkPlaceholders(
+      const child = overlayUnreadableLinkPlaceholdersInternal(
         tx,
         base,
         raw[i],
@@ -255,7 +275,7 @@ function overlayUnreadableLinkPlaceholders(
   if (isObjectOrArray(raw) && isObjectOrArray(materialized)) {
     let result: Record<string, unknown> | undefined;
     for (const [key, rawChild] of Object.entries(raw)) {
-      const child = overlayUnreadableLinkPlaceholders(
+      const child = overlayUnreadableLinkPlaceholdersInternal(
         tx,
         base,
         rawChild,
@@ -339,7 +359,6 @@ export function storedArgumentValidationIssue(
         argumentLink,
         argumentCell.withTx(tx).getRaw({ meta: ignoreReadForScheduling }),
         validationArgument,
-        { chain: new Set(), results: new Map(), cycleVersion: 0 },
       ),
       argumentSchema,
       validationOptions,
