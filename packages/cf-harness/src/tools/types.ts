@@ -23,7 +23,7 @@ import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
-import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
+import type { PatternIndexLedger } from "../pattern-index/ledger.ts";
 import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
 import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
@@ -143,13 +143,15 @@ export interface HarnessToolContext {
   patternIndexPublishDiscoverable?: boolean;
 
   /**
-   * Where a pattern this run authored is held until the session ends. The
-   * ledger publishes once per capability rather than once per successful run
-   * — see `pattern-index/publish-ledger.ts`. Absent when the run has no
-   * index, and absent for a tool invoked outside the engine, which publishes
-   * as it goes instead.
+   * Where this run's writes to the pattern index go: a pattern it authored is
+   * held there until the session ends, so the ledger publishes once per
+   * capability rather than once per successful run, and a report about an
+   * indexed pattern it ran is sent from there — see
+   * `pattern-index/ledger.ts`. Absent when the run has no index, and absent
+   * for a tool invoked outside the engine, which neither publishes nor
+   * reports.
    */
-  patternIndexPublications?: PatternIndexPublicationLedger;
+  patternIndexLedger?: PatternIndexLedger;
 
   /**
    * What this run was asked to do, in the words it was asked in. A published
