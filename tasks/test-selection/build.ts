@@ -286,6 +286,13 @@ export function readReport(
     const day = dayOf(group.context.startedAt);
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
+      // A lane measuring its own setup or one of its batches is not a
+      // test, so nothing here scores it: a catch, a flake observation and
+      // a churn rate are all statements about a test, and a lane is
+      // neither passing nor failing in the sense they read. It reaches
+      // the store as an ordinary record so that it travels the path every
+      // record travels, and this is where that path parts.
+      if (isLaneMeasurement(test)) continue;
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
       // is all an unmapped record can say. Where another record of the
@@ -579,9 +586,17 @@ export class Fold {
     today: string,
   ) {
     this.#states = new Map(
-      Object.entries(aggregate.states).map((
-        [key, state],
-      ) => [key, { ...emptyState(), ...state }]),
+      Object.entries(aggregate.states)
+        // An aggregate written before lane measurements stopped being
+        // folded carries a state for each of them. Nothing new adds one,
+        // and a state nothing adds to is a state nothing removes either,
+        // so an aggregate carrying one carries it for good unless it is
+        // dropped on the way in.
+        .filter(([key]) => {
+          const test = testIdentityOfKey(key);
+          return test === undefined || !isLaneMeasurement(test);
+        })
+        .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
     this.#context = parseContext(aggregate.context);
     this.#folded = [...aggregate.folded];

@@ -1627,11 +1627,20 @@ describe("what a lane does with the batches it was given", () => {
       });
   }
 
-  async function run(command: readonly string[]): Promise<boolean> {
+  /**
+   * Runs a lane over that suite, and answers with its verdict beside the
+   * measurements it wrote. The spool is the lane's own, so what it
+   * records about itself stays here rather than reaching the spool of
+   * the run testing it.
+   */
+  async function run(
+    command: readonly string[],
+  ): Promise<{ ok: boolean; measured: TestRecord[] }> {
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
     const log = console.log;
     console.log = () => {};
     try {
-      return await runLane(
+      const ok = await runLane(
         {
           lane: 1,
           of: 1,
@@ -1641,15 +1650,41 @@ describe("what a lane does with the batches it was given", () => {
           root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
         },
-        { manifest: selecting(), topology: topology(command) },
+        {
+          manifest: selecting(),
+          topology: topology(command),
+          spool: () => spool,
+        },
       );
+      const written = (await Promise.all(
+        (await Array.fromAsync(Deno.readDir(spool)))
+          .filter((entry) => entry.isFile)
+          .map((entry) => Deno.readTextFile(`${spool}/${entry.name}`)),
+      )).join("");
+      const measured = written.split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as TestRecord);
+      return { ok, measured };
     } finally {
       console.log = log;
+      await Deno.remove(spool, { recursive: true });
     }
   }
 
+  /** The outcome the lane recorded for its one batch. */
+  function batchOutcome(measured: readonly TestRecord[]): string | undefined {
+    return measured.find((record) =>
+      record.test.n === "ci-lane batch workspace-unit"
+    )?.outcome;
+  }
+
   it("passes when every batch passed", async () => {
-    expect(await run([Deno.execPath(), "eval", "0"])).toBe(true);
+    const { ok, measured } = await run([Deno.execPath(), "eval", "0"]);
+    expect(ok).toBe(true);
+    // The measurement says what the lane says. A batch recorded green
+    // while the lane reports red, or the other way about, is one commit
+    // carrying both outcomes for the identity.
+    expect(batchOutcome(measured)).toBe("pass");
   });
 
   it("gives each batch the environment its own suite asked for", async () => {
@@ -1710,6 +1745,9 @@ describe("what a lane does with the batches it was given", () => {
               reporting("asked", ["deno", "cf"]),
               reporting("did-not", ["deno"]),
             ]),
+          // What this case reads is the environment each batch ran in,
+          // so the lane records nothing about itself.
+          spool: () => undefined,
         },
       );
       expect(await Deno.readTextFile(`${dir}/asked`)).toBe(REPOSITORY);
@@ -1723,7 +1761,13 @@ describe("what a lane does with the batches it was given", () => {
   it("fails when a batch failed, having run it", async () => {
     // A lane reports what it measured: the batch ran and went red, so
     // the lane is red, and nothing about that is a crash or a timeout.
-    expect(await run([Deno.execPath(), "eval", "Deno.exit(1)"])).toBe(false);
+    const { ok, measured } = await run([
+      Deno.execPath(),
+      "eval",
+      "Deno.exit(1)",
+    ]);
+    expect(ok).toBe(false);
+    expect(batchOutcome(measured)).toBe("fail");
   });
 
   it("says it could not date the tree it is testing", async () => {
