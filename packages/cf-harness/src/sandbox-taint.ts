@@ -42,29 +42,42 @@ export type HarnessSandboxTaint =
   };
 
 /**
- * Whether a taint is a shape this can carry, checked before anything reads
- * one that came from outside this process.
+ * A taint read out of something that came from outside this process, as inert
+ * data, or `undefined` when it is not a shape this can carry.
  *
  * The run's record is a file. Whatever wrote it last — an earlier run, a
  * hand, a partial write this could not detect — is not this process, so its
  * contents are data rather than state. A `kind` outside the two defined, or a
  * label with a shape the merge would refuse or a serializer would raise on,
  * is not a run that saw nothing; it is a record this cannot read.
+ *
+ * A COPY rather than a verdict about the source, because a verdict is only
+ * true of the read that produced it. Everything downstream — the poison
+ * reason, the join, the seeded state — is built from what this returned, and
+ * the value it was read from is never consulted again.
  */
-const isRepresentableTaint = (
-  value: unknown,
-): value is HarnessSandboxTaint => {
+const readTaint = (value: unknown): HarnessSandboxTaint | undefined => {
   if (!isObjectNotArray(value)) {
-    return false;
+    return undefined;
   }
   if (value.kind === "unknown") {
-    return typeof value.reason === "string";
+    return typeof value.reason === "string"
+      ? { kind: "unknown", reason: value.reason }
+      : undefined;
   }
   if (value.kind !== "known") {
-    return false;
+    return undefined;
   }
-  return value.label === undefined ||
-    inertLabelSnapshot(value.label) !== undefined;
+  if (value.label === undefined) {
+    return { kind: "known" };
+  }
+  // The SNAPSHOT, taken once. What this returns is what gets joined and
+  // stored; the value it was read from is never consulted again, so a source
+  // that answers differently the next time has nothing left to answer.
+  const label = inertLabelSnapshot(value.label);
+  return label === undefined
+    ? undefined
+    : { kind: "known", label: label as IFCLabel };
 };
 
 const taints = new Map<string, HarnessSandboxTaint>();
@@ -89,16 +102,22 @@ export const joinSandboxTaint = (
   if (current.kind === "unknown") {
     return current;
   }
-  // A label the merge would refuse, or that would raise on the way through
-  // it, is not evidence of a public container. Callers validate before they
-  // get here; this makes the function total for the ones that do not.
-  if (inertLabelSnapshot(label) === undefined) {
+  // Snapshotted once, and the SNAPSHOT is what merges. Passing the original
+  // on would read it a second time, and a source that answered differently
+  // then would put something in the record that no check ever saw. A label
+  // the merge would refuse, or that would raise on the way through it, is not
+  // evidence of a public container either.
+  const snapshot = inertLabelSnapshot(label);
+  if (snapshot === undefined) {
     return poisonSandboxTaint(
       runId,
       "a sandbox invocation reported a taint whose shape cannot be read",
     );
   }
-  const merged = mergeConfidentialityOnlyLabels([current.label, label]);
+  const merged = mergeConfidentialityOnlyLabels([
+    current.label,
+    snapshot as IFCLabel,
+  ]);
   const next: HarnessSandboxTaint = merged === undefined
     ? { kind: "known" }
     : { kind: "known", label: merged };
@@ -148,20 +167,22 @@ export const seedSandboxTaint = (
         "earlier sandbox invocations were exposed to",
     );
   }
-  if (!isRepresentableTaint(persisted)) {
+  const read = readTaint(persisted);
+  if (read === undefined) {
     return poisonSandboxTaint(
       runId,
-      "the record this run's run state was read from does not describe a " +
-        "state this build can read, so what its earlier invocations were " +
-        "exposed to cannot be established",
+      "the record this run's state was read from does not describe a state " +
+        "this build can read, so what its earlier invocations were exposed " +
+        "to cannot be established",
     );
   }
-  if (persisted.kind === "unknown") {
-    return poisonSandboxTaint(runId, persisted.reason);
+  if (read.kind === "unknown") {
+    return poisonSandboxTaint(runId, read.reason);
   }
-  return persisted.label === undefined
+  // The snapshot `readTaint` took, not the record it came from.
+  return read.label === undefined
     ? sandboxTaint(runId)
-    : joinSandboxTaint(runId, persisted.label);
+    : joinSandboxTaint(runId, read.label);
 };
 
 /**

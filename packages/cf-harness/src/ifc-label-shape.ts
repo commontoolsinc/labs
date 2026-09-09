@@ -3,10 +3,11 @@
  *
  * Two different readers need this answer and both are on paths where being
  * WRONG is quiet: the sandbox taint reader, where a raised exception leaves a
- * family recorded as it was — which is to say clean — and the family's own
+ * run recorded as it was — which is to say clean — and the run's own
  * persisted record, where a shape nobody checked is seeded as though it were
  * evidence. Neither may end a read by raising, so every function here answers
- * with a boolean for every input, including the inputs a serializer refuses.
+ * for every input, including the inputs a serializer refuses: with the data
+ * it was able to take, or with nothing at all.
  */
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -26,10 +27,17 @@ export const MAX_LABEL_DEPTH = 64;
 /**
  * Whether `container` is a plain object or plain array and nothing more.
  *
- * The prototype check excludes the exotic ones: a class instance, an object
- * with an inherited `toJSON`, or a `Proxy` over either, all of which can run
- * code when read. `Object.create(null)` is admitted — it carries no inherited
- * anything, which is the property being asked about.
+ * The prototype check excludes the ones carrying inherited behavior a read
+ * would run: a class instance, an object with an inherited `toJSON`.
+ * `Object.create(null)` is admitted — it carries no inherited anything, which
+ * is the property being asked about.
+ *
+ * It does not exclude a `Proxy`, and is not asked to: a proxy reports its
+ * target's prototype, so no check made of one distinguishes it. What answers
+ * a proxy is the reading below rather than a heuristic here — every value is
+ * taken once, through a descriptor, so a trap that answers differently the
+ * second time has nothing left to answer, and a trap that raises refuses the
+ * label instead of escaping.
  */
 const isInertContainer = (container: object): boolean => {
   const prototype = Object.getPrototypeOf(container);
@@ -50,6 +58,7 @@ const isInertContainer = (container: object): boolean => {
  */
 const inertEntries = (
   container: object,
+  recognized?: ReadonlySet<string>,
 ): readonly (readonly [string, unknown])[] | undefined => {
   const entries: (readonly [string, unknown])[] = [];
   for (const key of Reflect.ownKeys(container)) {
@@ -57,7 +66,18 @@ const inertEntries = (
       return undefined;
     }
     const descriptor = Object.getOwnPropertyDescriptor(container, key);
-    if (descriptor === undefined || !descriptor.enumerable) {
+    if (descriptor === undefined) {
+      continue;
+    }
+    if (!descriptor.enumerable) {
+      // A key this build reads MEANING from, hidden where a walk over own
+      // enumerable properties does not go. Skipping it would answer with a
+      // label carrying less than the source does, which is the fail-open this
+      // exists to prevent: it is a shape this cannot read, not a label with
+      // one fewer requirement.
+      if (recognized?.has(key)) {
+        return undefined;
+      }
       continue;
     }
     if (!("value" in descriptor)) {
@@ -67,6 +87,12 @@ const inertEntries = (
   }
   return entries;
 };
+
+/** The keys a label carries meaning in. */
+const LABEL_CLAUSES: ReadonlySet<string> = new Set([
+  "confidentiality",
+  "integrity",
+]);
 
 /** A primitive this can carry, or `undefined` when it is not one. */
 const inertPrimitive = (
@@ -149,37 +175,47 @@ const inertJsonCopy = (
     frame.index += 1;
     const asPrimitive = inertPrimitive(entry);
     if (asPrimitive !== undefined) {
-      assign(frame.target, key, asPrimitive.value);
+      if (!assign(frame.target, key, asPrimitive.value)) {
+        return undefined;
+      }
       continue;
     }
     if (typeof entry !== "object" || entry === null) {
       return undefined;
     }
     const child = frameFor(entry as object, frame.depth + 1);
-    if (child === undefined) {
+    if (child === undefined || !assign(frame.target, key, child.target)) {
       return undefined;
     }
-    assign(frame.target, key, child.target);
     stack.push(child);
   }
   return { value: first.target };
 };
 
+/**
+ * Writes one entry into the copy, or reports that it cannot be written.
+ *
+ * An array's own enumerable data keys are its indices. Anything else on one —
+ * a named property hung off a list of atoms — is data the copy has nowhere to
+ * put, and dropping it would answer with a value that says less than the
+ * source. That is the same fail-open as a hidden clause, so it is refused
+ * rather than skipped.
+ */
 const assign = (
   target: Record<string, unknown> | unknown[],
   key: string,
   value: unknown,
-): void => {
+): boolean => {
   if (Array.isArray(target)) {
     const index = Number(key);
-    // An array's own enumerable data keys are its indices; anything else on
-    // one is not data this carries.
-    if (Number.isInteger(index) && index >= 0) {
-      target[index] = value;
+    if (!Number.isInteger(index) || index < 0 || String(index) !== key) {
+      return false;
     }
-    return;
+    target[index] = value;
+    return true;
   }
   target[key] = value;
+  return true;
 };
 
 /**
@@ -230,7 +266,7 @@ const readInertLabel = (
   if (!isObjectNotArray(value) || !isInertContainer(value)) {
     return undefined;
   }
-  const entries = inertEntries(value);
+  const entries = inertEntries(value, LABEL_CLAUSES);
   if (entries === undefined) {
     // An accessor on the label itself: reading it would run code, and it
     // could answer differently the next time.

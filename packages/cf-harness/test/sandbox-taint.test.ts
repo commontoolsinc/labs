@@ -88,6 +88,45 @@ describe("a run's accumulated sandbox taint", () => {
     });
   });
 
+  it("accumulates the label it validated, not a later read of the same one", () => {
+    // A reported taint is data too, and the reporting runtime is not this
+    // process. Descriptors that state a requirement while a direct property
+    // read states none is the shape that turns a checked label into a clean
+    // record; the join carries what the check saw.
+    withRun((runId) => {
+      const label = new Proxy({ confidentiality: ["finance"] }, {
+        get: (target, key) =>
+          key === "confidentiality" ? [] : Reflect.get(target, key),
+      });
+
+      expect(joinSandboxTaint(runId, label)).toEqual({
+        kind: "known",
+        label: { confidentiality: ["finance"] },
+      });
+    });
+  });
+
+  it("accumulates without raising when the label refuses a direct read", () => {
+    // The join runs at the invocation boundary, where an exception would
+    // travel out of the sandbox call while the run stayed recorded as it was
+    // — which is to say clean.
+    withRun((runId) => {
+      const label = new Proxy({ confidentiality: ["finance"] }, {
+        get: (target, key) => {
+          if (key === "confidentiality") {
+            throw new Error("the reported label refuses to be read again");
+          }
+          return Reflect.get(target, key);
+        },
+      });
+
+      expect(joinSandboxTaint(runId, label)).toEqual({
+        kind: "known",
+        label: { confidentiality: ["finance"] },
+      });
+    });
+  });
+
   it("poisons rather than accumulating a label it cannot read", () => {
     withRun((runId) => {
       const cyclic: unknown[] = [];
@@ -130,6 +169,51 @@ describe("a run's accumulated sandbox taint", () => {
     // earlier invocations, and the record it resumed from does not say.
     withRun((runId) => {
       expect(seedSandboxTaint(runId, undefined).kind).toBe("unknown");
+    });
+  });
+
+  it("seeds from the label it validated, not a later read of the record", () => {
+    // The record is data, and data can be a proxy: descriptors that report a
+    // requirement while a direct property read reports none. Seeding from a
+    // second read would put the run back as clean while the shape check that
+    // passed had seen otherwise.
+    withRun((runId) => {
+      const label = new Proxy({ confidentiality: ["finance"] }, {
+        get: (_target, key) =>
+          key === "confidentiality" ? [] : Reflect.get(_target, key),
+      });
+
+      expect(seedSandboxTaint(runId, { kind: "known", label })).toEqual({
+        kind: "known",
+        label: { confidentiality: ["finance"] },
+      });
+    });
+  });
+
+  it("seeds from the snapshot even when the record refuses a direct read", () => {
+    // Validation reads through descriptors, so every read after it is a
+    // re-read — and a record that stops answering them is the case that
+    // decides whether anything downstream still makes one. Seeding runs
+    // inside engine construction, so an exception here does not surface as a
+    // lost run: it takes the whole run down, and a caller that catches it is
+    // left with a map entry that still reads as clean.
+    withRun((runId) => {
+      const label = new Proxy({ confidentiality: ["finance"] }, {
+        get: (target, key) => {
+          if (key === "confidentiality") {
+            throw new Error("the record refuses to be read again");
+          }
+          return Reflect.get(target, key);
+        },
+      });
+
+      const seeded = seedSandboxTaint(runId, { kind: "known", label });
+
+      expect(seeded).toEqual({
+        kind: "known",
+        label: { confidentiality: ["finance"] },
+      });
+      expect(sandboxTaint(runId)).toEqual(seeded);
     });
   });
 

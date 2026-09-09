@@ -372,10 +372,10 @@ export const resolveDockerRunscSandboxConfig = (
     ? undefined
     : validateAbsoluteHostDir(rawCfcResultDir, "cfcResultDir");
   const cfcInvocationContextDir = resolveCfcInvocationContextDir(options);
-  // Every host directory this sandbox mounts read-write — the workspace, the
-  // run family's output directory, and anything else the operator bound —
-  // plus the artifact root, which is not mounted but holds the run's own
-  // record and must not hold the evidence that record is labelled from.
+  // Every host directory this sandbox mounts read-write — the workspace and
+  // anything else the operator bound — plus the artifact root, which is not
+  // mounted but holds the run's own record and must not hold the evidence
+  // that record is labelled from.
   const writableMounts = [
     ...(options.workspaceHostPath !== undefined
       ? [{

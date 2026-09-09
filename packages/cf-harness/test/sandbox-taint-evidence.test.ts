@@ -14,6 +14,10 @@ import { normalize } from "@std/path/posix";
 import { describe, it } from "@std/testing/bdd";
 
 import { CfHarnessEngine } from "../src/engine.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
+import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 import type {
   CfcSandboxResultOrigin,
   SandboxCommandRequest,
@@ -22,7 +26,10 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
-import { forgetSandboxTaintForTesting } from "../src/sandbox-taint.ts";
+import {
+  forgetSandboxTaintForTesting,
+  sandboxTaint,
+} from "../src/sandbox-taint.ts";
 
 const FINANCE: IFCLabel = { confidentiality: ["finance"] };
 
@@ -99,6 +106,92 @@ const taintAfter = async (
   }
 };
 
+/** The command the delegated child is scripted to run, and only it. */
+const CHILD_COMMAND = "inspect-the-workspace";
+
+/**
+ * A runtime whose answer depends on the command, so that one runtime can
+ * serve a parent and its child and still tell their invocations apart. Every
+ * invocation reports a complete runsc-origin result; the taint in it is a
+ * container requirement only for `taintedCommand`.
+ */
+class SequencedSandbox extends FakeSandbox {
+  readonly #taintedCommand: string;
+
+  constructor(taintedCommand: string) {
+    super(sandboxResult({}));
+    this.#taintedCommand = taintedCommand;
+  }
+
+  override runShell(
+    request: SandboxShellRequest,
+  ): Promise<SandboxCommandResult> {
+    const tainted = request.command.includes(this.#taintedCommand);
+    return Promise.resolve({
+      stdout: request.command.includes(CAPABILITY_PROBE_SENTINEL)
+        ? "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release"
+        : "",
+      stderr: "",
+      exitCode: 0,
+      cfcResult: sandboxResult(tainted ? FINANCE : {}),
+      cfcResultOrigin: "runsc-taint" as const,
+    });
+  }
+}
+
+const bashCallTurn = (id: string, command: string) => ({
+  choices: [{
+    index: 0,
+    message: {
+      role: "assistant",
+      content: "",
+      tool_calls: [{
+        id,
+        type: "function",
+        function: { name: "bash", arguments: JSON.stringify({ command }) },
+      }],
+    },
+  }],
+});
+
+const delegateCallTurn = (id: string, goal: string) => ({
+  choices: [{
+    index: 0,
+    message: {
+      role: "assistant",
+      content: "",
+      tool_calls: [{
+        id,
+        type: "function",
+        function: {
+          name: "delegate_task",
+          arguments: JSON.stringify({ goal }),
+        },
+      }],
+    },
+  }],
+});
+
+const finalTurn = (content: string) => ({
+  choices: [{ index: 0, message: { role: "assistant", content } }],
+});
+
+const scriptedFetch = (payloads: readonly unknown[]): typeof fetch => {
+  let served = 0;
+  return () => {
+    const payload = payloads[served];
+    served += 1;
+    if (payload === undefined) {
+      throw new Error("scripted fetch ran out of payloads");
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+        status: 200,
+      }),
+    );
+  };
+};
+
 /** A label whose data is where the shape check does not look by default. */
 const labelWith = (
   where:
@@ -107,7 +200,9 @@ const labelWith = (
     | "toJSON"
     | "proxy"
     | "deep"
-    | "cycle",
+    | "cycle"
+    | "hidden-clause"
+    | "named-clause-entry",
 ): Record<string, unknown> => {
   const label: Record<string, unknown> = { confidentiality: ["finance"] };
   if (where === "root-getter") {
@@ -157,6 +252,19 @@ const labelWith = (
       nest = [nest];
     }
     (label.confidentiality as unknown[]).push(nest);
+  } else if (where === "hidden-clause") {
+    // The clause is there and the merge reads it by name, but a walk over own
+    // enumerable properties does not: copying what that walk sees would
+    // answer with a label carrying less than this one does.
+    Object.defineProperty(label, "confidentiality", {
+      enumerable: false,
+      value: ["finance"],
+    });
+  } else if (where === "named-clause-entry") {
+    // A named property on a list of atoms. The copy has nowhere to put it,
+    // and a copy missing it says less than the source.
+    (label.confidentiality as unknown as Record<string, unknown>).extra =
+      "health";
   } else {
     const clause = label.confidentiality as unknown[];
     clause.push(clause);
@@ -245,51 +353,42 @@ describe("a run's sandbox taint", () => {
   });
 
   it("keeps a child's invocations out of its parent's record", async () => {
-    // A delegated child is handed the raw runtime and observes into its own
-    // state. The parent's accumulator is the parent's own work: attributing a
-    // child's containers to it would say the parent's invocations carried
-    // something they did not.
-    const parentId = `taint-${crypto.randomUUID()}`;
-    const childId = `${parentId}.subagent.1`;
+    // Through the real `delegate_task` path, because what is under test is
+    // which runtime that path hands the child. One runtime answers both runs:
+    // the child's scripted command is the only one that reports a container
+    // taint, so the parent's record can only hold it by having observed an
+    // invocation that was not the parent's.
+    const runId = `taint-delegation-${crypto.randomUUID()}`;
+    const childRunId = `${runId}.subagent.1`;
     try {
-      const parent = new CfHarnessEngine({
-        sandboxRuntime: new FakeSandbox(sandboxResult({})),
-        runId: parentId,
-        workspaceHostPath: "/tmp",
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new SequencedSandbox(CHILD_COMMAND),
+          runId,
+          model: "gpt-5.4",
+        }),
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-delegate", "Inspect the workspace."),
+          bashCallTurn("call-child", CHILD_COMMAND),
+          finalTurn("Child done."),
+          finalTurn("Parent done."),
+        ]),
       });
-      await parent.invokeBuiltinTool("bash", { command: "x" });
 
-      const child = new CfHarnessEngine({
-        sandboxRuntime: parent.sandboxForDelegation,
-        runId: childId,
-        lineage: {
-          role: "subagent",
-          rootRunId: parentId,
-          parentRunId: parentId,
-          parentToolCallId: "call-1",
-          depth: 1,
-        },
-        workspaceHostPath: "/tmp",
+      await loop.runPrompt({
+        prompt: "Delegate the inspection.",
+        promptSlotBinding: directPromptSlotBindingFor("sandbox-taint"),
       });
-      // The child's sandbox reports a taint; the parent's did not.
-      const tainted = new FakeSandbox(sandboxResult(FINANCE));
-      const childEngine = new CfHarnessEngine({
-        sandboxRuntime: tainted,
-        runId: `${childId}.b`,
-        workspaceHostPath: "/tmp",
-      });
-      await childEngine.invokeBuiltinTool("bash", { command: "x" });
 
-      expect(childEngine.sandboxTaint).toEqual({
+      expect(sandboxTaint(childRunId)).toEqual({
         kind: "known",
         label: FINANCE,
       });
-      expect(parent.sandboxTaint).toEqual({ kind: "known" });
-      expect(child.sandboxForDelegation).toBe(parent.sandboxForDelegation);
+      expect(sandboxTaint(runId)).toEqual({ kind: "known" });
     } finally {
-      forgetSandboxTaintForTesting(parentId);
-      forgetSandboxTaintForTesting(childId);
-      forgetSandboxTaintForTesting(`${childId}.b`);
+      forgetSandboxTaintForTesting(runId);
+      forgetSandboxTaintForTesting(childRunId);
     }
   });
 
@@ -370,6 +469,8 @@ describe("a run's sandbox taint", () => {
         "proxy",
         "deep",
         "cycle",
+        "hidden-clause",
+        "named-clause-entry",
       ] as const
     ) {
       const label = labelWith(where);
@@ -381,7 +482,11 @@ describe("a run's sandbox taint", () => {
         exitCode: { ...base.exitCode, label },
       } as unknown as CfcSandboxResult;
 
-      expect((await taintAfter(result)).kind).toBe("unknown");
+      // Keyed by case so a failure names the shape that got through.
+      expect({ where, kind: (await taintAfter(result)).kind }).toEqual({
+        where,
+        kind: "unknown",
+      });
     }
   });
 });

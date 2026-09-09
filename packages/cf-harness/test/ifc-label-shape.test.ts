@@ -182,16 +182,27 @@ describe("inertLabelSnapshot()", () => {
     }
   });
 
-  it("returns nothing for a non-enumerable clause", () => {
-    // Not data the label carries: a walk over own enumerable properties never
-    // sees it, so a label whose clause hides there is one this cannot read.
+  it("refuses a clause hidden as a non-enumerable property", () => {
+    // A walk over own enumerable properties never sees it, so answering with
+    // the label MINUS that clause would say the container carried less than
+    // it does. That is the fail-open this exists to prevent: a shape this
+    // cannot read, not a label with one fewer requirement.
     const label = {};
     Object.defineProperty(label, "confidentiality", {
       enumerable: false,
       value: ["finance"],
     });
 
-    expect(inertLabelSnapshot(label)).toEqual({});
+    expect(inertLabelSnapshot(label)).toBeUndefined();
+  });
+
+  it("refuses a named property hung off a clause list", () => {
+    // A list of atoms has indices. A named property on one is data the copy
+    // has nowhere to put, and dropping it says less than the source.
+    const clause: unknown[] = ["finance"];
+    (clause as unknown as Record<string, unknown>).extra = "health";
+
+    expect(inertLabelSnapshot({ confidentiality: clause })).toBeUndefined();
   });
 
   it("returns nothing for a cycle, however deeply it sits", () => {
