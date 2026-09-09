@@ -49,6 +49,12 @@ export type HarnessFabricCfcEnforcementMode =
 
 export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
 
+/** Where a fabric session's flow-label rung came from. */
+export type HarnessFabricCfcFlowLabelsSource =
+  | "configured"
+  | "posture"
+  | "default";
+
 /**
  * Connection settings for the trusted Fabric session behind the
  * `run_pattern` tool: the deployed API URL, a PKCS#8 identity keyfile path
@@ -371,6 +377,38 @@ export const fabricSessionCfcEnforcementMode = (
 ): CfcEnforcementMode =>
   resolveCfcDials(presetCfcOptions(fabricSessionPresetCfcDials(fabricSession)))
     .cfcEnforcementMode;
+
+/**
+ * The flow-label rung a fabric session propagates at, whether or not it
+ * stated one.
+ *
+ * `presetCfcOptions` resolves the dials the config states — the named posture
+ * bundle where one is selected, then the host dial over it — and the
+ * runtime's own dial defaults resolve whatever the preset leaves unset. A
+ * session's runtime is constructed through those same two steps over the same
+ * dials, so this is the rung it propagates at.
+ */
+export const fabricSessionCfcFlowLabels = (
+  fabricSession: HarnessFabricSessionConfig,
+): CfcFlowLabelsMode =>
+  resolveCfcDials(presetCfcOptions(fabricSessionPresetCfcDials(fabricSession)))
+    .cfcFlowLabels;
+
+/**
+ * Where that rung came from: `configured` when the config states the dial,
+ * `posture` when the named bundle the config selected moves the dial off what
+ * the preset resolves without it, and `default` when nothing the config states
+ * reaches this dial at all.
+ */
+export const fabricSessionCfcFlowLabelsSource = (
+  fabricSession: HarnessFabricSessionConfig,
+): HarnessFabricCfcFlowLabelsSource =>
+  fabricSession.cfcFlowLabels !== undefined
+    ? "configured"
+    : presetCfcOptions(fabricSessionPresetCfcDials(fabricSession))
+        .cfcFlowLabels === presetCfcOptions({}).cfcFlowLabels
+    ? "default"
+    : "posture";
 
 /** What the operator stated the harness's own dial to be, if anything. */
 const statedCfcEnforcementMode = (
