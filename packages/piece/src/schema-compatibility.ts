@@ -789,11 +789,12 @@ function schemaSubsetIssue(
   if (pairIsActive(source, target, context)) return undefined;
   markPairActive(source, target, context);
   try {
-    const sourceAlternatives = schemaAlternatives(source);
-    const targetAlternatives = schemaAlternatives(target);
-    if (sourceAlternatives || targetAlternatives) {
-      const sources = sourceAlternatives ?? [[source]];
-      const targets = targetAlternatives ?? [[target]];
+    if (
+      source.anyOf || target.anyOf ||
+      Array.isArray(source.type) || Array.isArray(target.type)
+    ) {
+      const sources = schemaAlternatives(source);
+      const targets = schemaAlternatives(target);
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
           schemaConjunctionSubsetIssue(
@@ -1510,25 +1511,22 @@ function schemaMayProduceType(
     types.some((type) => applicableTypes.includes(type));
 }
 
-function schemaAlternatives(
-  schema: SchemaObject,
-): JSONSchema[][] | undefined {
-  if (schema.anyOf) {
-    const { anyOf, ...base } = schema;
+/**
+ * Conjunctions for each alternative after the caller checks whole-schema
+ * defaults. The root default is omitted from both sides, including a schema
+ * with a single type, so branch comparisons concern their value constraints.
+ * Descendant schemas and their defaults remain intact.
+ */
+function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
+  const { default: _default, ...branch } = schema;
+  if (branch.anyOf) {
+    const { anyOf, ...base } = branch;
     return anyOf.map((branch) => [base, branch]);
   }
-  if (Array.isArray(schema.type)) {
-    // A default belongs to the union, and the caller judged it there before
-    // expanding: valid for the whole union under a link proof, unchanged or
-    // safely changed under an update. A synthetic single-type branch must not
-    // inherit it, because the branch whose type the default does not fit —
-    // `undefined` beside a string default — would fail a default-safety check
-    // the union itself passed, and take the update down with it. The `anyOf`
-    // form above keeps its default on the shared base, which carries no type.
-    const { default: _default, ...branch } = schema;
-    return schema.type.map((type) => [{ ...branch, type }]);
+  if (Array.isArray(branch.type)) {
+    return branch.type.map((type) => [{ ...branch, type }]);
   }
-  return undefined;
+  return [[branch]];
 }
 
 /**

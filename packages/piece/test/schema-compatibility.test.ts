@@ -2269,6 +2269,73 @@ describe("piece schema compatibility", () => {
       .toThrow(/not stable under default insertion/);
   });
 
+  for (const boundary of ["asCell", "uniqueItems"] as const) {
+    const wrap = (schema: Exclude<JSONSchema, boolean>): JSONSchema =>
+      boundary === "asCell"
+        ? { ...schema, asCell: ["cell"] }
+        : { type: "array", uniqueItems: true, items: schema };
+
+    it(`accepts safe single-type and union updates with unchanged defaults under \`${boundary}\``, () => {
+      const single = wrap({ type: "string", default: "" });
+      for (const type of [["string"], ["string", "undefined"]] as const) {
+        const union = wrap({ type, default: "" });
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(single, true),
+            pattern(union, true),
+          )
+        ).not.toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, union),
+            pattern(true, single),
+          )
+        ).not.toThrow();
+      }
+    });
+
+    it(`refuses narrowed arguments and widened results across single-type and union schemas under \`${boundary}\``, () => {
+      const single = wrap({ type: "string", default: "" });
+      const union = wrap({ type: ["string", "undefined"], default: "" });
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(union, true),
+          pattern(single, true),
+        )
+      ).toThrow(/schema alternative accepted previously/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, single),
+          pattern(true, union),
+        )
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    it(`refuses changed, added, or removed defaults during union expansion under \`${boundary}\``, () => {
+      const single = wrap({ type: "string", default: "" });
+      for (
+        const schema of [
+          { type: ["string", "undefined"], default: "changed" },
+          { type: ["string", "undefined"] },
+        ] satisfies JSONSchema[]
+      ) {
+        const union = wrap(schema);
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(single, true),
+            pattern(union, true),
+          )
+        ).toThrow(/defaults changed/);
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, union),
+            pattern(true, single),
+          )
+        ).toThrow(/defaults changed/);
+      }
+    });
+  }
+
   it("rejects unresolved references and terminates on recursive references", () => {
     const unresolved = pattern(
       {
