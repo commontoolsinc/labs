@@ -1911,6 +1911,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   recordCfcStructureContainer(address: CfcAddress): void;
 
   /**
+   * Settles whether this transaction is CFC-relevant — the flow-label
+   * relevance probe, then the sink-request ceiling probe — and runs
+   * `prepareCfc()` when it is.
+   *
+   * `commit()` runs this itself, so the enforcement ladder always decides on
+   * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
+   * callers that read what prepare produces before they commit — the CFC
+   * outbox, and the label-map writes a reactivity log captured before the
+   * commit carries. A second pass finds the transaction prepared and does
+   * nothing. `docs/specs/cfc-commit-preparation.md` covers the arrangement.
+   */
+  prepareForCommit(): void;
+
+  /**
    * Runs CFC boundary verification for this transaction and records the
    * prepared digest. Takes no caller-supplied input: the commit-time digest
    * recheck only confirms the prepared input matches real activity, so an

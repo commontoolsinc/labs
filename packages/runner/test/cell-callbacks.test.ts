@@ -168,7 +168,11 @@ describe("Cell commit callbacks", () => {
     cell.set(42, (committedTx) => {
       statuses.push(committedTx.status().status);
     });
-    refuseAtCommitBoundary(tx, "the callback reports a rejected commit");
+    refuseAtCommitBoundary(
+      tx,
+      space,
+      "the callback reports a rejected commit",
+    );
 
     const result = await tx.commit();
     expect(isCfcEnforcementRejection(result.error)).toBe(true);

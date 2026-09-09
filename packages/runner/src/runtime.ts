@@ -112,9 +112,6 @@ import {
   type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
-  externalIngestStamp,
-  flowLabelWorkExists,
-  gatedSinkRequestExists,
   linkCfcLabelView,
   type PolicySnapshot,
   resolveCfcDials,
@@ -3036,59 +3033,24 @@ export class Runtime {
     }
   }
 
+  /**
+   * Settles whether `tx` is CFC-relevant and prepares it when it is, by
+   * forwarding to `tx.prepareForCommit()`, which carries the step.
+   *
+   * `commit()` runs the same step, so calling this is never what decides
+   * whether the transaction is enforced. Call it where the commit's caller
+   * reads what prepare produces before the commit runs: the CFC outbox the
+   * scheduler counts as post-commit work, and the label-map writes that a
+   * reactivity log built before the commit carries.
+   *
+   * It stays a method on the runtime because a caller's prepare is
+   * replaceable per runtime instance through it: the scheduler's backstop
+   * for a throw out of prepare, and the cases that stand in for a caller
+   * that never prepares, are exercised by replacing it here rather than by
+   * patching every transaction the process makes.
+   */
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
-    // A transaction that is no longer open takes no prepare work, because it
-    // can no longer commit. Everything below reaches storage through the
-    // transaction: the flow probe reads stored metadata, and prepareCfc reads
-    // and writes the derived label map. A settled transaction refuses both,
-    // and its commit reports the terminal state as the result.
-    if (tx.status().status !== "ready") {
-      return;
-    }
-    const state = tx.getCfcState();
-    if (state.enforcementMode === "disabled") {
-      // A vouched ingest still needs its provenance mark minted even where CFC
-      // enforcement is disabled (an explicit `cfcEnforcementMode: "disabled"`
-      // opt-in — no shipped host today; toolshed passes no CFC options and so
-      // runs the enforce-explicit default). The mint
-      // is a builtin-authored boundary-commit step that never rejects, so run
-      // prepare for it explicitly rather than forcing the enforcement dial up
-      // (which would desync ingest txs from the runtime's real mode). The
-      // stamp already marked the tx relevant; nothing else here applies when
-      // disabled, so fall straight through to prepareCfc.
-      if (externalIngestStamp(tx) !== undefined) {
-        if (state.prepare.status === "unprepared") {
-          tx.prepareCfc();
-        }
-      }
-      return;
-    }
-    // Flow-label relevance is computed, not caller-marked (S16): the
-    // laundering txs are exactly the ones nothing marked relevant.
-    // Stage C tuning T1: probed ONCE per transaction activity epoch — the
-    // commit chokepoint re-uses this call's negative verdict (see
-    // IExtendedStorageTransaction.probeFlowLabelWork).
-    if (
-      !state.relevant &&
-      state.flowLabelsMode !== "off" &&
-      (tx.probeFlowLabelWork?.() ?? flowLabelWorkExists(tx))
-    ) {
-      tx.markCfcRelevant("flow-labels");
-    }
-    // Sink-request ceiling relevance is also computed, not caller-marked
-    // (audit item 21): a request assembled from a value pulled through a
-    // schema-less link marks nothing, so without this the egress commits
-    // without `prepareCfc` and the ceiling is never checked. Independent of
-    // the flow dial — the ceiling enforces even when flow labels are off.
-    if (!state.relevant && gatedSinkRequestExists(tx)) {
-      tx.markCfcRelevant("sink-request-ceiling");
-    }
-    if (!state.relevant) {
-      return;
-    }
-    if (state.prepare.status === "unprepared") {
-      tx.prepareCfc();
-    }
+    tx.prepareForCommit();
   }
 
   /**

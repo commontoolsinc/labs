@@ -950,7 +950,33 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant unprepared commits in enforcing modes", async () => {
+  it("rejects a refused commit in enforce-explicit mode", async () => {
+    // A reserved CFC grant document is policy state that only `writeCfcGrant`
+    // may write, so prepare records a verdict over this write and the ladder
+    // rejects it.
+
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      refuseAtCommitBoundary(tx, signer.did(), "the ladder rejects it");
+
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "unprivileged write to protected cfc path",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("prepares a relevant commit nothing prepared, in enforce-explicit mode", async () => {
+    // Relevance is computed from what the transaction did, so a caller cannot
+    // be the thing that decides whether the ladder sees a prepared
+    // transaction. `commit()` runs the prepare (see
+    // `docs/specs/cfc-commit-preparation.md`).
+
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -963,10 +989,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         path: [],
       }, { ok: true });
 
-      const result = await tx.commit();
-      expect(result.error?.message).toContain(
-        "relevant transaction was not prepared",
-      );
+      expect((await tx.commit()).error).toBeUndefined();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1065,22 +1089,16 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant unprepared commits in enforce-strict mode", async () => {
+  it("rejects a refused commit in enforce-strict mode", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-strict");
-      tx.markCfcRelevant("test");
-      tx.writeValueOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: "of:cfc-enforce-strict",
-        path: [],
-      }, { ok: true });
+      refuseAtCommitBoundary(tx, signer.did(), "the ladder rejects it");
 
       const result = await tx.commit();
       expect(result.error?.message).toContain(
-        "relevant transaction was not prepared",
+        "unprivileged write to protected cfc path",
       );
     } finally {
       await runtime.dispose();
@@ -1440,7 +1458,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(flushed).toEqual(["effect-1"]);
 
       const rejected = runtime.edit();
-      refuseAtCommitBoundary(rejected, "an effect must not flush");
+      refuseAtCommitBoundary(
+        rejected,
+        signer.did(),
+        "an effect must not flush",
+      );
       rejected.enqueuePostCommitEffect({
         id: "effect-2",
         kind: "test",
@@ -1448,13 +1470,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           flushed.push("effect-2");
         },
       });
-      rejected.writeValueOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: "of:cfc-outbox-reject",
-        path: [],
-      }, { ok: false });
-
       const rejectedResult = await rejected.commit();
       expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       expect(flushed).toEqual(["effect-1"]);
