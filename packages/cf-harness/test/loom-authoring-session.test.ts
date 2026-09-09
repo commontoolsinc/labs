@@ -29,6 +29,20 @@ const authoring: HarnessLoomAuthoringConfig = {
 };
 
 describe("loom-authoring-session", () => {
+  it("rejects invalid originating Loom identities before admitting a turn", async () => {
+    const service = new HarnessInteractiveChatService();
+    for (const loomId of [null, 4, "../other", "loom-not-an-id"]) {
+      const result = await service.startTurn("invalid-origin", {
+        sessionId: "not-yet-admitted",
+        input: { text: "Collect", loomId: loomId as unknown as string },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: "invalid_request" },
+      });
+    }
+  });
+
   it("admits only dedicated Loom tools to comment threads when the host explicitly grants them", async () => {
     for (const allowCommentThreads of [false, true]) {
       const observed: CreateHarnessPromptLoopOptions[] = [];

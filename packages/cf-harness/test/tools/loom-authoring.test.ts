@@ -138,6 +138,24 @@ describe("loom-authoring", () => {
         const cases = [
           {
             ref: createLLMFriendlyLink(link, pieces.getSpace()),
+            noFabric: true,
+            allowed: false,
+          },
+          {
+            ref: createLLMFriendlyLink(link, pieces.getSpace()),
+            cancelDuringResolution: true,
+            allowed: false,
+          },
+          {
+            ref: createLLMFriendlyLink(
+              runtime.getCell(pieces.getSpace(), "held-non-pattern")
+                .getAsNormalizedFullLink(),
+              pieces.getSpace(),
+            ),
+            allowed: false,
+          },
+          {
+            ref: createLLMFriendlyLink(link, pieces.getSpace()),
             allowed: true,
           },
           {
@@ -169,9 +187,17 @@ describe("loom-authoring", () => {
         ];
         for (const candidate of cases) {
           const calls: ProcessRunRequest[] = [];
+          const controller = new AbortController();
           const engine = new CfHarnessEngine({
             sandboxRuntime: sandbox,
-            fabricSessionFactory: () => Promise.resolve({ pieces }),
+            ...(!candidate.noFabric
+              ? {
+                fabricSessionFactory: () => {
+                  if (candidate.cancelDuringResolution) controller.abort();
+                  return Promise.resolve({ pieces });
+                },
+              }
+              : {}),
             loomAuthoring: {
               cliPath: "/trusted/loom",
               transport: { kind: "broker", queuePath: "/trusted/queue" },
@@ -205,7 +231,7 @@ describe("loom-authoring", () => {
           const { output } = await engine.invokeBuiltinTool("loom_compose", {
             request_id: "collection-one",
             components: [{ pattern_token: minted.token }],
-          });
+          }, { signal: controller.signal });
           expect(output.status).toBe(candidate.allowed ? "ok" : "error");
           expect(calls).toHaveLength(candidate.allowed ? 1 : 0);
           if (candidate.allowed) {
@@ -280,6 +306,194 @@ describe("loom-authoring", () => {
   });
 
   describe("host command boundary", () => {
+    it("rejects ambiguous or malformed components without starting a host command", async () => {
+      for (
+        const components of [
+          [],
+          Array(101).fill({ ref: "url:https://example.com" }),
+          [{}],
+          [{ ref: "url:https://example.com", pattern_token: "cfh:a:abcde" }],
+          [{ ref: "url:https://example.com", actor: "user" }],
+          [{ pattern_token: 4 }],
+          [{ ref: "piece:space/id" }],
+        ]
+      ) {
+        const { engine, calls } = engineFixture();
+        const { output } = await engine.invokeBuiltinTool("loom_compose", {
+          request_id: "collection-one",
+          components,
+        });
+        expect(output).toMatchObject({
+          status: "error",
+          mayHaveCommitted: false,
+        });
+        expect(calls).toHaveLength(0);
+      }
+    });
+
+    it("projects historical context without leaking host paths or referenced cells", async () => {
+      for (
+        const bound_loom of [null, {
+          loom_id: receipt.loom_id,
+          version: 7,
+          archived: false,
+          source: "host-context",
+          private: "private-host-path",
+        }]
+      ) {
+        const engine = new CfHarnessEngine({
+          sandboxRuntime: sandbox,
+          loomAuthoring: {
+            cliPath: "/trusted/loom",
+            transport: { kind: "broker", queuePath: "/trusted/queue" },
+          },
+          processRunner: {
+            run: () =>
+              Promise.resolve({
+                exitCode: 0,
+                stderr: "",
+                stdout: JSON.stringify({
+                  ok: true,
+                  result: {
+                    kind: "authoring-context",
+                    historical: true,
+                    run_scoped: true,
+                    truncated: true,
+                    bound_loom,
+                    authored: [{ receipt }, {
+                      receipt: { loom_id: receipt.loom_id },
+                    }],
+                    secret: "private-host-path",
+                  },
+                }),
+              }),
+          },
+        });
+        const { output } = await engine.invokeBuiltinTool(
+          "loom_authoring_context",
+          {},
+        );
+        expect(output).toMatchObject({
+          status: "ok",
+          kind: "authoring-context",
+          historical: true,
+          truncated: true,
+          authored: [{
+            receipt: {
+              loom_id: receipt.loom_id,
+              displaced: [{ component_id: "c-old" }],
+            },
+          }, { receipt: { loom_id: receipt.loom_id, displaced: [] } }],
+        });
+        expect(JSON.stringify(output)).not.toContain("private");
+        if (output.status !== "ok") {
+          throw new Error("Expected historical context");
+        }
+        if (bound_loom === null) expect(output.bound_loom).toBeNull();
+        else {expect(output.bound_loom).toMatchObject({
+            loom_id: receipt.loom_id,
+            version: 7,
+          });}
+      }
+    });
+
+    it("does not disclose uncertain host errors as proof of failed composition", async () => {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: sandbox,
+        loomAuthoring: {
+          cliPath: "/trusted/loom",
+          transport: { kind: "broker", queuePath: "/trusted/queue" },
+        },
+        processRunner: {
+          run: () =>
+            Promise.resolve({
+              exitCode: 1,
+              stderr: "",
+              stdout: JSON.stringify({
+                ok: false,
+                error: "private-cell-address",
+              }),
+            }),
+        },
+      });
+      const { output } = await engine.invokeBuiltinTool("loom_compose", {
+        request_id: "collection-one",
+        components: [{ ref: "url:https://example.com" }],
+      });
+      expect(output).toMatchObject({ status: "error", mayHaveCommitted: true });
+      expect(JSON.stringify(output)).not.toContain("private");
+    });
+
+    it("handles sparse inspection and failed reads without granting cell references", async () => {
+      for (
+        const manifest of [
+          { loom_id: receipt.loom_id, version: 3 },
+          {
+            loom_id: receipt.loom_id,
+            version: 3,
+            components: [{ component_id: "c-1", title: "Only a label" }],
+          },
+          {},
+        ]
+      ) {
+        const engine = new CfHarnessEngine({
+          sandboxRuntime: sandbox,
+          loomAuthoring: {
+            cliPath: "/trusted/loom",
+            transport: { kind: "broker", queuePath: "/trusted/queue" },
+          },
+          processRunner: {
+            run: () =>
+              Promise.resolve({
+                exitCode: 0,
+                stderr: "",
+                stdout: JSON.stringify({ ok: true, result: { manifest } }),
+              }),
+          },
+        });
+        const { output } = await engine.invokeBuiltinTool("loom_inspect", {
+          loom_id: receipt.loom_id,
+        });
+        if ("version" in manifest) {
+          expect(output).toMatchObject({
+            status: "ok",
+            manifest: {
+              components: "components" in manifest ? manifest.components : [],
+            },
+          });
+        } else {expect(output).toMatchObject({
+            status: "error",
+            mayHaveCommitted: false,
+          });}
+      }
+    });
+
+    it("forwards existing non-Fabric object references without inventing or resolving them", async () => {
+      for (
+        const ref of [
+          "wish:W-123",
+          "intention:step-11111111111111111111111111111111",
+          "chat:conv-example",
+          "person:email:synthetic@example.com",
+          "thread:signal.desktop:synthetic",
+          "moment:moment-example",
+          "loom:loom-2222222222222222",
+          "run:r-123456789abc",
+        ]
+      ) {
+        const { engine, calls } = engineFixture();
+        const { output } = await engine.invokeBuiltinTool("loom_compose", {
+          request_id: "collection-one",
+          components: [{ ref }],
+        });
+        expect(output.status).toBe("ok");
+        expect(calls).toHaveLength(1);
+        expect(JSON.parse(calls[0].stdinText ?? "").components).toEqual([{
+          ref,
+        }]);
+      }
+    });
+
     it("keeps current displacement empty when replaying an old receipt", async () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: sandbox,

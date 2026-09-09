@@ -5,6 +5,9 @@ import { describe, it } from "@std/testing/bdd";
 
 import {
   executeLoomAuthoringCommand,
+  type HarnessLoomAuthoringConfig,
+  type LoomAuthoringCommand,
+  readLoomAuthoringConfig,
   validateLoomAuthoringConfig,
 } from "../src/loom-authoring.ts";
 import type { ProcessRunRequest } from "../src/sandbox/process-runner.ts";
@@ -39,6 +42,152 @@ const input = {
 };
 
 describe("loom-authoring", () => {
+  const broker: HarnessLoomAuthoringConfig = {
+    cliPath: "/trusted/loom",
+    transport: { kind: "broker", queuePath: "/trusted/queue" },
+  };
+
+  it("rejects malformed operator routing and grants before offering tools", async () => {
+    for (
+      const config of [
+        { ...broker, cliPath: "relative" },
+        { ...broker, allowCommentThreads: "yes" },
+        { ...broker, boundLoomId: "unbound" },
+        { ...broker, transport: { kind: "broker", queuePath: "relative" } },
+        { ...broker, transport: { kind: "unknown" } },
+      ]
+    ) {
+      expect(() =>
+        validateLoomAuthoringConfig(config as HarnessLoomAuthoringConfig)
+      ).toThrow();
+    }
+    await expect(readLoomAuthoringConfig("relative")).rejects.toThrow();
+    for (
+      const value of [null, [], {}, {
+        cliPath: "/trusted/loom",
+        transport: null,
+      }]
+    ) {
+      await expect(
+        readLoomAuthoringConfig(
+          "/trusted/config",
+          () => Promise.resolve(JSON.stringify(value)),
+        ),
+      )
+        .rejects.toThrow();
+    }
+  });
+
+  it("rejects invalid requests before any process can apply a write", async () => {
+    let calls = 0;
+    const runner = {
+      run: () => {
+        calls++;
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: JSON.stringify(reply),
+          stderr: "",
+        });
+      },
+    };
+    const cases: [LoomAuthoringCommand, unknown][] = [
+      ["unsupported" as LoomAuthoringCommand, {}],
+      ["loom.compose", null],
+      ["loom.inspect", {}],
+      ["loom.inspect", { loom_id: "not-an-id" }],
+      ["loom.compose", { ...input, expected_version: 3 }],
+      ["loom.compose", {
+        ...input,
+        loom_id: receipt.loom_id,
+        expected_version: 0,
+      }],
+      ...["", " ", "x\n", "x".repeat(201)].map((
+        request_id,
+      ): [LoomAuthoringCommand, unknown] => ["loom.compose", {
+        ...input,
+        request_id,
+      }]),
+      ...[null, [], Array(101).fill({ ref: "url:https://example.com" })].map((
+        components,
+      ): [LoomAuthoringCommand, unknown] => ["loom.compose", {
+        ...input,
+        components,
+      }]),
+    ];
+    for (const [command, args] of cases) {
+      expect(await executeLoomAuthoringCommand(broker, command, args, runner))
+        .toMatchObject({ status: "error", mayHaveCommitted: false });
+    }
+    expect(calls).toBe(0);
+    const result = await executeLoomAuthoringCommand(broker, "loom.compose", {
+      ...input,
+      loom_id: receipt.loom_id,
+      expected_version: 1,
+    }, {
+      run: (request) => {
+        expect(request.args.slice(-4)).toEqual([
+          "--loom",
+          receipt.loom_id,
+          "--expect",
+          "1",
+        ]);
+        expect(JSON.parse(request.stdinText!)).toEqual(input);
+        return runner.run();
+      },
+    });
+    expect(result.status).toBe("ok");
+    expect(calls).toBe(1);
+  });
+
+  it("keeps unknown and unreadable write outcomes uncertain but never claims read commits", async () => {
+    for (const command of ["loom.compose", "loom.inspect"] as const) {
+      for (
+        const response of [
+          {
+            exitCode: 1,
+            stdout: JSON.stringify({ ok: false, error: "backend error" }),
+            stderr: "",
+          },
+          { exitCode: 0, stdout: "null", stderr: "" },
+          { exitCode: 0, stdout: "{broken", stderr: "" },
+          null,
+        ]
+      ) {
+        const result = await executeLoomAuthoringCommand(
+          broker,
+          command,
+          command === "loom.compose" ? input : { loom_id: receipt.loom_id },
+          {
+            run: () =>
+              response === null
+                ? Promise.reject(new Error("lost connection"))
+                : Promise.resolve(response),
+          },
+        );
+        expect(result).toMatchObject({
+          status: "error",
+          mayHaveCommitted: command === "loom.compose",
+        });
+      }
+    }
+    for (const command of ["loom.inspect", "loom.authoring-context"] as const) {
+      const result = await executeLoomAuthoringCommand(broker, command, {
+        loom_id: receipt.loom_id,
+      }, {
+        run: () =>
+          Promise.resolve({
+            exitCode: 0,
+            stderr: "",
+            stdout: JSON.stringify({ ok: true, result: {} }),
+          }),
+      });
+      expect(result).toMatchObject({
+        status: "error",
+        mayHaveCommitted: false,
+      });
+    }
+  });
+
   describe("executeLoomAuthoringCommand()", () => {
     it("preserves historical receipts when only the implicit origin is missing", async () => {
       const calls: ProcessRunRequest[] = [];

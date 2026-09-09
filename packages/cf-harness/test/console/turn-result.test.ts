@@ -81,6 +81,12 @@ describe("console/turn-result", () => {
           receipt: { ...receipt, operation_ids: [] },
         }),
         message("loom_compose", output),
+        {
+          role: "tool",
+          toolName: "loom_compose",
+          toolCallId: "unreadable-receipt",
+          content: "{broken",
+        },
       ], 2);
       const result = await readConsoleTurnResult({
         artifactRoot,

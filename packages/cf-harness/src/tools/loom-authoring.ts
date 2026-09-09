@@ -17,7 +17,7 @@ import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
 /** A requested addition, with one ordinary reference or one held pattern token. */
 export interface LoomComposeComponent {
-  /** A typed page, artifact, or URL reference. */
+  /** A typed non-Fabric object reference, validated by the Loom host. */
   ref?: string;
 
   /** A held whole Pattern Instance address, resolved by the host. */
@@ -241,10 +241,11 @@ const invoke = async (
       } else {
         if (
           typeof item.ref !== "string" ||
-          !/^(page|artifact|url):/.test(item.ref)
+          !/^(page|artifact|url|person|thread|moment|loom|wish|intention|chat|run):/
+            .test(item.ref)
         ) {
           return fail(
-            "Use page:, artifact:, or url: references; Pattern Instances require pattern_token.",
+            "Use a supported typed Loom object reference; Pattern Instances require pattern_token.",
           );
         }
         normalized.push(item);
@@ -337,7 +338,7 @@ export const loomComposeTool: HarnessToolDefinition<
     title: "Compose Loom",
     effectClass: "write",
     description:
-      "Create or extend a durable Loom collection of pages, links, artifacts, and held Pattern Instances. Choose one logical request_id and retain every argument on retry. Inspect an existing target before extending it with expected_version. A receipt proves a commit, not that every component renders. Report only the current displaced component ids; receipt.displaced is historical and a replay performs no new displacement.",
+      "Create or extend a durable Loom collection of existing objects and held Pattern Instances. Choose one logical request_id and retain every argument on retry. Inspect an existing target before extending it with expected_version. A receipt proves a commit, not that every component renders. Report only the current displaced component ids; receipt.displaced is historical and a replay performs no new displacement.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -358,7 +359,7 @@ export const loomComposeTool: HarnessToolDefinition<
               ref: {
                 type: "string",
                 description:
-                  "A page:, artifact:, or url: reference; mutually exclusive with pattern_token.",
+                  "An existing page:, artifact:, url:, person:, thread:, moment:, loom:, wish:, intention:, chat:, or run: reference. The host validates its grammar and binding. Mutually exclusive with pattern_token.",
               },
               pattern_token: {
                 type: "string",

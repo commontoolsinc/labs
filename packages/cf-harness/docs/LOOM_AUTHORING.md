@@ -63,7 +63,8 @@ supporting that routing flag, `loom.compose`, `loom.inspect`, and
 ## Tools and authority
 
 - `loom_compose` creates or extends a collection from 1–100 components. A
-  component supplies exactly one `ref` (`page:`, `artifact:`, or `url:`) or
+  component supplies exactly one `ref` (`page:`, `artifact:`, `url:`, `person:`,
+  `thread:`, `moment:`, `loom:`, `wish:`, `intention:`, `chat:`, or `run:`) or
   `pattern_token`, plus optional title, stage, and focus. An existing target is
   named by `loom_id` and may carry an `expected_version` guard.
 - `loom_inspect` reads the current version, component metadata, and layout of
