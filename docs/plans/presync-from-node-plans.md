@@ -210,10 +210,10 @@ landed.
 
 ### Stage 0. Prerequisite
 
-- [ ] #7193 lands: the store delivers metadata as data and follows only
-      `cfc`. Its runner changes (naming the argument document in the node
-      walk, `syncStoredPieceCells`, the `#familyAbsent` and `#swapReadsAbsent`
-      gates) are what stages 2 and 5 build on.
+- [x] #7193 landed (`3cdf2ab489`): the store delivers metadata as data and
+      follows only `cfc`. Its runner changes (naming the argument document
+      in the node walk, `syncStoredPieceCells`, the `#familyAbsent` and
+      `#swapReadsAbsent` gates) are what stages 2 and 5 build on.
 
 ### Stage 1. One plan per node
 
