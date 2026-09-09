@@ -77,17 +77,28 @@ const sandboxResult = (label: IFCLabel): CfcSandboxResult => {
  *
  * `nested` puts the cycle INSIDE the `confidentiality` array — a place the
  * label's own shape permits, so a check that only looks at the top level
- * passes it through to the comparison, which serializes and throws. The
- * other puts it in an extra property, which the shape check rejects on its
- * own. Both have to come back as a refusal rather than an exception.
+ * passes it through to the comparison, which serializes and throws.
+ * `top-level` puts it in an extra property, which the shape check rejects on
+ * its own. `deep` holds no cycle at all: it is ordinary JSON nested far
+ * enough to exhaust a recursive walk, which is the other way a read can end
+ * by raising instead of answering. All three have to come back as a refusal.
  */
 const cyclicLabelResult = (
-  where: "nested" | "top-level",
+  where: "nested" | "top-level" | "deep",
 ): CfcSandboxResult => {
   const label: Record<string, unknown> = { confidentiality: [] };
   if (where === "nested") {
     const clause = label.confidentiality as unknown[];
     clause.push(clause);
+  } else if (where === "deep") {
+    // Acyclic and perfectly ordinary JSON, just far deeper than a label ever
+    // is. A recursive walk raises `RangeError` on it, and so does the
+    // serializer that compares two labels afterwards.
+    let nest: unknown[] = ["finance"];
+    for (let i = 0; i < 20_000; i++) {
+      nest = [nest];
+    }
+    (label.confidentiality as unknown[]).push(nest);
   } else {
     label.self = label;
   }
@@ -1418,7 +1429,7 @@ describe("ingest_sandbox_file", () => {
     }
   });
 
-  it("poisons rather than throwing on a label it cannot serialize", async () => {
+  it("poisons rather than raising on a label it cannot read", async () => {
     // Comparing two labels serializes them, and a cyclic one would throw out
     // of the reader — an exception there leaves the family recorded as it
     // was, which is to say clean. Representability is therefore established
@@ -1430,7 +1441,7 @@ describe("ingest_sandbox_file", () => {
 
     const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
     try {
-      for (const where of ["nested", "top-level"] as const) {
+      for (const where of ["nested", "top-level", "deep"] as const) {
         const perRunId = `${runId}-${where}`;
         try {
           const engine = new CfHarnessEngine({

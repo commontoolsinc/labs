@@ -255,30 +255,6 @@ const resolveCfcInvocationContextDir = (
 };
 
 /**
- * Refuses a CFC sidecar transport directory the sandbox can reach.
- *
- * Both sidecars are trusted: the harness writes the invocation context the
- * container starts tainted from, and reads back the final taint that
- * `ingest_sandbox_file` mints a cell's label from. Neither claim survives the
- * directory being writable by the workload it describes — a container that
- * can rewrite its own result sidecar can name its own taint, and a label
- * minted from that is one the sandbox chose.
- *
- * Comparison is on real paths, so a symlink into a mount is caught as one.
- * A path that does not exist yet cannot be under a mount that does, and is
- * compared by name; that is the ordinary case, since the harness creates
- * these directories when it first writes to them.
- *
- * What this cannot check is the other side of the transport: whether the
- * runtime is registered to read the directory named here, and whether the
- * container's own view maps it in some way this host cannot see. That
- * residual belongs to the runsc registration and is recorded in the package
- * documentation rather than asserted here.
- *
- * @throws Error naming the directory and the mount it sits under.
- */
-
-/**
  * A path resolved as far down as it exists, with what does not exist joined
  * back on.
  *
@@ -326,6 +302,29 @@ export const isHostDirWithinMount = (
   return step !== ".." && !step.startsWith(`..${hostSeparator}`);
 };
 
+/**
+ * Refuses a CFC sidecar transport directory the sandbox can reach.
+ *
+ * Both sidecars are trusted: the harness writes the invocation context the
+ * container starts tainted from, and reads back the final taint that
+ * `ingest_sandbox_file` mints a cell's label from. Neither claim survives the
+ * directory being writable by the workload it describes — a container that
+ * can rewrite its own result sidecar can name its own taint, and a label
+ * minted from that is one the sandbox chose.
+ *
+ * Comparison is on real paths, so a symlink into a mount is caught as one.
+ * A path that does not exist yet cannot be under a mount that does, and is
+ * compared by name; that is the ordinary case, since the harness creates
+ * these directories when it first writes to them.
+ *
+ * What this cannot check is the other side of the transport: whether the
+ * runtime is registered to read the directory named here, and whether the
+ * container's own view maps it in some way this host cannot see. That
+ * residual belongs to the runsc registration and is recorded in the package
+ * documentation rather than asserted here.
+ *
+ * @throws Error naming the directory and the mount it sits under.
+ */
 const refuseSandboxVisibleTransportDir = (
   dir: string,
   label: string,

@@ -314,51 +314,78 @@ export interface BuiltinToolOutputMap {
 }
 
 /**
- * Whether `value` is plain JSON data this can carry: no cycles, and nothing
- * a serializer would refuse or silently drop.
+ * How deep a label's own data may nest.
  *
- * The cycle guard is a visited SET rather than a depth bound, and it is what
- * makes this total: the alternative is discovering the cycle inside
- * `JSON.stringify`, which throws — and an exception raised while reading a
- * container's taint leaves the family recorded as it was, which is to say
- * clean. A shape that cannot be read has to come back as a `false`, never as
- * a thrown error.
+ * A CFC label is a list of atoms, and an atom is a small flat record; nothing
+ * this reads has any use for depth. The bound is what keeps BOTH walks over
+ * one finite: this one, and the serializer that compares two labels
+ * afterwards. A structure deeper than this is not something the format
+ * describes, so refusing it costs nothing real and removes the last way a
+ * label can end a read by raising instead of answering.
  */
-const isRepresentableJsonValue = (
-  value: unknown,
-  seen: Set<object>,
-): boolean => {
-  if (value === null) {
-    return true;
-  }
-  switch (typeof value) {
-    case "string":
-    case "boolean":
-      return true;
-    case "number":
-      return Number.isFinite(value);
-    case "object":
-      break;
-    default:
+const MAX_LABEL_DEPTH = 64;
+
+/**
+ * Whether `value` is plain JSON data this can carry: bounded in depth, free
+ * of cycles, and holding nothing a serializer would refuse or silently drop.
+ *
+ * Walked with an explicit stack rather than by recursion, and bounded rather
+ * than merely guarded against cycles. Both of those are about the same thing:
+ * this must ANSWER for every input. A recursive walk raises `RangeError` on
+ * deep input, and an exception raised while reading a container's taint
+ * leaves the family recorded as it was — which is to say clean. A shape this
+ * cannot read has to come back as `false`.
+ *
+ * The visited set holds the containers on the CURRENT path, so an object
+ * appearing twice in sequence — one atom named in both clauses — is not
+ * mistaken for a cycle, which is an object appearing inside itself.
+ */
+const isRepresentableJsonValue = (value: unknown): boolean => {
+  type Frame = { value: unknown; depth: number; open: boolean };
+  const path = new Set<object>();
+  const stack: Frame[] = [{ value, depth: 0, open: true }];
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    if (!frame.open) {
+      path.delete(frame.value as object);
+      continue;
+    }
+    const entry = frame.value;
+    if (entry === null) {
+      continue;
+    }
+    switch (typeof entry) {
+      case "string":
+      case "boolean":
+        continue;
+      case "number":
+        if (!Number.isFinite(entry)) {
+          return false;
+        }
+        continue;
+      case "object":
+        break;
+      default:
+        return false;
+    }
+    const container = entry as object;
+    if (path.has(container) || frame.depth >= MAX_LABEL_DEPTH) {
       return false;
+    }
+    path.add(container);
+    // A closing frame under the children, so the container leaves the current
+    // path once everything below it has been read.
+    stack.push({ value: container, depth: frame.depth, open: false });
+    const children = Array.isArray(container)
+      ? container
+      : Object.values(container);
+    for (const child of children) {
+      if (child !== undefined) {
+        stack.push({ value: child, depth: frame.depth + 1, open: true });
+      }
+    }
   }
-  const container = value as object;
-  if (seen.has(container)) {
-    return false;
-  }
-  seen.add(container);
-  try {
-    return Array.isArray(container)
-      ? container.every((entry) => isRepresentableJsonValue(entry, seen))
-      : Object.values(container).every((entry) =>
-        entry === undefined || isRepresentableJsonValue(entry, seen)
-      );
-  } finally {
-    // Removed on the way out so that the same object appearing twice in
-    // SEQUENCE — a label naming one atom in both clauses — is not mistaken
-    // for a cycle, which is an object appearing inside itself.
-    seen.delete(container);
-  }
+  return true;
 };
 
 /**
@@ -373,10 +400,9 @@ const isRepresentableIfcLabel = (value: unknown): boolean => {
   if (!isObjectNotArray(value)) {
     return false;
   }
-  const seen = new Set<object>();
   return Object.entries(value).every(([clause, entry]) =>
     (clause === "confidentiality" || clause === "integrity")
-      ? Array.isArray(entry) && isRepresentableJsonValue(entry, seen)
+      ? Array.isArray(entry) && isRepresentableJsonValue(entry)
       : entry === undefined || entry === null
   );
 };
