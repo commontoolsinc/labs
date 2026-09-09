@@ -24,7 +24,6 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
-import { tagFromNativeValue, VALUE_TAGS } from "@/value-tags.ts";
 import { isFabricPlainObject } from "@/type-check.ts";
 import {
   assertValidFabricValueLayer,
@@ -33,6 +32,7 @@ import {
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
+import { tagFromNativeValue, VALUE_TAGS } from "@/value-tags.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 
 describe("validity-check", () => {
