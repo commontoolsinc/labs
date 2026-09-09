@@ -106,7 +106,26 @@ export type TrackedGraphState = {
    * query that names a document requires its key here too: reach without
    * family is not coverage for a root (see isGraphQueryCoveredByState). */
   chased: Set<string>;
+
+  /** Per-version scans of this state's delivered documents for embedded
+   * schema refs (`docKey -> { seq, refs }`), consulted when the closure is
+   * re-validated over the established set on every refresh. It lives with
+   * the state whose entities it describes: exactly one entry per delivered
+   * version, so it is as large as the state and no larger, dies with it,
+   * and — being one identity's — caches every scope, where the engine-wide
+   * cache below can hold only canonical space-scoped versions. Without it
+   * a refresh scanned the whole established set again whenever that set
+   * outgrew the engine-wide cache: a session holding the Topics board
+   * (some 18k delivered documents against a 4,096-entry cache) rescanned
+   * everything on every commit anyone made. */
+  schemaRefs: SchemaRefScans;
 };
+
+/** See TrackedGraphState.schemaRefs. */
+export type SchemaRefScans = Map<
+  QueryDocKey,
+  { seq: number; refs: ReadonlySet<string> }
+>;
 
 /**
  * The costliest single root of one query evaluation.
@@ -181,6 +200,14 @@ const walkStatsDelta = (
 export type QueryTraversalStats = GraphQueryWalkStats & {
   managerReads: number;
 
+  /** Documents whose value this evaluation scanned for embedded schema
+   * refs while assembling the delivered set's schema-document closure. A
+   * version scanned before — by this state, or by any session that
+   * delivered the same space-scoped version — costs no scan, so on a
+   * refresh this counts the documents that actually changed, not the
+   * established set the closure was re-validated over. */
+  schemaRefScans: number;
+
   /** Roots this evaluation visited. A cache hit visits none. */
   rootsVisited: number;
 
@@ -198,6 +225,7 @@ export type QueryTraversalStats = GraphQueryWalkStats & {
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
+  schemaRefScans: 0,
   rootsVisited: 0,
   rootsElapsedMs: 0,
   ...createGraphQueryWalkStats(),
@@ -876,6 +904,7 @@ export const cloneTrackedGraphState = (
     manager,
     roots: new Set(state.roots),
     chased: new Set(state.chased),
+    schemaRefs: new Map(state.schemaRefs),
   };
 };
 
@@ -949,13 +978,15 @@ const entitiesFromTracker = (
   return entities;
 };
 
-// Per-version cache of document scans for embedded schema refs, so a
-// version delivered again — by another session, query, or refresh — is
-// not rescanned. Only canonical `"space"`-scoped snapshots are cached: a
+// Engine-wide per-version cache of document scans for embedded schema
+// refs, so a version delivered again by ANOTHER session or query is not
+// rescanned. Only canonical `"space"`-scoped snapshots are cached: a
 // user- or session-scoped doc key names different content per principal,
 // and sharing scans across principals could hand one principal's refs to
 // another. Bounded; on overflow the cache clears and repopulates from
-// live deliveries.
+// live deliveries. A refresh does not depend on it: the established set
+// is answered from the graph state's own record
+// (`TrackedGraphState.schemaRefs`), which this cache only seeds.
 const SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES = 4096;
 const schemaRefScanCaches = new WeakMap<
   Engine.Engine,
@@ -987,7 +1018,15 @@ const scanSnapshotSchemaRefs = (
   engine: Engine.Engine,
   key: QueryDocKey,
   snapshot: EntitySnapshot,
+  scans: SchemaRefScans,
+  stats: QueryTraversalStats,
 ): ReadonlySet<string> => {
+  // The state's own record first: it covers every scope, and on a refresh
+  // it is where the whole established set is answered from.
+  const own = scans.get(key);
+  if (own !== undefined && own.seq === snapshot.seq) {
+    return own.refs;
+  }
   const cacheable = (snapshot.scope ?? DEFAULT_SCOPE) === DEFAULT_SCOPE;
   let cache = schemaRefScanCaches.get(engine);
   if (cache === undefined) {
@@ -997,9 +1036,11 @@ const scanSnapshotSchemaRefs = (
   if (cacheable) {
     const cached = cache.get(key);
     if (cached !== undefined && cached.seq === snapshot.seq) {
+      scans.set(key, cached);
       return cached.refs;
     }
   }
+  stats.schemaRefScans += 1;
   const refs = new Set<string>();
   const doc = snapshot.document;
   if (isObjectNotArray(doc)) {
@@ -1032,9 +1073,11 @@ const scanSnapshotSchemaRefs = (
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
+  const entry = { seq: snapshot.seq, refs: result };
+  scans.set(key, entry);
   if (cacheable) {
     if (cache.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) cache.clear();
-    cache.set(key, { seq: snapshot.seq, refs: result });
+    cache.set(key, entry);
   }
   return result;
 };
@@ -1089,6 +1132,8 @@ const assembleSchemaDocClosures = (
   branch: string,
   tracker: MapSetStringToPathSelectors,
   delivered: ReadonlyMap<QueryDocKey, EntitySnapshot>,
+  scans: SchemaRefScans,
+  stats: QueryTraversalStats,
   established?: ReadonlyMap<QueryDocKey, EntitySnapshot>,
 ): {
   trackerAdds: QueryDocKey[];
@@ -1103,14 +1148,24 @@ const assembleSchemaDocClosures = (
     }
   };
   for (const [key, snapshot] of delivered) {
-    for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+    for (
+      const hash of scanSnapshotSchemaRefs(engine, key, snapshot, scans, stats)
+    ) {
       enqueue(hash);
     }
   }
   if (established !== undefined) {
     for (const [key, snapshot] of established) {
       if (delivered.has(key)) continue;
-      for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+      for (
+        const hash of scanSnapshotSchemaRefs(
+          engine,
+          key,
+          snapshot,
+          scans,
+          stats,
+        )
+      ) {
         enqueue(hash);
       }
     }
@@ -1467,6 +1522,7 @@ export const trackGraph = (
   for (const key of walk.chasedFamilyKeys) chased.add(key);
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
+  const schemaRefs: SchemaRefScans = new Map();
   const staged = assembleSchemaDocClosures(
     space,
     engine,
@@ -1474,6 +1530,8 @@ export const trackGraph = (
     branch,
     schemaTracker,
     entities,
+    schemaRefs,
+    stats,
   );
   for (const key of staged.trackerAdds) {
     schemaTracker.add(key, REJECTING_SELECTOR);
@@ -1494,6 +1552,7 @@ export const trackGraph = (
     manager,
     roots,
     chased,
+    schemaRefs,
   };
   if (
     cache !== undefined && cacheKeys !== undefined &&
@@ -1608,6 +1667,8 @@ export const extendTrackedGraph = (
     state.branch,
     state.tracker,
     updates,
+    state.schemaRefs,
+    stats,
   );
   for (const key of staged.trackerAdds) {
     state.tracker.add(key, REJECTING_SELECTOR);
@@ -1929,6 +1990,8 @@ export const refreshTrackedGraph = (
       state.branch,
       state.tracker,
       updates,
+      state.schemaRefs,
+      stats,
       state.entities,
     );
     phases.enter("merge");
