@@ -264,9 +264,6 @@ interface Suite {
   /** Environment variables its commands run with. */
   env?: Record<string, string>;
 
-  /** Whether a subset of this suite is always run, and on what basis. */
-  mandatory?: "always" | "changed";
-
   /** Every available item and every configured unavailability. */
   enumerate(): Promise<{
     items: Item[];
@@ -359,15 +356,12 @@ suite supplies the variant shared by all of them. Direct records already
 carry their kind, scope, and name; the runner checks their record surface
 against the suite before applying that same variant.
 
-`mandatory` is the policy escape hatch. `"always"` means every item runs
-on every pull request, with no exceptions of any kind — it outranks the
-score, the budget, and both exclusion rules, and
-[Two rules that keep a test out](#two-rules-that-keep-a-test-out) explains
-why that has to be literal. `"changed"` means an item runs when the pull
-request touches a file the item covers; the per-package type check is the
-natural user, because the store already records one `typecheck` identity
-per package group and the mapping from a changed file to a package is
-direct.
+No suite exempts itself from selection. An item runs because the change
+touches what it covers, because nothing has a record of it, or because it
+is worth what running it costs, and a repository gate is held to those
+rules the way a unit test is. `deno fmt --check` earns its place from the
+failures it has caught; a suite that could declare itself exempt would be
+a suite whose worth nothing measures.
 
 Answering "what does this item cover" belongs to the suite, because a
 unit that is not a path is one only its suite can map a diff onto. A
@@ -375,13 +369,7 @@ suite whose units are files needs to say nothing: the diff naming the
 file is the whole of the question. A suite whose units are type-check
 groups or binaries maps the diff itself, and a suite that maps it wrongly
 runs too much or too little rather than reporting anything, so the answer
-errs toward running. Absent the field, the suite is selected purely on value.
-
-The `always` set is deliberately tiny, and every member of it is a gate
-whose failure means the tree is broken rather than that one test is
-unhappy: `deno fmt --check`, `deno lint`, and the topology drift guard.
-Together they cost seconds. Nothing expensive belongs there, and adding to
-the set is a decision to spend part of every lane's budget forever.
+errs toward running.
 
 ### Today's jobs as suites
 
@@ -391,6 +379,7 @@ table is the migration's checklist.
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
 | `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `repo-history-gates` | the two append-only gates in `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `typecheck` | `Check` (the type check) | — | `deno` |
 | `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
 | `runner-unit` | `Runner Tests (1..8)` | — | `deno` |
@@ -735,7 +724,7 @@ build's 17,999 executions.
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
-| One gate command | `repo-gates` | One, named for the gate that ran | Nothing to reach. |
+| One gate command | `repo-gates`, `repo-history-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
 | A section of `fuse-exec.sh` | `cli-fuse` | The phases that section alone selects. The phases more than one section runs record against the suite instead, since they name no single section | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
@@ -969,18 +958,19 @@ far worse failure than the workflow edit it replaced.
 `deno task check-test-topology` closes that, in two halves that catch the
 two different ways a surface goes missing.
 
-The **tree half** needs no store and runs on every pull request, in the
-`repo-gates` suite marked `mandatory: "always"`. It walks the tree for
-things that look like tests — `*.test.ts`, `*.test.tsx`, the integration
-directories, the shell scripts under `packages/cli/integration/` — and
-fails if any of them is claimed by no suite's `enumerate()`, or more than
-once under the same record surface and variant. A default suite and a
-non-default suite may claim the same source item because they are distinct
-execution surfaces. This is the half that catches a pull request adding a
-test surface nobody registered, at the moment it is added, and it is cheap
-enough to be unconditional. An entry in a configuration's declared skip
-registry accounts for its unavailable file or leaf without pretending it
-ran.
+The **tree half** needs no store, and is a unit of the `repo-gates` suite.
+It walks the tree for things that look like tests — `*.test.ts`,
+`*.test.tsx`, the integration directories, the shell scripts under
+`packages/cli/integration/` — and fails if any of them is claimed by no
+suite's `enumerate()`, or more than once under the same record surface and
+variant. A default suite and a non-default suite may claim the same source
+item because they are distinct execution surfaces. This is the half that
+catches a pull request adding a test surface nobody registered, and it is
+selected the way everything else is: a pull request that does not draw it
+leaves the unregistered surface to the full run on `main`, which is where
+the record of what this guard catches comes from. An entry in a
+configuration's declared skip registry accounts for its unavailable file or
+leaf without pretending it ran.
 
 The **store half** runs on `main`. It reads the most recent successful
 `main` build's records and fails if any recorded identity is one that no
@@ -1440,31 +1430,25 @@ from measurement rather than from somebody's judgement at one moment, it
 needs no owner or expiry to stop it rotting, and it reverses on its own
 the moment the test is fixed.
 
-**Neither rule touches an `always` item.** Both exclusions exist to stop a
-pull request failing for something its author cannot act on, and both
-reason about *tests*, whose individual absence costs one signal. An
-`always` item is not that. It is a gate the repository has decided must be
-green, and the moment it is red the exclusion would remove it from every
-pull request — including the pull requests that are about to make it
-worse, and including, in the drift guard's case, the very pull request
-that added the unregistered test surface it exists to catch. A guard that
-switches itself off exactly when it starts firing is not a guard.
+**Both rules reach a repository gate as well.** Formatting, linting and
+the drift guard are tests of the tree, and neither rule says anything
+about one of them that it does not say about a unit test. A gate failing
+in the latest `main` run leaves the selectable set, because a pull request
+red on it is red for something its author cannot act on. A gate above the
+flake threshold leaves the set too, and appears on the wall as the defect
+in the gate that it is.
 
-So `always` means always. Two consequences follow and both are intended.
-An `always` item red on `main` blocks every pull request until it is
-fixed. That is correct: with `deno fmt`, `deno lint`, and the topology
-guard, a red one means the tree is broken, the fix is usually a minute's
-work, and letting changes pile on top of it is how a minute becomes an
-afternoon. And an `always` item above the flake threshold keeps running
-rather than being hidden; a gate that is flaky is a defect in the gate,
-reported as one on the wall, and concealing it would be worse than the
-noise.
+The exception both rules carry cannot fire for a gate. A gate's unit is
+the name of a gate rather than a path, and its suite maps no change onto
+its units, so nothing a pull request touches reaches one. A gate red on
+`main` therefore stays out of pull requests until `main` is green, and
+`main`, which runs the whole corpus, is where it goes on failing until
+somebody fixes it.
 
 What the lane owes people in exchange is clarity about whose problem it
-is. A failing `always` item that was already failing in the latest `main`
-run is labelled in the job summary as pre-existing, with a link to the
-`main` run that first showed it, so nobody spends time looking for it in
-their own diff.
+is. The job summary names what was withheld and why, and says of each
+whether it ran anyway because the change reaches it, so nobody spends time
+looking for a pre-existing failure in their own diff.
 
 ### Two rules that force a test in
 
@@ -1778,9 +1762,9 @@ quietly absent.
 From what is left, given every item's value and cost and a budget of five
 lanes times 230 seconds each, it fills in four passes.
 
-1. **Mandatory.** Everything marked mandatory goes in first: the `always`
-   suites, the items the diff touched directly, every item of a covered
-   package the diff touched as described in [The one coverage gate that
+1. **Mandatory.** Everything mandatory goes in first: the items the diff
+   touched directly, every item of a covered package the diff touched as
+   described in [The one coverage gate that
    survives](#the-one-coverage-gate-that-survives), and the items with no
    history. An item excluded above comes back into this pass if the
    change edits the test itself, or its suite maps the change onto its
@@ -2918,7 +2902,6 @@ is pinned to the commit's date. And if none of that settles it,
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
-| An `always` item is red on `main` | Every pull request fails on it, deliberately, and the job summary says it was already red and links the `main` run. See [Two rules that keep a test out](#two-rules-that-keep-a-test-out). |
 | `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
 | The reporter cannot find the pull request behind a `main` commit | It logs the commit and posts nothing. A direct push to `main` with no pull request behind it is the ordinary case for this. |
 | The reporter would comment on a test that is known flaky | It says so in the comment rather than implying the change caused it. |
@@ -3052,9 +3035,10 @@ test-selection`. Its modes are also how the system is tested by hand.
   is the question this system will be asked most often and the one it
   would otherwise answer badly.
 - `dials` prints every dial with its comment, its current value and the
-  unit that value is in, saying of each whether it is chosen or measured,
-  and for a measured one whether the figure shown is still the checked-in
-  seed or one the publisher has since written back.
+  unit that value is in, saying of each whether somebody chose it, the
+  publisher measures it, or it is computed from other dials, and for a
+  measured one whether the figure shown is still the checked-in seed or
+  one the publisher has since written back.
 - `coverage` prints every workspace member, whether it carries the
   per-package coverage gate, the reason beside it when it does not, the
   task the gate measures, and the baseline the newest manifest holds for
@@ -3076,81 +3060,9 @@ those comments, and every manifest records the values it was built with,
 so a manifest is self-describing and a change in behavior can always be
 traced to a change in a dial.
 
-The **Units** column says what each number counts. Several of the dials
-are bare fractions that do not mean the same thing, and the table holds
-two different `0.25` values as it stands: `WEIGHT_BREADTH` is a share of a
-test's score and `FILL_DENSITY_SHARE` is a share of a lane's budget. A
-share of an item's runs reads the same way again. Naming the unit is what
-keeps them from being compared to each other.
-
-The **Set by** column separates three kinds. A **chosen** value is a
-decision somebody made, and editing it is how the decision changes. A
-**measured** value is worked out from the data and written back by the
-publisher, so the number in the file is only the seed used before there is
-anything to measure, and editing it changes nothing after the first
-publisher run. A **derived** value is computed from other dials and has no
-expression of its own to edit: each lane budget is its run's bound less
-the prologue and the safety margin, so a budget that does not fit inside
-its own bound cannot be written down. The distinction matters because all
-three look identical in a source file, and somebody who tunes a measured
-value is arguing with a tape measure while somebody who tries to tune a
-derived one is editing a line that is not there.
-
-| Dial | Default | Units | Set by | Why you would move it, and which way |
-| --- | --- | --- | --- | --- |
-| `LANES` | 5 | lanes | Chosen | Up when pull-request feedback is too thin and runner capacity allows more; down when the wave crowds other workflows off the shared runners. |
-| `LANE_BOUND_SECONDS` | 300 | seconds | Chosen | Up when more should fit in a lane; down when five minutes is longer than anybody will wait for a first answer. Either way `LANE_WORK_TIMEOUT_MINUTES` and `LANE_JOB_TIMEOUT_MINUTES` in `deno.yml` move with it. |
-| `LANE_PROLOGUE_SECONDS` | 40 | seconds | Measured | Never. The publisher overwrites it from the lanes' own timing records, and the checked-in figure is only what the first lane uses before any lane has reported one. |
-| `LANE_SAFETY_SECONDS` | 30 | seconds | Chosen | Up when lanes overrun their bound on slow runners; down when they finish early every time and the headroom is buying nothing. |
-| `FULL_LANE_BOUND_SECONDS` | 600 | seconds | Chosen | Up when `main`'s run uses more jobs than it needs; down when `main` takes too long to say something broke. |
-| `FULL_LANE_BUDGET_SECONDS` | 530 | seconds | Derived | Nothing edits this. It is the full run's bound less the same prologue and safety margin a pull request's lane pays, since a lane of either run is the same job doing the same setup on the same runner. |
-| `FULL_RUN_LABEL` | `ci: full` | a label | Chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
-| `VALUE_FLOOR` | 0.05 | score | Chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
-| `WEIGHT_PROVEN` | 0.55 | share of the score | Chosen | Up when a record of catching things should count for more. The three weights are shares of one score, so what this gains the other two lose. |
-| `WEIGHT_BREADTH` | 0.25 | share of the score | Chosen | Up when a test that several distinct sources have hit should count for more; down when breadth is mostly telling you about the environment rather than the test. |
-| `WEIGHT_CHURN` | 0.15 | share of the score | Chosen | Up when something going wrong right now should jump the queue faster; down when the queue keeps being jumped by noise. |
-| `PROVEN_SATURATION` | 2 | catches | Chosen | Up when four catches should outrank one by more; down when one catch should already be worth nearly everything a test can earn. |
-| `FRESHNESS_HALF_LIFE_DAYS` | 120 | days | Chosen | Up when old catches should keep more of their value; down when a test that caught something a year ago crowds out one that caught something last week. |
-| `FRESHNESS_FLOOR` | 0.3 | multiplier | Chosen | Up when a very old catch should keep more of its worth; down when age should be allowed to retire one almost completely. |
-| `CATCH_WEIGHT_LOCAL` | 2.0 | multiplier | Chosen | Up when evidence from a workstation should count for more; down if local records ever arrive in volume and stop being the scarce signal they are today. |
-| `CATCH_WEIGHT_PR` | 1.0 | multiplier | Chosen | Neither. It is the unit the other two are expressed against, so move those instead. |
-| `CATCH_WEIGHT_MAIN` | 1.5 | multiplier | Chosen | Up when an escape should pull harder on what gets selected next; down when `main`'s failures are mostly environmental rather than real. |
-| `CHURN_HALF_LIFE_DAYS` | 14 | days | Chosen | Up when recent trouble should stay relevant for longer; down when a problem already fixed keeps its tests selected for weeks afterwards. |
-| `FILL_VALUE_SHARE` | 0.60 | share of the budget | Chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
-| `FILL_DENSITY_SHARE` | 0.25 | share of the budget | Chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
-| `FILL_EXPLORATION_SHARE` | 0.15 | share of the budget | Chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
-| `FLAKE_EXCLUSION_RATE` | 0.05 | share of runs | Chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
-| `FLAKE_REPEAT_RATES` | 0.01, 0.03 | share of runs | Chosen | Up when repeats cost more lane time than the intermittent failures they catch are worth; down when intermittent failures are still slipping through. Every band stays under `FLAKE_EXCLUSION_RATE`, or an item is excluded before it reaches the band and the band never fires. |
-| `MAX_REPEATS` | 3 | runs of one item | Chosen | Up when intermittent regressions still get through; down when repeats are crowding a lane. |
-| `SUITE_FLAKE_PRIOR_RATE` | 0.02 | share of runs | Chosen | Up when too many suites count as flake-prone and their new items are repeated needlessly; down when new tests in a noisy suite land unrepeated and then flake. |
-| `COVERAGE_COMMENT_LINES` | 25 | lines | Chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
-| `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | Chosen | Up when too many packages are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
-| `LOCAL_COVERAGE_MAX_PACKAGES` | 2 | packages | Chosen | Up when broader changes should still be gated and the run can afford their packages' whole test sets; down when sweeping changes are crowding lanes. |
-| `EXCLUDED_FROM_COVERAGE_GATE` | nine | workspace members | Chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which turns its gate on. A line goes on when a package's own tests stop being what covers it. |
-| `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | Chosen | Up when branches based further back are being reported for want of an ancestor baseline; down when the manifest carries more history than anybody reads. |
-| `COVERAGE_TREND_WEEKS` | 3 | weeks | Chosen | Up when the tile goes amber too readily; down when debt climbs for a month before anybody is told. |
-| `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | Chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
-| `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | Chosen | How many distinct sources a failure spans inside that window before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as catches. |
-| `BREADTH_SATURATION` | 2 | sources | Chosen | Where the breadth term reaches half its ceiling. Up when four sources should outrank one by more; down when one source should already be worth nearly all of it. |
-| `CHURN_WINDOW_DAYS` | 60 | days | Chosen | How far back the decayed counts are read. Past this the weight is under one part in sixteen, so this is a performance decision rather than a policy one. |
-| `SAME_COMMIT_REACH_DAYS` | 2 | days | Chosen | How far back the fold remembers a commit's outcomes, so that a re-run landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when re-runs land far enough behind that their disagreement is counted as a catch; down when the fold's memory is what will not fit. It costs the number of identities that have failed times the number of commits, so it is the first dial to look at when a publisher run runs out of memory. |
-| `FLAKE_COMMIT_REACH` | 8 | commits | Chosen | How many of the most recently observed commits the fold keeps outcomes at, alongside the span above. Moves for the same two reasons and against the same cost. |
-| `FLAKE_WINDOW_DAYS` | 60 | days | Chosen | Up when a flake rate swings about on too little evidence; down when a test since fixed stays excluded. |
-| `COST_WINDOW_DAYS` | 7 | days | Chosen | Up when cost estimates are noisy; down when durations drift faster than the estimate follows. |
-| `RENAME_SIMILARITY` | 0.7 | share of the longer name's own part | Chosen | Up when the run report offers rename pairings nobody meant; down when a rename that discarded history goes unoffered. It only decides what is suggested — nothing is written to the alias file without somebody appending it. |
-| `RENAME_MARGIN` | 0.1 | share of the longer name's own part | Chosen | Up when the run report pairs a deletion with an unrelated addition; down when a rename made alongside another rename in the same area goes unoffered. |
-| `RENAME_SUGGESTIONS` | 5 | suggestions in one comment | Chosen | Up when a change that renamed many tests has its later suggestions cut off; down when a comment carrying this many is one nobody reads. |
-| `ALIAS_GATE_MIN_CATCHES` | off | catches | Chosen | Off by default. Turn it on at a catch count to fail a pull request that discards that much history in a rename without an alias line, and lower the count as the alias file becomes routine. |
-
-Three more numbers are measured, and they are not in the table because
-they are not in `policy.ts`: `setupCost` for each capability, and
-`suiteOverhead` and `correction` for each suite. They are fitted from the
-lanes' own timing records and published in the manifest, one set per
-publisher run, which is where to read them. Nothing hand-edits them, and a
-manifest carrying a strange one is a measurement to look at rather than a
-setting to fix. They are listed here so that the answer to "what numbers
-decide what runs" is complete rather than only complete for the ones a
-person owns.
+[Every dial](../development/test-selection.md#every-dial) in the
+test-selection guide tabulates them, one row each with its default, its
+unit, where its value comes from, and the reason to move it.
 
 Of the chosen dials, three are worth revisiting first, because their right
 values are empirical rather than structural. They stay chosen — nothing
@@ -3307,10 +3219,10 @@ exercised on the branch on its own.
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
       Twenty-one suites currently hold 2,396 units. The repository gates are two
-      suites rather than one, because `mandatory` belongs to a suite and
-      the `always` set has to stay tiny: `repo-gates` holds formatting,
-      linting and the drift guard, and `repo-checks` holds the rest of
-      what the `Check` job runs, selected on value like anything else.
+      suites rather than one, because a lane opens what a suite needs
+      before it runs any of it: `repo-gates` holds every gate that reads
+      the working tree alone, and `repo-history-gates` the two append-only
+      gates that read the revision the change is measured against.
 - [x] The server-execution ON configuration consumes
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude

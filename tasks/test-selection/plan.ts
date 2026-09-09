@@ -29,7 +29,6 @@ import type {
 
 /** Why one identity is in the run. */
 export type SelectionReason =
-  | "always"
   | "changed"
   | "unknown"
   | "coverage-gate"

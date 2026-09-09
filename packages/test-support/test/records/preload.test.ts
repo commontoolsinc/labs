@@ -33,6 +33,10 @@ const FIXTURE_CONFIG = {
       .href,
     "@std/testing/bdd/real": "jsr:@std/testing@^1.0.19/bdd",
     "@std/ulid": "jsr:@std/ulid@^1.0.0",
+    "@records/registration": new URL(
+      "../../src/records/registration.ts",
+      import.meta.url,
+    ).href,
   },
 };
 
@@ -131,6 +135,36 @@ describe("elsewhere", () => {
 });
 `;
 
+// A second file opening with the same suite title as BDD_FILE. Nothing
+// stops two files sharing one, and several packages have a title every
+// one of their files opens with.
+const SHARED_TITLE_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("outer", () => {
+  it("elsewhere", () => {});
+});
+`;
+
+// Two modules that register a suite for whoever calls them, one
+// declaring itself machinery and one not. What each leaf's file comes
+// out as is the whole of what the declaration does.
+const DECLARED_REGISTRAR = `import { describe, it } from "@std/testing/bdd";
+import { registerFrameworkModule } from "@records/registration";
+registerFrameworkModule(import.meta.url);
+export function suite(title: string): void {
+  describe(title, () => {
+    it("leaf", () => {});
+  });
+}
+`;
+
+const BARE_REGISTRAR = `import { describe, it } from "@std/testing/bdd";
+export function suite(title: string): void {
+  describe(title, () => {
+    it("leaf", () => {});
+  });
+}
+`;
+
 const BARE_FILE = `Deno.test("bare kept", () => {});
 Deno.test("bare dropped", () => {});
 `;
@@ -171,6 +205,139 @@ describe("preload", () => {
       const byName = new Map(records.map((r) => [r.test.n, r.file]));
       expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
       expect(byName.get("bare kept")).toEqual("bare.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("keeps each leaf's own file where two files share a suite title", async () => {
+    const fixture = await makeFixture({
+      "bdd.test.ts": BDD_FILE,
+      "shared.test.ts": SHARED_TITLE_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, ["bdd.test.ts", "shared.test.ts"]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool);
+      // The title both files register under says nothing about either,
+      // so it carries no file; each leaf carries its own.
+      expect(names.get("outer")).toBeUndefined();
+      expect(names.get("outer > kept")).toEqual("bdd.test.ts");
+      expect(names.get("outer > elsewhere")).toEqual("shared.test.ts");
+
+      const records = ingestJUnit(await Deno.readTextFile(fixture.junit), {
+        kind: "unit",
+        scope: "fixture",
+        fileByName: names,
+      });
+      const byName = new Map(records.map((r) => [r.test.n, r.file]));
+      expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
+      expect(byName.get("outer > elsewhere")).toEqual("shared.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("says so when the bdd re-export loaded before it", async () => {
+    // Loading the re-export first is what makes it hand back the real
+    // `describe` and `it`, and every leaf then reaches the report
+    // without reaching the name map. A preload that pulls the re-export
+    // in ahead of this one is the way that happens.
+    const fixture = await makeFixture({
+      "bdd.test.ts": BDD_FILE,
+      "early.ts": `import "@std/testing/bdd";\n`,
+    });
+    try {
+      // Without `--quiet`, which folds what a preload writes into a
+      // section of its own and shows it.
+      const run = await new Deno.Command(Deno.execPath(), {
+        args: [
+          "test",
+          "--allow-read",
+          "--allow-write",
+          "--allow-env",
+          "--preload=./early.ts",
+          `--preload=${preloadModulePath()}`,
+          `--junit-path=${fixture.junit}`,
+          "bdd.test.ts",
+        ],
+        cwd: fixture.dir,
+        env: { CF_TEST_RECORDS_DIR: fixture.spool },
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      const output = new TextDecoder().decode(run.stdout) +
+        new TextDecoder().decode(run.stderr);
+      assert(run.success, output);
+      expect(output).toContain("the bdd re-export loaded before this preload");
+      // What the warning names: the wrapper around `Deno.test` still
+      // sees the suite the describe chain registers, and nothing sees
+      // the leaves inside it.
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("outer")).toEqual("bdd.test.ts");
+      expect(names.get("outer > kept")).toBeUndefined();
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("attributes a suite a declared registrar built to its caller", async () => {
+    const fixture = await makeFixture({
+      "declared.ts": DECLARED_REGISTRAR,
+      "bare.ts": BARE_REGISTRAR,
+      "declared.test.ts":
+        `import { suite } from "./declared.ts";\nsuite("declared");\n`,
+      "bare.test.ts": `import { suite } from "./bare.ts";\nsuite("bare");\n`,
+    });
+    try {
+      const run = await runFixture(fixture, [
+        "declared.test.ts",
+        "bare.test.ts",
+      ]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("declared > leaf")).toEqual("declared.test.ts");
+      // Undeclared, so the map names the module that called `describe`
+      // rather than the file that asked it to.
+      expect(names.get("bare > leaf")).toEqual("bare.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("stops a run that loaded the re-export early and holds a skip list", async () => {
+    const fixture = await makeFixture({
+      "bdd.test.ts": BDD_FILE,
+      "early.ts": `import "@std/testing/bdd";\n`,
+    });
+    try {
+      const skips = join(fixture.dir, "skips.json");
+      await Deno.writeTextFile(
+        skips,
+        serializeSkipList({ "bdd.test.ts": ["outer > dropped"] }),
+      );
+      const run = await new Deno.Command(Deno.execPath(), {
+        args: [
+          "test",
+          "--allow-read",
+          "--allow-write",
+          "--allow-env",
+          "--preload=./early.ts",
+          `--preload=${preloadModulePath()}`,
+          "bdd.test.ts",
+        ],
+        cwd: fixture.dir,
+        env: { CF_TEST_RECORDS_DIR: fixture.spool, CF_TEST_SKIP_LIST: skips },
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      // A skip list says what this invocation is not to run, and nothing
+      // reaches inside a describe chain to apply it, so the run ends
+      // rather than running the leaf it was told to leave alone.
+      expect(run.success).toBe(false);
+      const output = new TextDecoder().decode(run.stdout) +
+        new TextDecoder().decode(run.stderr);
+      expect(output).toContain("the bdd re-export loaded before this preload");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });
     }
@@ -363,11 +530,10 @@ describe("preload", () => {
     });
     try {
       // No write permission and no skip list, so `Deno.test` is left
-      // alone and a bare test keeps its own class name. A bdd file's
-      // class name is the module its `describe` came from, which is the
-      // repository's own re-export, so ingestion declines it and the
-      // leaf has no file: the preload's name map is what supplies one,
-      // and this run wrote none.
+      // alone and the report keeps its own class names. The bdd
+      // re-export hands back the real `describe` and `it` where there is
+      // no capture, so a bdd file's class name is the file too, and both
+      // kinds of leaf carry one without a name map to join onto.
       const run = await new Deno.Command(Deno.execPath(), {
         args: [
           "test",
@@ -392,7 +558,7 @@ describe("preload", () => {
         filePrefix: "",
       });
       const byName = new Map(records.map((r) => [r.test.n, r.file]));
-      expect(byName.get("outer > kept")).toBeUndefined();
+      expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
       expect(byName.get("bare kept")).toEqual("bare.test.ts");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });

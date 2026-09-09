@@ -11,6 +11,62 @@ const EXPORTED_DIALS = Object.keys(policy).filter((name) =>
   /^[A-Z][A-Z0-9_]*$/.test(name) && name !== "DIALS"
 );
 
+/** The live document the dial table lives in, from the repository root. */
+const DIAL_TABLE_PATH = "docs/development/test-selection.md";
+
+/** The dial table's header row, which is how the table is found. */
+const DIAL_TABLE_HEADER =
+  "| Dial | Default | Units | Set by | Why you would move it, and which way |";
+
+/** One line of a cell, unwrapped and with its pipes unescaped. */
+function flatten(text: string): string {
+  return text.replace(/\\\|/g, "|").replace(/\s+/g, " ").trim();
+}
+
+/** The same, without the backticks a cell puts around a name. */
+function unquoted(text: string): string {
+  return flatten(text).replace(/`/g, "");
+}
+
+/** A table row's cells. A cell escapes any `|` it holds. */
+function tableCells(line: string): string[] {
+  const inner = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
+  return inner.split(/(?<!\\)\|/).map(flatten);
+}
+
+/** The dial table's columns after the first, which names the dial. */
+const DIAL_TABLE_COLUMNS = tableCells(DIAL_TABLE_HEADER).slice(1);
+
+/**
+ * The dial table's rows, each one its cells with the dial's name first.
+ * `policy.ts` wraps its strings at 72 columns and the table writes each
+ * row on one line, so both sides are flattened before anything is
+ * compared.
+ */
+function dialTable(): string[][] {
+  const lines = Deno.readTextFileSync(
+    new URL(`../../${DIAL_TABLE_PATH}`, import.meta.url),
+  ).split("\n");
+  const headers = lines.flatMap((line, at) =>
+    flatten(line) === flatten(DIAL_TABLE_HEADER) ? [at] : []
+  );
+  if (headers.length !== 1) {
+    throw new Error(
+      `${DIAL_TABLE_PATH} holds ${headers.length} dial tables and takes ` +
+        "exactly one. It is the documented copy of `DIALS` in " +
+        "`tasks/test-selection/policy.ts`, and it belongs in a live " +
+        "document, which an archived one is not. Point `DIAL_TABLE_PATH` " +
+        "at the live document holding it.",
+    );
+  }
+  const rows: string[][] = [];
+  for (const line of lines.slice(headers[0]! + 2)) {
+    if (!line.trimStart().startsWith("|")) break;
+    rows.push(tableCells(line));
+  }
+  return rows;
+}
+
 describe("policy", () => {
   describe("the dial table", () => {
     it("names every exported dial", () => {
@@ -37,6 +93,49 @@ describe("policy", () => {
 
     it("lists each dial once", () => {
       expect(NAMED_IN_TABLE.size).toBe(DIALS.length);
+    });
+  });
+
+  describe("the dial table in the guide", () => {
+    // `DIALS` and the table in the documentation are two copies of one
+    // set of decisions, and a reader reaches for whichever is nearer.
+    // Each cell is compared on its own, so a mismatch names the dial and
+    // the column it is in.
+
+    it("holds one row per dial and no row without one", () => {
+      expect(dialTable().map((row) => unquoted(row[0]!)))
+        .toEqual(DIALS.map((dial) => dial.name));
+    });
+
+    it("gives every dial the value, unit, source, and reason `policy.ts` gives it", () => {
+      const rows = dialTable();
+      const disagreements: string[] = [];
+      for (const dial of DIALS) {
+        const row = rows.find((cells) => unquoted(cells[0]!) === dial.name);
+        if (row === undefined) {
+          disagreements.push(
+            `${dial.name}: ${DIAL_TABLE_PATH} carries no row for it`,
+          );
+          continue;
+        }
+        const inCode = [
+          policy.dialValue(dial),
+          dial.unit,
+          dial.setBy,
+          dial.why,
+        ];
+        DIAL_TABLE_COLUMNS.forEach((column, index) => {
+          const documented = row[index + 1] ?? "";
+          const code = flatten(inCode[index]!);
+          if (documented !== code) {
+            disagreements.push(
+              `${dial.name} ${column}: ${DIAL_TABLE_PATH} says ` +
+                `"${documented}", \`policy.ts\` says "${code}"`,
+            );
+          }
+        });
+      }
+      expect(disagreements).toEqual([]);
     });
   });
 

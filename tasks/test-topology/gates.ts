@@ -3,12 +3,12 @@
  * pattern type check, the pattern update gates, and the checks that hold
  * a file or a document to a shape.
  *
- * Two of them are suites rather than one because of what `mandatory`
- * means. A gate marked `always` outranks the score, the budget, and both
- * exclusion rules, so the set of them is deliberately tiny and every
- * member is a gate whose failure means the tree is broken rather than
- * that one test is unhappy. `repo-gates` holds those three; everything
- * else the `Check` job runs is an ordinary selectable gate.
+ * The gates are two suites rather than one because a lane opens what a
+ * suite needs before it runs any of it. Two of them read the revision the
+ * change is measured against, which takes a checkout carrying history;
+ * the rest read the working tree and need nothing but the toolchain. A
+ * gate reaches a lane the way a test does: on what it is worth, or
+ * because nothing has a record of it.
  */
 
 import { collectPathsByScope, scopeOfPath } from "../typecheck.ts";
@@ -46,20 +46,11 @@ interface Gate {
   cwd?: string;
 }
 
-/**
- * The gates that run on every pull request whatever else does. A red one
- * means the tree is broken, the fix is usually a minute's work, and
- * letting changes pile on top of it is how a minute becomes an
- * afternoon.
- */
-const ALWAYS_GATES: readonly Gate[] = [
+/** The gates that read nothing but the working tree. */
+const WORKING_TREE_GATES: readonly Gate[] = [
   { name: "deno-fmt", kind: "format", task: "fmt", args: () => ["--check"] },
   { name: "deno-lint", kind: "lint", task: "lint" },
   { name: "check-test-topology", kind: "gate", task: "check-test-topology" },
-];
-
-/** Everything else the repository checks about itself. */
-const CHECK_GATES: readonly Gate[] = [
   { name: "check-skill-facts", kind: "gate", task: "check-skill-facts" },
   { name: "check-tripwires", kind: "gate", task: "check-tripwires" },
   { name: "check-docs", kind: "gate", task: "check-docs" },
@@ -119,6 +110,14 @@ const CHECK_GATES: readonly Gate[] = [
     task: "check-withheld-globals",
     cwd: "packages/static",
   },
+];
+
+/**
+ * The gates that hold a file to being appended to. Each reads the file as
+ * it stood at the merge base with the revision the change is measured
+ * against, which takes a checkout carrying history.
+ */
+const HISTORY_GATES: readonly Gate[] = [
   {
     name: "check-baselines-append-only",
     kind: "gate",
@@ -142,7 +141,6 @@ function gateSuite(
   id: string,
   gates: readonly Gate[],
   needs: readonly CapabilityId[],
-  mandatory?: "always",
 ): Suite {
   const byName = new Map(gates.map((gate) => [gate.name, gate]));
   const recordSurfaces: RecordSurface[] = [
@@ -152,7 +150,6 @@ function gateSuite(
     id,
     recordSurfaces,
     needs,
-    ...(mandatory === undefined ? {} : { mandatory }),
     units: gates.map((gate) => gate.name),
     unavailable: [],
     locate(record): Location | undefined {
@@ -192,11 +189,9 @@ function gateSuite(
 }
 
 /**
- * The type check, one unit per package group. It is `mandatory:
- * "changed"` rather than selected on value: the store records one
+ * The type check, one unit per package group. The store records one
  * identity per group and the mapping from a changed file to its group is
- * direct, so a change can always be checked against exactly the groups it
- * touches.
+ * direct, so `unitsForChange` names exactly the groups a change touches.
  */
 async function typecheckSuite(root: string): Promise<Suite> {
   const byScope = await collectPathsByScope(root);
@@ -207,7 +202,6 @@ async function typecheckSuite(root: string): Promise<Suite> {
     id: "typecheck",
     recordSurfaces,
     needs: ["deno"],
-    mandatory: "changed",
     units: scopes,
     unavailable: [],
     // A group's unit is the scope it checks rather than a path, so the
@@ -393,8 +387,8 @@ function patternVintageSuite(): Suite {
 /** Every gate suite, read from the working tree. */
 export async function loadGateSuites(root: string): Promise<Suite[]> {
   return [
-    gateSuite("repo-gates", ALWAYS_GATES, ["deno"], "always"),
-    gateSuite("repo-checks", CHECK_GATES, ["deno", "git-history"]),
+    gateSuite("repo-gates", WORKING_TREE_GATES, ["deno"]),
+    gateSuite("repo-history-gates", HISTORY_GATES, ["deno", "git-history"]),
     await typecheckSuite(root),
     cfcheckSuite(),
     await patternCompatSuite(root),
