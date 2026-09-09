@@ -2816,12 +2816,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
-            invalidateReadCaches();
             noteSystemWrite(address, write.value);
             noteWriteIdentity();
             if (!write.delete && getContentAddressedSchemasConfig()) {
               staged.push({ address, value: write.value });
             }
+            // After the chokepoint, so a write it refuses leaves the caches
+            // standing over a state it did not change.
+            invalidateReadCaches();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
