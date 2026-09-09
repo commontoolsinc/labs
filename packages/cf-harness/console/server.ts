@@ -1002,8 +1002,9 @@ export class ConsoleServer {
     // (`./src/mount.ts`), so the trailing-slash form is sent to the
     // canonical one rather than served with a stylesheet that cannot load.
     // Relative `Location`: it resolves under any host prefix on the client.
+    // The query rides along: `?turn=` and `?piecesBase=` are the address.
     const canonical = request.method === "GET"
-      ? liveCanonicalRedirect(url.pathname)
+      ? liveCanonicalRedirect(url.pathname, url.search)
       : undefined;
     if (canonical !== undefined) {
       return new Response(null, {

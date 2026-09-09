@@ -42,12 +42,24 @@ export const pageMount = (): string =>
  * script are `../styles/...` and `../scripts/...`, one level up from
  * `/live/<sessionId>`, so a trailing slash would resolve them one level too
  * deep. Rather than serve a page whose assets cannot load, the server sends
- * the trailing-slash form to the canonical one. The `Location` is RELATIVE
- * on purpose: from `<mount>/live/<sessionId>/` it resolves to
+ * the trailing-slash form to the canonical one, query and all — `?turn=` and
+ * `?piecesBase=` are what the address carries, and a redirect that lost them
+ * would open the pane on the wrong thing. The `Location` is RELATIVE on
+ * purpose: from `<mount>/live/<sessionId>/` it resolves to
  * `<mount>/live/<sessionId>` on the client, whatever the mount, so a host
  * fronting the console under a prefix needs no `Location` rewriting.
+ *
+ * The operator's page has the mirror-image case, and it is the HOST's: at a
+ * bare prefix (`/harness-console`, no slash) `./styles/...` would resolve
+ * beside the prefix rather than under it. The console itself is never asked
+ * for that address — at its own root the page is `/` — so the host that
+ * fronts it under a prefix owns that redirect (loom's daemon answers 308 to
+ * the slashed form).
  */
-export const liveCanonicalRedirect = (pathname: string): string | undefined => {
+export const liveCanonicalRedirect = (
+  pathname: string,
+  search = "",
+): string | undefined => {
   const match = /^\/live\/([^/]+)\/$/.exec(pathname);
-  return match === null ? undefined : `../${match[1]}`;
+  return match === null ? undefined : `../${match[1]}${search}`;
 };

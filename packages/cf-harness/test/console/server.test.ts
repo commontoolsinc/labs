@@ -1710,6 +1710,21 @@ describe("console/server", () => {
       expect(response.headers.get("set-cookie")).toBeNull();
     });
 
+    it("keeps the turn and pieces base a trailing-slash live address carries", async () => {
+      // `?turn=` narrows the pane and `?piecesBase=` says where a piece
+      // renders; a redirect that dropped them would open the pane on the
+      // wrong thing.
+      const response = await server.handle(getRequest(
+        "/live/session-1/?turn=turn-1&piecesBase=http%3A%2F%2Fh%2Fpattern-pane",
+      ));
+      await response.body?.cancel();
+
+      expect(response.status).toBe(308);
+      expect(response.headers.get("location")).toBe(
+        "../session-1?turn=turn-1&piecesBase=http%3A%2F%2Fh%2Fpattern-pane",
+      );
+    });
+
     it("still refuses the trailing-slash live address naming another host", async () => {
       const response = await server.handle(
         getRequest("/live/session-1/", { host: "evil.test:8100" }),

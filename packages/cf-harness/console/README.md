@@ -295,6 +295,19 @@ level of a view, never framed.
 `?turn=<turnId>` narrows the pane to one turn. Without it the pane shows the
 session's activity in order, however many turns it has taken.
 
+`GET /live/<sessionId>/` — the trailing-slash form — answers `308` to
+`../<sessionId>`, query and all. The pane's stylesheet and script are written
+relative to `/live/<sessionId>` (see below), so the slashed form would resolve
+them one level too deep; the `Location` is relative so it lands under whatever
+prefix a host fronts the console at, with no rewriting on the host's side.
+
+Both pages address the console RELATIVE to where they were opened — assets,
+`/api` fetches and the event stream all go under the mount `src/mount.ts` reads
+off the page's own address — so a host may serve the console under a prefix on
+its own origin (loom's daemon fronts it at `/harness-console`, satisfying the
+`Host` gate and carrying the token cookie itself). At the console's own root the
+mount is empty and every path is what it always was.
+
 `?piecesBase=<url-prefix>` says where the host renders a piece. A piece's own
 address is the one `assign_slug` recorded, which is the Fabric API's; a host
 that shows pieces somewhere else — a pane of its own, say, where the API's

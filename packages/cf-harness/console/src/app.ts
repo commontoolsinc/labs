@@ -9,7 +9,6 @@
  * its own.
  */
 
-import { consolePath, pageMount } from "./mount.ts";
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   cancelTurn,
@@ -20,6 +19,7 @@ import {
   readRunFlow,
   startTask,
 } from "./api.ts";
+import { consolePath, pageMount } from "./mount.ts";
 import "./index-view.ts";
 import "./flow-view.ts";
 import "./run-view.ts";

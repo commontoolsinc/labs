@@ -68,6 +68,21 @@ describe("console/src/mount", () => {
       );
     });
 
+    it("carries the address's query through the redirect", () => {
+      expect(liveCanonicalRedirect("/live/session-1/", "?turn=t1")).toBe(
+        "../session-1?turn=t1",
+      );
+      expect(
+        liveCanonicalRedirect(
+          "/live/session-1/",
+          "?turn=t1&piecesBase=http%3A%2F%2Fh%2Fpattern-pane",
+        ),
+      ).toBe("../session-1?turn=t1&piecesBase=http%3A%2F%2Fh%2Fpattern-pane");
+      expect(liveCanonicalRedirect("/live/session-1/", "")).toBe(
+        "../session-1",
+      );
+    });
+
     it("leaves every other address alone", () => {
       expect(liveCanonicalRedirect("/live/session-1")).toBeUndefined();
       expect(liveCanonicalRedirect("/live/")).toBeUndefined();

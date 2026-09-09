@@ -19,13 +19,13 @@
  * otherwise a feed.
  */
 
-import { consolePath, pageMount } from "./mount.ts";
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   type ConsoleChatEventEnvelope,
   type ConsoleRunDetail,
   readRun,
 } from "./api.ts";
+import { consolePath, pageMount } from "./mount.ts";
 import { stepPolicyView, withheldView } from "./steps-view.ts";
 import type { ConsoleStep } from "../steps.ts";
 import type { ConsoleTurnResultPiece } from "../turn-result.ts";

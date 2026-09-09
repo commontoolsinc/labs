@@ -37,14 +37,14 @@ describe("console/src/api", () => {
       expect(asked.calls).toBe(1);
     });
 
-    it("asks under the page's mount, which is the root outside a page", () => {
+    it("asks under the page's mount, which is the root outside a page", async () => {
       // Every path goes through console/src/mount.ts; with no location (a
       // test), the mount is the console's own root and the path is as it was.
       const asked = answerWith(Response.json({ sessionId: "session-a" }));
 
-      return cancelTurn("session-a", "turn-a").then(() => {
-        expect(asked.paths).toEqual(["/api/cancel"]);
-      });
+      await cancelTurn("session-a", "turn-a");
+
+      expect(asked.paths).toEqual(["/api/cancel"]);
     });
 
     it("rejects with the reason a refused cancel reported", async () => {
