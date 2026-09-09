@@ -24,7 +24,12 @@ A test's identity has three required parts, scoped within a repository:
   repository-root-relative file path with forward slashes, a task name, a
   script's own name (`acl.sh`), a script step (`integration.sh
   piece-values`), or a task-plus-item pair (`cfcheck <file>`,
-  `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
+  `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`). A
+  bdd file declaring a hook outside every `describe` has a root suite
+  invented for it, named `global`, and every chain that file goes on to
+  run opens with that name. A suite it registers as ignored is reported
+  under its bare name. The runner keeps such a suite out of the root
+  suite and never runs its body.
 - **variant**, when present — a stable name for a non-default configuration
   that runs the same test. The default configuration has no variant. The
   server-execution deployed-topology lanes have stable `default` and
@@ -95,11 +100,37 @@ places and the second overrides the first. Deno names a case's class after
 the module that registered the test, so the case a `describe` registers
 carries the file of every leaf beneath it, and the report joins itself: a
 leaf is named as its describe chain, and its file is the one whose
-registered name is the longest prefix of that chain. That source
-disappears the moment anything wraps `Deno.test`, because every class then
-names the wrapper. The registration preload is such a wrapper, and it
-replaces what it takes: it writes a name-to-file map into the spool, and
-ingestion lays that over what the report says.
+registered name is the longest prefix of that chain. What the class names
+is the nearest frame of this repository's own code below the runner, so
+that source holds only while nothing of ours sits between a test file and
+the registrar. The `describe` and `it` the import map resolves to are
+therefore the real ones wherever they would have nothing to do, and a
+module that does register on a file's behalf — a fixture runner, a clock
+harness — takes the class name with it.
+
+The registration preload is such a module, and it replaces what it takes:
+it writes a name-to-file map into the spool, and ingestion lays that over
+what the report says. The map holds each name `Deno.test` was called with
+and, for a file written with `describe` and `it`, the whole chain of each
+leaf. A hook a file declares outside every `describe` has no suite to
+hold it, so the bdd runner makes one named `global` and every suite that
+file goes on to run sits inside it; the chain each leaf is named by opens
+with that name. A suite title two files share says nothing about either
+and is dropped from the merged map; a leaf's whole chain is what usually
+survives that, and `global` is a title every file declaring such a hook
+shares.
+
+Every package of a workspace run writes into one spool, so each map also
+names the repository-relative directory its process ran in. A caller
+ingesting one package's report asks for that directory. A map naming it
+belongs to that package and is read whole, whatever files it names: a
+test task may name a file anywhere in the tree, and
+`packages/test-support` runs `tools/write-iframe-wrapper.test.ts`, two
+directories above itself. A map naming no directory at all is judged by
+its files instead, and contributes only those under the directory asked
+for. Either way the scope is applied before ambiguity is judged, or a
+name two packages happen to share would cost each of them a file it held
+unambiguously.
 
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
@@ -145,6 +176,33 @@ fixture is data rather than a test of this repository. A test that drives
 such a harness as a child process hands it an empty
 `CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
 empty value is recording off, the same as an unset one.
+
+A check that no lane can be asked to run is not recorded. A record is one
+execution of one test, and every history built from records — flake rate,
+duration, and what a pull request selects — answers whether to run that
+test again. A check reading what the run around it produced exists only
+as part of that run, so there is nothing to select and no suite in the
+test topology to claim its identity. Two checks are of this shape: the
+pull request coverage gate, which reads the coverage artifacts of every
+job in its own run, and the nightly audit over the CFC property corpus,
+which reads what the step before it wrote. A gate resolving a merge base
+against a base ref is not, and records normally.
+
+A test another workflow already records against the same commit is not
+recorded a second time. One execution of one test is one record, so a
+second workflow running those tests on that commit would give each of
+them two entries in its history. The exemption covers tests rather than
+jobs: a test that runs only in such a job is recorded there.
+
+`run-recorded` records the command it wraps, as one line carrying the
+identity the wrapper was given. It is therefore for a command that is
+itself the check — a formatter, a linter, a gate. A command whose own
+tests are the checks is not wrapped: its tests record through their own
+runner, and the wrapper's line would summarize an invocation beside
+them rather than record one execution of one test. The wrapper passes
+recording through to what it runs either way, so wrapping such a
+command adds that summary without changing what the tests below it
+record.
 
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the
@@ -224,10 +282,11 @@ the partition where their report was produced, not where it was uploaded.
 A trailing window can make late arrivals likely to be found, but cannot
 make discovery exact; what listing does and does not settle is described
 below. The whole dataset is readable by `allUsers`. Writers hold
-`roles/storage.objectCreator` pinned to their own folder, which cannot
-read, list, overwrite, or delete; nothing already stored can be modified
-by any append credential. An incompatible schema writes under `v2/` and
-readers migrate at their own pace.
+`roles/storage.objectCreator` pinned to their own folder. That
+identity-specific writer grant cannot overwrite or delete, while the public
+reader grant separately lets every principal read and list. Nothing already
+stored can be modified by any append credential. An incompatible schema writes
+under `v2/` and readers migrate at their own pace.
 
 Four writer principals exist, three of them recording. The **relay** —
 the only one that writes what CI produced — holds create on
@@ -314,7 +373,9 @@ make if a closed partition is ever shown to have lost something.
 
 ## CI movement
 
-Test jobs hold no credentials. Each job spools records (and its JUnit
+Test jobs hold no credentials. Each recording job — which is every job
+running tests that "Recording" above does not exempt — spools records
+(and its JUnit
 XML: leaf cases become records, container cases — one per describe level,
 with overlapping times — are dropped by a name-prefix rule) and uploads
 one credential-free `test-records-<job>-a<attempt>` artifact,
@@ -342,9 +403,10 @@ first. Test workflows start emitting the field only after that support is on
 the default branch. Otherwise the old relay drops the field before writing a
 create-only object that cannot be repaired in place.
 
-The relay workflow follows the completion of every workflow that runs tests —
-success, failure, cancellation, and timeout alike. It ships a
-same-repository run unconditionally, since only write access creates
+The relay workflow follows the completion of every workflow that records
+tests — success, failure, cancellation, and timeout alike — and follows
+no workflow that "Recording" above leaves recording nothing. The relay
+ships a same-repository run unconditionally, since only write access creates
 one, and a fork run only when the run's actor — read from the trusted
 payload — is on the team member list (`TEST_RECORDS_MEMBER_ACTOR_IDS`,
 an infra-managed variable of numeric actor ids): team members work from

@@ -1664,13 +1664,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * The dispatched handler's BODY did not run (the runner's stream-path
    * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
    * Set by the runner on the skip; consumed by the scheduler's event
-   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
-   * a SERVED dispatch's transaction carries the entry's pre-stamped
-   * `consequenced` mark, so sealing a skipped run would commit the mark
-   * with ZERO effects and permanently consume the event (the a04 1-op
-   * shape). The finalize withdraws the whole transaction instead — the
-   * entry stays pending-unconsequenced and the drain re-delivers it.
-   * Client/OFF dispatches carry no mark and keep the silent skip.
+   * finalize, which withdraws the whole transaction rather than sealing
+   * it and re-runs the handler (events.md §5). A SERVED dispatch's
+   * transaction carries the entry's pre-stamped `consequenced` mark, so
+   * sealing a skipped run would commit the mark with ZERO effects and
+   * permanently consume the event (the a04 1-op shape); the entry stays
+   * pending-unconsequenced and the drain re-delivers it. A client
+   * dispatch is requeued by the scheduler within its retry window, parked
+   * on the loads the run registered when any are in flight, and fails
+   * loudly once the window is spent or once its re-runs with nothing to
+   * park on reach `HANDLER_NOT_RUN_BACKOFF_LIMIT`; one that opted out of retrying is
+   * not re-run, and its callback sees the aborted transaction. Under
+   * events-down a client dispatch without a served carriage is the
+   * speculative echo of an entry the server re-drains, and its skip seals
+   * as an empty speculative commit.
    */
   dispatchedHandlerNotRun?: { reason: string };
 
@@ -1909,6 +1916,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * `deepFreeze()`d on entry.
    */
   recordCfcStructureContainer(address: CfcAddress): void;
+
+  /**
+   * Settles whether this transaction is CFC-relevant — the flow-label
+   * relevance probe, then the sink-request ceiling probe — and runs
+   * `prepareCfc()` when it is.
+   *
+   * `commit()` runs this itself, so the enforcement ladder always decides on
+   * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
+   * callers that read what prepare produces before they commit — the CFC
+   * outbox, and the label-map writes a reactivity log captured before the
+   * commit carries. A second pass finds the transaction prepared and does
+   * nothing. `docs/specs/cfc-commit-preparation.md` covers the arrangement.
+   */
+  prepareForCommit(): void;
 
   /**
    * Runs CFC boundary verification for this transaction and records the
@@ -2316,10 +2337,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Link resolution and CFC label-view derivation both do exactly that, and
    * both are driven per element of a collection, so a scan recomputes them
    * once per element per pass. Each user owns its own key prefix and entry
-   * shape; the transaction owns when the map may be used and when it is
-   * dropped. It is replaced wholesale on any write — same rule as the
-   * `Cell.get()` cache above — so an entry is only ever served when nothing
-   * has been written since it was made.
+   * shape; the transaction owns which map is handed out and when it is
+   * dropped. The map for the current instant is replaced wholesale on any
+   * write — same rule as the `Cell.get()` cache above — so an entry is only
+   * ever served when nothing has been written since it was made. A read under
+   * an epoch, or inside a `runWithAmbientReadMeta()` scope, is handed a map of
+   * its own: an entry stands in only for reads journaled the way the caller's
+   * would be, and a map for an epoch outlives writes, since the instant it
+   * describes does.
    *
    * A user must be a derivation whose only observable effect is its result, or
    * must reproduce the rest itself: the reads a memoized derivation skips were
@@ -2329,9 +2354,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * `undefined` is returned where a derivation is not a pure function of the
    * snapshot: once CFC is prepared, where the read path's read-after-prepare
-   * invalidation is load-bearing, and inside a `runWithAmbientReadMeta()`
-   * scope, where the reads carry metadata that a call outside the scope would
-   * not.
+   * invalidation is load-bearing.
    *
    * Optional: transactions that must not memoize (the non-reactive `sample()`
    * wrapper, whose reads are excluded from scheduling) leave it undefined, and

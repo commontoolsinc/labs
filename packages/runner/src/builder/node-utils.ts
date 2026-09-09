@@ -1,10 +1,9 @@
-import { FabricInstance } from "@commonfabric/data-model";
+import { FabricInstance, refuseFabricInstance } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { isCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,

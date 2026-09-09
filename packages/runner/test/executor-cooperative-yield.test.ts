@@ -74,9 +74,13 @@ const burn = (ms: number): void => {
 const WALK_STEPS = 30;
 const STEP_MS = 40;
 
+/** Reads the expiry as a millisecond timestamp through SQLite's REAL accessor. */
 const leaseExpiry = (engine: Engine.Engine): number =>
   (engine.database.prepare(
-    `SELECT expires_at FROM execution_lease WHERE space = :space`,
+    // The engine's INTEGER accessor truncates to 32 bits; millisecond
+    // timestamps are exactly representable as REAL values.
+    `SELECT CAST(expires_at AS REAL) AS expires_at
+     FROM execution_lease WHERE space = :space`,
   ).get({ space }) as { expires_at: number } | undefined)?.expires_at ?? 0;
 
 describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
@@ -260,7 +264,7 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     const engine = await activate();
     const spaceServer = host.spaceServer(space)!;
     const expiryAtStart = leaseExpiry(engine);
-    expect(expiryAtStart).toBeGreaterThan(0);
+    expect(expiryAtStart).toBeGreaterThan(Date.now());
     const seqBefore = Engine.serverSeq(engine);
     const derivedBefore = host.stats().derivedCommits;
 

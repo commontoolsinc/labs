@@ -6,9 +6,8 @@
 # is silently dead for anyone without a `cf` on PATH — including for
 # `deno task cf <TAB>`, since the same function services the `deno` binding.
 #
-# Two ways to pick this up, neither of which needs the binary built:
-#   - mise users get it automatically (`_.path` in mise.toml)
-#   - everyone else: deno task install-cf
+# Pick it up with `deno task install-cf`, which copies this file to a directory
+# on PATH: that needs no binary built, and one copy serves every checkout.
 #
 # Runs from source, so it never goes stale against the checkout. `dist/cf` is
 # deliberately not used here — see "Why not dist/cf" in packages/cli/README.md.
@@ -30,8 +29,8 @@ set -e
 #      to it fall through to their own checkout. Neither applies while you are
 #      inside a checkout, which is the overwhelmingly common case.
 #
-# This mirrors what mise already does for route 2 (`_.path` resolves relative
-# to the mise.toml declaring it), so all install routes agree.
+# Route 2 is what lets one installed copy serve every checkout: the copy has no
+# checkout of its own, and the directory you stand in decides.
 
 # Rewritten by scripts/install-cf.sh when it installs a copy. Empty here: the
 # in-repo file is reached through a checkout by definition.

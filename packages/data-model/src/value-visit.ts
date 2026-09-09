@@ -8,7 +8,7 @@ import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Primitive } from "@commonfabric/utils/types";
 
-import { type ValueTag } from "./VALUE_TAGS.ts";
+import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   FabricArray,
   FabricContainerValue,
@@ -17,14 +17,14 @@ import {
   FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
-import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricArray,
   isFabricContainerValue,
   isFabricPlainObject,
-  isValidFabricValue,
 } from "./type-check.ts";
+import { isValidFabricValue } from "./validity-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
+import { type ValueTag } from "./value-tags.ts";
 
 /** Type for a `mainResult` form. */
 type MainResultForm<ResultType> = { type: "mainResult"; value: ResultType };

@@ -106,9 +106,10 @@ first work item, made in `packages/cli` where the substrate lives.
   raw value — and sinks deeply only the rows on screen. Element cost is
   bounded by the visible page; membership is one document whose size
   grows with the collection's link array — the linear-in-links frame
-  that replaces the element-closure shape behind the 89MB sync. Schema shapes that look
-  shallow to a reader do not bound what the server syncs, so this is the
-  one place shuttle reads below `Cell.sink`; the seam
+  that replaces the element-closure shape behind the 89MB sync. A schema
+  that looks shallow to a reader bounds the element closure but still
+  delivers every element's root document, so this is the one place shuttle
+  reads below `Cell.sink`; the seam
   (`SpaceReplica.sinkDocument`) exists but is unexercised. Issue
   [#6534](https://github.com/commontoolsinc/labs/issues/6534) carries the
   problem and the solution lanes. B3 opens by proving that seam on the

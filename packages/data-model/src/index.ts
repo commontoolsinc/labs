@@ -35,16 +35,24 @@ export {
 } from "./value-clone.ts";
 
 export {
-  assertValidFabricValueLayer,
+  isFabricArray,
   isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isKeyableObjectNotArray,
+  isKeyableObjectOrArray,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
+} from "./type-check.ts";
+
+export {
+  assertValidFabricValueLayer,
   isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
-} from "./type-check.ts";
+} from "./validity-check.ts";
 
 export {
   fabricFromNativeValue,
@@ -56,6 +64,10 @@ export {
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
+export { fabricAwareEqual } from "./fabricAwareEqual.ts";
+
+export { refuseFabricInstance } from "./refuseFabricInstance.ts";
+
 export { valueEqual } from "./valueEqual.ts";
 
 export {
@@ -63,8 +75,6 @@ export {
   isDeepFrozen,
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
-
-export { tagFromNativeClass, tagFromNativeValue } from "./native-type-tags.ts";
 
 export {
   toCompactDebugString,
@@ -75,4 +85,14 @@ export {
 
 export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
-export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
+export {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+  tagFromFabricPrimitive,
+  tagFromFabricPrimitiveElseNull,
+  tagFromFabricValue,
+  tagFromFabricValueElseNull,
+  tagFromNativeValueElseNull,
+  VALUE_TAGS,
+  type ValueTag,
+} from "./value-tags.ts";

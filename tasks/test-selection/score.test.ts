@@ -53,7 +53,7 @@ function saw(
 }
 
 function stateFrom(observations: readonly Observation[]) {
-  const state = foldObservations(observations).states.get(KEY);
+  const state = foldObservations(observations).get(KEY);
   expect(state).toBeDefined();
   return state!;
 }
@@ -275,6 +275,15 @@ describe("score", () => {
       expect(state.prCatches).toBe(0);
     });
 
+    it("counts a failure on a branch after main went green again", () => {
+      const state = stateFrom([
+        saw("fail", { day: "2026-08-18", commit: "c0" }),
+        saw("pass", { day: "2026-08-19", commit: "c1" }),
+        saw("fail", { commit: "c2", place: "pr", source: "fix-writes" }),
+      ]);
+      expect(state.prCatches).toBe(1);
+    });
+
     it("reads a pass and a failure at one commit as a flake", () => {
       const state = stateFrom([
         saw("pass", { commit: "c1", place: "pr", source: "branch" }),
@@ -331,6 +340,24 @@ describe("score", () => {
       expect(state.pendingMain).toEqual([]);
     });
 
+    it("counts one catch for a run of failures one change ended", () => {
+      // A test red across several commits on the default branch has one
+      // thing wrong with it, and the change that makes it green fixed
+      // that one thing.
+      const state = stateFrom([
+        saw("fail", { day: "2026-08-17", commit: "c0" }),
+        saw("fail", { day: "2026-08-18", commit: "c1" }),
+        saw("fail", { day: "2026-08-19", commit: "c2" }),
+        saw("pass", { commit: "c3" }),
+      ]);
+      expect(state.mainCatches).toBe(1);
+      expect(state.lastCatch).toBe("2026-08-17");
+      expect(state.pendingMain).toEqual([]);
+      // One catch and nothing else: the run resolved, so none of the
+      // failures in it is also flake evidence.
+      expect(flakeRate(state, "2026-08-20")).toBe(0);
+    });
+
     it("reads a green rerun of the same commit as a flake", () => {
       // The two runs can arrive in separate batches, so the same-commit
       // check inside one batch does not see this pair.
@@ -344,34 +371,6 @@ describe("score", () => {
       ]);
       expect(state.mainCatches).toBe(0);
       expect(flakeRate(state, "2026-08-21")).toBe(1);
-    });
-
-    it("reads a failure nothing fixed as a flake", () => {
-      const folded = foldObservations([
-        saw("fail", { day: "2026-08-19", commit: "c0" }),
-        saw("pass", { commit: "c1" }),
-      ], { coveredChanged: () => false });
-      const state = folded.states.get(KEY)!;
-      expect(state.mainCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-20")).toBe(1);
-    });
-  });
-
-  describe("what the latest run on main says", () => {
-    it("names the identities that run left red", () => {
-      const folded = foldObservations([
-        saw("pass", { day: "2026-08-19", commit: "c0" }),
-        saw("fail", { commit: "c1" }),
-      ]);
-      expect(folded.mainRed.has(KEY)).toBe(true);
-    });
-
-    it("clears one a later run passed", () => {
-      const folded = foldObservations([
-        saw("fail", { day: "2026-08-19", commit: "c0" }),
-        saw("pass", { commit: "c1" }),
-      ]);
-      expect(folded.mainRed.has(KEY)).toBe(false);
     });
   });
 
@@ -393,8 +392,8 @@ describe("score", () => {
         marked.n,
         marked.v,
       ]);
-      expect(folded.states.get(KEY)!.prCatches).toBe(1);
-      expect(folded.states.get(markedKey)!.prCatches).toBe(0);
+      expect(folded.get(KEY)!.prCatches).toBe(1);
+      expect(folded.get(markedKey)!.prCatches).toBe(0);
     });
   });
 
@@ -425,14 +424,12 @@ describe("score", () => {
     it("keeps an old proven test ahead of one with no record", () => {
       const proven = {
         catches: 4,
-        mainCatches: 0,
         lastCatch: "2024-08-20",
         sources: 2,
         churn: 0,
       };
       const unproven = {
         catches: 0,
-        mainCatches: 0,
         sources: 0,
         churn: 0,
       };
@@ -446,7 +443,6 @@ describe("score", () => {
         value(
           {
             catches,
-            mainCatches: 0,
             lastCatch: "2026-08-20",
             sources: 1,
             churn: 0,
@@ -461,7 +457,7 @@ describe("score", () => {
     it("decays a catch slowly and never below the freshness floor", () => {
       const at = (lastCatch: string) =>
         value(
-          { catches: 4, mainCatches: 0, lastCatch, sources: 0, churn: 0 },
+          { catches: 4, lastCatch, sources: 0, churn: 0 },
           "2026-08-20",
         );
       expect(at("2026-08-13")).toBeGreaterThan(at("2026-04-20"));
@@ -657,9 +653,9 @@ describe("a main failure resolved in a later batch", () => {
     });
     const second = foldObservations([saw("pass", { commit: "c1" })], {
       context,
-      prior: first.states,
+      prior: first,
     });
-    const state = second.states.get(KEY)!;
+    const state = second.get(KEY)!;
     expect(state.flakesByDay["2026-08-20"]).toBe(1);
     // A flake at one commit is not a catch: nothing was fixed between the
     // failure and the pass, because there is nothing between them.
@@ -673,9 +669,9 @@ describe("a main failure resolved in a later batch", () => {
     });
     const second = foldObservations([saw("pass", { commit: "c2" })], {
       context,
-      prior: first.states,
+      prior: first,
     });
-    const state = second.states.get(KEY)!;
+    const state = second.get(KEY)!;
     expect(state.flakesByDay["2026-08-20"]).toBeUndefined();
     expect(state.mainCatches).toBe(1);
   });
@@ -691,7 +687,7 @@ describe("a failure seen from many places at once", () => {
         saw("fail", { source, place: "pr", commit: `c-${source}` })
       ),
     );
-    const state = folded.states.get(KEY)!;
+    const state = folded.get(KEY)!;
     expect(state.prCatches).toBe(0);
   });
 
@@ -702,7 +698,7 @@ describe("a failure seen from many places at once", () => {
         saw("fail", { source, place: "pr", commit: `c-${source}` })
       ),
     );
-    expect(folded.states.get(KEY)!.prCatches).toBe(sources.length);
+    expect(folded.get(KEY)!.prCatches).toBe(sources.length);
   });
 
   it("counts a failure outside the window as a separate one", () => {
@@ -724,7 +720,7 @@ describe("a failure seen from many places at once", () => {
       startedAt: "2026-08-01T00:00:00.000Z",
     });
     const folded = foldObservations([far, ...near]);
-    const state = folded.states.get(KEY)!;
+    const state = folded.get(KEY)!;
     expect(state.failuresByDay["2026-08-01"]).toBe(1);
     expect(state.failuresByDay["2026-08-20"]).toBe(3);
     // Four sources in all, but never four at once, so each is a catch.
@@ -738,17 +734,20 @@ describe("a skipped run", () => {
       saw("skip"),
       saw("skip", { commit: "c2" }),
     ]);
-    const state = folded.states.get(KEY);
+    const state = folded.get(KEY);
     expect(state?.runsByDay["2026-08-20"]).toBeUndefined();
     expect(state?.failuresByDay["2026-08-20"]).toBeUndefined();
   });
 
   it("does not show that a test failing on main was fixed", () => {
+    // The default branch is still where the failure belongs, so the one
+    // the pull request sees is not credited to the change in front of it.
     const folded = foldObservations([
       saw("fail", { commit: "c1" }),
       saw("skip", { commit: "c2" }),
+      saw("fail", { commit: "c3", place: "pr", source: "branch" }),
     ]);
-    expect(folded.mainRed.has(KEY)).toBe(true);
+    expect(folded.get(KEY)?.prCatches).toBe(0);
   });
 });
 
@@ -769,7 +768,7 @@ describe("how far back the fold remembers where a test passed", () => {
       saw("pass", { commit: "c1", startedAt: "2026-08-20T01:00:00.000Z" }),
       saw("fail", { commit: "c0", startedAt: "2026-08-20T02:00:00.000Z" }),
     ], { context });
-    const state = second.states.get(KEY)!;
+    const state = second.get(KEY)!;
     expect(state.flakesByDay["2026-08-20"]).toBe(1);
     expect(state.mainCatches).toBe(0);
   });
@@ -791,7 +790,7 @@ describe("how far back the fold remembers where a test passed", () => {
     const late = foldObservations([
       saw("fail", { commit: "c0", startedAt: "2026-08-21T00:00:00.000Z" }),
     ], { context, prior: new Map() });
-    expect(late.states.get(KEY)!.flakesByDay["2026-08-20"]).toBeUndefined();
+    expect(late.get(KEY)!.flakesByDay["2026-08-20"]).toBeUndefined();
   });
 
   it("keeps a failed test's passes past the reach", () => {
@@ -915,8 +914,8 @@ describe("a rerun that lands after the window would have let go", () => {
         day: "2026-08-30",
         startedAt: "2026-08-30T00:00:00.000Z",
       }),
-    ], { context, prior: first.states });
-    const state = late.states.get(KEY)!;
+    ], { context, prior: first });
+    const state = late.get(KEY)!;
     expect(state.flakesByDay["2026-08-30"]).toBe(1);
     expect(state.mainCatches).toBe(0);
   });

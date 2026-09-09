@@ -1,13 +1,13 @@
 import {
+  fabricAwareEqual,
   type FabricValue,
   isFabricPlainObject,
   isValidFabricPlainObject,
+  isWalkableObjectOrArray,
   shallowMutableClone,
-  valueEqual,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   isModule,
@@ -32,23 +32,84 @@ import {
   isSchemaScope,
 } from "./scope.ts";
 
-const schemaDefaultValueEqual = (left: unknown, right: unknown): boolean => {
+/**
+ * Whether a merged result is equivalent to the value it was built from, for
+ * the four decisions in this file that return the original value when it is.
+ *
+ * A value this cannot read compares unequal, so the merged snapshot is kept.
+ * `mergeSchemaDefaults()` walks values that are only partly materialized: a
+ * retained descendant may be a getter that throws rather than answering, and
+ * the walk `fabricAwareEqual()` falls back to reads by property. The
+ * comparison is an optimization -- it decides whether to hand back the
+ * original object rather than the copy -- so a value it cannot read costs a
+ * copy rather than an answer.
+ */
+function mergedValueEquals(left: unknown, right: unknown): boolean {
   try {
-    return valueEqual(left as FabricValue, right as FabricValue);
+    return fabricAwareEqual(left, right);
   } catch {
-    if (Object.is(left, right)) return true;
-    try {
-      return deepEqual(left, right);
-    } catch {
-      return false;
-    }
+    return false;
   }
-};
+}
 
 type ActiveDefaultMergePairs = WeakMap<
   object,
   WeakMap<object, WeakSet<object>>
 >;
+
+/** Completed result, including a result whose value is `undefined`. */
+interface DefaultMergeResult {
+  /** Value after applying the requested defaults. */
+  value: unknown;
+}
+
+/** Per-call state for reusing defaults and completed graph merges. */
+interface DefaultMergeContext {
+  /** Value, schema root, and schema combinations currently being merged. */
+  activePairs: ActiveDefaultMergePairs;
+
+  /** Completed results keyed by value, root, schema, and supplied defaults. */
+  results: WeakMap<
+    object,
+    WeakMap<object, WeakMap<object, Map<unknown, DefaultMergeResult>>>
+  >;
+
+  /** Extracted defaults keyed by their schema root and schema. */
+  defaults: Map<JSONSchema, Map<JSONSchema, { value: FabricValue }>>;
+
+  /** Number of active back edges encountered during this merge. */
+  cycleVersion: number;
+}
+
+/** Returns an empty cache owned by a single default merge. */
+function createDefaultMergeContext(): DefaultMergeContext {
+  return {
+    activePairs: new WeakMap(),
+    results: new WeakMap(),
+    defaults: new Map(),
+    cycleVersion: 0,
+  };
+}
+
+/** Returns canonical default extraction reused within one merge. */
+function defaultValuesForMerge(
+  schema: JSONSchema,
+  root: JSONSchema,
+  context: DefaultMergeContext,
+): FabricValue {
+  const canonicalSchema = internSchema(schema);
+  const canonicalRoot = internSchema(root);
+  let bySchema = context.defaults.get(canonicalRoot);
+  if (bySchema === undefined) {
+    bySchema = new Map();
+    context.defaults.set(canonicalRoot, bySchema);
+  }
+  const cached = bySchema.get(canonicalSchema);
+  if (cached !== undefined) return cached.value;
+  const value = extractDefaultValues(canonicalSchema, canonicalRoot);
+  bySchema.set(canonicalSchema, { value });
+  return value;
+}
 
 const mergeDefaultCandidateObjects = (
   earlier: Record<string, FabricValue>,
@@ -291,7 +352,7 @@ function extractDefaultValuesInternal(
       ).map((candidate) => candidate.value);
       return validCandidates.length > 0 &&
           validCandidates.every((candidate) =>
-            schemaDefaultValueEqual(candidate, validCandidates[0])
+            mergedValueEquals(candidate, validCandidates[0])
           )
         ? validCandidates[0]
         : NO_SCHEMA_DEFAULT;
@@ -303,22 +364,17 @@ function extractDefaultValuesInternal(
       canonical.properties &&
       isObjectOrArray(canonical.properties)
     ) {
-      // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so a
-      // fabric-valued `default` under an object-with-properties schema skips
-      // this scalar return and proceeds below: `shallowMutableClone` returns
-      // a `FabricPrimitive` by identity (it is inherently frozen), so the
-      // first property-default assignment throws a `TypeError`; a
-      // `FabricInstance` gets own data properties grafted onto its clone
-      // that its codec never reads, and ships as the pattern's argument
-      // default. Wants a `FabricSpecialObject` test taking this return.
+      // A fabric-valued default takes this return alongside the scalars: it
+      // carries no properties for the assembly below to build on, and is
+      // already the whole of what the schema declares.
       if (
         Object.hasOwn(canonical, "default") &&
-        !isObjectOrArray(canonical.default)
+        !isWalkableObjectOrArray(canonical.default)
       ) {
         return canonical.default;
       }
       const hasObjectDefault = Object.hasOwn(canonical, "default") &&
-        isObjectOrArray(canonical.default);
+        isWalkableObjectOrArray(canonical.default);
       // Mutable top-level copy of the schema default, so injecting top-level
       // property defaults below doesn't mutate the schema's own default object.
       // Only top-level keys are written here, and the result is normalized
@@ -327,7 +383,7 @@ function extractDefaultValuesInternal(
       // children as inexpensive defense-in-depth against accidental deeper
       // mutation of the shared default.
       const obj = shallowMutableClone(
-        isObjectOrArray(canonical.default) ? canonical.default : {},
+        isWalkableObjectOrArray(canonical.default) ? canonical.default : {},
       ) as Record<string, FabricValue>;
       for (
         const [propKey, propSchema] of Object.entries(canonical.properties)
@@ -433,6 +489,9 @@ export function foldStoredArgumentSlots<T>(
 /**
  * Merge schema defaults into an existing argument while avoiding optional
  * object defaults that would create an invalid partial value on their own.
+ * Reuses completed merges of shared acyclic values under the same contract
+ * and defaults. Cyclic merges retain active-path semantics, so results that
+ * depend on a back edge are not reused on other paths.
  */
 export function mergeSchemaDefaults<T>(
   value: T | undefined,
@@ -460,11 +519,76 @@ export function mergeSchemaDefaults<T>(
     options.mergeMaterializedLinks === true,
     options.acceptOpaqueValue,
     options.acceptUnionCandidate,
-    new WeakMap(),
+    createDefaultMergeContext(),
   ) as T;
 }
 
+/** Reuses completed merges of the same value, contract, and defaults. */
 function mergeSchemaDefaultsInternal(
+  value: unknown,
+  defaults: unknown,
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+  valuePresent: boolean,
+  mergeMaterializedLinks: boolean,
+  acceptOpaqueValue:
+    | ((value: unknown, schema: JSONSchema, fullSchema: JSONSchema) => boolean)
+    | undefined,
+  acceptUnionCandidate: ((candidate: unknown) => boolean) | undefined,
+  context: DefaultMergeContext,
+): unknown {
+  let byDefaults: Map<unknown, DefaultMergeResult> | undefined;
+  if (
+    valuePresent && value !== null && typeof value === "object" &&
+    typeof schema === "object" && schema !== null &&
+    acceptUnionCandidate === undefined
+  ) {
+    const canonicalSchema = internSchema(schema);
+    const canonicalRoot = typeof fullSchema === "object" && fullSchema !== null
+      ? internSchema(fullSchema)
+      : canonicalSchema;
+    let byRoot = context.results.get(value);
+    if (byRoot === undefined) {
+      byRoot = new WeakMap();
+      context.results.set(value, byRoot);
+    }
+    let bySchema = byRoot.get(canonicalRoot);
+    if (bySchema === undefined) {
+      bySchema = new WeakMap();
+      byRoot.set(canonicalRoot, bySchema);
+    }
+    byDefaults = bySchema.get(canonicalSchema);
+    if (byDefaults === undefined) {
+      byDefaults = new Map();
+      bySchema.set(canonicalSchema, byDefaults);
+    }
+    const cached = byDefaults.get(defaults);
+    if (cached !== undefined) return cached.value;
+  }
+
+  const cycleVersion = context.cycleVersion;
+  const result = mergeSchemaDefaultsUncached(
+    value,
+    defaults,
+    schema,
+    fullSchema,
+    valuePresent,
+    mergeMaterializedLinks,
+    acceptOpaqueValue,
+    acceptUnionCandidate,
+    context,
+  );
+  // A back edge returns an ancestor's original value while that ancestor is
+  // still being merged. Such a result depends on the active path and cannot
+  // serve as a completed result for a different path through the graph.
+  if (cycleVersion === context.cycleVersion) {
+    byDefaults?.set(defaults, { value: result });
+  }
+  return result;
+}
+
+/** Applies defaults with active-path cycle detection. */
+function mergeSchemaDefaultsUncached(
   value: unknown,
   defaults: unknown,
   schema: JSONSchema,
@@ -479,7 +603,7 @@ function mergeSchemaDefaultsInternal(
     ) => boolean)
     | undefined,
   acceptUnionCandidate: ((candidate: unknown) => boolean) | undefined,
-  activePairs: ActiveDefaultMergePairs,
+  context: DefaultMergeContext,
 ): unknown {
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const resolved = typeof schema === "object" && schema !== null && schema.$ref
@@ -507,17 +631,20 @@ function mergeSchemaDefaultsInternal(
     trackedValue !== undefined && trackedSchema !== undefined &&
     trackedRoot !== undefined
   ) {
-    let byRoot = activePairs.get(trackedValue);
+    let byRoot = context.activePairs.get(trackedValue);
     if (!byRoot) {
       byRoot = new WeakMap();
-      activePairs.set(trackedValue, byRoot);
+      context.activePairs.set(trackedValue, byRoot);
     }
     activeSchemas = byRoot.get(trackedRoot);
     if (!activeSchemas) {
       activeSchemas = new WeakSet();
       byRoot.set(trackedRoot, activeSchemas);
     }
-    if (activeSchemas.has(trackedSchema)) return value;
+    if (activeSchemas.has(trackedSchema)) {
+      context.cycleVersion++;
+      return value;
+    }
     activeSchemas.add(trackedSchema);
   }
 
@@ -534,7 +661,11 @@ function mergeSchemaDefaultsInternal(
         default: _unionDefault,
         ...baseSchema
       } = resolved;
-      const baseDefaults = extractDefaultValues(baseSchema, resolvedRoot);
+      const baseDefaults = defaultValuesForMerge(
+        baseSchema,
+        resolvedRoot,
+        context,
+      );
       type UnionCandidate = {
         value: unknown;
         selectedBranches: JSONSchema[];
@@ -548,7 +679,7 @@ function mergeSchemaDefaultsInternal(
         mergeMaterializedLinks,
         acceptOpaqueValue,
         undefined,
-        activePairs,
+        context,
       );
       let candidates: UnionCandidate[] = [{
         value: mergeSchemaDefaultsInternal(
@@ -560,7 +691,7 @@ function mergeSchemaDefaultsInternal(
           mergeMaterializedLinks,
           acceptOpaqueValue,
           undefined,
-          activePairs,
+          context,
         ),
         selectedBranches: [],
       }];
@@ -571,7 +702,11 @@ function mergeSchemaDefaultsInternal(
         const expanded: UnionCandidate[] = [];
         for (const candidate of candidates) {
           for (const branch of branches) {
-            const branchDefaults = extractDefaultValues(branch, resolvedRoot);
+            const branchDefaults = defaultValuesForMerge(
+              branch,
+              resolvedRoot,
+              context,
+            );
             expanded.push({
               value: mergeSchemaDefaultsInternal(
                 candidate.value,
@@ -582,7 +717,7 @@ function mergeSchemaDefaultsInternal(
                 mergeMaterializedLinks,
                 acceptOpaqueValue,
                 undefined,
-                activePairs,
+                context,
               ),
               selectedBranches: [...candidate.selectedBranches, branch],
             });
@@ -606,7 +741,7 @@ function mergeSchemaDefaultsInternal(
       if (
         acceptedCandidates.length > 0 &&
         acceptedCandidates.every((candidate) =>
-          schemaDefaultValueEqual(candidate, acceptedCandidates[0])
+          mergedValueEquals(candidate, acceptedCandidates[0])
         )
       ) {
         return acceptedCandidates[0];
@@ -620,9 +755,10 @@ function mergeSchemaDefaultsInternal(
       Array.isArray(resolved.type) && resolved.type.includes("object")
     ) {
       const { default: _unionDefault, ...objectSchema } = resolved;
-      const objectDefaults = extractDefaultValues(
+      const objectDefaults = defaultValuesForMerge(
         { ...objectSchema, type: "object" },
         resolvedRoot,
+        context,
       );
       const unionDefaultValue = mergeSchemaDefaultsInternal(
         value,
@@ -633,7 +769,7 @@ function mergeSchemaDefaultsInternal(
         mergeMaterializedLinks,
         acceptOpaqueValue,
         undefined,
-        activePairs,
+        context,
       );
       return mergeSchemaDefaultsInternal(
         unionDefaultValue,
@@ -644,7 +780,7 @@ function mergeSchemaDefaultsInternal(
         mergeMaterializedLinks,
         acceptOpaqueValue,
         undefined,
-        activePairs,
+        context,
       );
     }
 
@@ -656,9 +792,10 @@ function mergeSchemaDefaultsInternal(
       const { default: _unionDefault, ...arraySchema } = resolved;
       return mergeSchemaDefaultsInternal(
         value,
-        extractDefaultValues(
+        defaultValuesForMerge(
           { ...arraySchema, type: "array" },
           resolvedRoot,
+          context,
         ),
         { ...arraySchema, type: "array" },
         resolvedRoot,
@@ -666,7 +803,7 @@ function mergeSchemaDefaultsInternal(
         mergeMaterializedLinks,
         acceptOpaqueValue,
         undefined,
-        activePairs,
+        context,
       );
     }
 
@@ -685,17 +822,17 @@ function mergeSchemaDefaultsInternal(
           : resolved.items ?? true;
         result[index] = mergeSchemaDefaultsInternal(
           value[index],
-          extractDefaultValues(itemSchema, resolvedRoot),
+          defaultValuesForMerge(itemSchema, resolvedRoot, context),
           itemSchema,
           resolvedRoot,
           true,
           mergeMaterializedLinks,
           acceptOpaqueValue,
           undefined,
-          activePairs,
+          context,
         );
       }
-      return schemaDefaultValueEqual(result, value) ? value : result;
+      return mergedValueEquals(result, value) ? value : result;
     }
 
     const objectSchema = typeof resolved === "object" && resolved !== null &&
@@ -746,7 +883,7 @@ function mergeSchemaDefaultsInternal(
         const propertySchema = propertySchemas[index]!;
         const propertyDefaults = index === 0 && hasDefaultValue
           ? defaultObject[key]
-          : extractDefaultValues(propertySchema, resolvedRoot);
+          : defaultValuesForMerge(propertySchema, resolvedRoot, context);
         merged = mergeSchemaDefaultsInternal(
           merged,
           propertyDefaults,
@@ -756,7 +893,7 @@ function mergeSchemaDefaultsInternal(
           mergeMaterializedLinks,
           acceptOpaqueValue,
           undefined,
-          activePairs,
+          context,
         );
         if (
           !mergedValuePresent &&
@@ -781,9 +918,7 @@ function mergeSchemaDefaultsInternal(
         });
       }
     }
-    return valuePresent && schemaDefaultValueEqual(result, value)
-      ? value
-      : result;
+    return valuePresent && mergedValueEquals(result, value) ? value : result;
   } finally {
     if (trackedSchema !== undefined) activeSchemas?.delete(trackedSchema);
   }

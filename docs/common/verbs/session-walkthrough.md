@@ -778,7 +778,10 @@ alike, and nothing in the output could tell one item from two.
 
 That spelling — the address exactly as a read printed it — dispatches where
 the verb declares a reference, and the edge that lands is the target rather
-than a copy. The dispatch gate reads the DECLARED contract
+than a copy. So does the `{"$link": …}` object a marked read renders the
+address in, alone or beside contents the same read projected: the address
+inside is what the position takes, and those contents, the target's own
+fields, are not sent. The dispatch gate reads the DECLARED contract
 ([verb input contract](../../history/plans/verb-input-contract.md)) to know
 which positions declare references, and the same contract refuses the two
 payloads that could only ever be mistakes at one:

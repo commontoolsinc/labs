@@ -2840,6 +2840,7 @@ export class CfHarnessPromptLoop {
       // neither tool.
       skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
+      loomAuthoringAvailable: this.engine.config.loomAuthoring !== undefined,
     };
   }
 
@@ -3292,18 +3293,22 @@ export class CfHarnessPromptLoop {
 
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
-   * tool input with their canonical address strings. Two tools are exempt:
+   * tool input with their canonical address strings. Custody-checking tools are exempt:
    * `delegate_task`, whose `goal` and `context` reach the child as the model
    * wrote them (its `skillHandle` is resolved separately, trusted-side,
    * before dispatch), and `describe_handle`, whose input names a token rather
-   * than a referent — it looks the token up in the table itself. Returns
+   * than a referent — it looks the token up in the table itself. `loom_compose`
+   * also proves membership before resolving a Pattern Instance. Returns
    * `input` itself when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (toolId === "delegate_task" || toolId === "describe_handle") {
+    if (
+      toolId === "delegate_task" || toolId === "describe_handle" ||
+      toolId === "loom_compose"
+    ) {
       return input;
     }
     const table = this.engine.handleTable;

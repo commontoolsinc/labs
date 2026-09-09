@@ -1,56 +1,55 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-env --allow-run
 
 /**
  * .claude/scripts/post-edit-ts.ts
  *
  * Claude Code Post-Tool hook for Write|Edit.
- * - Runs `deno check <file>` on TypeScript files after editing.
- * - Reports type errors via exit code 2.
- *
- * Formatting (`deno fmt`) is deliberately NOT run here — it ran on every
- * Edit/Write and produced noisy "file was modified by a formatter"
- * notifications that interrupt iteration. Formatting now lives in the
- * git pre-commit hook (`.githooks/pre-commit`); install via
- * `scripts/install-git-hooks.sh`.
+ * - Runs `deno check` on a `.ts` file after it is edited and prints whatever
+ *   type errors come back.
+ * - Exits 0 either way, so an edit that leaves the file mid-change is not
+ *   blocked on being finished.
  */
 
-const rawInput = await new Response(Deno.stdin.readable).text();
+import { guardProjectDir, parseFilePath } from "./common/guard.ts";
+guardProjectDir();
 
-let filePath = "";
-try {
-  const payload = JSON.parse(rawInput);
-  filePath = payload?.tool_input?.file_path ?? "";
-} catch {
-  // If the JSON is malformed we allow the call.
-  Deno.exit(0);
-}
+const filePath = await parseFilePath();
 
-// Only process .ts files (not .d.ts, not .tsx which has its own handling)
 if (!filePath.endsWith(".ts") || filePath.endsWith(".d.ts")) {
   Deno.exit(0);
 }
 
-// Skip if the file is in node_modules or a vendor directory (but not packages/vendor-*)
 if (
   filePath.includes("node_modules") ||
-  filePath.includes("/vendor/") ||
   filePath.includes("vendor/")
 ) {
   Deno.exit(0);
 }
 
-// Run deno check on the file.
+// The two fixture corpora `tasks/typecheck.ts` exempts, for the reason it
+// gives. They hold data the tests beside them feed to a transformer rather
+// than modules this repository builds. The inputs among them name the ambient
+// wrappers that transformer supplies instead of importing them, so checking
+// one alone reports every such name as missing. Every other `test/fixtures`
+// directory in the workspace is type-checked, so none is listed here.
+if (
+  filePath.includes("packages/schema-generator/test/fixtures/") ||
+  filePath.includes("packages/ts-transformers/test/fixtures/")
+) {
+  Deno.exit(0);
+}
+
+// `--no-lock` stops `deno check` writing to the tree. Without it, `deno check`
+// rewrites `deno.lock` whenever a checked file's dependency graph names a
+// specifier the lock does not yet hold, which is what adding a dependency
+// does. `deno.lock` is tracked and this hook runs on every `.ts` edit, so an
+// edit would dirty a file the author never touched. Type errors are still
+// reported. The flag only skips verifying the lock, which CI verifies against
+// the real one.
 //
-// `--no-lock`: `deno check` rewrites `deno.lock` whenever a checked file's
-// dependency graph names a specifier the lock does not have yet — the ordinary
-// "add a dependency" edit. `deno.lock` is tracked, and this hook fires on every
-// `.ts` edit, so without the flag an edit dirtied a file the author never
-// touched and it went out in their next commit. Measured in a scratch project.
-// Type errors are still reported; only lockfile integrity goes unchecked here,
-// and CI checks that against the real lock.
-// `Deno.execPath()`: the check runs under the Deno running this hook, not
-// whichever `deno` comes first on `PATH`, so the type errors it reports are the
-// ones the pinned compiler reports.
+// `Deno.execPath()` names the Deno running this hook rather than whichever
+// `deno` comes first on `PATH`, so the type errors reported are the ones the
+// pinned compiler reports.
 const check = new Deno.Command(Deno.execPath(), {
   args: ["check", "--no-lock", filePath],
   stdout: "piped",
@@ -61,8 +60,6 @@ const checkResult = await check.output();
 if (!checkResult.success) {
   const stderr = new TextDecoder().decode(checkResult.stderr);
   console.error(`Type errors in ${filePath}:\n${stderr}`);
-  // Exit 0 to allow incremental changes - errors are shown but don't block
-  Deno.exit(0);
 }
 
 Deno.exit(0);

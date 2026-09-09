@@ -4,7 +4,7 @@ import {
   FabricInstance,
   type FabricPlainObject,
   type FabricValue,
-  tagFromNativeValue,
+  tagFromNativeValueElseNull,
   VALUE_TAGS,
 } from "@commonfabric/data-model";
 import {
@@ -77,8 +77,8 @@ function replaceCellsWithLinks(
     }
     return converted;
   }
-  const nativeTag = tagFromNativeValue(value);
-  if (nativeTag === VALUE_TAGS.Error) {
+  const nativeTag = tagFromNativeValueElseNull(value);
+  if (nativeTag === VALUE_TAGS.JsError) {
     const error = value as Error;
     const existing = seen.get(error);
     if (existing) return existing;

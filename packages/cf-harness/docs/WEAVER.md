@@ -57,7 +57,7 @@ export CF_HARNESS_FABRIC_SPACE=<space name>
 export MEMORY_DIR=<store path>
 export CF_HARNESS_CONSOLE_PORT=8135
 export CF_HARNESS_CONSOLE_DIR=<directory for console state>
-deno task console
+deno task --no-lock console
 ```
 
 Add the pattern index and skills registry URLs your deployment uses, the CFC
@@ -65,6 +65,34 @@ posture flags, and the `runsc-cfc` result and invocation-context directories as
 the console README describes; an enforcing posture refuses to start without the
 sandbox directories. Launch the process so it outlives the shell that started
 it; macOS has no `setsid`, so a double fork with `nohup` is the usual form.
+
+To let `/cf-harness` collect existing assets into durable Looms, the console
+also needs an explicit host authoring configuration. The shared Fabric identity
+above is not a grant to the separate Common Fabric Service command host. Save a
+private host file (outside the model workspace) with absolute paths:
+
+```json
+{
+  "cliPath": "/absolute/loom/src/bin/loom",
+  "transport": {
+    "kind": "direct",
+    "instanceDir": "/absolute/loom/instances/your-instance",
+    "runId": "weaver-console",
+    "actor": "agent:cf-harness"
+  }
+}
+```
+
+Set `CF_HARNESS_LOOM_AUTHORING_CONFIG` to that file's absolute path in the
+console's launch environment, then restart the console with its existing Fabric
+and provider settings. Use the CLI and instance corresponding to this console's
+Fabric; do not reuse a different bench's file. The CLI must support the direct
+transport flag and three authoring commands described in
+[Durable Loom authoring](LOOM_AUTHORING.md). Each interactive session derives a
+separate stable receipt namespace from this configured base run identity.
+Without the file the console still builds Patterns, but it offers no Loom tools.
+Start a new session after changing the policy; existing sessions keep their
+recorded tool grants.
 
 Verify before opening Weaver:
 

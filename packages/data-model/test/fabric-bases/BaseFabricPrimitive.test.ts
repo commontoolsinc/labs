@@ -18,14 +18,18 @@ import { expect } from "@std/expect";
 import { FabricPrimitive } from "@/interface.ts";
 import {
   BaseFabricPrimitive,
-  EXAMPLE_METHOD,
+  VALUE_TAG,
 } from "@/fabric-bases/BaseFabricPrimitive.ts";
 
 /**
  * Minimal `BaseFabricPrimitive` subclass for exercising the static guard in
  * isolation, independent of any production primitive.
  */
-class ProbePrimitive extends BaseFabricPrimitive {}
+class ProbePrimitive extends BaseFabricPrimitive {
+  get [VALUE_TAG](): never {
+    throw new Error("Called VALUE_TAG on probe.");
+  }
+}
 
 /**
  * A `BaseFabricPrimitive` subclass that assigns a private field after
@@ -38,6 +42,10 @@ class StatefulProbe extends BaseFabricPrimitive {
     super();
 
     this.#value = value;
+  }
+
+  get [VALUE_TAG](): never {
+    throw new Error("Unimplemented.");
   }
 
   get value(): bigint {
@@ -89,16 +97,6 @@ describe("BaseFabricPrimitive", () => {
       const probe = new StatefulProbe(7n);
       expect(Object.isFrozen(probe)).toBe(true);
       expect(probe.value).toBe(7n);
-    });
-  });
-
-  describe("instance members", () => {
-    describe("`[EXAMPLE_METHOD]` (placeholder seed)", () => {
-      it("throws when invoked (unimplemented stub)", () => {
-        expect(() => new ProbePrimitive()[EXAMPLE_METHOD]()).toThrow(
-          "Not implemented",
-        );
-      });
     });
   });
 

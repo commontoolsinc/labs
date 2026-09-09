@@ -10,6 +10,7 @@ export {
   serializeContextLine,
   serializeRecordLine,
   testIdentityKey,
+  testIdentityOfKey,
 } from "./schema.ts";
 export type {
   CiContext,
@@ -77,7 +78,11 @@ export {
   SKIP_LIST_VARIABLE,
 } from "./registration.ts";
 export type { NameMap, RegistrationCapture, SkipList } from "./registration.ts";
-export { preloadArgument, preloadModulePath } from "./preload-path.ts";
+export {
+  preloadArgument,
+  preloadModulePath,
+  spoolWriteArgument,
+} from "./preload-path.ts";
 export {
   dropContainerCases,
   ingestJUnit,

@@ -1930,6 +1930,13 @@ Special path:
   schema).
 - `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains `true`
 - arrays of `unknown` emit `items: { type: "unknown" }`
+- the node-based generator analyzes through a `readonly` type operator to
+  its wrapped array type. A pattern-scope `.get()` on a `Cell<unknown[]>`
+  lowers to a lift with result type `readonly unknown[]` and result schema
+  `{ type: "array", items: { type: "unknown" } }`. The derived cell keeps
+  this reference-only element schema. The
+  `schema-injection/cell-get-readonly-array-result` fixture pins the emitted
+  lift schemas, including a `number[]` control.
 - synthetic unions preserve explicit `{ type: "unknown" }` members in `anyOf`
   rather than collapsing them away
 - `Reactive<T>` does not emit an opaque marker. Cell, stream, and opaque

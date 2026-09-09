@@ -1,12 +1,9 @@
 [tools]
 deno = "2.9.4"
 
-# Puts this checkout's `bin/cf` on PATH, so `cf` resolves to the worktree you
-# are standing in. Shell completion needs a `cf` on PATH to work at all — see
+# The pin is all this file does. A tools-only file loads without `mise trust`,
+# so a fresh worktree needs no step before `deno` resolves. `cf` on PATH is
+# `deno task install-cf`, once per machine, for mise users and everyone else:
+# an `[env]` entry here would reach only shells whose mise hook ran for this
+# directory, and would need the trust prompt in every new worktree. See
 # "Installing cf on PATH" in packages/cli/README.md.
-#
-# mise is not guaranteed (README.md blesses a direct Deno install, and
-# tasks/check.sh only reads the pin out of this file), so this is a convenience
-# for mise users, not the mechanism. Non-mise users symlink bin/cf themselves.
-[env]
-_.path = ["bin"]

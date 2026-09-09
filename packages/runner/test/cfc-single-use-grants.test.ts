@@ -26,7 +26,7 @@ import {
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
-import type { IFCLabel } from "../src/cfc/mod.ts";
+import type { CfcEnforcementMode, IFCLabel } from "../src/cfc/mod.ts";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
@@ -39,7 +39,10 @@ import {
   StorageManager,
 } from "../src/storage/cache.deno.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { isPermanentRejection } from "../src/storage/rejection.ts";
+import {
+  isCfcEnforcementRejection,
+  isPermanentRejection,
+} from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-single-use-grants");
 
@@ -263,6 +266,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     opts: {
       receipts?: boolean;
       policyEvaluation?: "off" | "observe" | "enforce";
+      enforcement?: CfcEnforcementMode;
       rules?: readonly ExchangeRule[];
     },
     body: (
@@ -285,6 +289,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       // The rule firings these tests assert on happen inside policy
       // evaluation.
       cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
+      // An unstated rung is the one the runtime resolves for a construction
+      // that names none. The S18 gate case below names its own; nothing else
+      // in this file does.
+      cfcEnforcementMode: opts.enforcement,
     });
     try {
       await body(runtime, storageManager);
@@ -1234,19 +1242,43 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
+    // The enforcement rung decides this case, so it names one. A reserved
+    // grant address written through the ordinary write surface is refused
+    // from `enforce-explicit` upward. Under `observe` the recorded reason
+    // stays a diagnostic and under `disabled` no gate runs, so under either
+    // of those the commit succeeds and the forged write lands.
     it("rejects an unprivileged write at the receipt address (S18 gate)", async () => {
-      await withRuntime({}, async (runtime) => {
-        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
-        const tx = runtime.edit();
-        tx.writeOrThrow({
-          space: signer.did(),
-          id: receiptId,
-          type: "application/json",
-          path: ["value"],
-        }, { forged: true });
-        const result = await tx.commit();
-        expect(result.error).toBeDefined();
-      });
+      await withRuntime(
+        { enforcement: "enforce-explicit" },
+        async (runtime) => {
+          const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+          const tx = runtime.edit();
+          tx.writeOrThrow({
+            space: signer.did(),
+            id: receiptId,
+            type: "application/json",
+            path: ["value"],
+          }, { forged: true });
+          // Prepare, the way the runtime's own commit paths do, so the gate
+          // this case is named for is the one that decides the commit. An
+          // unprepared transaction is refused too, but for being unprepared:
+          // that arm carries no reason and would still refuse if the gate
+          // stopped recording the write.
+          tx.prepareCfc();
+          const state = tx.getCfcState().prepare;
+          expect(state.status).toBe("invalidated");
+          if (state.status === "invalidated") {
+            expect(state.reasons.join(" ")).toContain(
+              `unprivileged write to protected cfc path ${receiptId}`,
+            );
+          }
+          const result = await tx.commit();
+          // The refusal, rather than any error at all. The message prefix is
+          // what tells a CFC refusal apart from an ordinary abort or a storage
+          // failure.
+          expect(isCfcEnforcementRejection(result.error)).toBe(true);
+        },
+      );
     });
   });
 

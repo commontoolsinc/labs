@@ -84,8 +84,15 @@
  * `isFabricObjectOrArray()` for the same reason.
  */
 
-/** Standard type meaning constructor function, a/k/a "class object." */
-export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
+/**
+ * The type of a class object, a/k/a constructor function: a class, abstract or
+ * concrete, whose instances are `T`. The `prototype` property is part of the
+ * shape so that a read of it is typed `T`; the `Function` interface alone
+ * would type it `any`.
+ */
+export type Constructor<T = unknown> =
+  & (abstract new (...args: any[]) => T)
+  & { prototype: T };
 
 /** Helper type to recursively add `readonly` properties to type `T`. */
 export type Immutable<T> = T extends ReadonlyArray<infer U>
@@ -98,9 +105,7 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
 
-/**
- * The union of all primitive Javascript types.
- */
+/** The union of all primitive JavaScript types. */
 export type Primitive =
   | bigint
   | boolean
@@ -308,6 +313,17 @@ export function isString(value: unknown): value is string {
  */
 export function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
+}
+
+/**
+ * Indicates whether a value is a `Primitive`: anything whose `typeof` is
+ * neither `object` nor `function`, plus `null`, which `typeof` files under
+ * `object`. This is an exact test, so its `false` branch holds every object,
+ * array, and function and nothing else.
+ */
+export function isPrimitive(value: unknown): value is Primitive {
+  const type = typeof value;
+  return value === null || (type !== "object" && type !== "function");
 }
 
 /**

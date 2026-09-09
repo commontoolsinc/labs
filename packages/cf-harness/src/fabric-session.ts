@@ -8,7 +8,11 @@
 
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import type { HarnessFabricSessionConfig } from "./config.ts";
+import {
+  fabricSessionPresetCfcDials,
+  type HarnessFabricSessionConfig,
+  type HarnessFabricSessionPresetCfcDials,
+} from "./config.ts";
 import {
   createFabricInstantiationRecorder,
   type FabricPatternInstantiations,
@@ -54,12 +58,9 @@ export type HarnessFabricSessionFactory = () => Promise<HarnessFabricSession>;
  */
 export const harnessFabricSessionControllerOptions = (
   config: HarnessFabricSessionConfig,
-): {
+): HarnessFabricSessionPresetCfcDials & {
   apiUrl: URL;
   space: string;
-  cfcEnforcementMode?: HarnessFabricSessionConfig["cfcEnforcementMode"];
-  cfcFlowLabels?: HarnessFabricSessionConfig["cfcFlowLabels"];
-  cfcPosture?: HarnessFabricSessionConfig["cfcPosture"];
   cfcReadMaxConfidentiality?: HarnessFabricSessionConfig[
     "cfcReadMaxConfidentiality"
   ];
@@ -67,13 +68,7 @@ export const harnessFabricSessionControllerOptions = (
 } => ({
   apiUrl: new URL(config.apiUrl),
   space: config.space,
-  ...(config.cfcEnforcementMode !== undefined
-    ? { cfcEnforcementMode: config.cfcEnforcementMode }
-    : {}),
-  ...(config.cfcFlowLabels !== undefined
-    ? { cfcFlowLabels: config.cfcFlowLabels }
-    : {}),
-  ...(config.cfcPosture !== undefined ? { cfcPosture: config.cfcPosture } : {}),
+  ...fabricSessionPresetCfcDials(config),
   ...(config.cfcReadMaxConfidentiality !== undefined
     ? { cfcReadMaxConfidentiality: config.cfcReadMaxConfidentiality }
     : {}),

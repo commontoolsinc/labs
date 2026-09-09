@@ -35,4 +35,13 @@ describe("run-pattern description", () => {
       "an ordinary result row is materialized as its own document in the space",
     );
   });
+
+  it("exempts an aggregate from the LIMIT it asks of every other query", () => {
+    expect(runPatternToolDescriptor.description).toContain(
+      "an aggregate returning one row per group",
+    );
+    expect(runPatternToolDescriptor.description).toContain(
+      "bounded by its own shape and needs no LIMIT",
+    );
+  });
 });

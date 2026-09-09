@@ -3355,7 +3355,7 @@ personally; the soak starts at ITS merge.** What it carries:
   exit — RED-FIRST with a forced-OFF service env (posture line "OFF"
   vs expected "ON").
   (2) cf-harness — had NO toolshed-backed lane (its integration suite
-  is CF_HARNESS_INTEGRATION-gated); the same job runs
+  was CF_HARNESS_INTEGRATION-gated); the same job runs
   `createHarnessFabricSessionFactory` (PKCS#8 from disk →
   `PiecesController.initialize` → deployed-client adoption), asserts
   the session's runtime resolved ON with nothing declared, and serves
@@ -6674,8 +6674,11 @@ supply; OW29/OW32/OW34 closed):
     DROP notice; no stream wedge). An LT1 copy withdraws through the
     abort alone (no onFailure): the batch marks only a surviving lt1
     run, the entry lands unmarked, the drain re-delivers with a
-    `streamEntry`. Client/OFF dispatches carry no mark and keep the
-    silent skip. Spec: events.md §5's new handler-body-did-not-run
+    `streamEntry`. A client/OFF dispatch carries no mark and is withdrawn
+    and requeued by the scheduler within its retry window, or withdrawn
+    and dropped at once when it was sent with `retries: false`
+    (events.md §5's client bullet); a flag-ON client echo seals its skip
+    as an empty speculative commit. Spec: events.md §5's handler-body-did-not-run
     bullet (RULED 2026-08-27). **Pin (red-first, watched):**
     `executor-events-down.test.ts` "mark/effects atomicity at the
     DISPATCH layer" — a served event whose handler `$ctx` requires a
@@ -9631,7 +9634,7 @@ supply; OW29/OW32/OW34 closed):
     cell must arrive through the same consumer — watched red against
     the no-containment base validator (the board's exact doc pair as
     an unhandled rejection, then the liveness timeout), green at
-    head with the computed doc quarantined, the request path
+    head with a cid-mentioning doc quarantined, the request path
     answering ok, and the ensure completing.
     Subscriber-shape finding (the owner's cf-harness question,
     verified): ALL THREE named production space-cell-only

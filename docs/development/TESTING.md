@@ -15,6 +15,40 @@ deno task test
 
 **Important:** Always use `deno task test` from the root, NOT `deno test`, as the task includes necessary flags.
 
+### Running one test by name
+
+Use `--filter` on a package's `test` task, not on the root one. The root task
+runs `tasks/test.ts`, which reads no arguments. A flag passed to it is ignored,
+and the whole workspace suite runs.
+
+```bash
+cd packages/runner
+deno task test --filter "test name"
+```
+
+The flag is passed to the `deno test` that the package's own task invokes, so
+the preload, the permissions, and the file globs that package's tests need are
+all still applied. The same holds for the packages that run their tests through
+a script of their own, `packages/cli` and `packages/piece` among them. Each of
+those scripts passes on the arguments it receives.
+
+`deno task` appends the extra arguments to the end of the task's command line,
+so the flag is passed to the last command on that line. Two kinds of task have
+something other than a `deno test` at the end, and both run their whole suite:
+
+- A task that lists other tasks and has no command of its own. `packages/memory`
+  and `packages/static` are two. There is no command for the flag to be passed
+  to. Name the underlying task instead. In `packages/memory` that is
+  `deno task just-test --filter "test name"`.
+- A task that chains two commands with `&&`, as `packages/ui` does to run its
+  browser tests after its other tests. The flag is passed only to the second
+  command, so the first runs unfiltered. Run the command that holds the test
+  directly, using the flags the `test` task gives it.
+
+The package's `test` task in its `deno.jsonc` says which kind it is.
+`deno task test` also prints the command line it runs, which shows where the
+flag was appended.
+
 ### Browser tests in agent sandboxes
 
 Headless Chrome registers with AppKit and needs Launch Services and

@@ -11,6 +11,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
+  refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
@@ -119,7 +120,6 @@ import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
 } from "./data-uri.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -2690,24 +2690,8 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
-    // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
-    // (or `FabricInstance`) ref to `areLinksSame`, which parses both
-    // operands as links and returns `false` when either is not one — so a
-    // fabric-valued ref matches only by reference identity, never by value,
-    // and the call otherwise silently no-ops. The sibling `removeByValue`
-    // has the right shape: link comparison for cells, `valueEqual` (which
-    // has a fabric arm) for everything else.
     const index = typeof ref === "object"
-      ? array.findIndex((item) =>
-        areLinksSame(
-          item,
-          ref,
-          this as unknown as Cell<any>,
-          true, // resolveBeforeComparing
-          this.tx,
-          this.runtime,
-        )
-      )
+      ? array.findIndex((item) => this.#refMatchesElement(ref, item))
       // Primitives match by `Object.is` (`NaN` is findable; `0` and `-0` are
       // distinct), unlike `indexOf`'s `===`.
       : array.findIndex((item) => Object.is(item, ref));
@@ -2731,24 +2715,42 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
-    // TODO(danfuzz): same gap as `remove()` above — a fabric-valued `ref`
-    // reaches `areLinksSame` and matches only by reference identity, never
-    // by value, so the call otherwise silently no-ops.
     // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
-        ? !areLinksSame(
-          item,
-          ref,
-          this as unknown as Cell<any>,
-          true, // resolveBeforeComparing
-          this.tx,
-          this.runtime,
-        )
+        ? !this.#refMatchesElement(ref, item)
         // As in `remove()`: primitives match by `Object.is`.
         : !Object.is(item, ref)
     ) as unknown as T;
     this.set(newArray);
+  }
+
+  /**
+   * Whether an object-valued `remove()`/`removeAll()` argument names the given
+   * array element. A cell or a link names its element by link, which is what
+   * `areLinksSame()` decides. A `FabricSpecialObject` keeps its state in
+   * private fields, so a link comparison can only tell whether the two are the
+   * same object -- and two equal fabric values written at different times never
+   * are. Those name their element by content, the way `removeByValue()`
+   * matches.
+   */
+  #refMatchesElement(ref: unknown, element: unknown): boolean {
+    if (
+      areLinksSame(
+        element,
+        ref,
+        this as unknown as Cell<any>,
+        true, // resolveBeforeComparing
+        this.tx,
+        this.runtime,
+      )
+    ) {
+      return true;
+    }
+
+    return ref instanceof FabricSpecialObject &&
+      element instanceof FabricSpecialObject &&
+      valueEqual(element, ref);
   }
 
   equals(other: any): boolean {
@@ -3287,27 +3289,8 @@ export class CellImpl<T extends FabricValue>
   ): void {
     if (!this.tx) throw new Error("Transaction required for setMetaRaw");
     // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict. A cell carrying a trivially-permissive schema
-    // (`true`/`{}`) kicks a DOCUMENT sync: a conflict retry needs the doc it
-    // rewrites local, such a schema is the absence of a bound, and a sync
-    // honoring one loads the cell's entire reachable graph — thousands of
-    // documents on a populated space — to protect one meta write. Setup's
-    // derived-cell materialization reaches this with exactly those cells.
-    // A shaped schema keeps its own sync: its closure is a bounded
-    // declaration something reads through — a pattern's local `$ref`
-    // resolution rides it — and marking the cell synced without loading it
-    // starves that read.
-    if (!this.#synced) {
-      if (
-        this.#link.schema !== undefined &&
-        ContextualFlowControl.isTrueSchema(this.#link.schema)
-      ) {
-        this.#synced = true;
-        this.asSchema(false).sync();
-      } else {
-        this.sync();
-      }
-    }
+    // retry on conflict.
+    if (!this.#synced) this.sync();
     const metaAddr = {
       space: this.#link.space,
       id: this.#link.id,

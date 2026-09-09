@@ -208,7 +208,23 @@ const timing = getLogger("memory", { enabled: false });
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
-const SLOW_QUERY_THRESHOLD_MS = 100;
+// Operations slower than this are recorded for `/api/health/stats`. The
+// default suits a deployment, where the interesting operations are the ones
+// well past it; a local investigation of a fast machine sets
+// `CF_SLOW_QUERY_THRESHOLD_MS` lower — to `0` to record every one — so the
+// buffer carries the per-operation root, read and upsert counts for
+// operations the default would leave invisible.
+const SLOW_QUERY_THRESHOLD_MS = (() => {
+  try {
+    const raw = typeof Deno !== "undefined"
+      ? Deno.env.get("CF_SLOW_QUERY_THRESHOLD_MS")
+      : undefined;
+    const parsed = raw === undefined || raw === "" ? NaN : Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 100;
+  } catch {
+    return 100;
+  }
+})();
 const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
 // ~5 board-scale corpora (a full board evaluation retains ~6k entities).
 // Entity count is the byte proxy: what an entry holds alive is its cloned
@@ -271,8 +287,24 @@ export type SlowQuery = {
   /** Query and watch operations: summed elapsed time of those root visits.
    * Against the entry's own `elapsed` this is the share of the request
    * that traversal accounts for; the remainder is entity assembly,
-   * schema-closure staging, and operation-field attachment. */
+   * schema-closure staging, operation-field attachment, and (for
+   * `watch.add`, whose `elapsed` runs through response assembly) mapping
+   * the delivered snapshots to the wire. */
   rootsElapsedMs?: number;
+
+  /** Query and watch operations: engine document reads across every branch
+   * group. Unlike `rootsVisited`, this exposes roots whose declarations fan
+   * out over many documents, and unlike `slowestRoot.reads`, it accounts for
+   * the complete request rather than only its costliest root. */
+  managerReads?: number;
+
+  /** watch.add and watch.refresh: changed entity snapshots delivered to the
+   * client. This is the delivered-width counterpart to `watches` and
+   * `managerReads`: a wide traversal that yields few upserts is repeated
+   * server work, while a wide frame is also transport and client-ingest
+   * work. A refresh that produced no upserts answers with an empty catch-up
+   * and is not recorded, so a refresh entry never reports zero here. */
+  upserts?: number;
 
   /** Query and watch operations: the costliest single root, which is what
    * a watch COUNT cannot say. A `watch.add` unions the roots of every
@@ -289,12 +321,14 @@ export type SlowQuery = {
 type RootAttribution = {
   rootsVisited: number;
   rootsElapsedMs: number;
+  managerReads: number;
   slowestRoot?: SlowestQueryRoot;
 };
 
 const createRootAttribution = (): RootAttribution => ({
   rootsVisited: 0,
   rootsElapsedMs: 0,
+  managerReads: 0,
 });
 
 /**
@@ -310,6 +344,7 @@ const foldRootAttribution = (
 ): void => {
   into.rootsVisited += stats.rootsVisited;
   into.rootsElapsedMs += stats.rootsElapsedMs;
+  into.managerReads += stats.managerReads;
   if (
     stats.slowestRoot !== undefined &&
     (into.slowestRoot === undefined ||
@@ -355,7 +390,8 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query, watch, and commit operations (>100ms). */
+/** Returns the last N slow query, watch, and commit operations — those over
+ * `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
@@ -759,9 +795,14 @@ class Connection {
   }
 
   #send(message: ServerMessage): void {
-    this.#sendRaw(
-      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
-    );
+    const schemaStart = performance.now();
+    const prepared = this.#syncSchemaTable
+      ? compressServerMessageSchemas(message)
+      : message;
+    timing.time(schemaStart, "memory", "response", "prepareSchemas");
+    const sendStart = performance.now();
+    this.#sendRaw(prepared);
+    timing.time(sendStart, "memory", "response", "sendRaw");
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -4446,7 +4487,7 @@ export class Server {
         message.watches,
         { principal: session.principal, sessionId: message.sessionId },
       );
-      this.#addUndeliveredToTrackedIds(session.trackedIds, graphs.values());
+      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
@@ -4472,7 +4513,20 @@ export class Server {
     }
   }
 
+  /** Add session watches, timing admission through the handler's completion. */
   async watchAdd(
+    message: WatchAddRequest,
+  ): Promise<ResponseMessage<WatchAddResult>> {
+    const startedAt = performance.now();
+    try {
+      return await this.#watchAdd(message);
+    } finally {
+      timing.time(startedAt, "memory", "watchAdd", "total");
+    }
+  }
+
+  /** Helper for watchAdd(), which authorizes, evaluates, and installs watches. */
+  async #watchAdd(
     message: WatchAddRequest,
   ): Promise<ResponseMessage<WatchAddResult>> {
     const session = this.#sessions.get(message.space, message.sessionId);
@@ -4657,10 +4711,10 @@ export class Server {
         entities.set(key, entry);
       }
       // Rebuilt from provenance — entities, operation watches, and every
-      // graph's undelivered interests — never unioned from the previous
-      // set: an interest a refresh RETIRED (a manifest entry dropped, its
-      // registration released) must leave the wake set with it, or every
-      // later commit to the orphaned document keeps waking this session.
+      // graph's misses — never unioned from the previous set: an interest
+      // a refresh RETIRED (a link edited away, its miss released) must
+      // leave the wake set with it, or every later commit to the orphaned
+      // document keeps waking this session.
       const trackedIds = addOperationWatchTrackedIds(
         trackedIdsFromEntries(entities.values()),
         nextWatches,
@@ -4669,7 +4723,7 @@ export class Server {
           sessionId: message.sessionId,
         },
       );
-      this.#addUndeliveredToTrackedIds(trackedIds, graphs.values());
+      this.#addMissedToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
         fromSeq,
@@ -4694,13 +4748,7 @@ export class Server {
       session.lastSyncedSeq = serverSeq;
       session.operationCursors = nextOperationCursors;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
-      recordSlowQueryDuration(
-        "session.watch.add",
-        message.space,
-        startedAt,
-        { watches: message.watches.length, ...attribution },
-      );
-      return {
+      const response: ResponseMessage<WatchAddResult> = {
         type: "response",
         requestId: message.requestId,
         ok: {
@@ -4716,6 +4764,17 @@ export class Server {
           },
         },
       };
+      recordSlowQueryDuration(
+        "session.watch.add",
+        message.space,
+        startedAt,
+        {
+          watches: message.watches.length,
+          upserts: upserts.length,
+          ...attribution,
+        },
+      );
+      return response;
     } catch (error) {
       // Evaluation state is staged (the session's graphs and watches are
       // assigned only on success), so a failure answers the requester —
@@ -5062,25 +5121,20 @@ export class Server {
    * are wake-reactivity only — they are never delivered, so they flow
    * into `trackedIds` beside the delivered entities at every site that
    * rebuilds or folds that set. */
-  #addUndeliveredToTrackedIds(
+  #addMissedToTrackedIds(
     trackedIds: Set<string>,
     graphs: Iterable<TrackedGraphState>,
   ): void {
-    // Missed and lazily registered documents are dirty interest exactly
-    // like delivered ones: a commit touching either must wake the session
-    // — to heal the miss, or to promote and deliver the lazy document.
-    const add = (key: string) => {
-      let parsed: { id: string; scopeKey: ScopeKey };
-      try {
-        parsed = fromDocKey(key as QueryDocKey);
-      } catch {
-        return;
-      }
-      trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
-    };
     for (const graph of graphs) {
-      for (const [key] of graph.missed) add(key);
-      for (const key of graph.lazy) add(key);
+      for (const [key] of graph.missed) {
+        let parsed: { id: string; scopeKey: ScopeKey };
+        try {
+          parsed = fromDocKey(key as QueryDocKey);
+        } catch {
+          continue;
+        }
+        trackedIds.add(toDirtyKey(parsed.id, parsed.scopeKey));
+      }
     }
   }
 
@@ -5362,8 +5416,8 @@ export class Server {
               // session's tracked set is a demand change; notify so the
               // demand pass sees it without waiting for the next input.
               // The set is rebuilt rather than grown, so the change can
-              // be a same-size swap (a crossing manifest rewritten from
-              // one lazy target to another) or a shrink — compared by
+              // be a same-size swap (a link retargeted from one absent
+              // document to another) or a shrink — compared by
               // membership, exactly as the full-evaluation branch below
               // does, and like there the O(tracked) scan runs only when
               // a demand observer is attached (the serving posture; its
@@ -5375,11 +5429,10 @@ export class Server {
                 session.entities.set(key, entry);
               }
               // Rebuilt from provenance rather than grown in place: the
-              // refresh above may have RETIRED interests (a manifest
-              // entry dropped releases its registration), and a retired
-              // interest must leave the wake set with it — while a
-              // re-walk's new absent dead-ends and registrations are
-              // wake-reactivity the next commit needs.
+              // refresh above may have RETIRED interests (a link edited
+              // away releases its miss), and a retired interest must
+              // leave the wake set with it — while a re-walk's new absent
+              // dead-ends are wake-reactivity the next commit needs.
               session.trackedIds = addOperationWatchTrackedIds(
                 trackedIdsFromEntries(session.entities.values()),
                 session.watches,
@@ -5388,7 +5441,7 @@ export class Server {
                   sessionId: session.id,
                 },
               );
-              this.#addUndeliveredToTrackedIds(
+              this.#addMissedToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
               );
@@ -5425,6 +5478,7 @@ export class Server {
             }
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
+              upserts: upserts.length,
             });
             const message = await finishCatchUp({
               type: "sync",
@@ -5503,7 +5557,7 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
-          this.#addUndeliveredToTrackedIds(
+          this.#addMissedToTrackedIds(
             evaluatedTrackedIds,
             graphs.values(),
           );
@@ -5898,7 +5952,7 @@ export class Server {
       // the graph-only provenance from delivered entries plus traversal misses
       // before producing demand rows.
       const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
-      this.#addUndeliveredToTrackedIds(
+      this.#addMissedToTrackedIds(
         graphTrackedIds,
         session.graphs.values(),
       );

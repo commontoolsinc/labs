@@ -7,7 +7,10 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import {
+  BaseFabricPrimitive,
+  VALUE_TAG,
+} from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
@@ -21,6 +24,10 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 
 /**
@@ -144,6 +151,11 @@ export class FabricKeyPair extends BaseFabricPrimitive {
   //
   // Instance members
   //
+
+  /** @inheritDoc */
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricKeyPair;
+  }
 
   /** The algorithm name (e.g. `"Ed25519"`). */
   get algorithm(): string {

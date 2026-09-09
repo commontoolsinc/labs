@@ -34,7 +34,6 @@ import * as path from "@std/path";
 import {
   FragmentWriter,
   recordsDir,
-  type TestIdentity,
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
@@ -57,6 +56,10 @@ import {
 import { type Census, census } from "./test-selection/census.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
+import {
+  LANE_MEASUREMENT_PREFIX,
+  LANE_MEASUREMENT_SURFACE,
+} from "./lane-measurement.ts";
 
 /** What the lane was asked to do. */
 export interface LaneOptions {
@@ -341,28 +344,6 @@ export async function runInvocation(
   };
 }
 
-/** The record surface the lane measures itself on. */
-export const LANE_MEASUREMENT_SURFACE = { kind: "gate", scope: "ci" };
-
-/** What the lane's own measurements are named for. */
-export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
-
-/**
- * Whether an identity is the lane measuring itself rather than a test.
- *
- * The topology claims test surfaces, and these are not one: nothing
- * enumerates them, nothing scores them, and no lane can be asked to run
- * one. They would therefore be identities no suite claims, which is what
- * the store half of the drift guard exists to fail on, so the guard is
- * told about them here — beside the code that writes them, rather than in
- * a second list that could describe something this no longer produces.
- */
-export function isLaneMeasurement(test: TestIdentity): boolean {
-  return test.k === LANE_MEASUREMENT_SURFACE.kind &&
-    test.s === LANE_MEASUREMENT_SURFACE.scope &&
-    test.n.startsWith(LANE_MEASUREMENT_PREFIX);
-}
-
 /**
  * A record measuring the lane machinery rather than a test. The publisher
  * fits `setupCost`, `suiteOverhead` and `correction` from these, so they
@@ -432,6 +413,7 @@ export async function runBatch(
     const invocations = await batch.suite.command(batch.units, {
       root: options.root,
       outputDir,
+      spoolDir: batchSpool,
       ...(options.base === undefined ? {} : { baseRef: options.base }),
     });
     for (const invocation of invocations) {
@@ -469,7 +451,11 @@ export async function runBatch(
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
-      timingRecord(`ci-lane batch ${batch.suite.id}`, seconds, ok),
+      timingRecord(
+        `${LANE_MEASUREMENT_PREFIX}batch ${batch.suite.id}`,
+        seconds,
+        ok,
+      ),
     ]);
   }
   return { ok, records, conflicts, seconds };
@@ -502,7 +488,6 @@ export function describeConflicts(conflicts: readonly TestRecord[]): void {
 
 /** What a withheld identity is absent for, in words. */
 const WITHHELD_REASONS: Record<WithheldReason, string> = {
-  "main-red": "already failing in the latest run on `main`",
   flaky: "too noisy to judge a change by",
 };
 
@@ -825,16 +810,28 @@ export async function runLane(
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
   const spool = recordsDir();
-  const opened = await openCapabilities([...needs], {
-    root: options.root,
-    dryRun: false,
-    workDir,
-  });
+  // The directory belongs to the lane from the moment it exists, and a
+  // capability that refuses to open is one of the ways the lane ends.
+  let opened;
+  try {
+    opened = await openCapabilities([...needs], {
+      root: options.root,
+      dryRun: false,
+      workDir,
+    });
+  } catch (error) {
+    await Deno.remove(workDir, { recursive: true }).catch(() => {});
+    throw error;
+  }
   if (spool !== undefined) {
     spoolRecords(
       spool,
       opened.timings.map((timing) =>
-        timingRecord(`ci-lane setup ${timing.capability}`, timing.seconds, true)
+        timingRecord(
+          `${LANE_MEASUREMENT_PREFIX}setup ${timing.capability}`,
+          timing.seconds,
+          true,
+        )
       ),
     );
   }
@@ -845,7 +842,16 @@ export async function runLane(
       // A failure never stops the lane: one failing batch would otherwise
       // hide every batch and every repeat after it, and the point of a
       // lane is what it measured.
-      const result = await runBatch(batch, options, workDir, spool, opened.env);
+      const result = await runBatch(
+        batch,
+        options,
+        workDir,
+        spool,
+        // Two capabilities may export the same name and mean different
+        // things by it, and the two server-execution arms can share a
+        // lane.
+        opened.envFor(batch.suite.needs),
+      );
       if (!result.ok) ok = false;
       conflicts.push(...result.conflicts);
     }

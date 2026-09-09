@@ -1,17 +1,26 @@
-import { assertEquals } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import {
   sampleEntry,
   sampleManifest,
   serializeManifest,
 } from "@commonfabric/test-support/records";
 
-import { generatedAtOf, newestManifest } from "./test-selection-manifest.ts";
-import { makeTestFlakes } from "./tiles/test-flakes.ts";
 import {
+  FLAKE_WINDOW_FALLBACK_DAYS,
+  generatedAtOf,
   LANE_BUDGET_FALLBACK_SECONDS,
   laneBudgetOf,
-  makeTestSelection,
-} from "./tiles/test-selection.ts";
+  type ManifestReader,
+  newestManifest,
+} from "./test-selection-manifest.ts";
+import { makeTestFlakes } from "./tiles/test-flakes.ts";
+import { makeTestSelection } from "./tiles/test-selection.ts";
+import { TEST_SELECTION_PATH } from "./test-selection-page.ts";
 import type { Ctx } from "./types.ts";
 
 const PREFIX = "labs/test-selection/v1";
@@ -61,14 +70,22 @@ Deno.test("newestManifest takes the newest object under the prefix", async () =>
   assertEquals(found?.generatedAt, "2026-08-20T04:00:00.000Z");
 });
 
-Deno.test("newestManifest treats a malformed manifest as absent", async () => {
-  const found = await newestManifest({
-    fetchImpl: storeOf({
-      [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]:
-        "{not a manifest",
-    }),
-  });
-  assertEquals(found, undefined);
+Deno.test("newestManifest reports a body that is not a manifest", async () => {
+  await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: storeOf({
+          [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]:
+            "{not a manifest",
+        }),
+      }),
+    Error,
+    "not a manifest",
+  );
+});
+
+Deno.test("newestManifest reports nothing when the store holds none", async () => {
+  assertEquals(await newestManifest({ fetchImpl: storeOf({}) }), undefined);
 });
 
 /**
@@ -89,31 +106,44 @@ function storeRefusing(answer: () => Promise<Response>): typeof fetch {
   }) as typeof fetch;
 }
 
-Deno.test("newestManifest treats a refused manifest as absent", async () => {
+Deno.test("newestManifest reports a refused manifest", async () => {
   // Listed but not readable, which is what a manifest deleted between
   // the listing and the read looks like.
   for (const status of [403, 404, 500]) {
-    const found = await newestManifest({
-      fetchImpl: storeRefusing(() =>
-        Promise.resolve(new Response("", { status }))
-      ),
-    });
-    assertEquals(found, undefined);
+    await assertRejects(
+      () =>
+        newestManifest({
+          fetchImpl: storeRefusing(() =>
+            Promise.resolve(new Response("", { status }))
+          ),
+        }),
+      Error,
+      `HTTP ${status}`,
+    );
   }
 });
 
-Deno.test("newestManifest treats a failed read as absent", async () => {
-  const found = await newestManifest({
-    fetchImpl: storeRefusing(() => Promise.reject(new Error("no network"))),
-  });
-  assertEquals(found, undefined);
+Deno.test("newestManifest reports a failed read", async () => {
+  await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: storeRefusing(() => Promise.reject(new Error("no network"))),
+      }),
+    Error,
+    "no network",
+  );
 });
 
-Deno.test("newestManifest treats an unreachable store as absent", async () => {
-  const found = await newestManifest({
-    fetchImpl: (() => Promise.reject(new Error("no network"))) as typeof fetch,
-  });
-  assertEquals(found, undefined);
+Deno.test("newestManifest reports an unreachable store", async () => {
+  await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: (() =>
+          Promise.reject(new Error("no network"))) as typeof fetch,
+      }),
+    Error,
+    "no network",
+  );
 });
 
 const CTX: Ctx = {
@@ -122,20 +152,23 @@ const CTX: Ctx = {
   env: () => undefined,
 };
 
-/** A store holding one manifest under a fixed name. */
-function storeHolding(manifest: Parameters<typeof serializeManifest>[0]) {
-  return storeOf({
+/** A reader over a store holding one manifest under a fixed name. */
+function reading(
+  manifest: Parameters<typeof serializeManifest>[0],
+): ManifestReader {
+  const fetchImpl = storeOf({
     [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`]:
       serializeManifest(manifest),
   });
+  return () => newestManifest({ fetchImpl });
 }
 
 Deno.test("both test tiles are unknown when there is no manifest", async () => {
-  const empty = storeOf({});
+  const empty: ManifestReader = () => Promise.resolve(undefined);
   for (
     const tile of [
-      makeTestFlakes({ fetchImpl: empty }),
-      makeTestSelection({ fetchImpl: empty }),
+      makeTestFlakes({ read: empty }),
+      makeTestSelection({ read: empty }),
     ]
   ) {
     const view = await tile.collect(CTX);
@@ -145,13 +178,19 @@ Deno.test("both test tiles are unknown when there is no manifest", async () => {
 });
 
 Deno.test("the flake tile is green when nothing is withheld as flaky", async () => {
-  const tile = makeTestFlakes({ fetchImpl: storeHolding(sampleManifest()) });
+  const tile = makeTestFlakes({
+    read: reading(sampleManifest()),
+    now: () => Date.parse("2026-08-20T00:30:00.000Z"),
+  });
   const view = await tile.collect(CTX);
   assertEquals(view.status, "good");
-  assertEquals(view.value, "0");
+  assertEquals(view.value, "no flaky tests");
+  // What the conclusion was drawn from: the window the share is measured
+  // over, and how long ago the publisher measured it.
+  assertEquals(view.sub, `${FLAKE_WINDOW_FALLBACK_DAYS} days of runs · 30m old`);
 });
 
-Deno.test("the flake tile counts what selection held back, and names the worst", async () => {
+Deno.test("the flake tile counts what selection held back, and points at them", async () => {
   const longName = "space > flakes with a name that keeps going past the tile limit";
   const noisy = sampleEntry({ k: "unit", s: "memory", n: longName, v: "worker" }, {
     flakeRate: 0.4,
@@ -160,21 +199,17 @@ Deno.test("the flake tile counts what selection held back, and names the worst",
     entries: [noisy],
     withheld: [{ test: noisy.test, suite: noisy.suite, reason: "flaky" }],
   });
-  const view = await makeTestFlakes({ fetchImpl: storeHolding(manifest) })
-    .collect(CTX);
+  const view = await makeTestFlakes({
+    read: reading(manifest),
+    now: () => Date.parse("2026-08-20T04:00:00.000Z"),
+  }).collect(CTX);
   assertEquals(view.status, "warn");
-  assertEquals(view.value, "1");
-  assertEquals(view.extra?.includes('class="tile-detail-list"'), true);
-  assertEquals(view.extra?.includes('role="region"'), true);
-  assertEquals(view.extra?.includes('tabindex="0"'), true);
-  assertEquals(view.extra?.includes("scroll for more"), false);
-  assertEquals(
-    view.extra?.includes(
-      `title="40.0% · unit · memory: ${longName.replace(">", "&gt;")} (worker)"`,
-    ),
-    true,
-  );
-  assertEquals(view.extra?.includes("… (worker)</div>"), true);
+  assertEquals(view.value, "1 flaky test");
+  assertEquals(view.sub, `${FLAKE_WINDOW_FALLBACK_DAYS} days of runs · 4h old`);
+  // The count is the whole tile: no name reaches it to be cut in half.
+  assertEquals(view.extra, undefined);
+  assertEquals(view.href, "/test-selection#flaky");
+  assertEquals(view.hint, "flakes ↗");
 });
 
 Deno.test("the selection tile says what share of the corpus would run", async () => {
@@ -192,24 +227,23 @@ Deno.test("the selection tile says what share of the corpus would run", async ()
     }],
   });
   const view = await makeTestSelection({
-    fetchImpl: storeHolding(manifest),
+    read: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "good");
   assertEquals(view.value, "50%");
-  assertEquals(
-    view.sub,
-    `1 of 2 tests · fullest lane 3s of ${LANE_BUDGET_FALLBACK_SECONDS}s`,
-  );
+  assertEquals(view.sub, "1 of 2 tests");
+  assertEquals(view.href, "/test-selection");
+  assertEquals(view.hint, "lanes ↗");
 });
 
 Deno.test("the selection tile goes amber once the manifest has gone stale", async () => {
   const view = await makeTestSelection({
-    fetchImpl: storeHolding(sampleManifest()),
+    read: reading(sampleManifest()),
     now: () => Date.parse("2026-08-21T04:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
-  assertEquals(view.aside, "28h old");
+  assertEquals(view.aside, '<span class="hfacet" title="28h old">28h old</span>');
 });
 
 Deno.test("the lane budget comes from the manifest that named it", () => {
@@ -233,8 +267,62 @@ Deno.test("the selection tile goes red when a lane is past its budget", async ()
     }],
   });
   const view = await makeTestSelection({
-    fetchImpl: storeHolding(manifest),
+    read: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "bad");
+  // The overrun is why the tile is red, so it takes the line the share holds.
+  assertEquals(
+    view.sub,
+    `fullest lane 400s of ${LANE_BUDGET_FALLBACK_SECONDS}s`,
+  );
+});
+
+Deno.test("the selection tile serves the page both tiles link to", async () => {
+  const tile = makeTestSelection({ read: reading(sampleManifest()) });
+  const route = tile.routes?.find((r) => r.path === TEST_SELECTION_PATH);
+  assertExists(route);
+  const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
+  const response = await route.handler(new Request(url), url);
+  assertEquals(
+    response.headers.get("content-type"),
+    "text/html; charset=utf-8",
+  );
+  assertStringIncludes(await response.text(), "<title>Test selection</title>");
+});
+
+Deno.test("both tiles link into the page the route serves", async () => {
+  const read = reading(sampleManifest());
+  const flakes = await makeTestFlakes({ read }).collect(CTX);
+  const selection = await makeTestSelection({ read }).collect(CTX);
+  assertEquals(selection.href, TEST_SELECTION_PATH);
+  assertEquals(flakes.href?.split("#")[0], TEST_SELECTION_PATH);
+});
+
+Deno.test("a tile lets a store failure through, for the wall to gray it", async () => {
+  // The wall turns a collection that throws into a gray tile carrying the
+  // reason, which is what separates an unreadable store from an empty one.
+  const failing: ManifestReader = () => Promise.reject(new Error("no network"));
+  for (
+    const tile of [
+      makeTestFlakes({ read: failing }),
+      makeTestSelection({ read: failing }),
+    ]
+  ) {
+    await assertRejects(() => tile.collect(CTX), Error, "no network");
+  }
+});
+
+Deno.test("the page says a store could not be read, rather than that it is empty", async () => {
+  const tile = makeTestSelection({
+    read: () => Promise.reject(new Error("no network")),
+  });
+  const route = tile.routes?.find((r) => r.path === TEST_SELECTION_PATH);
+  assertExists(route);
+  const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
+  const response = await route.handler(new Request(url), url);
+  assertEquals(response.status, 503);
+  const body = await response.text();
+  assertStringIncludes(body, "could not be read: source unreachable");
+  assertEquals(body.includes("has been published yet"), false);
 });

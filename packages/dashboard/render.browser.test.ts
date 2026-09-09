@@ -94,12 +94,12 @@ function assertStandardTileLayout(
       header.scrollWidth <= header.clientWidth,
       `${id} header overflows at ${width}px`,
     );
-    const mtd = header.querySelector<HTMLElement>(".hmtd");
-    if (mtd) {
+    const facet = header.querySelector<HTMLElement>(".hfacet");
+    if (facet) {
       assertEquals(
-        mtd.title,
-        mtd.textContent,
-        `${id} truncated MTD value must expose its full text at ${width}px`,
+        facet.title,
+        facet.textContent,
+        `${id} truncated header facet must expose its full text at ${width}px`,
       );
     }
     assertEquals(
