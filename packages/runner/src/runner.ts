@@ -4069,10 +4069,8 @@ export class Runner {
             const argumentLink = getMetaLink(resultCell, "argument");
             if (
               argumentLink === undefined ||
-              !this.#familyAbsent(
+              !this.#swapReadsAbsent(
                 this.#resolveToPattern(live),
-                newKey,
-                undefined,
                 argumentLink,
                 resultCell,
               )
@@ -5050,6 +5048,53 @@ export class Runner {
       )
       ? { pattern: resolved.pattern, entryKey }
       : undefined;
+  }
+
+  /**
+   * Whether a swap of `resultCell` to `pattern` would read a document this
+   * replica lacks: the argument document `argumentLink` names, which the
+   * swap's setup reads whole, or an owned cell the stored manifest lists —
+   * one a setup somewhere has materialized — that is absent here. A cell the
+   * manifest does not list is one the swap's setup seeds itself, and a link
+   * target the argument holds is read reactively once the piece runs, so
+   * neither holds the swap.
+   */
+  #swapReadsAbsent(
+    pattern: Pattern,
+    argumentLink: NormalizedFullLink,
+    resultCell: Cell<any>,
+  ): boolean {
+    const readTx = this.#runtime.readTx();
+    const present = (link: NormalizedFullLink): boolean =>
+      readTx.readOrThrow(
+        {
+          space: link.space,
+          id: link.id,
+          path: ["value"],
+          ...(link.scope !== undefined && { scope: link.scope }),
+        },
+        { meta: ignoreReadForScheduling },
+      ) !== undefined;
+    if (!present(argumentLink)) return true;
+    const cell = resultCell.withTx(readTx);
+    const manifest = nativeFromFabricValue(
+      cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+    );
+    if (!Array.isArray(manifest)) return false;
+    const listed = new Set<string>();
+    for (const entry of manifest) {
+      const link = isObjectOrArray(entry)
+        ? parseLink((entry as { link?: unknown }).link, resultCell)
+        : undefined;
+      if (link !== undefined) listed.add(link.id);
+    }
+    if (listed.size === 0) return false;
+    const owned: Cell<any>[] = [];
+    this.#collectResumeOwnedCells(pattern, cell, owned, new Set(), readTx);
+    return owned.some((ownedCell) => {
+      const link = ownedCell.getAsNormalizedFullLink();
+      return listed.has(link.id) && !present(link);
+    });
   }
 
   /**
