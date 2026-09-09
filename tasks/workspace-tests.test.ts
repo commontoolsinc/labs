@@ -9,7 +9,6 @@ import {
   acceptsPreload,
   assertMemberTestTasksDefined,
   assertTaskTestsIncluded,
-  grantableSpool,
   initializeDb,
   junitCapableMembers,
   leafFlags,
@@ -17,6 +16,7 @@ import {
   memberTestTask,
   parseDisabledPackageList,
   readWorkspaceMembers,
+  recordingSpool,
   runTests,
   selectShardMembers,
   testConcurrency,
@@ -769,12 +769,28 @@ Deno.test("the workspace's capable members are read from their manifests", async
   }
 });
 
+Deno.test("the spool a run records into is resolved once", () => {
+  // Each leaf runs with its own package as the working directory, so a
+  // relative spool would name a different place in each of them.
+  assertEquals(
+    recordingSpool("spool/records", "/work"),
+    "/work/spool/records",
+  );
+  assertEquals(recordingSpool("/var/records", "/work"), "/var/records");
+  assertEquals(recordingSpool(undefined, "/work"), undefined);
+});
+
 Deno.test("a spool Deno cannot be told about is not recorded into", () => {
   // A comma separates one path from the next inside `--allow-write=`, so
   // such a spool is granted as two paths that are not it. The run turns
   // recording off rather than failing the members that would take it.
-  assertEquals(grantableSpool("/var/spool/records"), true);
-  assertEquals(grantableSpool("/var/a,b/records"), false);
+  const said: string[] = [];
+  assertEquals(
+    recordingSpool("/var/a,b/records", "/work", (m) => said.push(m)),
+    undefined,
+  );
+  assertEquals(said.length, 1);
+  assertStringIncludes(said[0]!, "/var/a,b/records");
 });
 
 Deno.test("a forwarding runner is read by the flags it hands its leaf", () => {

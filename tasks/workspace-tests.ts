@@ -380,13 +380,27 @@ export function acceptsPreload(
 }
 
 /**
- * Whether a spool can be named to a leaf. A comma separates one path from
- * the next inside `--allow-write=`, and Deno offers no way to write one
- * that belongs to a path, so a spool holding a comma is granted as two
- * paths that are not it.
+ * The spool this run records into, absolute, or undefined where there is
+ * none or Deno cannot be told about the one there is.
+ *
+ * Resolving here is what makes one directory of three: the runner reads
+ * the spool with the workspace as its working directory, each leaf runs
+ * with its own package as one, and the write granted to a leaf names a
+ * path. A comma separates one path from the next inside `--allow-write=`,
+ * and Deno offers no way to write one that belongs to a path, so a spool
+ * holding a comma is granted as two paths that are not it; such a run
+ * records nothing and says so, as every other recording problem does.
  */
-export function grantableSpool(spool: string): boolean {
-  return !spool.includes(",");
+export function recordingSpool(
+  raw: string | undefined,
+  workspaceCwd: string,
+  warn: (message: string) => void = console.warn,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  const spool = path.resolve(workspaceCwd, raw);
+  if (!spool.includes(",")) return spool;
+  warn(`test records: no recording, the spool holds a comma: ${spool}`);
+  return undefined;
 }
 
 /**
@@ -567,22 +581,7 @@ export async function runTests(
   // plumbing: it forwards the flag and moves the results; the reported
   // names come from the leaves. A temporary directory that cannot be
   // created turns recording off with a warning; it never fails the suite.
-  // Resolved once here and used everywhere after: the parent reads this
-  // spool with the workspace as its working directory, each leaf runs with
-  // its own package as one, and the write granted to a leaf names a path.
-  // A relative `CF_TEST_RECORDS_DIR` would be three directories.
-  // A spool Deno cannot be told about turns recording off the same way,
-  // rather than failing a member that would have been granted it.
-  const rawSpoolDir = recordsDir();
-  let spoolDir = rawSpoolDir === undefined
-    ? undefined
-    : path.resolve(workspaceCwd, rawSpoolDir);
-  if (spoolDir !== undefined && !grantableSpool(spoolDir)) {
-    console.warn(
-      `test records: no recording, the spool holds a comma: ${spoolDir}`,
-    );
-    spoolDir = undefined;
-  }
+  const spoolDir = recordingSpool(recordsDir(), workspaceCwd);
   let junitRoot: string | undefined;
   if (spoolDir !== undefined) {
     try {
