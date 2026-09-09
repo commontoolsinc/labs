@@ -120,6 +120,18 @@ and is dropped from the merged map; a leaf's whole chain is what usually
 survives that, and `global` is a title every file declaring such a hook
 shares.
 
+Every package of a workspace run writes into one spool, so each map also
+names the repository-relative directory its process ran in. A caller
+ingesting one package's report asks for that directory. A map naming it
+belongs to that package and is read whole, whatever files it names: a
+test task may name a file anywhere in the tree, and
+`packages/test-support` runs `tools/write-iframe-wrapper.test.ts`, two
+directories above itself. A map naming no directory at all is judged by
+its files instead, and contributes only those under the directory asked
+for. Either way the scope is applied before ambiguity is judged, or a
+name two packages happen to share would cost each of them a file it held
+unambiguously.
+
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
 name (a constant owned by the repository's tooling, never derived from git
