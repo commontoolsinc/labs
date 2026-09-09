@@ -18,6 +18,7 @@ import {
   extractDefaultBrandPayloadValue,
   getArrayElementInfo,
   getPropertyNameText,
+  isEmptyRecordType,
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
@@ -1922,6 +1923,11 @@ export class CommonFabricFormatter implements TypeFormatter {
       return undefined;
     }
 
+    // Mapped records have type declarations but no `.valueDeclaration`.
+    if (isEmptyRecordType(type, context.typeChecker)) {
+      return {};
+    }
+
     // For complex values (arrays/objects), try to extract from the type's symbol
     // This is a simplified approach that works for many cases
     const symbol = type.getSymbol();
@@ -1971,7 +1977,6 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Check if this is an empty object type (no properties, object type)
-    // This handles cases like Record<string, never>
     if (
       (type.flags & ts.TypeFlags.Object) !== 0 &&
       context.typeChecker.getPropertiesOfType(type).length === 0

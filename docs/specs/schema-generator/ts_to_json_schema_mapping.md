@@ -469,7 +469,15 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    through import aliases to the variable initializer (unwrapping
    `as`/`satisfies`/parens/type assertions; shorthand properties via
    `getShorthandAssignmentValueSymbol`).
-2. **Brand-payload fallback**: `Default<T,V>` carries V in a
+2. **Type-based extraction** (both formatters): literal values, symbol value
+   declarations, and empty records. A record with no named properties or call
+   or construct signatures, and at least one index signature, yields `{}` when
+   every index value type is `never`. This includes `Record<string, never>`,
+   `Record<PropertyKey, never>`, and aliases of these types, in both
+   `T | Default<V>` and `Default<T, V>`. The record check does not require a
+   symbol value declaration. A propertyless record with `string` or `unknown`
+   values does not qualify for this check.
+3. **Brand-payload fallback**: `Default<T,V>` carries V in a
    `DEFAULT_MARKER`-branded payload; when the alias is resolved away
    (`T | (T & DefaultMarker<V>)`), the payload is read back type-structurally
    (`type-utils.ts`). Union-distributed brands must **agree**;
