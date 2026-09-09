@@ -110,14 +110,24 @@ refresh finishes.
 
 `collectSource(driver, signal?)` consumes `listSessions()` until `nextCursor` is
 absent. It records an inventory error for a repeated cursor. It also records an
-error before retaining a page that would raise the inventory above 100,000
-summaries. It then calls `readSession()` once for every retained summary. The
-optional signal is checked before and after every provider call. A host still
-stops the driver to interrupt a provider call that does not return on its own.
+error before reading a page that would raise the inventory above 100,000
+summaries. Each page's sessions are read and spooled before requesting the next
+page. The optional signal is checked before and after every provider call and
+after each spool write. A host still stops the driver to interrupt a provider
+call that does not return on its own.
 
-The returned `CollectedSource` contains successful snapshots and structured
-errors. Its `complete` field is true only when enumeration completed, every
-session read succeeded, and every snapshot reported itself complete.
+The returned `CollectedSource & AsyncDisposable` contains a replayable
+asynchronous `sessions` iterator with a `length`, plus structured errors. Its
+`complete` field is true only when enumeration completed, every session read
+succeeded, and every snapshot reported itself complete. Publication also accepts
+snapshot arrays for callers that already own a single session or a small batch.
+
+The spool uses the Fabric JSON codec to retain native values and sparse arrays.
+Its directory is private and its files are created with mode `0600`. Disposing
+the result removes all temporary files. The host uses an `AsyncDisposableStack`
+to own every source result through publication. Cancellation and spool I/O
+failures dispose an unfinished collection and reject instead of reporting an
+incomplete provider inventory.
 
 `prepareSession(sourceId, snapshot, targetChunkBytes?)` is available when a host
 or another target needs the connector's stable key, chunks, and hashes without
@@ -135,8 +145,15 @@ interface AgentFabricConnection {
   runtime: Runtime;
   spaceDid: MemorySpace;
   ownerDid: string;
+  createPublicationRuntime?: () => Runtime;
 }
 ```
+
+Long-lived hosts supply `createPublicationRuntime`. It creates an independent
+runtime and storage manager using the same destination, identity, and runtime
+configuration. The target disposes one runtime per changed session and one per
+index publication after their commits settle. A caller omitting the factory owns
+the supplied runtime and its retained documents.
 
 The owner DID participates in every connector cause and stored protocol
 envelope. Every connector cell has a Common Fabric confidentiality label for
@@ -362,6 +379,9 @@ connector-owned prompts. `bypassPermissions` is advertised only when
 The Codex transport uses JSON-RPC 2.0 objects separated by newlines on child
 process stdin and stdout. Request IDs are increasing integers. Notifications
 have a method and no ID. Server requests have both a method and an ID.
+
+`SessionSummary.raw` contains the thread metadata with `turns` excluded. The
+snapshot's native events contain the complete turn array.
 
 The launch modes are:
 
@@ -717,15 +737,18 @@ coordination for each API, space, and owner.
 The callback must finish synchronously and return a plain record. Causes and
 values must be accepted by the Common Fabric cell and value converters.
 
-Session graph publication batches at most ten content-addressed chunk cells per
-transaction and one manifest per transaction. Index cells are committed after
+Session graph publication prepares and commits one content-addressed event chunk
+at a time, followed by one manifest transaction. Index cells are committed after
 session graphs. Because changed chunks use new root and child cells, committing
 chunks before a manifest cannot mutate the graph reachable from the prior
 manifest.
 
-`readStableCellGraphValue()` synchronizes a root cell and recursively hydrates
-`FabricLink`s. It caches repeated links within one read and synchronizes at most
-50 array children concurrently.
+`readStableCellGraphValue()` synchronizes each document with a `false` schema
+and explicitly follows its `FabricLink`s. It caches repeated links within one
+read and synchronizes at most 50 array children concurrently. Protected graph
+writes synchronize through a `false` schema and mark their cell handles
+document-synchronized before applying write policies, so those operations keep
+their document-only read.
 
 Its optional fourth argument accepts `preserveLinkFields`. A link stored under a
 named object field in that set remains a link instead of being hydrated. The

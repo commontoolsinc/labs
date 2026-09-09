@@ -1,14 +1,18 @@
-import type { Cancel, Cell } from "@commonfabric/runner";
+import {
+  type Cancel,
+  type Cell,
+  markCellDocumentSynced,
+} from "@commonfabric/runner";
 import {
   AGENT_CONNECTOR_WRITER_ID,
   type AgentFabricConnection,
   agentOwnerSchema,
   agentPrincipalSchema,
   cellHasOwnerProtection,
+  openPublicationConnection,
   pushStableCellGraph,
   readStableActions,
   readStableCellGraphValue,
-  type StableCellGraphEntry,
   stableCellId,
   subscribeStableActions,
 } from "./fabric-graph.ts";
@@ -44,6 +48,7 @@ import {
   type StableArrayCellPlan,
 } from "./array-cell-identity.ts";
 import { AsyncSerialQueue } from "./serial-queue.ts";
+import { SessionSpool } from "./session-spool.ts";
 import { isAbsolute as isPosixAbsolute } from "@std/path/posix";
 import { isAbsolute as isWindowsAbsolute } from "@std/path/windows";
 
@@ -435,13 +440,12 @@ async function syncAgentFabricCells(
   conn: AgentFabricConnection,
 ): Promise<AgentFabricCells> {
   const cells = createAgentFabricCells(conn);
-  await Promise.all([
-    cells.index.sync(),
-    cells.allIndex.sync(),
-    cells.health.sync(),
-    cells.commands.sync(),
-    cells.receipts.sync(),
-  ]);
+  await Promise.all(
+    Object.values(cells).map(async (cell) => {
+      await cell.asSchema(false).sync();
+      markCellDocumentSynced(cell);
+    }),
+  );
   await conn.runtime.storageManager.synced();
   return cells;
 }
@@ -641,21 +645,14 @@ function asIndex(
   return record as unknown as AgentSessionIndex;
 }
 
-interface PlannedSessionGraph {
-  chunks: StableCellGraphEntry[];
-  manifest: StableCellGraphEntry;
-  indexEntry: IndexEntry;
-}
-
-const SESSION_GRAPH_BATCH_SIZE = 10;
-const MANIFEST_GRAPH_BATCH_SIZE = 1;
-
-async function planSessionGraph(
+/** Publishes each event chunk before publishing its session manifest. */
+async function publishSessionGraph(
   conn: AgentFabricConnection,
   prepared: PreparedSession,
   driver: string,
   gitContext: GitContext,
-): Promise<PlannedSessionGraph> {
+  onCommit: () => void,
+): Promise<IndexEntry> {
   const manifest = conn.runtime.getCell(
     conn.spaceDid,
     sessionCause(
@@ -666,7 +663,8 @@ async function planSessionGraph(
     ),
     agentOwnerSchema(conn.ownerDid),
   );
-  const chunkEntries = await Promise.all(prepared.chunks.map(async (chunk) => {
+  const descriptors = [];
+  for (const chunk of prepared.chunks) {
     const cell = conn.runtime.getCell(
       conn.spaceDid,
       sessionChunkCause(
@@ -687,26 +685,25 @@ async function planSessionGraph(
       contentHash: chunk.contentHash,
       events: chunk.events,
     };
-    return {
-      cell,
-      plan: await planStableArrayCells(
-        value,
-        childScope(conn.spaceDid, conn.ownerDid, "session-events", {
-          sourceId: prepared.sourceId,
-          nativeSessionId: prepared.nativeSessionId,
-          part: chunk.part,
-          contentHash: chunk.contentHash,
-        }),
-      ),
-      descriptor: {
+    const plan = await planStableArrayCells(
+      value,
+      childScope(conn.spaceDid, conn.ownerDid, "session-events", {
+        sourceId: prepared.sourceId,
+        nativeSessionId: prepared.nativeSessionId,
         part: chunk.part,
-        link: cell,
         contentHash: chunk.contentHash,
-        byteLength: chunk.byteLength,
-        eventCount: chunk.eventCount,
-      },
-    };
-  }));
+      }),
+    );
+    onCommit();
+    await pushStableCellGraph(conn, [graphEntry(cell, plan)]);
+    descriptors.push({
+      part: chunk.part,
+      link: cell,
+      contentHash: chunk.contentHash,
+      byteLength: chunk.byteLength,
+      eventCount: chunk.eventCount,
+    });
+  }
   const manifestValue = {
     schema: AGENT_CONNECTOR_SCHEMAS.session,
     ownerDid: conn.ownerDid,
@@ -717,7 +714,7 @@ async function planSessionGraph(
     metadata: prepared.summary.raw,
     summary: prepared.summary,
     normalized: { messages: prepared.normalizedMessages },
-    chunks: chunkEntries.map(({ descriptor }) => descriptor),
+    chunks: descriptors,
     snapshotHash: prepared.snapshotHash,
     revision: prepared.revision ?? null,
     observedAt: new Date().toISOString(),
@@ -730,62 +727,32 @@ async function planSessionGraph(
       nativeSessionId: prepared.nativeSessionId,
     }),
   );
+  onCommit();
+  await pushStableCellGraph(conn, [graphEntry(manifest, manifestPlan)]);
   return {
-    chunks: chunkEntries.map(({ cell, plan }) => graphEntry(cell, plan)),
-    manifest: graphEntry(manifest, manifestPlan),
-    indexEntry: {
-      ownerDid: conn.ownerDid,
-      key: prepared.key,
-      sourceId: prepared.sourceId,
-      driver,
-      nativeSessionId: prepared.nativeSessionId,
-      title: prepared.summary.title,
-      cwd: prepared.summary.cwd,
-      gitRepo: prepared.summary.gitRepo ?? null,
-      gitBranch: prepared.summary.gitBranch ?? null,
-      gitWorktreeRoot: prepared.summary.gitWorktreeRoot ?? null,
-      gitHeadSha: gitContext.gitHeadSha,
-      gitRemotes: gitContext.gitRemotes,
-      gitObservedAt: gitContext.gitObservedAt,
-      createdAt: prepared.summary.createdAt,
-      updatedAt: prepared.summary.updatedAt,
-      archived: prepared.summary.archived,
-      active: prepared.summary.active,
-      capabilities: {},
-      recentMessages: recentSessionMessages(prepared.normalizedMessages),
-      manifest,
-      contentHash: prepared.snapshotHash,
-      syncStatus: prepared.complete ? "complete" : "partial",
-    },
+    ownerDid: conn.ownerDid,
+    key: prepared.key,
+    sourceId: prepared.sourceId,
+    driver,
+    nativeSessionId: prepared.nativeSessionId,
+    title: prepared.summary.title,
+    cwd: prepared.summary.cwd,
+    gitRepo: prepared.summary.gitRepo ?? null,
+    gitBranch: prepared.summary.gitBranch ?? null,
+    gitWorktreeRoot: prepared.summary.gitWorktreeRoot ?? null,
+    gitHeadSha: gitContext.gitHeadSha,
+    gitRemotes: gitContext.gitRemotes,
+    gitObservedAt: gitContext.gitObservedAt,
+    createdAt: prepared.summary.createdAt,
+    updatedAt: prepared.summary.updatedAt,
+    archived: prepared.summary.archived,
+    active: prepared.summary.active,
+    capabilities: {},
+    recentMessages: recentSessionMessages(prepared.normalizedMessages),
+    manifest,
+    contentHash: prepared.snapshotHash,
+    syncStatus: prepared.complete ? "complete" : "partial",
   };
-}
-
-async function pushSessionGraphBatch(
-  conn: AgentFabricConnection,
-  graphs: PlannedSessionGraph[],
-): Promise<void> {
-  const chunks = graphs.flatMap((graph) => graph.chunks);
-  for (
-    let offset = 0;
-    offset < chunks.length;
-    offset += SESSION_GRAPH_BATCH_SIZE
-  ) {
-    await pushStableCellGraph(
-      conn,
-      chunks.slice(offset, offset + SESSION_GRAPH_BATCH_SIZE),
-    );
-  }
-  const manifests = graphs.map((graph) => graph.manifest);
-  for (
-    let offset = 0;
-    offset < manifests.length;
-    offset += MANIFEST_GRAPH_BATCH_SIZE
-  ) {
-    await pushStableCellGraph(
-      conn,
-      manifests.slice(offset, offset + MANIFEST_GRAPH_BATCH_SIZE),
-    );
-  }
 }
 
 export class AgentFabricTarget implements CommandTarget {
@@ -881,9 +848,12 @@ export class AgentFabricTarget implements CommandTarget {
     collected: CollectedSource[],
     options: AgentFabricPublishOptions & { observationSequence: number },
   ): Promise<number> {
+    await using conn = openPublicationConnection(this.conn);
+    const cells = createAgentFabricCells(conn);
     let graphCommitStarted = false;
     const startGraphCommit = () => {
       if (graphCommitStarted) return;
+      options.signal?.throwIfAborted();
       options.onCommit?.();
       graphCommitStarted = true;
     };
@@ -906,22 +876,22 @@ export class AgentFabricTarget implements CommandTarget {
     const graphReadCache = new Map<string, Promise<unknown>>();
     const previousRecent = asIndex(
       await readStableCellGraphValue(
-        this.conn,
-        this.cells.index,
+        conn,
+        cells.index,
         graphReadCache,
         { preserveLinkFields: new Set(["manifest"]) },
       ),
-      this.conn.ownerDid,
+      conn.ownerDid,
       "recent",
     );
     const previousAll = asIndex(
       await readStableCellGraphValue(
-        this.conn,
-        this.cells.allIndex,
+        conn,
+        cells.allIndex,
         graphReadCache,
         { preserveLinkFields: new Set(["manifest"]) },
       ),
-      this.conn.ownerDid,
+      conn.ownerDid,
       "all",
     );
     const discoveredCheckouts: GitContext[] = [];
@@ -955,15 +925,15 @@ export class AgentFabricTarget implements CommandTarget {
               ? entry.archived
               : null,
             active: typeof entry.active === "boolean" ? entry.active : null,
-            manifest: this.conn.runtime.getCell(
-              this.conn.spaceDid,
+            manifest: conn.runtime.getCell(
+              conn.spaceDid,
               sessionCause(
-                this.conn.spaceDid,
-                this.conn.ownerDid,
+                conn.spaceDid,
+                conn.ownerDid,
                 entry.sourceId,
                 entry.nativeSessionId,
               ),
-              agentOwnerSchema(this.conn.ownerDid),
+              agentOwnerSchema(conn.ownerDid),
             ),
           };
           return [
@@ -983,18 +953,9 @@ export class AgentFabricTarget implements CommandTarget {
         source,
       ) => [String(source.id), { ...source }]),
     );
-    let pendingGraphs: PlannedSessionGraph[] = [];
     const observedSessionKeys = new Set<string>();
     const observedCompleteSourceIds = new Set<string>();
     const observedDescriptorSourceIds = new Set<string>();
-    const flushGraphs = async () => {
-      if (pendingGraphs.length === 0) return;
-      throwIfPublicationCanStop();
-      const batch = pendingGraphs;
-      pendingGraphs = [];
-      startGraphCommit();
-      await pushSessionGraphBatch(this.conn, batch);
-    };
 
     for (const source of collected) {
       if (isSourceSuperseded(source.source.id)) continue;
@@ -1015,7 +976,7 @@ export class AgentFabricTarget implements CommandTarget {
         entry.sourceId === source.source.id
       );
       const currentKeys = new Set<string>();
-      for (const snapshot of source.sessions) {
+      for await (const snapshot of source.sessions) {
         throwIfPublicationCanStop();
         const key = sessionKey(
           source.source.id,
@@ -1083,19 +1044,19 @@ export class AgentFabricTarget implements CommandTarget {
           });
           continue;
         }
-        const graph = await planSessionGraph(
-          this.conn,
+        await using sessionConnection = openPublicationConnection(conn);
+        const entry = await publishSessionGraph(
+          sessionConnection,
           prepared,
           driver,
           context,
+          startGraphCommit,
         );
-        const entry = graph.indexEntry;
+        entry.manifest = conn.runtime.getCellFromLink(
+          entry.manifest.getAsNormalizedFullLink(),
+        );
         entry.capabilities = { ...capabilities };
         entriesByKey.set(entry.key, entry);
-        pendingGraphs.push(graph);
-        if (pendingGraphs.length >= SESSION_GRAPH_BATCH_SIZE) {
-          await flushGraphs();
-        }
       }
       for (const prior of priorForSource) {
         if (currentKeys.has(prior.key)) continue;
@@ -1147,7 +1108,6 @@ export class AgentFabricTarget implements CommandTarget {
         });
       }
     }
-    await flushGraphs();
     throwIfPublicationCanStop();
     const generatedAt = new Date().toISOString();
     const generation = Math.max(
@@ -1179,7 +1139,7 @@ export class AgentFabricTarget implements CommandTarget {
       : checkoutEntries(activeSessions, discoveredCheckouts);
     const recentIndex: AgentSessionIndex = {
       schema: AGENT_CONNECTOR_SCHEMAS.sessionIndex,
-      ownerDid: this.conn.ownerDid,
+      ownerDid: conn.ownerDid,
       bucket: "recent",
       generatedAt,
       generation,
@@ -1191,7 +1151,7 @@ export class AgentFabricTarget implements CommandTarget {
     };
     const allIndex: AgentSessionIndex = {
       schema: AGENT_CONNECTOR_SCHEMAS.sessionIndex,
-      ownerDid: this.conn.ownerDid,
+      ownerDid: conn.ownerDid,
       bucket: "all",
       generatedAt,
       generation,
@@ -1202,8 +1162,8 @@ export class AgentFabricTarget implements CommandTarget {
       sessions: allSessions,
     };
     const indexChildScope = childScope(
-      this.conn.spaceDid,
-      this.conn.ownerDid,
+      conn.spaceDid,
+      conn.ownerDid,
       "session-index",
     );
     const [recentIndexPlan, allIndexPlan] = await Promise.all([
@@ -1213,10 +1173,10 @@ export class AgentFabricTarget implements CommandTarget {
     throwIfPublicationCanStop();
     startGraphCommit();
     await pushStableCellGraph(
-      this.conn,
+      conn,
       [
-        graphEntry(this.cells.index, recentIndexPlan),
-        graphEntry(this.cells.allIndex, allIndexPlan),
+        graphEntry(cells.index, recentIndexPlan),
+        graphEntry(cells.allIndex, allIndexPlan),
       ],
     );
     for (const key of observedSessionKeys) {
@@ -1516,14 +1476,10 @@ export class AgentFabricTarget implements CommandTarget {
     nativeSessionId: string,
   ): Promise<void> {
     const observationSequence = this.beginSessionObservation();
-    const snapshot = await driver.readSession(nativeSessionId);
+    await using sessions = await SessionSpool.create();
+    await sessions.append(await driver.readSession(nativeSessionId));
     await this.publish(
-      [{
-        source: driver.source,
-        sessions: [snapshot],
-        errors: [],
-        complete: false,
-      }],
+      [{ source: driver.source, sessions, errors: [], complete: false }],
       { preserveUntouchedStatus: true, observationSequence },
     );
   }

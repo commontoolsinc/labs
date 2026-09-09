@@ -937,6 +937,8 @@ function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
  * ```
  */
 export class Runtime {
+  static #ambientConfigUsers = 0;
+  #holdsAmbientConfig = false;
   #tearingDownWrites = false;
   readonly #writeTeardown = new AbortController();
 
@@ -1400,10 +1402,9 @@ export class Runtime {
     // Validate-then-apply: option combinations are refused BEFORE any
     // process-global write (the ambient experimental-flag propagation
     // below, the server-execution enabler), so a refused construction
-    // leaves no trace in the process — the try/catch further down rolls
-    // back only the enabler, and everything above it must not need
-    // rolling back. A serving runtime uses the DEFAULT trust-snapshot
-    // provider — the run stamper attaches per-run snapshots via
+    // leaves no trace in the process. The try/catch further down releases
+    // the runtime's ambient config ownership. A serving runtime uses the
+    // DEFAULT trust-snapshot provider — the run stamper attaches per-run snapshots via
     // trustSnapshotForPrincipal (serving-loop.md §3c), whose revision is
     // the runtime's own; a custom provider would be silently bypassed
     // for every acting run and would compose a revision the stamper
@@ -1509,6 +1510,8 @@ export class Runtime {
     this.experimental.serverExecution = this.#explicitServerExecution ??
       getServerExecutionConfig();
     this.servingPosture = options.servingPosture === true;
+    Runtime.#ambientConfigUsers++;
+    this.#holdsAmbientConfig = true;
     // Everything below can throw (URL parsing, host validation, engine
     // construction). The enabler claimed above is process-global state,
     // so a THROWING construction must roll it back — a leaked enabler
@@ -1702,6 +1705,7 @@ export class Runtime {
       this.#defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
+      this.#releaseAmbientConfig();
       throw error;
     }
   }
@@ -1983,14 +1987,11 @@ export class Runtime {
    * Passing `false` makes closing the CALLER's job — nothing else will. Note
    * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
    *
-   * Either way this resets the PROCESS-GLOBAL experimental config to defaults
-   * (`resetModernCellRepConfig` and friends) — except
-   * `readerSchemaPrecedence`, which dispose leaves standing: serving
-   * runtimes are per-space and idle-disposed, so a teardown reset would
-   * lift a live rollback from under the survivors. Under a non-default
-   * flag that is visible to a second runtime still running against the
-   * same store, which is exactly the caller this option serves — so set
-   * the flags per process, not per runtime, if two of them must agree.
+   * The last runtime's disposal resets the process-global modernCellRep and
+   * commitPreconditions settings to defaults. Disposing one of several live
+   * runtimes leaves those settings in effect. Explicit construction changes
+   * remain process-global. readerSchemaPrecedence stays in effect after every
+   * runtime has been disposed.
    */
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
@@ -2001,6 +2002,7 @@ export class Runtime {
       // Exception-safe: a rejecting teardown step must not leak the
       // process-global enabler (the reset would then never fire).
       this.#releaseServerExecutionEnabler();
+      this.#releaseAmbientConfig();
     }
 
     // Clear the current runtime reference
@@ -2129,13 +2131,21 @@ export class Runtime {
       // contract: the last enabler's dispose resets. Released in
       // #releaseServerExecutionEnabler (also called from the dispose
       // catch), so a REJECTING async teardown cannot leak the enabler.
-      resetModernCellRepConfig();
-      resetCommitPreconditionsConfig();
       // readerSchemaPrecedence deliberately does NOT reset here: a server
       // runs one serving runtime per space and disposes idle ones while
       // the rest live, so a dispose-time reset would lift a rollback out
       // from under them. The ambient changes only when a construction
       // sets it (last construction wins).
+    }
+  }
+
+  /** Releases ambient settings when the last runtime finishes teardown. */
+  #releaseAmbientConfig(): void {
+    if (!this.#holdsAmbientConfig) return;
+    this.#holdsAmbientConfig = false;
+    if (--Runtime.#ambientConfigUsers === 0) {
+      resetModernCellRepConfig();
+      resetCommitPreconditionsConfig();
     }
   }
 

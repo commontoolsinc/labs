@@ -105,6 +105,7 @@ function threadSummary(
   archivedFallback: boolean | null = null,
 ): SessionSummary {
   const thread = record(value);
+  const { turns: _turns, ...metadata } = thread;
   return {
     nativeSessionId: String(thread.id ?? ""),
     title: typeof thread.name === "string"
@@ -119,7 +120,7 @@ function threadSummary(
       ? thread.archived
       : archivedFallback,
     active: threadActive(thread.status),
-    raw: { ...thread },
+    raw: metadata,
   };
 }
 

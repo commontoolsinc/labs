@@ -224,11 +224,19 @@ when the replacement host does not share the earlier host's local ledger.
 The command-line wrapper requests collections periodically and on `SIGHUP`. It
 keeps one pending request while a collection is active. Calls that reach
 `AgentsHost.synchronize(reason)` are serialized. Each collection asks every
-running driver for its complete inventory and session snapshots. The host
-allocates a target observation sequence before those reads. It publishes all
-successful and partial source results together through
-`AgentFabricTarget.publish()`. The sequence prevents that collection from
-overwriting a newer session refresh if the refresh finishes first.
+running driver for its complete inventory and session snapshots. Drivers are
+collected sequentially. Each snapshot is captured in a private temporary spool,
+which publication reads one session at a time. The host removes the spools after
+publication or failure. The host allocates a target observation sequence before
+those reads. It publishes all successful and partial source results together
+through `AgentFabricTarget.publish()`. The sequence prevents that collection
+from overwriting a newer session refresh if the refresh finishes first.
+
+The host supplies independent runtimes for session and index publications. Each
+runtime is disposed after its commits settle. The persistent command runtime
+does not retain the transcript documents written during full collection.
+Targeted refreshes spool completed session reads before waiting for publication.
+Independent provider reads can proceed concurrently.
 
 Provider read failures do not discard sessions read successfully from the same
 source. They make that source and the overall host degraded. A Fabric

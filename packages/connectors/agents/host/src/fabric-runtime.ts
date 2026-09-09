@@ -62,20 +62,21 @@ export async function openAgentFabricRuntime(options: {
     ...(options.signal !== undefined ? { signal: options.signal } : {}),
   });
   options.signal?.throwIfAborted();
-  const storageManager = StorageManager.open({
-    as: session.as,
-    memoryHost: apiUrl,
-    spaceIdentity: session.spaceIdentity,
-  });
-  const runtime = new Runtime(runtimePresets.remoteClient({
-    apiUrl,
-    storageManager,
-    experimental,
-    trustSnapshotProvider: () => ({
-      id: `principal:${session.as.did()}`,
-      actingPrincipal: session.as.did(),
-    }),
-  }));
+  const createRuntime = () =>
+    new Runtime(runtimePresets.remoteClient({
+      apiUrl,
+      storageManager: StorageManager.open({
+        as: session.as,
+        memoryHost: apiUrl,
+        spaceIdentity: session.spaceIdentity,
+      }),
+      experimental,
+      trustSnapshotProvider: () => ({
+        id: `principal:${session.as.did()}`,
+        actingPrincipal: session.as.did(),
+      }),
+    }));
+  const runtime = createRuntime();
   let disposeTask: Promise<void> | undefined;
   const dispose = () => disposeTask ??= runtime.dispose();
 
@@ -106,6 +107,7 @@ export async function openAgentFabricRuntime(options: {
     options.signal?.throwIfAborted();
     const connection = {
       runtime,
+      createPublicationRuntime: createRuntime,
       spaceDid: session.space,
       ownerDid: options.ownerDid,
     };

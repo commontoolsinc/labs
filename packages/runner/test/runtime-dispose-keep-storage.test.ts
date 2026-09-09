@@ -369,9 +369,8 @@ describe("runtime.dispose({ closeStorage })", () => {
         "provider destroy failed",
       );
 
-      // PROCESS-GLOBAL, which is why this one matters beyond the runtime that
-      // set it: skipped once, a non-default flag reaches every runtime built
-      // afterwards in the same process and nothing puts it back.
+      expect(getModernCellRepConfig()).toBe(true);
+      await witnessRuntime.dispose();
       expect(getModernCellRepConfig()).toBe(false);
       expect(registered.filter((s) => failing.live.has(s))).toEqual([]);
     } finally {
