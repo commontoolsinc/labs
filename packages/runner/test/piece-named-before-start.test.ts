@@ -95,7 +95,7 @@ const CARDS_ITEM_SCHEMA = {
   },
 } as const;
 // One card per case, each cold on the replica that runs it.
-const CARD_COUNT = 9;
+const CARD_COUNT = 10;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -674,5 +674,50 @@ describe("piece-named-before-start", () => {
     expect(pendingStarts()).toBe(1);
     expect(await send(cardB, "poke")).toBe(10);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
+  });
+  it("releases a start whose moved pointer names a pattern this session cannot load", async () => {
+    const { cardB, itemB, key } = locateCard(9);
+    const v1Ref = b.patternManager.getArtifactEntryRef(cardPattern)!;
+    let moved = false;
+    b.runner.accessForTestingOnly.dependencySyncer = async (
+      resultCell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      const walked = await sync(resultCell, pattern, inputs);
+      if (!moved) {
+        moved = true;
+        const moveTx = b.edit();
+        cardB.withTx(moveTx).setMetaRaw("patternIdentity", {
+          identity: v1Ref.identity,
+          symbol: "unknown",
+        }, rawMetaWriteAuthorization);
+        expect((await moveTx.commit()).error).toBeUndefined();
+      }
+      return walked;
+    };
+    const failures: { actionId: string; error: unknown }[] = [];
+    b.pieceStartCommitFailureObserver = (failure) => {
+      failures.push(failure);
+    };
+    const settled = waitForDeferredStart(
+      b,
+      "runner.deferred-start.settled",
+      key,
+    );
+    const runTx = b.edit();
+    b.runner.run(runTx, undefined, { item: itemB }, cardB);
+    b.prepareTxForCommit(runTx);
+    expect((await runTx.commit()).error).toBeUndefined();
+    expect((await settled).outcome).toBe("cancelled");
+    await quiesce(b);
+    expect(b.runner.cancels.has(key)).toBe(false);
+    expect(failures.map((failure) => failure.actionId)).toEqual([
+      `piece-run/${cardB.getAsNormalizedFullLink().id}`,
+    ]);
+    expect(String((failures[0].error as Error).message)).toContain(
+      "Unknown pattern",
+    );
   });
 });
