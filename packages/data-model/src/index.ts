@@ -88,6 +88,8 @@ export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 export {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  JS_TYPE_VALUE_TAGS,
+  type JsTypeValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
