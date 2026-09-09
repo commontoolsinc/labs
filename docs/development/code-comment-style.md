@@ -699,7 +699,7 @@ nothing else. The blank line is load-bearing for that same reason: it is what
 keeps the header from being read as the doc comment of the first declaration
 under it.
 
-Every file gets one, except for the three kinds below.
+Every file gets one, except for the four kinds below.
 
 **A file that defines a single thing.** Where the whole content of a file is
 one declaration — one class, one function, one type — along with the imports
@@ -737,8 +737,31 @@ The exception ends where the file does. A second exported declaration, or
 module-level machinery that is not simply in service of the one, and the file
 has something to say about itself again.
 
-**A re-export barrel**, and **a test fixture whose content is the point**, are
-the other two.
+**A unit test file.** Its name says what it tests, and its one top-level
+`describe()` says it again, so the header a typical one could carry is either
+``Unit tests for `fryer.ts`.`` or a restatement of the contract that the code
+under test already documents. Neither is worth the slot, and a file whose
+header would be one of those has none.
+
+The exemption is narrower than its name, in two ways. It covers the `.test.ts`
+file itself and nothing beside it: a helper module under `test/` — shared
+setup, a fake, a builder for test values — is an ordinary file, and gets a
+header on the ordinary terms. And it is a default rather than a bar. A test
+file that does something a reader would not guess from its name — walks a
+generated corpus, drives the code under test from a second runtime, checks two
+implementations against each other — has something to say about itself that no
+declaration in it says, and a header is where that goes.
+
+**A re-export barrel.** Its whole content is the list of what it re-exports,
+and each entry carries its own doc comment where it is declared. A header
+could only repeat the list, and would stop matching it at the next line added
+to the file.
+
+**A test fixture whose content is the point.** The file is an input a test
+feeds to the code under test, or an output it compares against, and what it
+is for is stated in the test that reads it. A header inside it would be part
+of the content, and where the fixture is source that a compiler or transformer
+takes in, part of what the test measures.
 
 Two placements look close enough to pass and are not. A `//` block is not an
 alternative form of a header: it reads as a note about the line beneath it,
