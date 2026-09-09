@@ -473,9 +473,9 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    declarations, and empty records. A record with no named properties or call
    or construct signatures, and at least one index signature, yields `{}` when
    every index value type is `never`. This includes `Record<string, never>`,
-   `Record<PropertyKey, never>`, and aliases of these types, in both
-   `T | Default<V>` and `Default<T, V>`. The record check does not require a
-   symbol value declaration. A propertyless record with `string` or `unknown`
+   `Record<PropertyKey, never>`, their intersections, and aliases of these types,
+   in both `T | Default<V>` and `Default<T, V>`. The record check does not require
+   a symbol value declaration. A propertyless record with `string` or `unknown`
    values does not qualify for this check.
 3. **Brand-payload fallback**: `Default<T,V>` carries V in a
    `DEFAULT_MARKER`-branded payload; when the alias is resolved away

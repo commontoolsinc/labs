@@ -852,6 +852,10 @@ function schemaSubsetIssue(
 
 const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   ...ANNOTATION_KEYS,
+  // Cell wrappers and storage scopes do not constrain descendant values.
+  // Changes to the metadata itself are checked by `SEMANTIC_EXTENSION_KEYS`.
+  "asCell",
+  "scope",
   "$ref",
   "additionalProperties",
   "exclusiveMaximum",
@@ -1038,15 +1042,10 @@ function objectSubsetIssue(
     // refused at dispatch once the update has landed. Below a verb node the
     // rule is the argument side's, stated in this comparison's direction:
     // `source` is the candidate here, where `target` is the candidate there.
-    // The rescue turns on the field's own default and not on
-    // `allowEvolutionDefaults`, which the verb node above has already set
-    // false: `asCell` is not default-stable, so descending through one
-    // withdraws permission to introduce a default anywhere below. That
-    // withdrawal is about defaults that CHANGE, which the check above decides
-    // on its own. A field that carried the same default before and after
-    // changes nothing and still materializes for a caller that omits it, so
-    // reusing the flag here would refuse the one evolution this rule means to
-    // allow.
+    // The rescue uses the field's own default even when an ancestor forbids
+    // changed defaults. An unchanged default still materializes the field for
+    // a caller that omits it; the default-comparison check separately rejects
+    // changed defaults beneath constraints that are not default-stable.
     if (context.verbEvent) {
       for (const property of sourceRequired) {
         if (

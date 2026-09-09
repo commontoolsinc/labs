@@ -1348,6 +1348,95 @@ describe("piece schema compatibility", () => {
       .toThrow(/not stable under default insertion/);
   });
 
+  it("accepts record defaults with unchanged cell and scope metadata", () => {
+    const resultSchema: JSONSchema = { type: "object" };
+    for (
+      const metadata of [
+        { asCell: ["cell"] },
+        { asCell: [{ kind: "cell", scope: "space" }] },
+        { scope: "user" },
+      ] as const
+    ) {
+      const record: JSONSchema = {
+        type: "object",
+        additionalProperties: { type: "string" },
+      };
+      const source: JSONSchema = {
+        type: "object",
+        properties: { settings: { ...record, ...metadata } },
+      };
+      const target: JSONSchema = {
+        ...source,
+        properties: { settings: { ...record, ...metadata, default: {} } },
+      };
+
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(source, resultSchema),
+          pattern(target, resultSchema),
+        )
+      ).not.toThrow();
+      expect(() => assertSchemaSubset(source, target)).not.toThrow();
+
+      const withRef: JSONSchema = {
+        type: "object",
+        properties: { settings: { $ref: "#/$defs/Settings", ...metadata } },
+        $defs: { Settings: record },
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(withRef, resultSchema),
+          pattern({
+            ...withRef,
+            $defs: { Settings: { ...record, default: {} } },
+          }, resultSchema),
+        )
+      ).not.toThrow();
+    }
+  });
+
+  it("rejects cell and scope changes when a record gains a default", () => {
+    for (
+      const [before, after, message] of [
+        [{ asCell: ["cell"] }, { asCell: ["readonly"] }, "asCell changed"],
+        [{ scope: "user" }, { scope: "space" }, "scope changed"],
+      ] as const
+    ) {
+      const record: JSONSchema = {
+        type: "object",
+        additionalProperties: { type: "string" },
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern({ ...record, ...before }, true),
+          pattern({ ...record, ...after, default: {} }, true),
+        )
+      ).toThrow(message);
+    }
+  });
+
+  it("rejects descendant defaults under a cell with a property-count constraint", () => {
+    const source: JSONSchema = {
+      type: "object",
+      asCell: ["cell"],
+      properties: { settings: { type: "object" } },
+      maxProperties: 0,
+    };
+    const target: JSONSchema = {
+      ...source,
+      properties: { settings: { type: "object", default: {} } },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(source, true),
+        pattern(target, true),
+      )
+    ).toThrow(/not stable under default insertion/);
+    expect(() => assertSchemaSubset(source, target)).toThrow(
+      /not stable under default insertion/,
+    );
+  });
+
   it("rejects changed migration defaults below default-unstable constraints", () => {
     const resultSchema: JSONSchema = {
       type: "object",

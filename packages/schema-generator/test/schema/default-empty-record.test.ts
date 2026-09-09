@@ -15,6 +15,7 @@ describe("default-empty-record", () => {
           "Record<number, never>",
           "Record<symbol, never>",
           "Record<PropertyKey, never>",
+          "Record<string, never> & Record<number, never>",
           "{ [K in PropertyKey]: never }",
           "{ [key: string]: never }",
         ]
@@ -45,6 +46,7 @@ describe("default-empty-record", () => {
           "Record<string, unknown>",
           'Record<"required", never>',
           "Record<string, never[]>",
+          "Record<string, never> & Record<symbol, string>",
           "{ [K in PropertyKey]: K extends string ? never : string }",
         ]
       ) {
@@ -69,4 +71,20 @@ describe("default-empty-record", () => {
       }
     });
   }
+
+  it("emits an empty object default for an aliased `typeof` value", async () => {
+    const { type, checker, typeNode } = await getTypeFromCode(
+      `
+      interface Default<T, V extends T = T> {}
+      const emptyObject = {};
+      type EmptyObject = typeof emptyObject;
+      type SchemaRoot = Default<Record<string, unknown>, EmptyObject>;
+      `,
+      "SchemaRoot",
+    );
+    const schema = asObjectSchema(
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
+    );
+    expect(schema.default).toEqual({});
+  });
 });

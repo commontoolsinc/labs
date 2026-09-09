@@ -117,6 +117,12 @@ candidate pattern generates it during setup. This admits the forward migration;
 add a result default as well when an older concurrently running generation must
 still be able to write its previous result shape.
 
+Unchanged cell wrappers (`asCell`) and storage scopes (`scope`) permit default
+insertion, including an empty-object default on a record reached through a
+`$ref`. The metadata itself must still compare equal across an update. Value
+constraints that default insertion can invalidate, such as `maxProperties`,
+continue to require equal defaults beneath them.
+
 A verb's event is the one place inside a result where that reasoning does not
 hold, and the direction is decided by which side supplies the value rather
 than by where the node sits. A verb declares its event below a stream marker

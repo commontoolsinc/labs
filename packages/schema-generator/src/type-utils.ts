@@ -912,7 +912,7 @@ export function isEmptyRecordType(
   typeChecker: ts.TypeChecker,
 ): boolean {
   if (
-    (type.flags & ts.TypeFlags.Object) === 0 ||
+    (type.flags & (ts.TypeFlags.Object | ts.TypeFlags.Intersection)) === 0 ||
     typeChecker.getPropertiesOfType(type).length !== 0 ||
     type.getCallSignatures().length !== 0 ||
     type.getConstructSignatures().length !== 0
