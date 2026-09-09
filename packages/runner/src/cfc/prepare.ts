@@ -1400,12 +1400,31 @@ const schemasEqualIgnoringWriterStamp = (
     stripWriterIdentityStamp(right),
   );
 
+const candidateDeclaresNothing = (
+  candidate: JSONSchema | undefined,
+): boolean =>
+  candidate === true ||
+  (isObjectNotArray(candidate) && Object.keys(candidate).length === 0);
+
 // Exported for unit testing of the merge-skip decision. Not part of the
 // public CFC surface.
 export const storedSchemaCoversCandidateEnvelope = (
   stored: JSONSchema | undefined,
   candidate: JSONSchema | undefined,
 ): boolean => {
+  // A candidate that declares nothing — JSON Schema `true`, or the empty
+  // object schema `getSchemaAtPath` returns for it — carries no label, no
+  // policy claim and no shape, so folding it into a stored schema that
+  // admits values leaves that schema as it stands. `false` admits none, and
+  // the merge refuses that form, so it is not one of those.
+  //
+  // The reading is narrower than `cfcSchemaIsTrue`, which also admits a
+  // schema whose only keys are `ifc`, `asCell`, `asStream`, `scope`,
+  // `default` or `$defs`. Each of those carries something the merge folds
+  // in.
+  if (stored !== false && candidateDeclaresNothing(candidate)) {
+    return true;
+  }
   if (stored === undefined || candidate === undefined) {
     return false;
   }
@@ -1424,12 +1443,25 @@ export const storedSchemaCoversCandidateEnvelope = (
       return false;
     }
     const storedProperties = stored.properties;
+    // What a stored `additionalProperties` governs is every key the STORED
+    // side does not name, and the merge pulls that claim down onto a key the
+    // candidate names (`leftClaim` in `mergeCfcSchemaEnvelopes`). So a
+    // candidate key absent from the stored properties is covered only where
+    // no such claim stands to be pulled down; otherwise the merge is what
+    // mints the label for it.
+    const storedGovernsUnnamedKeys = stored.additionalProperties !== undefined;
     if (
       !Object.entries(candidate.properties).every(([key, child]) =>
-        storedSchemaCoversCandidateEnvelope(
-          storedProperties[key] as JSONSchema | undefined,
-          child as JSONSchema,
-        )
+        Object.hasOwn(storedProperties, key)
+          ? storedSchemaCoversCandidateEnvelope(
+            storedProperties[key] as JSONSchema | undefined,
+            child as JSONSchema,
+          )
+          : !storedGovernsUnnamedKeys &&
+            storedSchemaCoversCandidateEnvelope(
+              undefined,
+              child as JSONSchema,
+            )
       )
     ) {
       return false;
