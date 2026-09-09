@@ -162,9 +162,9 @@ export function census(
   for (const suite of suites) {
     const unavailable = unavailableUnits(suite);
     // A unit that is a path is made mandatory by the diff naming it. A
-    // unit that is not — a type-check group, a binary — is one the suite
-    // has to map the diff onto itself, because only it knows what its
-    // unit covers.
+    // unit that is not — a type-check group, a repository gate, a
+    // binary — is one the suite has to map the diff onto itself,
+    // because only it knows what its unit covers.
     const touched = new Set<string>(
       suite.unitsForChange !== undefined
         ? suite.unitsForChange(changed)
