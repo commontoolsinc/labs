@@ -1,4 +1,6 @@
 import { expect } from "@std/expect";
+import { parse as parseJsonc } from "@std/jsonc";
+import * as path from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import {
   capabilitiesBySuite,
@@ -11,14 +13,88 @@ import {
 import { CAPABILITIES } from "./ci-capabilities.ts";
 import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
-const suites = await loadTopology(
-  new URL("..", import.meta.url).pathname.replace(/\/$/, ""),
-);
+const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const suites = await loadTopology(root);
+
+/** The Deno subcommands a suite's runner is allowed to be. */
+const SUBCOMMANDS = new Set(["task", "test", "run", "check", "fmt", "lint"]);
+
+/** The task names the manifest in a directory defines, if it has one. */
+async function tasksOf(dir: string): Promise<Set<string>> {
+  for (const name of ["deno.json", "deno.jsonc"]) {
+    const text = await Deno.readTextFile(path.join(dir, name)).catch(
+      () => undefined,
+    );
+    if (text === undefined) continue;
+    const manifest = parseJsonc(text) as { tasks?: Record<string, unknown> };
+    return new Set(Object.keys(manifest.tasks ?? {}));
+  }
+  return new Set();
+}
 
 describe("the test topology", () => {
   it("names each suite once", () => {
     const ids = suites.map((suite) => suite.id);
     expect(ids.length).toBe(new Set(ids).size);
+  });
+
+  it("names a task every manifest it runs in defines", async () => {
+    // `deno fmt` and `deno lint` are subcommands rather than tasks of this
+    // repository, and a command asking for one as a task prints the list
+    // of tasks that do exist and exits one. A lane reports that the way it
+    // reports any failed unit, by exiting one itself, with no failing test
+    // under it to say what broke. So every task a suite runs is held to
+    // being one Deno can find: defined where the command runs, or in the
+    // root manifest, which is where Deno looks next.
+
+    const outputDir = await Deno.makeTempDir({ prefix: "topology-commands-" });
+    const rootTasks = await tasksOf(root);
+    const missing: string[] = [];
+    const named: string[] = [];
+    for (const suite of suites) {
+      const requests = suite.units.map((unit) => ({ unit, skip: [] }));
+      for (
+        const invocation of await suite.command(requests, {
+          root,
+          outputDir,
+          baseRef: "origin/main",
+        })
+      ) {
+        // A suite whose runner is a script of its own runs no Deno
+        // subcommand and names no task.
+        if (invocation.command[0] !== Deno.execPath()) continue;
+        // What the command runs, which for a gate is what the recorder
+        // was handed rather than the recorder's own task.
+        const separator = invocation.command.indexOf("--");
+        const run = separator < 0
+          ? invocation.command.slice(1)
+          : invocation.command.slice(separator + 2);
+        if (!SUBCOMMANDS.has(run[0]!)) {
+          missing.push(`${suite.id}: ${run[0]} is no subcommand of Deno`);
+          continue;
+        }
+        if (run[0] !== "task") continue;
+        named.push(run[1]!);
+        const where = invocation.cwd ?? root;
+        const local = await tasksOf(where);
+        if (!local.has(run[1]!) && !rootTasks.has(run[1]!)) {
+          missing.push(`${suite.id}: no task named ${run[1]} in ${where}`);
+        }
+      }
+    }
+    await Deno.remove(outputDir, { recursive: true });
+    expect(missing).toEqual([]);
+
+    // A run that read nothing satisfies the check above, and so does one
+    // that stopped at the recorder instead of reaching what the recorder
+    // was handed. Every gate whose name begins `check-` runs a task of
+    // that name, so the two counts agree only where each of them was
+    // reached and read past the recorder.
+    const gates = ["repo-gates", "repo-history-gates"]
+      .flatMap((id) => suiteById(suites, id)!.units)
+      .filter((unit) => unit.startsWith("check-"));
+    expect(named.filter((task) => task.startsWith("check-")).toSorted())
+      .toEqual(gates.toSorted());
   });
 
   it("asks only for capabilities the registry declares", () => {

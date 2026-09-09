@@ -386,14 +386,14 @@ table is the migration's checklist.
 | `pattern-compat` | `Pattern Update Compatibility (1..3)` | — | `deno` |
 | `pattern-vintage` | `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `generated-patterns` | `Generated Patterns Integration Tests (1..2)` | — | `deno`, `compile-cache` |
-| `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` |
+| `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed-baked`, `browser` |
 | `package-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
 | `deployed-topology` | the background-service and cf-harness default-posture gates | — | `deno`, `toolshed`, `bg-piece-service-binary` |
 | `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` |
 | `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` |
 | `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` |
-| `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed`, `browser`, `compile-cache` |
-| `pattern-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
+| `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed-baked`, `browser`, `compile-cache` |
+| `pattern-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser`, `compile-cache` |
 | `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
 | `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
 | `binaries` | the compile inside `Build Binary (toolshed)` and the two beside it | — | `deno` |
@@ -1037,7 +1037,8 @@ from source with `deno run` skips both. The dependency graph is already in
 the Deno cache that the `deno` capability restores, so starting from
 source costs a few seconds. The full run on `main` keeps the
 compiled-binary path, because it needs the binary anyway for attestation
-and deployment.
+and deployment. A suite that only talks to the server's API takes this
+one, which is why the CLI suites and the deployed-topology gates do.
 
 **The baked capabilities cannot.** The browser shell is a bundle compiled
 into the binary, so a server run from source answers the API and serves no

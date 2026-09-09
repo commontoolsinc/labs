@@ -112,6 +112,14 @@ export interface CommandContext {
   coverageDir?: string;
 
   /**
+   * Where a producer that writes a coverage report of its own puts it.
+   * The authored-pattern instrumentation writes LCOV rather than a V8
+   * profile, so it has nowhere to put one under `coverageDir`, which
+   * holds profiles and is converted from them.
+   */
+  patternCoverageDir?: string;
+
+  /**
    * What this change is measured against, as a git revision. The gates
    * that hold a file to being appended to compare against it.
    */
@@ -382,6 +390,14 @@ export interface FileSuiteOptions {
    * directory and its own record scope.
    */
   parts: readonly FilePart[];
+
+  /**
+   * Whether this suite's runner instruments authored patterns, which
+   * write a coverage report of their own rather than a V8 profile. A
+   * suite that says so is handed `CF_PATTERN_COVERAGE_DIR` wherever the
+   * batch is measured.
+   */
+  patternCoverage?: boolean;
 }
 
 /**
@@ -462,6 +478,12 @@ export function fileSuite(options: FileSuiteOptions): Suite {
         }
         if (context.coverageDir !== undefined) {
           env.DENO_COVERAGE_DIR = path.join(context.coverageDir, slug);
+        }
+        if (
+          options.patternCoverage === true &&
+          context.patternCoverageDir !== undefined
+        ) {
+          env.CF_PATTERN_COVERAGE_DIR = context.patternCoverageDir;
         }
         invocations.push({
           command: [
