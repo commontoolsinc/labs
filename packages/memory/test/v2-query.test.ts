@@ -2759,3 +2759,99 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     await Deno.remove(path);
   }
 });
+
+// The memory engine owns scope partitions and drives the runner's graph walk,
+// so this boundary test makes an inherited metadata scope observable.
+Deno.test("memory v2 query loads CFC schemas from space scope", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-cfc-schema-scope";
+  const identity = { principal: "did:key:alice", sessionId: "session:alice" };
+  const labelSchema = {
+    type: "object",
+    properties: { name: { type: "string" } },
+  } as const;
+  const labelSchemaId = `cid:${internSchemaAsTaggedHashString(labelSchema)}`;
+
+  try {
+    applyCommit(engine, {
+      ...identity,
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: labelSchemaId,
+          value: { value: labelSchema },
+        }, {
+          op: "set",
+          id: "of:scoped-crossing",
+          scope: "user",
+          value: {
+            value: { name: "target" },
+            cfc: {
+              version: 1,
+              schemaHash: labelSchemaId.slice("cid:".length),
+              labelMap: { version: 1, entries: [] },
+            },
+          },
+        }, {
+          op: "set",
+          id: "of:cfc-schema-scope-root",
+          value: {
+            value: {
+              child: {
+                "/": {
+                  "link@1": {
+                    id: "of:scoped-crossing",
+                    path: [],
+                    space,
+                    scope: "user",
+                  },
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+
+    const result = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:cfc-schema-scope-root",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                child: {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
+    );
+
+    assertEquals(
+      result.entities.find((entity) => entity.id === labelSchemaId),
+      {
+        branch: "",
+        id: labelSchemaId,
+        seq: 1,
+        document: { value: labelSchema },
+      },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

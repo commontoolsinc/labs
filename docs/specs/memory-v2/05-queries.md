@@ -264,7 +264,11 @@ ordinary cell references. The `internal` field is raw metadata, not a direct
 metadata link. It stores a manifest array, and each manifest-entry `link` names
 an internal cell owned by the result cell. The `cfc` metadata field is also
 special: it uses a compact metadata object, and traversal converts its
-`schemaHash` into a CID sigil link before loading the referenced document.
+`schemaHash` into a CID sigil link before loading the referenced document. The
+synthesized link MUST declare
+[space scope](../content-addressed-schemas.md#schema-documents) even when the
+document carrying the metadata is user- or session-scoped: content-addressed
+schema documents never inherit a referrer's scope.
 
 How much of a document's metadata family the evaluation loads depends on the
 document's ROLE in the query:
