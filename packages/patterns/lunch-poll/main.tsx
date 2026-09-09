@@ -88,6 +88,7 @@ import {
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
 import { safeImageUrl } from "./generated-art.tsx";
+import { memoBy } from "./voter-memo.ts";
 
 /**
  * The minimal profile shape this pattern reads: the stable identity cell for
@@ -1017,15 +1018,31 @@ interface OptionTally {
 }
 
 /**
- * The key a voter's cell groups under, so that a lookup made for one of a
- * voter's votes serves the rest. A voter is compared with `equals()`, which
- * resolves both sides; this key only says which cells are the same link, so
- * two spellings of one voter cost one comparison each and never a wrong one.
+ * The key a voter's cell is looked up under, so that a lookup made for one of
+ * a voter's votes serves the rest. The key is a hint, not an identity: it is
+ * built from the entity id and path alone, and two profile cells in different
+ * spaces or scopes can share one. A remembered answer is served only to a
+ * voter whose link equals the one it was computed for; other voters under the
+ * same key are kept apart.
  */
 const voterKey = (voter: LunchProfileCell): string | undefined => {
   const id = getEntityId(voter);
   return id === undefined ? undefined : entityRefToString(id);
 };
+
+/**
+ * Remembers `compute(voter)` per voter, so a voter who cast several votes is
+ * looked up once. A hit is a remembered voter whose link equals this one, not
+ * merely one whose key matches.
+ */
+const memoByVoter = <T,>(
+  compute: (voter: LunchProfileCell) => T,
+): (voter: LunchProfileCell) => T =>
+  memoBy(
+    voterKey,
+    (remembered, voter) => remembered.equalLinks(voter),
+    compute,
+  );
 
 /** A vote as the tally holds it: read off the reactive list once. */
 type VoteRecord = Pick<Vote, "voter" | "voteType">;
@@ -1043,13 +1060,15 @@ const groupVotesByOption = (
 ): Map<string, VoteRecord[]> => {
   const byOption = new Map<string, VoteRecord[]>();
   for (const vote of votes) {
+    const voter = vote.voter;
+    const optionId = vote.optionId;
     const record: VoteRecord = {
       voteType: vote.voteType,
-      ...(vote.voter === undefined ? {} : { voter: vote.voter }),
+      ...(voter === undefined ? {} : { voter }),
     };
-    const group = byOption.get(vote.optionId);
+    const group = byOption.get(optionId);
     if (group === undefined) {
-      byOption.set(vote.optionId, [record]);
+      byOption.set(optionId, [record]);
     } else {
       group.push(record);
     }
@@ -1070,39 +1089,26 @@ const tallyOptions = (
   // are looked up from the roster by comparison. A voter who has left the
   // roster still tallies; they just render without a name. The roster is read
   // once, and each voter is compared once however many votes they cast.
-  const roster = users.map((u) => ({
-    name: u.name,
-    color: u.color,
-    ...(u.profile === undefined ? {} : { profile: u.profile }),
-  }));
+  const roster = users.map((u) => {
+    const profile = u.profile;
+    return {
+      name: u.name,
+      color: u.color,
+      ...(profile === undefined ? {} : { profile }),
+    };
+  });
   const participantNames = roster.map((u) => u.name);
   const initialsByName = getInitialsByName(participantNames);
-  const rosterByVoter = new Map<string, (typeof roster)[number] | undefined>();
+  const rosterEntryOf = memoByVoter((voter) =>
+    roster.find((u) => u.profile !== undefined && equals(u.profile, voter))
+  );
   const rosterOf = (
     voter: LunchProfileCell | undefined,
-  ): (typeof roster)[number] | undefined => {
-    if (voter === undefined) return undefined;
-    const key = voterKey(voter);
-    if (key !== undefined && rosterByVoter.has(key)) {
-      return rosterByVoter.get(key);
-    }
-    const entry = roster.find((u) =>
-      u.profile !== undefined && equals(u.profile, voter)
-    );
-    if (key !== undefined) rosterByVoter.set(key, entry);
-    return entry;
-  };
-  const selfByVoter = new Map<string, boolean>();
-  const isSelf = (voter: LunchProfileCell | undefined): boolean => {
-    if (viewer === undefined || voter === undefined) return false;
-    const key = voterKey(voter);
-    if (key !== undefined && selfByVoter.has(key)) {
-      return selfByVoter.get(key)!;
-    }
-    const same = equals(voter, viewer);
-    if (key !== undefined) selfByVoter.set(key, same);
-    return same;
-  };
+  ): (typeof roster)[number] | undefined =>
+    voter === undefined ? undefined : rosterEntryOf(voter);
+  const viewerIs = memoByVoter((voter) => equals(voter, viewer));
+  const isSelf = (voter: LunchProfileCell | undefined): boolean =>
+    viewer !== undefined && voter !== undefined && viewerIs(voter);
   const byOption = groupVotesByOption(votes);
   const tallies = options.map((option): OptionTally => {
     const optionVotes = byOption.get(option.id) ?? [];
