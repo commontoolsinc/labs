@@ -62,6 +62,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
+- [Pre-syncing from node plans](presync-from-node-plans.md) makes one
+  derivation per pattern node serve both instantiation and the pre-sync, so a
+  resume and a fresh start name exactly what each lift, handler, builtin, and
+  nested pattern reads under its transformer-narrowed schema, then holds each
+  node's first run on the loads it named instead of on a space-wide timer.
 - [Choosing which tests a pull request runs](pull-request-test-selection.md)
   replaces the sixty-seven pull-request jobs with five, each running a subset
   chosen from what the record store knows about which tests have caught real
