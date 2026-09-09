@@ -25,7 +25,7 @@ const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 
 const suites = await loadGateSuites(root);
 const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
-const context = { root: "/repo", outputDir: "/out" };
+const context = { root: "/repo", outputDir: "/out", spoolDir: "/spool" };
 
 describe("the repository's gate suites", () => {
   it("gives the base revision to the gates whose suite asks for history", async () => {
@@ -236,6 +236,28 @@ describe("the repository's gate suites", () => {
     expect(invocation!.command).toContain("lint");
     expect(invocation!.command).toContain("deno-lint");
     expect(invocation!.cwd).toBe("/repo");
+  });
+
+  it("runs the two Deno subcommands as subcommands", async () => {
+    // `fmt` and `lint` are subcommands of Deno rather than tasks this
+    // repository defines, so a command asking for either as a task
+    // prints the list of tasks that do exist and exits one. The tail of
+    // the command line is what the recorder runs, and it is the whole of
+    // what decides this.
+
+    const suite = byId("repo-gates");
+    for (
+      const [unit, run] of [
+        ["deno-fmt", ["fmt", "--check"]],
+        ["deno-lint", ["lint"]],
+      ] as const
+    ) {
+      const [invocation] = await suite.command([{ unit, skip: [] }], context);
+      expect(invocation!.command.slice(-run.length - 1)).toEqual([
+        Deno.execPath(),
+        ...run,
+      ]);
+    }
   });
 
   it("gives a gate that compares against a base the base to use", async () => {

@@ -14,6 +14,7 @@ import {
   serializeSkipList,
   SKIP_LIST_VARIABLE,
   type SkipList,
+  spoolWriteArgument,
   type TestIdentity,
 } from "@commonfabric/test-support/records";
 import type { CapabilityId } from "../ci-capabilities.ts";
@@ -112,10 +113,26 @@ export interface CommandContext {
   coverageDir?: string;
 
   /**
+   * Where a producer that writes a coverage report of its own puts it.
+   * The authored-pattern instrumentation writes LCOV rather than a V8
+   * profile, so it has nowhere to put one under `coverageDir`, which
+   * holds profiles and is converted from them.
+   */
+  patternCoverageDir?: string;
+
+  /**
    * What this change is measured against, as a git revision. The gates
    * that hold a file to being appended to compare against it.
    */
   baseRef?: string;
+
+  /**
+   * The spool this batch's records go in, absolute. An invocation that
+   * loads the registration preload is permitted to write here, which is
+   * where the preload leaves the name map that gives each identity its
+   * file.
+   */
+  spoolDir: string;
 }
 
 /** One test surface. */
@@ -323,6 +340,21 @@ export function unavailableFrom(
   return { whole, unavailable };
 }
 
+/**
+ * What an invocation takes to record: the preload, and the write
+ * permission it needs to leave its name map in the batch's spool. The
+ * permission is left out where the flags already grant one, since
+ * appending a path list to a blanket grant either ends the run or cuts
+ * the grant down to that list; `spoolWriteArgument` says which.
+ */
+export function recordingArguments(
+  flags: readonly string[],
+  context: CommandContext,
+): string[] {
+  const write = spoolWriteArgument(flags, context.spoolDir);
+  return write === undefined ? [preloadArgument()] : [preloadArgument(), write];
+}
+
 /** Writes a batch's skip list where its invocations will read it. */
 export async function writeSkipList(
   skipListPath: string,
@@ -382,6 +414,14 @@ export interface FileSuiteOptions {
    * directory and its own record scope.
    */
   parts: readonly FilePart[];
+
+  /**
+   * Whether this suite's runner instruments authored patterns, which
+   * write a coverage report of their own rather than a V8 profile. A
+   * suite that says so is handed `CF_PATTERN_COVERAGE_DIR` wherever the
+   * batch is measured.
+   */
+  patternCoverage?: boolean;
 }
 
 /**
@@ -463,12 +503,18 @@ export function fileSuite(options: FileSuiteOptions): Suite {
         if (context.coverageDir !== undefined) {
           env.DENO_COVERAGE_DIR = path.join(context.coverageDir, slug);
         }
+        if (
+          options.patternCoverage === true &&
+          context.patternCoverageDir !== undefined
+        ) {
+          env.CF_PATTERN_COVERAGE_DIR = context.patternCoverageDir;
+        }
         invocations.push({
           command: [
             Deno.execPath(),
             "test",
             ...part.flags,
-            preloadArgument(),
+            ...recordingArguments(part.flags, context),
             `--junit-path=${junitPath}`,
             ...group.map((request) =>
               path.relative(cwd, path.resolve(context.root, request.unit))

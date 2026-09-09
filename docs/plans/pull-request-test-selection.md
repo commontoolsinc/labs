@@ -386,14 +386,14 @@ table is the migration's checklist.
 | `pattern-compat` | `Pattern Update Compatibility (1..3)` | — | `deno` |
 | `pattern-vintage` | `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `generated-patterns` | `Generated Patterns Integration Tests (1..2)` | — | `deno`, `compile-cache` |
-| `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` |
+| `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed-baked`, `browser` |
 | `package-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
 | `deployed-topology` | the background-service and cf-harness default-posture gates | — | `deno`, `toolshed`, `bg-piece-service-binary` |
 | `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` |
 | `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` |
 | `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` |
-| `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed`, `browser`, `compile-cache` |
-| `pattern-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
+| `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed-baked`, `browser`, `compile-cache` |
+| `pattern-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser`, `compile-cache` |
 | `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
 | `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
 | `binaries` | the compile inside `Build Binary (toolshed)` and the two beside it | — | `deno` |
@@ -909,8 +909,7 @@ being imposed.
 - Suites that are not `deno test` need no mechanism. Every one of their
   invocation units holds a single identity, so skipping it is declining to
   invoke it.
-- Both halves of the drift guard are unchanged: the tree half still claims
-  files, the store half still claims identities.
+- Skipping does not reach the drift guard.
 - A repeat names an identity and invokes its file with every other
   identity in that file skipped.
 
@@ -954,8 +953,8 @@ The topology is only worth having if it stays complete. A new test surface
 that nobody registers would silently vanish from the full run, which is a
 far worse failure than the workflow edit it replaced.
 
-`deno task check-test-topology` closes that, in two halves that catch the
-two different ways a surface goes missing.
+`deno task check-test-topology` closes that. A surface goes missing in
+three ways, and the guard answers each.
 
 The **tree half** needs no store, and is a unit of the `repo-gates` suite.
 It walks the tree for things that look like tests — `*.test.ts`,
@@ -970,6 +969,23 @@ leaves the unregistered surface to the full run on `main`, which is where
 the record of what this guard catches comes from. An entry in a
 configuration's declared skip registry accounts for its unavailable file or
 leaf without pretending it ran.
+
+The **workflow half** runs beside it, on the checkout alone, over the
+step definitions under `.github` — the workflows and the composite
+actions alike. A step can wrap a command in `deno task run-recorded
+<kind> <scope> <name>`. Those three words are the command's identity, and
+every record the command writes carries that identity. The topology is
+the other place an identity is written down. A lane builds its commands
+from the topology, so a step whose identity no suite holds runs while
+that step stands and stops when a lane takes over the job holding it.
+Nothing in the tree carries such an identity, which is what puts it out
+of the tree half's reach.
+
+The half admits no exceptions, because there is nothing for one to
+cover. `docs/specs/test-records.md` says under "Recording" that a check
+no lane can be asked to run is not recorded, so a recording step whose
+identity no suite claims is a defect either way round: the step should
+be registered, or it should not be recording.
 
 The **store half** runs on `main`. It reads the most recent successful
 `main` build's records and fails if any recorded identity is one that no
@@ -1037,7 +1053,8 @@ from source with `deno run` skips both. The dependency graph is already in
 the Deno cache that the `deno` capability restores, so starting from
 source costs a few seconds. The full run on `main` keeps the
 compiled-binary path, because it needs the binary anyway for attestation
-and deployment.
+and deployment. A suite that only talks to the server's API takes this
+one, which is why the CLI suites and the deployed-topology gates do.
 
 **The baked capabilities cannot.** The browser shell is a bundle compiled
 into the binary, so a server run from source answers the API and serves no
@@ -2927,6 +2944,7 @@ is pinned to the commit's date. And if none of that settles it,
 | The manifest is malformed or a newer schema | Rejected whole, treated as absent, same path as unreachable. |
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
 | A new test surface nobody registered | `check-test-topology` fails on the next `main` run and names the unclaimed identities. |
+| A gate wired into a workflow job and into no suite | The workflow half of the drift guard fails on the pull request that adds the step, before the gate has ever run. |
 | A record's variant or record surface contradicts its batch | Kept as written and named in the lane summary. The identity then belongs to no suite, so the store half of the drift guard fails on the next `main` run. |
 | A suite gains a new variant with no records | Every available item in that variant is mandatory until a successful full `main` run accounts for every enumerated item under that exact variant, the store drift guard passes, and the next publisher cycle includes the run. Other variants do not stand in for it. |
 | A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown. Removing the skip makes it mandatory until `main` records it. |
@@ -3315,7 +3333,7 @@ exercised on the branch on its own.
       test. A pull request runs its servers and its command line from
       source and compiles nothing, so without these a broken compile
       would be found only on `main`.
-- [x] `tasks/check-test-topology.ts`, both halves, wired into
+- [x] `tasks/check-test-topology.ts`, tree, workflow and store, wired into
       `repo-gates`, with exact variant matching and one source-item claim
       allowed per variant. Eight paths that look like tests and are not
       are declared as the fixtures they are: the five projects under
@@ -3429,6 +3447,18 @@ exercised on the branch on its own.
       convention: a package that mixes Deno-only tests with tests needing
       a browser names the Deno-only half `deno-test`, and that half is
       what the coverage gate measures.
+- [ ] The workflow half turned around, once the lanes carry the gates.
+      It asks today whether every recording step's identity is in the
+      topology, which is the right question while the workflows and the
+      topology both name gates. When a lane runs them, the question
+      becomes whether a recording step is one the topology could not run:
+      the declarations become the whole list of steps a workflow may
+      write, and a step outside that list fails whether or not a suite
+      claims it. That form also catches a gate a leftover step runs a
+      second time, which the current form passes over. Four recording
+      steps survive the switch, so the half does not go quiet on its own;
+      if a later change leaves none, the declarations fail as stale and
+      the half is then dead and should go.
 - [ ] This plan archived.
 
 ### What would force a split, and what to split first

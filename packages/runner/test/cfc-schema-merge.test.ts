@@ -6,6 +6,7 @@ import {
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 describe("mergeCfcSchemaEnvelopes", () => {
   describe("observes through a merge", () => {
@@ -1494,5 +1495,83 @@ describe("cfcSchemaMergeIssue", () => {
     expect(mergeArrayIdentities).toThrow(
       "writeAuthorizedBy must remain stable",
     );
+  });
+});
+
+describe("schema comparison over a fabric-valued default", () => {
+  // A fabric-valued default has no properties for a schema comparison to
+  // read, so a comparison built on a property walk calls two schemas that
+  // differ only there equal -- and coverage=true skips the merge, discarding
+  // the candidate's default.
+
+  const withDefault = (bytes: readonly number[]) => ({
+    type: "object",
+    properties: {
+      a: {
+        type: "object",
+        default: new FabricBytes(new Uint8Array(bytes)) as never,
+      },
+    },
+  } as const);
+
+  it("does not judge differing fabric defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withDefault([1, 2]),
+        withDefault([3]),
+      ),
+    ).toBe(false);
+  });
+
+  it("still judges equal fabric defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withDefault([1, 2]),
+        withDefault([1, 2]),
+      ),
+    ).toBe(true);
+  });
+
+  it("merges a fabric default onto a plain one rather than to `{}`", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { a: { type: "object", default: { x: 1 } } },
+    }, withDefault([7])) as JSONSchemaObj;
+    const properties = merged.properties as Record<string, JSONSchemaObj>;
+    expect(properties.a.default).toBeInstanceOf(FabricBytes);
+  });
+});
+
+describe("schema comparison over a link-valued default", () => {
+  // `stripWriterIdentityStamp` runs over the whole schema before two are
+  // compared, and it rebuilds every record it visits. A link is a reference
+  // rather than a record of the writer's, so it is carried whole; rebuilding
+  // one would strip nothing and erase the difference between two schemas that
+  // point at different documents.
+
+  const linkTo = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+  const withLink = (id: string) =>
+    ({
+      type: "object",
+      properties: { a: { type: "object", default: linkTo(id) as never } },
+    }) as const;
+
+  it("does not judge differing link defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withLink("of:sp-one"),
+        withLink("of:sp-two"),
+      ),
+    ).toBe(false);
+  });
+
+  it("still judges equal link defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withLink("of:sp-one"),
+        withLink("of:sp-one"),
+      ),
+    ).toBe(true);
   });
 });

@@ -1,5 +1,4 @@
 import {
-  deepEqual,
   extractDefaultValues,
   type JSONSchema,
   type Pattern,
@@ -24,7 +23,7 @@ import {
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "@commonfabric/runner/schema-walk";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+import { fabricAwareEqual } from "@commonfabric/data-model";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -195,14 +194,6 @@ const SUBSCHEMA_MAP_KEYS: ReadonlySet<string> = new Set<string>([
 const holdsSubschemas = (key: string): boolean =>
   SUBSCHEMA_KEYS.has(key) || SUBSCHEMA_LIST_KEYS.has(key) ||
   SUBSCHEMA_MAP_KEYS.has(key);
-
-const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return valueEqual(left as FabricValue, right as FabricValue);
-  } catch {
-    return deepEqual(left, right);
-  }
-};
 
 /**
  * The keys inside a `writeAuthorizedBy` writer claim's `__ctWriterIdentityOf`
@@ -620,17 +611,18 @@ export function assertPatternSchemasBackwardCompatible(
  * `target`. This is used for durable links: validating only their current
  * materialization is insufficient because the linked cell can change later.
  *
- * The `ifc` reduction {@link comparableIfc} performs applies here as well, and
- * this entry point puts it to a different question. A pattern update compares
- * two versions of one contract, where a changed writer identity is the same
- * module recompiled. A link joins two separate pieces, where a differing
- * `moduleIdentity` names a different authoring module. What holds either way is
- * the reason the reduction exists: the runtime authorizes a write against the
- * claim on the location being written, re-verifying the live writer's
- * `moduleIdentity` there (`writeAuthorizedByReason`,
- * `packages/runner/src/cfc/prepare.ts`). Proving a link neither performs that
- * check nor stands in for it, and the binding `path` and the whole `uiContract`
- * are compared here as they are for an update.
+ * The `ifc` reduction {@link comparableIfc} performs reaches this proof as
+ * well, where the two claims come from two separate pieces and a differing
+ * `moduleIdentity` names a different authoring module rather than one module
+ * recompiled. The reduction stays because this proof is not what decides who
+ * may write. That is decided at write time, against the claim in the schema
+ * write-policy input recorded at the document a write reaches
+ * (`writeAuthorizedByReason`, `packages/runner/src/cfc/prepare.ts`), and a
+ * durable link reaches storage by routes this proof does not sit on — a
+ * handler writing a handle into a slot among them. A proof that refused a
+ * writer identity would therefore withhold no authority, and the binding
+ * `path` and the whole `uiContract` are compared here as they are for a
+ * pattern update.
  */
 export function assertSchemaSubset(
   source: JSONSchema,

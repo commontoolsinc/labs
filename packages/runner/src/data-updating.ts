@@ -12,6 +12,7 @@ import {
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
+  isKeyableObjectNotArray,
   shallowFabricFromNativeObjectElseUndefined,
   toCompactDebugString,
 } from "@commonfabric/data-model";
@@ -19,7 +20,7 @@ import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type CellScope, type JSONSchema } from "./builder/types.ts";
 import {
@@ -671,11 +672,13 @@ export function normalizeAndDiff(
     // location at it too -- all occurrences stay aliased to one stable
     // document. A root `seen` location (an already-anchored occurrence)
     // needs no promotion; the plain link below is stable.
+    //
+    // A `FabricInstance` is excluded here alongside the other atomic special
+    // objects: the instance branch below emits it whole.
     if (
       state.nextAnchorId !== undefined &&
       isArrayElement &&
-      isObjectNotArray(newValue) &&
-      !(newValue instanceof FabricSpecialObject) &&
+      isKeyableObjectNotArray(newValue) &&
       !isCellLink(newValue) &&
       seenLink.path.length > 0
     ) {
@@ -1316,8 +1319,7 @@ export function normalizeAndDiff(
   if (
     state.nextAnchorId !== undefined &&
     isArrayElement &&
-    isObjectNotArray(newValue) &&
-    !(newValue instanceof FabricSpecialObject) &&
+    isKeyableObjectNotArray(newValue) &&
     !isCellLink(newValue)
   ) {
     if (Object.is(currentValue, newValue)) {
@@ -1579,21 +1581,19 @@ export function normalizeAndDiff(
     );
     // If the current value is not a (regular) object, set it to an empty object.
     // Note that the alias case is handled above.
-    // We use `isObjectNotArray` (not `isObjectOrArray`) here deliberately: `isObjectOrArray` is true
-    // for arrays (`typeof [] === "object"`), whereas `isObjectNotArray` excludes them.
     // Resetting on an array→object transition is required; otherwise per-key
     // writes land in a slot whose stored parent is still an array and storage
     // rejects them with a TypeMismatchError. This mirrors the array branch
     // above, which resets a mismatched container via `value: []`.
     //
-    // TODO(danfuzz): `isObjectNotArray` is also true for a `FabricSpecialObject`, so
-    // a stored special object (which reaches storage whole via this
-    // function's `FabricSpecialObject` branch above) is treated as an
-    // existing plain record: no reset is emitted, its zero keys yield no
-    // removals, and the per-key child writes land in slots whose stored
-    // parent is still the special object. The special-object→object
-    // transition wants the same reset the array→object one gets.
-    if (!isObjectNotArray(currentValue) || isPrimitiveCellLink(currentValue)) {
+    // A stored special object gets that same reset, for the same reason: it
+    // reaches storage whole via the branch above, its zero keys yield no
+    // removals, and without a reset the per-key child writes would land in
+    // slots whose stored parent is still the special object.
+    if (
+      !isKeyableObjectNotArray(currentValue) ||
+      isPrimitiveCellLink(currentValue)
+    ) {
       diffLogger.debug(
         "diff",
         () =>
