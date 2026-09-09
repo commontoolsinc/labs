@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { streamEntriesDocId } from "@commonfabric/memory/v2";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -1081,6 +1082,248 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           "writer-fit confidentiality misfit",
         );
         expect(result.error?.message).toContain('"secret"');
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
+  describe("stream entries-document exemption", () => {
+    // The measurement quantifies over surfaces a schema could have declared a
+    // policy at, and a stream's entries document is not one. The runtime
+    // materializes it to hold that stream's durable event entries and the
+    // marks recording which of them have been handled, at an id derived from
+    // the stream's link (`STREAM_ENTRIES_DOC_PREFIX` in
+    // `@commonfabric/memory/v2`) so that every party addresses the same
+    // document with no coordination. No pattern names it and no value schema
+    // describes it, so measuring it refuses every event a handler over
+    // labeled data emits, and every mark a served run writes to record that
+    // it handled one.
+    //
+    // The exemption decides which store the entries may land in, not whether
+    // they stay labeled: the join still lands on the document as its
+    // `derived` component, which the first two cases pin alongside the
+    // verdict.
+    //
+    // The first two cases read the verdict off the prepare pass rather than
+    // off a completed commit. A write to one of these documents meets
+    // the memory server's own sidecar admission after CFC is done with it
+    // (events.md §1: authored traffic reaches one only as a declared tail
+    // append, and only under `EXPERIMENTAL_SERVER_EXECUTION`), which
+    // `packages/memory/test/v2-event-append.test.ts` covers. A recorded
+    // writer-fit reason leaves the prepare state `invalidated` and rejects
+    // ahead of all of that, so `prepared` is the whole of what this gate
+    // decides.
+
+    /**
+     * The entries document of the `events` stream inside the document the
+     * cause `stream` mints — the id every party derives rather than one an
+     * author named.
+     */
+    const entriesDocFor = (
+      runtime: Runtime,
+      stream: string,
+    ): `${string}:${string}` =>
+      streamEntriesDocId({
+        id: runtime.getCell(signer.did(), stream).getAsNormalizedFullLink().id,
+        path: ["events"],
+        scope: "space",
+      }) as `${string}:${string}`;
+
+    /**
+     * The `derived` confidentiality the prepare pass staged on `id`, read back
+     * out of the transaction. That is where the envelope sits until a commit
+     * carries it to the replica, and these cases do not reach a commit.
+     */
+    const stagedDerivedConfidentiality = (
+      tx: ReturnType<Runtime["edit"]>,
+      id: `${string}:${string}`,
+    ): string[] =>
+      (((tx.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id,
+        path: [],
+      }) ?? {}) as { cfc?: { labelMap?: { entries: StoredEntry[] } } })
+        .cfc?.labelMap?.entries ?? [])
+        .filter((entry) => entry.origin === "derived")
+        .flatMap((entry) => entry.label.confidentiality ?? []);
+
+    it("records no writer-fit reason for an entry's `consequenced` mark", async () => {
+      // The defect this exemption closes: a handler that read labeled data
+      // runs on the serving runtime, which records that the entry was handled
+      // by writing the mark. Measuring that write refuses the commit, and the
+      // action a user clicks then does nothing they can see.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-entries-source");
+        const entriesId = entriesDocFor(runtime, "wf-entries-stream");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-entries-source",
+          undefined,
+          tx,
+        );
+        expect((source.getRaw() as { secret?: string }).secret).toBe("s3cr3t");
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: entriesId,
+          path: ["value", "entries", "0", "consequenced"],
+        }, true);
+        tx.prepareCfc();
+
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+        // The mark stayed labeled: the exemption decides which store the
+        // value may land in, not whether the join follows it.
+        expect(stagedDerivedConfidentiality(tx, entriesId))
+          .toContain("secret");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("records no writer-fit reason for an appended entry", async () => {
+      // The other write a served run makes to the document: a same-space
+      // emission carries its durable entry inside the emitting transaction,
+      // so the payload takes the same join the mark does.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-entries-append-source");
+        const entriesId = entriesDocFor(runtime, "wf-entries-append-stream");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-entries-append-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: entriesId,
+          path: ["value", "entries"],
+        }, [{ eventId: "evt:emitted", payload: { note: `${raw.secret}!` } }]);
+        tx.prepareCfc();
+
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+        expect(stagedDerivedConfidentiality(tx, entriesId))
+          .toContain("secret");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("still rejects the same write into an ordinary document", async () => {
+      // The control: the exemption is about the document class, not about the
+      // path a mark is written at or the join this transaction carries.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-entries-plain-source");
+        const plainId = runtime
+          .getCell(signer.did(), "wf-entries-plain-target")
+          .getAsNormalizedFullLink().id;
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-entries-plain-source",
+          undefined,
+          tx,
+        );
+        expect((source.getRaw() as { secret?: string }).secret).toBe("s3cr3t");
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: plainId,
+          path: ["value", "entries", "0", "consequenced"],
+        }, true);
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${plainId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps measuring an entries document whose join came from another space", async () => {
+      // The exemption is scoped to a join this document's own space produced,
+      // the same as the computed-cell one above: an emission cannot carry a
+      // foreign space's labeled value into a local stream's entries document.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      const foreign = (await Identity.fromPassphrase("wf-entries-foreign"))
+        .did();
+      try {
+        const seed = runtime.edit();
+        const foreignCell = runtime.getCell(
+          foreign,
+          "wf-entries-foreign-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+          seed,
+        );
+        const foreignId = foreignCell.getAsNormalizedFullLink().id;
+        writeSeedEnvelopeDoc(seed, foreign);
+        seed.writeOrThrow({
+          space: foreign,
+          scope: "space",
+          id: foreignId,
+          path: [],
+        }, {
+          value: { secret: "s3cr3t" },
+          cfc: {
+            version: 1,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["secret"],
+                label: { confidentiality: ["secret"] },
+              }],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const entriesId = entriesDocFor(runtime, "wf-entries-foreign-stream");
+        const tx = runtime.edit();
+        const source = runtime.getCellFromLink(
+          { id: foreignId, path: [], space: foreign, scope: "space" },
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        tx.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: entriesId,
+          path: ["value", "entries"],
+        }, [{ eventId: "evt:foreign", payload: { note: `${raw.secret}!` } }]);
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${entriesId} at /`);
       } finally {
         await runtime.dispose();
         await storageManager.close();
