@@ -19,7 +19,7 @@ import {
 } from "./interface.ts";
 import { isValidFabricValue } from "./validity-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
-import { tagFromFabricValue, type ValueTag, VALUE_TAGS } from "./value-tags.ts";
+import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
 
 /** Type for a `mainResult` form. */
 type MainResultForm<ResultType> = { type: "mainResult"; value: ResultType };
@@ -186,6 +186,12 @@ class VisitInProgress<Domain, ResultType> {
   #stack = new IndexTrackingStack<Domain>();
 
   /**
+   * Indicates if the value being visited is known to be a valid `FabricValue`.
+   * This is used to avoid re-checking during the visit.
+   */
+  #knownValid = false;
+
+  /**
    * Constructs an instance.
    */
   constructor(visitor: ValueVisitor<Domain, ResultType>) {
@@ -203,6 +209,9 @@ class VisitInProgress<Domain, ResultType> {
         "Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
       );
     }
+
+    this.#knownValid = false; // Because it's read by the next call.
+    this.#knownValid = this.#isValidFabricValue(value);
 
     const result = this.#visitValue(value);
 
@@ -355,7 +364,7 @@ class VisitInProgress<Domain, ResultType> {
         return result;
       }
 
-      if (VisitInProgress.#isValidFabricValue(value)) {
+      if (this.#isValidFabricValue(value)) {
         const tag = tagFromFabricValue(value);
         switch (tag) {
           case VALUE_TAGS.Array: {
@@ -386,7 +395,7 @@ class VisitInProgress<Domain, ResultType> {
           }
 
           default: {
-            const prim = value as (Domain & (Primitive | FabricPrimitive))
+            const prim = value as (Domain & (Primitive | FabricPrimitive));
             result = vis.visitPrimitive(prim, tag);
           }
         }
@@ -402,20 +411,17 @@ class VisitInProgress<Domain, ResultType> {
     }
   }
 
-  //
-  // Static members
-  //
-
   /**
    * Indicates whether or not the given value is a valid `FabricValue`.
    *
    * TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster than
    * `isValidFabricValue()`. The latter should actually sniff at the frozen
-   * cache. Once that happens, this method can go away, replaced by a regular
-   * call to just `isValidFabricValue()`.
+   * cache.
    */
-  static #isValidFabricValue(value: unknown): value is FabricValue {
-    return isValidDeepFrozenFabricValue(value) || isValidFabricValue(value);
+  #isValidFabricValue(value: unknown): value is FabricValue {
+    return this.#knownValid ||
+      isValidDeepFrozenFabricValue(value) ||
+      isValidFabricValue(value);
   }
 }
 
