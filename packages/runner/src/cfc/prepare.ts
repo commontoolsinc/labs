@@ -1428,7 +1428,11 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   // beside `bundleId` has the stamp keys stripped out of it and compares
   // equal to one that never carried them. Value-bearing keys want to be
   // carried by reference too.
-  if (!isWalkableObjectOrArray(value)) {
+  //
+  // An instance is carried whole here as well. This arm returns rather than
+  // rebuilding, so nothing of it is lost, and refusing would take down a
+  // schema comparison over a default that holds one.
+  if (!isKeyableObjectOrArray(value)) {
     return value;
   }
 

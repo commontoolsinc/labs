@@ -1,4 +1,8 @@
-import { isWalkableObjectOrArray, valueEqual } from "@commonfabric/data-model";
+import {
+  isKeyableObjectOrArray,
+  isWalkableObjectOrArray,
+  valueEqual,
+} from "@commonfabric/data-model";
 
 /**
  * Read one path segment out of a data container WITHOUT falling through to the
@@ -83,8 +87,14 @@ export function getValueAtPath(obj: any, path: readonly PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
+    // A path continuing below a `FabricInstance` reports absent rather than
+    // refusing, as the stored path reads in `storage/v2-path.ts` do: this
+    // reports what a path finds and rebuilds nothing.
+    //
+    // TODO(danfuzz): "absent" is an incomplete answer for an instance, whose
+    // codec contents are real and not addressable by a path segment yet.
     if (
-      !isWalkableObjectOrArray(current) ||
+      !isKeyableObjectOrArray(current) ||
       !Object.hasOwn(current, key as string)
     ) {
       return false;

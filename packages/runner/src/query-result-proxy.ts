@@ -807,6 +807,12 @@ export function snapshotQueryResult<T>(value: T): T {
     // A special object leafs through whole. It has no own properties for the
     // rebuild below to copy, so snapshotting one by its keys would return
     // `{}` and lose the value.
+    //
+    // TODO(danfuzz): that covers a value handed over directly and not one
+    // arriving through a cell read. This function's callers pass `cell.get()`,
+    // and the proxy erases the prototype, so a proxied `FabricInstance` still
+    // reaches the rebuild below and snapshots as `{}`. The fix is the one the
+    // marker further down this file names.
     if (!isWalkableObjectOrArray(current)) return current;
     const existing = seen.get(current);
     if (existing !== undefined) return existing;

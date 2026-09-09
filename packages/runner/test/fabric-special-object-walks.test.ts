@@ -413,6 +413,17 @@ describe("fabric special objects through the runner's walks", () => {
         );
       });
 
+      it(`reports no path inside a \`${kind.name}\` to the local read`, () => {
+        // `hasValueAtPath()` reports what a path finds and rebuilds nothing,
+        // so it answers for an instance rather than refusing, as the stored
+        // reads do. Its `setValueAtPath()` sibling above still refuses,
+        // because that one writes through the path it walks.
+
+        const root = { a: kind.make() };
+        expect(hasValueAtPath(root, ["a", "b"])).toBe(false);
+        expect(hasValueAtPath(root, ["a"])).toBe(true);
+      });
+
       it(`reports no path inside a \`${kind.name}\` to the stored read`, () => {
         // The two stored path reads are the exception among these. They are
         // read helpers on the write path, so refusing would take down an
