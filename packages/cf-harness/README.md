@@ -1614,6 +1614,23 @@ turn records, and replayable events across process restarts. Pass
 bound the transport's in-memory event cache while keeping durable replay
 available through SQLite.
 
+Both this entrypoint and the strict Loom host's `interactive` subcommand accept
+`--fabric-api-url`, `--fabric-identity`, and `--fabric-space`, with defaults
+from `CF_HARNESS_FABRIC_API_URL`, `CF_HARNESS_FABRIC_IDENTITY`, and
+`CF_HARNESS_FABRIC_SPACE`. Explicit flags override the environment; relative
+identity paths resolve against the host process's working directory. All three
+values form one binding, and partial or invalid configuration fails before the
+service starts. Without that binding the service has no Fabric session.
+
+These entrypoints share the batch CLI's CFC session options:
+`--fabric-cfc-enforcement-mode`, `--fabric-cfc-flow-labels`,
+`--fabric-cfc-posture`, and `--max-confidentiality`, including their validation
+and runtime defaults. The Fabric identity stays on the host. Per-turn
+`inputCells` supply held handles in that space; a model cannot configure the
+session or turn a raw Pattern Instance reference into a held token. See
+[Durable Loom authoring](docs/LOOM_AUTHORING.md) for the separate host grant
+required to collect those tokens into a Loom.
+
 Initial prompt image attachments:
 
 ```bash

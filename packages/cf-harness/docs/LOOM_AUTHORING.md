@@ -19,6 +19,20 @@ The batch CLI, both interactive stdio entrypoints, and console accept
 on the host, and never passed into the sandbox. Without it the three Loom tools
 are absent, including when an allowlist names them.
 
+Batch profiles can grant `loom_compose`, `loom_inspect`, and
+`loom_authoring_context` through `--allow-tool` or a run manifest. The CLI
+capability response lists all three as parent tools. Such a grant still needs
+the host configuration above before the tools become available.
+
+To collect a held Pattern Instance token, both interactive stdio entrypoints
+accept the same complete Fabric binding as batch: `--fabric-api-url`,
+`--fabric-identity`, and `--fabric-space`, or their `CF_HARNESS_FABRIC_API_URL`,
+`CF_HARNESS_FABRIC_IDENTITY`, and `CF_HARNESS_FABRIC_SPACE` environment
+defaults. CFC posture and read ceiling options retain the batch CLI's validation
+and defaults. A partial binding fails before the service starts. The host
+supplies `inputCells` per turn to grant existing handles; this does not relax
+the token checks below.
+
 A broker-backed configuration pins the existing scoped queue:
 
 ```json
