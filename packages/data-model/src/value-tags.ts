@@ -28,8 +28,8 @@ import {
  * These are distinct from wire-format `TAGS`.
  *
  * Covers the following:
- * * **Native JS builtins**: standard JS types, all represented by the type
- *   `Primitive`.
+ * * **Native JS builtins**: standard JS types, primitives all represented by
+ *   the type `Primitive`, and classes represented by their respective names.
  * * **`FabricPrimitive`s**: classes defined by this package which are
  *   considered equivalent to primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
