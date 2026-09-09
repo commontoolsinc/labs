@@ -30,9 +30,9 @@ import {
  */
 export const FABRIC_PRIMITIVE_VALUE_TAGS = Object.freeze(
   {
-    EpochNsec: "EpochNsec",
-    EpochDay: "EpochDay",
-    Hash: "Hash",
+    FabricEpochNsec: "FabricEpochNsec",
+    FabricEpochDay: "FabricEpochDay",
+    FabricHash: "FabricHash",
     FabricBytes: "FabricBytes",
     FabricKeyPair: "FabricKeyPair",
     FabricRegExp: "FabricRegExp",
@@ -49,7 +49,8 @@ export type FabricPrimitiveValueTag =
  *
  * Covers the following:
  * * **Native JS builtins**: standard JS types, primitives all represented by
- *   the type `Primitive`, and classes represented by their respective names.
+ *   the type `Primitive`, and classes represented by their respective names
+ *   under a `Js` prefix, `Array` and `Object` aside.
  * * **`FabricPrimitive`s**: classes defined by this package which are
  *   considered equivalent to primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella. These
@@ -60,14 +61,14 @@ export type FabricPrimitiveValueTag =
 export const VALUE_TAGS = Object.freeze(
   {
     Array: "Array",
-    Object: "Object",
-    Error: "Error",
-    Map: "Map",
-    Set: "Set",
-    Date: "Date",
-    Uint8Array: "Uint8Array",
-    RegExp: "RegExp",
     FabricInstance: "FabricInstance",
+    JsDate: "JsDate",
+    JsError: "JsError",
+    JsMap: "JsMap",
+    JsRegExp: "JsRegExp",
+    JsSet: "JsSet",
+    JsUint8Array: "JsUint8Array",
+    Object: "Object",
     Primitive: "Primitive",
     ...FABRIC_PRIMITIVE_VALUE_TAGS,
   } as const,
@@ -205,7 +206,7 @@ export function tagFromNativeBuiltinClassElseNull(
       return VALUE_TAGS.Array;
     }
 
-    // `Error` and standard subclasses all map to the `Error` tag.
+    // `Error` and standard subclasses all map to the `JsError` tag.
     case Error:
     case TypeError:
     case RangeError:
@@ -213,27 +214,27 @@ export function tagFromNativeBuiltinClassElseNull(
     case ReferenceError:
     case URIError:
     case EvalError: {
-      return VALUE_TAGS.Error;
+      return VALUE_TAGS.JsError;
     }
 
     case Map: {
-      return VALUE_TAGS.Map;
+      return VALUE_TAGS.JsMap;
     }
 
     case Set: {
-      return VALUE_TAGS.Set;
+      return VALUE_TAGS.JsSet;
     }
 
     case Date: {
-      return VALUE_TAGS.Date;
+      return VALUE_TAGS.JsDate;
     }
 
     case Uint8Array: {
-      return VALUE_TAGS.Uint8Array;
+      return VALUE_TAGS.JsUint8Array;
     }
 
     case RegExp: {
-      return VALUE_TAGS.RegExp;
+      return VALUE_TAGS.JsRegExp;
     }
 
     default: {
@@ -246,7 +247,7 @@ export function tagFromNativeBuiltinClassElseNull(
         typeof constructorFn === "function" &&
         constructorFn.prototype instanceof Error
       ) {
-        return VALUE_TAGS.Error;
+        return VALUE_TAGS.JsError;
       }
       return null;
     }
@@ -278,7 +279,7 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   if (proto === Object.prototype) {
     return VALUE_TAGS.Object;
   } else if (Error.isError(value)) {
-    return VALUE_TAGS.Error;
+    return VALUE_TAGS.JsError;
   } else if (proto === null) {
     // After the `isError()` check above, the only recognized possibility of a
     // null-proto object is a plain object.

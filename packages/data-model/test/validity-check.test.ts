@@ -707,12 +707,12 @@ describe("validity-check", () => {
     // which is what the corpus is for.
 
     const nativeObjectTags: ReadonlyArray<string> = [
-      VALUE_TAGS.Error,
-      VALUE_TAGS.Map,
-      VALUE_TAGS.Set,
-      VALUE_TAGS.Date,
-      VALUE_TAGS.Uint8Array,
-      VALUE_TAGS.RegExp,
+      VALUE_TAGS.JsError,
+      VALUE_TAGS.JsMap,
+      VALUE_TAGS.JsSet,
+      VALUE_TAGS.JsDate,
+      VALUE_TAGS.JsUint8Array,
+      VALUE_TAGS.JsRegExp,
     ];
 
     for (const [label, value] of LAYER_CORPUS) {
