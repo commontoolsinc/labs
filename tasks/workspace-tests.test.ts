@@ -9,6 +9,7 @@ import {
   acceptsPreload,
   assertMemberTestTasksDefined,
   assertTaskTestsIncluded,
+  grantableSpool,
   initializeDb,
   junitCapableMembers,
   leafFlags,
@@ -766,6 +767,14 @@ Deno.test("the workspace's capable members are read from their manifests", async
   ) {
     assertEquals(capable.has(member), false, `${member} should not`);
   }
+});
+
+Deno.test("a spool Deno cannot be told about is not recorded into", () => {
+  // A comma separates one path from the next inside `--allow-write=`, so
+  // such a spool is granted as two paths that are not it. The run turns
+  // recording off rather than failing the members that would take it.
+  assertEquals(grantableSpool("/var/spool/records"), true);
+  assertEquals(grantableSpool("/var/a,b/records"), false);
 });
 
 Deno.test("a forwarding runner is read by the flags it hands its leaf", () => {

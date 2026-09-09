@@ -380,6 +380,16 @@ export function acceptsPreload(
 }
 
 /**
+ * Whether a spool can be named to a leaf. A comma separates one path from
+ * the next inside `--allow-write=`, and Deno offers no way to write one
+ * that belongs to a path, so a spool holding a comma is granted as two
+ * paths that are not it.
+ */
+export function grantableSpool(spool: string): boolean {
+  return !spool.includes(",");
+}
+
+/**
  * The flags the leaf `deno test` of a member's task runs under. A
  * forwarding runner's task line holds two lists: the runner process's
  * own flags, and after `--` the ones it hands its leaf. The leaf is what
@@ -561,10 +571,18 @@ export async function runTests(
   // spool with the workspace as its working directory, each leaf runs with
   // its own package as one, and the write granted to a leaf names a path.
   // A relative `CF_TEST_RECORDS_DIR` would be three directories.
+  // A spool Deno cannot be told about turns recording off the same way,
+  // rather than failing a member that would have been granted it.
   const rawSpoolDir = recordsDir();
-  const spoolDir = rawSpoolDir === undefined
+  let spoolDir = rawSpoolDir === undefined
     ? undefined
     : path.resolve(workspaceCwd, rawSpoolDir);
+  if (spoolDir !== undefined && !grantableSpool(spoolDir)) {
+    console.warn(
+      `test records: no recording, the spool holds a comma: ${spoolDir}`,
+    );
+    spoolDir = undefined;
+  }
   let junitRoot: string | undefined;
   if (spoolDir !== undefined) {
     try {
