@@ -2075,7 +2075,7 @@ describe("piece pull materialization", () => {
     });
   });
 
-  it("preserves missing-path diagnostics through the narrow fallback", async () => {
+  it("refuses an undeclared path without pulling the input root", async () => {
     const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
@@ -2088,7 +2088,7 @@ describe("piece pull materialization", () => {
       await expect(controller.input.get(["missing"])).rejects.toThrow(
         'Cannot access path "missing" - property "missing" not found',
       );
-      expect(rootPulls()).toBe(1);
+      expect(rootPulls()).toBe(0);
     });
   });
 
@@ -6718,7 +6718,18 @@ describe("piece pull materialization", () => {
     const controller = new PieceController(pieces, piece);
     const previousRef = getPatternIdentityRef(piece);
 
-    await controller.input.set(sourcePiece.key("value"), ["mode"]);
+    // Seed a retained link written before the pattern declared this input.
+    // Piece IO refuses new writes through such a hidden path.
+    const inputCell = await controller.input.getCell();
+    const write = await runtime.editWithRetry((tx) => {
+      inputCell.withTx(tx).key("mode").setRawUntyped(
+        sourcePiece.key("value").getAsLink({
+          base: inputCell,
+          includeSchema: true,
+        }),
+      );
+    });
+    expect(write.error).toBeUndefined();
     await expect(
       controller.setPattern(compiledOptionalNumberFieldProgram(2)),
     ).rejects.toThrow(/input link.*schema is not compatible/);

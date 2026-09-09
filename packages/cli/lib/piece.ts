@@ -30,9 +30,11 @@ import {
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
+  assertPieceInputPath,
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
   PieceController,
+  PieceInputPathError,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -3803,8 +3805,9 @@ export async function executePieceCallable(
  * the source piece, so the target reads the source rather than holding a copy
  * of what it said.
  *
- * Both endpoints are read back first, and the link is refused when either the
- * piece or the path is missing; `options.allowNonExisting` links anyway.
+ * Both endpoints must have a pattern and their paths must have values unless
+ * `options.allowNonExisting` is set. A target piece's current input schema must
+ * select the target path regardless of that flag.
  */
 export async function linkPieces(
   config: SpaceConfig,
@@ -3918,22 +3921,30 @@ export async function linkPieces(
         `Target piece ${resolvedTargetPieceId} does not have pattern`,
       );
     } else if (resolvedTargetPath.length > 0) {
-      // Check target path resolves on the input cell
+      // Schema refusal takes precedence over the overridable absence check.
+      // The write repeats this check against metadata in its own transaction.
+      try {
+        assertPieceInputPath(
+          await targetPiece.input.getCell(),
+          resolvedTargetPath,
+        );
+      } catch (error) {
+        if (error instanceof PieceInputPathError) {
+          throw new LinkValidationError(error.message);
+        }
+        throw error;
+      }
       const targetData = await timeCliPhase(
         "linkPieces.readTargetInput",
         () => targetPiece.input.get(),
       );
-      let current: any = targetData;
+      let current: unknown = targetData;
       for (const segment of resolvedTargetPath) {
         if (current == null || typeof current !== "object") {
-          errors.push(
-            `Target path "${
-              resolvedTargetPath.join("/")
-            }" does not exist on piece ${resolvedTargetPieceId}`,
-          );
+          current = undefined;
           break;
         }
-        current = current[segment];
+        current = (current as Record<string | number, unknown>)[segment];
       }
       if (current === undefined) {
         errors.push(
@@ -3951,25 +3962,32 @@ export async function linkPieces(
     }
   }
 
-  await timeCliPhase(
-    "linkPieces.link",
-    () =>
-      pieces.link(
-        resolvedSourcePieceId,
-        resolvedSourcePath,
-        resolvedTargetPieceId,
-        resolvedTargetPath,
-        {
-          ...options,
-          ...(resolvedSourceScope === undefined
-            ? {}
-            : { sourceScope: resolvedSourceScope }),
-          ...(resolvedTargetScope === undefined
-            ? {}
-            : { targetScope: resolvedTargetScope }),
-        },
-      ),
-  );
+  try {
+    await timeCliPhase(
+      "linkPieces.link",
+      () =>
+        pieces.link(
+          resolvedSourcePieceId,
+          resolvedSourcePath,
+          resolvedTargetPieceId,
+          resolvedTargetPath,
+          {
+            ...options,
+            ...(resolvedSourceScope === undefined
+              ? {}
+              : { sourceScope: resolvedSourceScope }),
+            ...(resolvedTargetScope === undefined
+              ? {}
+              : { targetScope: resolvedTargetScope }),
+          },
+        ),
+    );
+  } catch (error) {
+    if (error instanceof PieceInputPathError) {
+      throw new LinkValidationError(error.message);
+    }
+    throw error;
+  }
   noteWroteTo(config.space);
 }
 
@@ -4785,9 +4803,9 @@ export async function getCellValue(
           () => piece.getCell().pull(),
         );
       }
-      const rootCell =
-        await (options.input ? piece.input.getCell() : piece.result.getCell());
-      const targetCell = rootCell.key(...path);
+      const targetCell = options.input
+        ? await piece.input.getCell(path)
+        : (await piece.result.getCell()).key(...path);
       await timeCliPhase(
         "getCellValue.step.target.pull",
         () => targetCell.pull(),
@@ -4809,8 +4827,9 @@ export async function getCellValue(
     const prop = options.input ? "input" : "result";
     if (options.selection !== undefined) {
       const selection = options.selection;
-      const rootCell = await piece[prop].getCell();
-      const targetCell = rootCell.key(...path);
+      const targetCell = options.input
+        ? await piece.input.getCell(path)
+        : (await piece.result.getCell()).key(...path);
       let selected: unknown;
       try {
         selected = await timeCliPhase(

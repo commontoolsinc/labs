@@ -384,3 +384,6 @@ export {
   SlugResolutionError,
   type SlugTargetInPiece,
 } from "./slug-resolution.ts";
+
+export { schemaPathSelection } from "./schema-path.ts";
+export { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
