@@ -1170,7 +1170,10 @@ export class SpaceSession {
     );
   }
 
-  /** Removes watches from both the live session and reconnect intent. */
+  /**
+   * Removes watches from both the live session and reconnect intent, retaining
+   * unrelated watches acquired by preceding mutations during concurrent refresh.
+   */
   async watchRemoveSync(
     watchIds: readonly string[],
   ): Promise<WatchMutationResult> {
@@ -1206,6 +1209,7 @@ export class SpaceSession {
           sync: result.sync,
         };
       },
+      "apply",
     );
   }
 
@@ -1505,14 +1509,15 @@ export class SpaceSession {
   }
 
   /**
-   * Serialize a watch mutation (`watch.set` / `watch.add`). `send` issues the
-   * request; `apply` mutates the session view (`#watchSpecs` / `#watchView`)
-   * from the response. Splitting them lets concurrent mode overlap the request
-   * round trips while keeping application ordered.
+   * Helper for watch mutations, which orders request issue and response
+   * application. Concurrent mode overlaps round trips; `sendAfter: apply`
+   * waits for preceding responses to be applied before `send()` reads session
+   * state to construct its request.
    */
   async #runWatchMutation<R, T>(
     send: () => Promise<R>,
     apply: (result: R) => T,
+    sendAfter: "issue" | "apply" = "issue",
   ): Promise<T> {
     this.#assertOpen();
     if (!this.#concurrentWatchRefresh) {
@@ -1533,14 +1538,21 @@ export class SpaceSession {
     // Concurrent: preserve wire order across the WHOLE watch-mutation family
     // (set + add) by issuing requests in call order, while applying responses
     // in that same order.
-    //  - `#watchIssue` advances as soon as `send()` has been CALLED (its frame
+    //  - `#watchIssue` advances as soon as `send()` has been called (its frame
     //    scheduled ahead of the next mutation's), so an earlier `watch.set` can
     //    never be overtaken on the wire by a later `watch.add`.
     //  - the apply step waits for [prior apply, this response], so `#watchSpecs`
     //    / `#watchView` mutate in call order regardless of which response lands
     //    first.
+    const previousApply = this.#watchApply;
+    // A removal derives a full replacement set from `#watchSpecs`, so its
+    // send must see earlier acquisitions applied. Reserve its place in the
+    // issue chain while waiting, keeping later acquisitions behind it.
+    const readyToIssue = sendAfter === "apply"
+      ? Promise.all([this.#watchIssue, previousApply])
+      : this.#watchIssue;
     let response!: Promise<R>;
-    const issued = this.#watchIssue.catch(() => undefined).then(() => {
+    const issued = readyToIssue.catch(() => undefined).then(() => {
       response = send();
       // Attach a rejection handler immediately: a later request may reject
       // while an earlier mutation is still pending, which would otherwise
@@ -1551,7 +1563,7 @@ export class SpaceSession {
     this.#watchIssue = issued.then(() => undefined, () => undefined);
 
     const current = Promise.all([
-      this.#watchApply.catch(() => undefined),
+      previousApply.catch(() => undefined),
       issued,
     ]).then(() => response).then((result) => apply(result));
     this.#watchApply = current.then(() => undefined, () => undefined);
