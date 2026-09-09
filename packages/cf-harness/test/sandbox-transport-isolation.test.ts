@@ -19,7 +19,10 @@ import {
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
-import type { DockerRunscAdditionalMount } from "../src/sandbox/types.ts";
+import type {
+  DockerRunscAdditionalMount,
+  ResolveDockerRunscSandboxConfigOptions,
+} from "../src/sandbox/types.ts";
 
 describe("CFC sidecar transport isolation", () => {
   // The harness writes the invocation context a container starts tainted
@@ -33,20 +36,53 @@ describe("CFC sidecar transport isolation", () => {
     // Checking one read and building the config from another is the whole
     // failure: the containment check passes against a workspace that never
     // reaches the mount, and the launch binds the one it never saw.
-    let reads = 0;
+    // Counted per option, the list-valued ones included: a second read of any
+    // of them is a second chance for the caller's object to answer
+    // differently, whether or not this particular one lets a path escape.
+    const reads: Record<string, number> = {};
     const options = {
+      cfcResultDir: "/host/sidecars/results",
+    } as ResolveDockerRunscSandboxConfigOptions;
+    // Defined rather than spread: spreading an object of getters invokes them
+    // at the spread and leaves plain data behind, so the count would be of
+    // this test's own read and never of the resolver's.
+    const counted = (name: string, value: unknown) =>
+      Object.defineProperty(options, name, {
+        enumerable: true,
+        get: () => {
+          reads[name] = (reads[name] ?? 0) + 1;
+          return value;
+        },
+      });
+    counted("workspaceHostPath", "/host/project");
+    counted("additionalMounts", []);
+    counted("extraDockerArgs", []);
+
+    const config = resolveDockerRunscSandboxConfig(options);
+
+    expect(reads).toEqual({
+      workspaceHostPath: 1,
+      additionalMounts: 1,
+      extraDockerArgs: 1,
+    });
+    expect(config.workspaceHostPath).toBe("/host/project");
+    expect(config.cfcResultDir).toBe("/host/sidecars/results");
+  });
+
+  it("emits the workspace path it was first given, whatever a later read says", () => {
+    // The consequence the count exists for: a getter that changes after the
+    // first read must not be able to pass the containment check on one path
+    // and put another in the config the launch binds.
+    let reads = 0;
+    const config = resolveDockerRunscSandboxConfig({
       get workspaceHostPath() {
         reads += 1;
         return reads === 1 ? "/host/project" : "/host/sidecars";
       },
       cfcResultDir: "/host/sidecars/results",
-    };
+    });
 
-    const config = resolveDockerRunscSandboxConfig(options);
-
-    expect(reads).toBe(1);
     expect(config.workspaceHostPath).toBe("/host/project");
-    expect(config.cfcResultDir).toBe("/host/sidecars/results");
   });
 
   it("launches from mounts no later hand can move", () => {

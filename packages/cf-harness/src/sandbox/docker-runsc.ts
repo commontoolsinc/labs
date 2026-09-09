@@ -361,25 +361,32 @@ const refuseSandboxVisibleTransportDir = (
  */
 const snapshotResolveOptions = (
   options: ResolveDockerRunscSandboxConfigOptions,
-): ResolveDockerRunscSandboxConfigOptions => ({
-  dockerBinary: options.dockerBinary,
-  runtimeName: options.runtimeName,
-  image: options.image,
-  containerUser: options.containerUser,
-  workspaceHostPath: options.workspaceHostPath,
-  workspaceMountPath: options.workspaceMountPath,
-  shellPath: options.shellPath,
-  dockerNetworkMode: options.dockerNetworkMode,
-  additionalMounts: options.additionalMounts === undefined
-    ? undefined
-    : [...options.additionalMounts],
-  extraDockerArgs: options.extraDockerArgs === undefined
-    ? undefined
-    : [...options.extraDockerArgs],
-  cfcResultDir: options.cfcResultDir,
-  cfcInvocationContextDir: options.cfcInvocationContextDir,
-  artifactRootHostPath: options.artifactRootHostPath,
-});
+): ResolveDockerRunscSandboxConfigOptions => {
+  // Into locals first, the list-valued ones included: `x === undefined ? …
+  // : [...x]` reads the property twice, which is the very thing this exists
+  // to stop — the second read is where a different list would arrive.
+  const additionalMounts = options.additionalMounts;
+  const extraDockerArgs = options.extraDockerArgs;
+  return {
+    dockerBinary: options.dockerBinary,
+    runtimeName: options.runtimeName,
+    image: options.image,
+    containerUser: options.containerUser,
+    workspaceHostPath: options.workspaceHostPath,
+    workspaceMountPath: options.workspaceMountPath,
+    shellPath: options.shellPath,
+    dockerNetworkMode: options.dockerNetworkMode,
+    additionalMounts: additionalMounts === undefined
+      ? undefined
+      : [...additionalMounts],
+    extraDockerArgs: extraDockerArgs === undefined
+      ? undefined
+      : [...extraDockerArgs],
+    cfcResultDir: options.cfcResultDir,
+    cfcInvocationContextDir: options.cfcInvocationContextDir,
+    artifactRootHostPath: options.artifactRootHostPath,
+  };
+};
 
 /**
  * A config the runtime owns, past the reach of whoever handed it over.

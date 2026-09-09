@@ -25,6 +25,7 @@
 
 import type { IFCLabel } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { isOrClause } from "@commonfabric/runner/cfc";
 import { mergeConfidentialityOnlyLabels } from "./contracts/cfc-model-context.ts";
 import { inertLabelSnapshot } from "./ifc-label-shape.ts";
 
@@ -105,29 +106,33 @@ const readTaintRecord = (value: unknown): HarnessSandboxTaint | undefined => {
  * module-private for that reason. Handing a caller the stored object would
  * put the accumulator back within reach of anything holding a reference to
  * what it read — a clause pushed onto a returned label is a run recorded as
- * carrying something no invocation reported. The structure is a small inert
- * record, so freezing all of it costs nothing worth counting.
+ * carrying something no invocation reported.
+ *
+ * Written out level by level rather than walked generically, because the
+ * shape is known: the merge above produces a confidentiality-only label, so
+ * this is a state, its label, that label's clause list, and the clauses in
+ * it. Naming the levels is what lets the walk end at an atom on purpose
+ * instead of by running out of containers.
  */
 const frozenTaint = (taint: HarnessSandboxTaint): HarnessSandboxTaint => {
   if (taint.kind === "known" && taint.label !== undefined) {
-    for (const clause of Object.values(taint.label)) {
-      if (Array.isArray(clause)) {
-        deepFreeze(clause);
+    for (const clause of taint.label.confidentiality ?? []) {
+      // A clause is an atom, or a disjunction of them written `{ anyOf }`.
+      // The atoms are where the walk ends: an atom's own fields are the
+      // primitives the format defines, so there is no further container for a
+      // later hand to reach into.
+      if (isOrClause(clause)) {
+        for (const alternative of clause.anyOf) {
+          Object.freeze(alternative);
+        }
+        Object.freeze(clause.anyOf);
       }
+      Object.freeze(clause);
     }
+    Object.freeze(taint.label.confidentiality);
     Object.freeze(taint.label);
   }
   return Object.freeze(taint);
-};
-
-const deepFreeze = (value: unknown): void => {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
-    return;
-  }
-  Object.freeze(value);
-  for (const entry of Object.values(value)) {
-    deepFreeze(entry);
-  }
 };
 
 const taints = new Map<string, HarnessSandboxTaint>();

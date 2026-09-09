@@ -87,6 +87,7 @@ describe("a run's accumulated sandbox taint", () => {
       const clause = taint.label.confidentiality as string[];
 
       expect(() => clause.push("health")).toThrow(TypeError);
+      expect(Object.isFrozen(taint.label)).toBe(true);
       expect(() => {
         (taint as { kind: string }).kind = "unknown";
       }).toThrow(TypeError);
@@ -219,6 +220,29 @@ describe("a run's accumulated sandbox taint", () => {
         }).toEqual({ shape, kind: "unknown" });
       });
     }
+  });
+
+  it("freezes a disjunction all the way to its alternatives", () => {
+    // A clause can be an OR of atoms, so the list, the disjunction, its
+    // alternatives array and each alternative are all containers a caller
+    // could otherwise write through. The walk ends at an atom because an
+    // atom's fields are primitives, not because it ran out of things to
+    // freeze.
+    withRun((runId) => {
+      const taint = joinSandboxTaint(runId, {
+        confidentiality: [{ anyOf: [{ type: "cfc/atom", name: "finance" }] }],
+      } as never);
+      if (taint.kind !== "known" || taint.label === undefined) {
+        throw new Error("expected the join to record a label");
+      }
+      const clause = taint.label.confidentiality?.[0] as {
+        anyOf: Record<string, unknown>[];
+      };
+
+      expect(Object.isFrozen(clause)).toBe(true);
+      expect(Object.isFrozen(clause.anyOf)).toBe(true);
+      expect(Object.isFrozen(clause.anyOf[0])).toBe(true);
+    });
   });
 
   it("poisons rather than accumulating a label it cannot read", () => {
