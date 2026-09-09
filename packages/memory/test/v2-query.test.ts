@@ -1957,10 +1957,11 @@ Deno.test("memory v2 selector validation meets a shared dependency once and reje
       },
     } as const;
     const rootHash = internSchemaAsTaggedHashString(root);
-    const forgedTarget = internSchemaAsTaggedHashString({
+    const forgedClaim = {
       type: "string",
       title: "selector-forged-claim",
-    });
+    } as const;
+    const forgedTarget = internSchemaAsTaggedHashString(forgedClaim);
     applyCommit(engine, {
       sessionId: "session:selector-diamond-writer",
       invocation: invocationFor(1),
@@ -1978,17 +1979,29 @@ Deno.test("memory v2 selector validation meets a shared dependency once and reje
             id: "of:selector-diamond-doc",
             value: { value: { a: {}, b: {} } },
           },
-          // An unreferenced forged install is admitted (the boundary cannot
-          // name its class) — the selector validation below must still
-          // reject a reference to it.
           {
             op: "set",
             id: `cid:${forgedTarget}`,
-            value: { value: { type: "number", title: "not-the-claim" } },
+            value: { value: forgedClaim },
           },
         ],
       },
     });
+    // The commit API admits nothing under an id its content does not hash
+    // to, so a forged document reaches storage only out of band — direct
+    // database manipulation, as genuine corruption would — and the selector
+    // validation below must still reject a reference to it.
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({
+      data: encodeMemoryBoundary({
+        value: { type: "number", title: "not-the-claim" },
+      }),
+      id: `cid:${forgedTarget}`,
+    });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: `cid:${forgedTarget}` });
     // The diamond walk meets the shared dependency once and validates the
     // whole closure from the space's own storage.
     const tracked = trackGraph(space, engine, {

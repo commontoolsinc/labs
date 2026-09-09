@@ -127,11 +127,13 @@ content the `cid:` namespace holds, and the larger.
   content it is handed, so a code document can never be installed under a
   hash its content does not produce. The record that links to it is written
   in the same transaction.
-- **Verification**: the commit boundary re-hashes a string-valued `cid:`
-  set against its id and refuses a mismatch, beside the check it already
-  runs on schema-shaped content. A reader re-hashes the string it resolves
-  against the id the record's link names, so a document that reached a
-  replica by another route holding other content is refused at load.
+- **Verification**: the commit boundary re-hashes every `cid:` set's
+  content against its id and refuses a mismatch, so nothing lands in the
+  namespace that a reader cannot verify; a schema document's interned hash
+  is the same value, so one rule covers both kinds. A reader re-hashes the
+  string it resolves against the id the record's link names, so a document
+  that reached a replica by another route holding other content is refused
+  at load.
 - **Per space, by rule**: as for a schema document, it exists in every space
   that references it, and a reference resolves only in the space it sits
   in. A space can be unavailable, so a piece's code loads from the space
