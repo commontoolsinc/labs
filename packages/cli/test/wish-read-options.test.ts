@@ -1,3 +1,10 @@
+/**
+ * `cf wish`'s read options, against the emulated runtime the rest of the wish
+ * read is exercised on (test/wish.test.ts). A wish resolves a query rather
+ * than an address, but it still terminates in a cell, and that cell is what
+ * these shape.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -9,13 +16,8 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 
-/**
- * `cf wish`'s read options, against the emulated runtime the rest of the wish
- * read is exercised on (test/wish.test.ts). A wish resolves a query rather
- * than an address, but it still terminates in a cell, and that cell is what
- * these shape.
- */
 const userIdentity = await Identity.fromPassphrase("cf-wish-read-options-user");
+
 const profileSpace =
   (await Identity.fromPassphrase("cf-wish-read-options-profile")).did();
 

@@ -80,6 +80,9 @@ export const memoryServer = new MemoryServer.Server({
     serviceDids: memoryAclPrincipals.serviceDids,
     delegatingDids: memoryAclPrincipals.delegatingDids,
   },
+  documentCacheBudgetBytes: env.MEMORY_DOCUMENT_CACHE_BUDGET_BYTES,
+  documentCacheMaxEntries: env.MEMORY_DOCUMENT_CACHE_MAX_ENTRIES,
+  documentCacheTotalBudgetBytes: env.MEMORY_DOCUMENT_CACHE_TOTAL_BUDGET_BYTES,
 });
 export const memory = {
   async close(): Promise<

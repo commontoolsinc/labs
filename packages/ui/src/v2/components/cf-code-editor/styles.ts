@@ -334,6 +334,16 @@ export const styles = css`
     );
   }
 
+  /* The member name a mention's destination publishes, beside its label.
+    Generated content, because the document's own text is the label alone:
+    a reference's spelling is computed where it is read and never stored. */
+  .cm-mention-ref-pill[data-short-name]::after {
+    content: attr(data-short-name);
+    margin-left: 0.375rem;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Pending pill - incomplete backlink without ID */
   .cm-backlink-pending {
     background-color: var(

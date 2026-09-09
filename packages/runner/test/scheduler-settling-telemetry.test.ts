@@ -12,10 +12,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import type {
-  SchedulerSettleResult,
-  SettlingTracker,
-} from "../src/scheduler/execution.ts";
+import type { SchedulerSettleResult } from "../src/scheduler/execution.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import type {
   RuntimeTelemetryEvent,
@@ -24,15 +21,9 @@ import type {
 
 const signer = await Identity.fromPassphrase("settling telemetry test");
 
-// The tracker and the execute-end hook are private: backdating the tracker is
-// the only seam that reaches the telemetry branch without real wall-clock
-// busy time.
-type SchedulerInternals = {
-  settlingTracker: SettlingTracker;
-  recordExecuteEndTelemetry(): void;
-  recordBudgetBackoffTelemetry(settleResult: SchedulerSettleResult): void;
-  diagnosisEnabled: boolean;
-};
+// The tracker and the execute-end hook come through `accessForTestingOnly`;
+// backdating the tracker is what reaches the telemetry branch without real
+// wall-clock busy time.
 
 // A settle result carrying only the fields the backoff telemetry path reads;
 // the rest of the shape is inert here.
@@ -67,11 +58,13 @@ describe("scheduler non-settling telemetry", () => {
       storageManager,
     });
     try {
-      const scheduler = runtime.scheduler as unknown as SchedulerInternals;
+      const scheduler = runtime.scheduler.accessForTestingOnly;
       const markers: { busyTime: number; windowDuration: number }[] = [];
+      let diagnosisStarts = 0;
       const listener = (event: Event) => {
         const { marker } = (event as RuntimeTelemetryEvent).detail;
         if (marker.type === "scheduler.non-settling") markers.push(marker);
+        if (marker.type === "scheduler.diagnosis.start") diagnosisStarts++;
       };
       runtime.telemetry.addEventListener("telemetry", listener);
       try {
@@ -93,12 +86,13 @@ describe("scheduler non-settling telemetry", () => {
         expect(markers[0].windowDuration).toBeGreaterThanOrEqual(8_000);
         expect(runtime.scheduler.isNonSettling()).toBe(true);
         // Auto-trigger switched diagnosis on.
-        expect(scheduler.diagnosisEnabled).toBe(true);
+        expect(diagnosisStarts).toBe(1);
 
         // A later execute end in the same episode stays quiet (and takes the
         // diagnosis busy-time accounting branch instead).
         scheduler.recordExecuteEndTelemetry();
         expect(markers.length).toBe(1);
+        expect(diagnosisStarts).toBe(1);
       } finally {
         runtime.telemetry.removeEventListener("telemetry", listener);
       }
@@ -115,7 +109,7 @@ describe("scheduler non-settling telemetry", () => {
         storageManager,
       });
       try {
-        const scheduler = runtime.scheduler as unknown as SchedulerInternals;
+        const scheduler = runtime.scheduler.accessForTestingOnly;
         const markers: RuntimeTelemetryMarker[] = [];
         const listener = (event: Event) => {
           const { marker } = (event as RuntimeTelemetryEvent).detail;
@@ -190,7 +184,7 @@ describe("scheduler non-settling telemetry", () => {
         storageManager,
       });
       try {
-        const scheduler = runtime.scheduler as unknown as SchedulerInternals;
+        const scheduler = runtime.scheduler.accessForTestingOnly;
         const markers: RuntimeTelemetryMarker[] = [];
         const listener = (event: Event) => {
           const { marker } = (event as RuntimeTelemetryEvent).detail;

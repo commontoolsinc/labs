@@ -24,10 +24,10 @@ stored bytes match their key), not *pristineness* (the bytes are valid
 transformer input). A poisoned closure is self-consistent and verifies clean.
 
 Default patterns are disproportionately affected because they are seeded once
-(`cf piece set-home`) and rarely redeployed, while dev patterns mint fresh
+(`cf space set-home`) and rarely redeployed, while dev patterns mint fresh
 closures on every deploy.
 
-**Fix:** `cf piece recreate-root` — the CLI's own error output suggests it
+**Fix:** `cf space recreate-root` — the CLI's own error output suggests it
 (`packages/cli/lib/piece.ts`). Recreation mints a fresh closure from current
 authored source. There is no in-place repair: even without the guard, a
 recompile of the poisoned source would hash to a different identity than the

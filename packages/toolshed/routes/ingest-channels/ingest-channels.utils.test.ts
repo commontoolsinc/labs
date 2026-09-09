@@ -29,11 +29,11 @@ import {
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
 
-/** Narrow a ControlResult to its success body, failing loudly otherwise. */
 // Shaped like a real derived channel id: ids are validated before they become
 // a cell cause in the operator's service space.
 const WELL_FORMED_ID = "ing_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+/** Narrow a ControlResult to its success body, failing loudly otherwise. */
 const ok = <T>(result: ControlResult<T>): T => {
   assert(
     result.status === 200,
@@ -48,17 +48,17 @@ const err = (result: ControlResult<unknown>): string => {
   return result.body.error;
 };
 
-// The brief's acceptance criteria, run against a REAL memory server with
-// `acl: { mode: "enforce" }`: a user holding only their own identity key can
-// mint a channel for their own space, is refused when naming a space they do
-// not control, can list / rotate / revoke, and a revoked token stops working.
-//
-// Ownership is enforced against a space with a CONCRETE, non-derived owner.
-// That matters: on a deployment where space DIDs derive from a public
-// passphrase, anyone can sign as the space and grant themselves OWNER, so a
-// test against such a space would prove nothing about the check.
-
 describe("ingest-channels control plane", () => {
+  // The brief's acceptance criteria, run against a REAL memory server with
+  // `acl: { mode: "enforce" }`: a user holding only their own identity key can
+  // mint a channel for their own space, is refused when naming a space they do
+  // not control, can list / rotate / revoke, and a revoked token stops working.
+  //
+  // Ownership is enforced against a space with a CONCRETE, non-derived owner.
+  // That matters: on a deployment where space DIDs derive from a public
+  // passphrase, anyone can sign as the space and grant themselves OWNER, so a
+  // test against such a space would prove nothing about the check.
+
   let server: MemoryV2Server.Server;
   let factory: LoopbackSessionFactory;
   let operator: Identity;
@@ -159,8 +159,9 @@ describe("ingest-channels control plane", () => {
     expect(JSON.stringify(res.body)).not.toContain(stored!.secretHash);
   });
 
-  // The headline acceptance criterion.
   it("refuses a caller who does not own the space", async () => {
+    // The headline acceptance criterion.
+
     const res = await mint(mallory, "req-2");
     expect(res.status).toBe(403);
     expect(err(res)).toContain("Not authorized");
@@ -180,9 +181,10 @@ describe("ingest-channels control plane", () => {
     expect(unhosted.body).toEqual(unowned.body);
   });
 
-  // Without this, a captured mint replayed inside the ≤300s proof freshness
-  // window would mint a FRESH secret and hand it to the replayer.
   it("returns 409 and NO token when a requestId is replayed", async () => {
+    // Without this, a captured mint replayed inside the ≤300s proof freshness
+    // window would mint a FRESH secret and hand it to the replayer.
+
     const first = await mint(alice, "req-dup");
     expect(first.status).toBe(200);
 
@@ -218,6 +220,7 @@ describe("ingest-channels control plane", () => {
     // `did:web:commonfabric.org#oauth2` and `#plaid` are the token-less
     // integration audiences; the segment charset is what keeps a minted
     // audience out of that namespace.
+
     const res = await mint(alice, "req-c", {
       installId: "did:web:commonfabric.org#oauth2",
     });
@@ -262,9 +265,10 @@ describe("ingest-channels control plane", () => {
     expect(withOld.status).toBe(403);
   });
 
-  // The invariant whose violation is a total break: rotate/revoke authorize
-  // against the registration's STORED space, never against caller input.
   it("refuses rotate and revoke from a non-owner (IDOR)", async () => {
+    // The invariant whose violation is a total break: rotate/revoke authorize
+    // against the registration's STORED space, never against caller input.
+
     const first = await mint(alice, "req-i1");
     const id = ok(first).id;
 
@@ -372,9 +376,10 @@ describe("ingest-channels control plane", () => {
     expect(scoped.channels.map((c) => c.space)).toEqual([otherSpace]);
   });
 
-  // The highest-value item in the brief: a channel that would accept POSTs and
-  // commit nothing must be refused at mint, with an actionable message.
   it("refuses at mint when the operator cannot write the space", async () => {
+    // The highest-value item in the brief: a channel that would accept POSTs
+    // and commit nothing must be refused at mint, with an actionable message.
+
     const lonely = await Identity.fromPassphrase("ic-space-no-operator");
     await genesisAcl(factory, lonely, { [alice.did()]: "OWNER" });
 
@@ -387,10 +392,11 @@ describe("ingest-channels control plane", () => {
     expect(err(res)).toContain(operator.did());
   });
 
-  // The data plane refuses any registration carrying `revoked`, so a re-mint
-  // that left the flag set would hand back a token dead on its first POST —
-  // a success message and a broken device.
   it("re-minting a revoked channel yields a token that actually works", async () => {
+    // The data plane refuses any registration carrying `revoked`, so a re-mint
+    // that left the flag set would hand back a token dead on its first POST —
+    // a success message and a broken device.
+
     const first = await mint(alice, "req-rm1");
     const id = ok(first).id;
     expect(
@@ -422,10 +428,11 @@ describe("ingest-channels control plane", () => {
     expect(stored?.revocations?.[0].by).toBe(alice.did());
   });
 
-  // The whole point of relaxing the 401 equalization was the rotation case, and
-  // rotation replaces the secret — so without a superseded-hash record the 403
-  // branch is structurally unreachable for exactly that case.
   it("tells a device holding a rotated-away token to re-pair", async () => {
+    // The whole point of relaxing the 401 equalization was the rotation case,
+    // and rotation replaces the secret — so without a superseded-hash record
+    // the 403 branch is structurally unreachable for exactly that case.
+
     const first = await mint(alice, "req-rr1");
     const id = ok(first).id;
     await processRotate(deps, alice.did(), { id, requestId: "req-rr2" });
@@ -460,10 +467,11 @@ describe("ingest-channels control plane", () => {
     expect(empty.status).toBe(401);
   });
 
-  // A co-owner minting the same low-entropy installId ("phone-1") would
-  // otherwise silently replace `owner` and kill the incumbent's live token with
-  // no revocation record.
   it("refuses to take over a channel owned by another principal", async () => {
+    // A co-owner minting the same low-entropy installId ("phone-1") would
+    // otherwise silently replace `owner` and kill the incumbent's live token
+    // with no revocation record.
+
     const shared = await sharedSpace();
     const first = await processMint(deps, alice.did(), {
       space: shared,
@@ -491,12 +499,13 @@ describe("ingest-channels control plane", () => {
     expect(post.status).toBe(200);
   });
 
-  // The guard's error message says "revoke it first" — so revoking first has to
-  // actually work. Revoke preserves `owner` (attribution, not liveness) and
-  // there is no delete path, so gating on owner alone would lock the channel to
-  // one DID permanently and the advice would be a lie. This is also how a user
-  // who re-keys recovers their own device.
   it("allows takeover after an explicit revoke, and records it", async () => {
+    // The guard's error message says "revoke it first" — so revoking first has
+    // to actually work. Revoke preserves `owner` (attribution, not liveness)
+    // and there is no delete path, so gating on owner alone would lock the
+    // channel to one DID permanently and the advice would be a lie. This is
+    // also how a user who re-keys recovers their own device.
+
     const shared = await sharedSpace();
     const first = await processMint(deps, alice.did(), {
       space: shared,
@@ -540,10 +549,11 @@ describe("ingest-channels control plane", () => {
     expect(post.status).toBe(200);
   });
 
-  // `processRevoke` shallow-spreads a stored registration, and stored values
-  // are deep-frozen: without rebuilding them the history is silently dropped on
-  // the second revoke.
   it("keeps the revocation history across repeated revoke/mint cycles", async () => {
+    // `processRevoke` shallow-spreads a stored registration, and stored values
+    // are deep-frozen: without rebuilding them the history is silently dropped
+    // on the second revoke.
+
     const first = await mint(alice, "req-h1");
     const id = ok(first).id;
     await processRevoke(deps, alice.did(), {
@@ -563,15 +573,16 @@ describe("ingest-channels control plane", () => {
     expect(stored?.revocations?.length).toBe(2);
   });
 
-  // A revoke request is a durable weapon unless its request id is spent. The
-  // signed body names only the channel, so a captured revoke stays replayable
-  // for its whole proof window — long enough for the owner to notice the
-  // outage, re-pair the device, and have the replay kill the NEW credential.
-  //
-  // The no-op leg is the load-bearing one: if a replay against an
-  // already-revoked channel returns 200 without spending the id, the attacker
-  // just waits for the re-mint and fires the same request again.
   it("refuses a captured revoke replayed after the channel is re-minted", async () => {
+    // A revoke request is a durable weapon unless its request id is spent. The
+    // signed body names only the channel, so a captured revoke stays replayable
+    // for its whole proof window — long enough for the owner to notice the
+    // outage, re-pair the device, and have the replay kill the NEW credential.
+    //
+    // The no-op leg is the load-bearing one: if a replay against an
+    // already-revoked channel returns 200 without spending the id, the attacker
+    // just waits for the re-mint and fires the same request again.
+
     const first = await mint(alice, "req-w1a");
     const id = ok(first).id;
     const captured = "rv-captured";
@@ -635,12 +646,13 @@ describe("ingest-channels control plane", () => {
     expect((channels[0].revocations as unknown[]).length).toBe(1);
   });
 
-  // Re-minting the same installId is how a user re-pairs a device, and it
-  // replaces the secret — so it IS a rotation and must leave the old device an
-  // actionable answer. Without the superseded hash it gets the blank 401 that
-  // the whole 403 re-pair decision exists to remove, on the likeliest path to
-  // reach it.
   it("re-minting leaves the old device an actionable 403, not a blank 401", async () => {
+    // Re-minting the same installId is how a user re-pairs a device, and it
+    // replaces the secret — so it IS a rotation and must leave the old device
+    // an actionable answer. Without the superseded hash it gets the blank 401
+    // that the whole 403 re-pair decision exists to remove, on the likeliest
+    // path to reach it.
+
     const first = await mint(alice, "req-rp1");
     const id = ok(first).id;
 
@@ -682,10 +694,11 @@ describe("ingest-channels control plane", () => {
     ).toBe(401);
   });
 
-  // Storage faults must surface as 502, never as a denial or an uncaught 500 —
-  // the same contract the data plane holds. Every verb reaches storage, so
-  // every verb needs it.
   describe("storage faults", () => {
+    // Storage faults must surface as 502, never as a denial or an uncaught 500
+    // — the same contract the data plane holds. Every verb reaches storage, so
+    // every verb needs it.
+
     const broken = {
       getCell() {
         throw new Error("boom");
@@ -819,6 +832,7 @@ describe("ingest-channels control plane", () => {
     it("a malformed space DID shares the ownership denial, not its own error", async () => {
       // A distinguishable shape error would be a free probe for whether a
       // space exists, so it must answer exactly like "not an owner".
+
       const res = await processMint(deps, alice.did(), {
         space: "not-a-did",
         installId: "phone-1",
@@ -881,17 +895,18 @@ describe("ingest-channels control plane", () => {
     ).toBe(200);
   });
 
-  // The requestId alone does NOT close this, and that is the whole reason
-  // `expectedRevision` exists. An id only proves "this exact request was
-  // already DELIVERED". A request that is captured and WITHHELD was never
-  // delivered, so its id is unspent and looks perfectly fresh — it stays a live
-  // weapon for the rest of the proof window, and lands on whatever credential
-  // exists when it is finally let through.
-  //
-  // The realistic shape: the attacker swallows Alice's revoke, Alice sees it
-  // fail and retries (a fresh id), then re-pairs the device — and only then is
-  // the original let through.
   it("refuses a revoke that was captured, withheld, and delivered after a re-mint", async () => {
+    // The requestId alone does NOT close this, and that is the whole reason
+    // `expectedRevision` exists. An id only proves "this exact request was
+    // already DELIVERED". A request that is captured and WITHHELD was never
+    // delivered, so its id is unspent and looks perfectly fresh — it stays a
+    // live weapon for the rest of the proof window, and lands on whatever
+    // credential exists when it is finally let through.
+    //
+    // The realistic shape: the attacker swallows Alice's revoke, Alice sees it
+    // fail and retries (a fresh id), then re-pairs the device — and only then
+    // is the original let through.
+
     const first = await mint(alice, "req-wh1");
     const id = ok(first).id;
 
@@ -937,12 +952,13 @@ describe("ingest-channels control plane", () => {
     ).toBe(200);
   });
 
-  // The cap used to be counted before the write, from a separate read. Every
-  // request in a burst then read the same under-cap number and every one of
-  // them committed, so the limit was exceeded by the width of the burst — the
-  // easiest bound in the system to walk straight through. The count now comes
-  // off the owner index inside the transaction that updates it.
   it("holds the live cap against a burst of concurrent mints", async () => {
+    // The cap used to be counted before the write, from a separate read. Every
+    // request in a burst then read the same under-cap number and every one of
+    // them committed, so the limit was exceeded by the width of the burst — the
+    // easiest bound in the system to walk straight through. The count now comes
+    // off the owner index inside the transaction that updates it.
+
     const capped = { ...deps, maxChannelsPerOwner: 2 };
     const results = await Promise.all(
       ["a", "b", "c", "d", "e"].map((n) =>
@@ -966,10 +982,12 @@ describe("ingest-channels control plane", () => {
     expect(owned.length).toBe(2);
   });
 
-  // Revoking frees a live slot but frees no storage: the registration cell and
-  // the audit entry are kept on purpose. Without a lifetime bound, mint/revoke
-  // in a loop is one authenticated user growing deployment-wide state forever.
   it("bounds how many channels one owner can ever create", async () => {
+    // Revoking frees a live slot but frees no storage: the registration cell
+    // and the audit entry are kept on purpose. Without a lifetime bound,
+    // mint/revoke in a loop is one authenticated user growing deployment-wide
+    // state forever.
+
     const capped = {
       ...deps,
       maxChannelsPerOwner: 1,
@@ -1017,10 +1035,12 @@ describe("ingest-channels control plane", () => {
     ).toBe(2);
   });
 
-  // The meter is read as a record of what an identity holds, and a takeover
-  // adds a channel to the acquirer without creating one. Charging only creation
-  // let an identity accumulate channels with its meter pinned at zero.
   it("charges a takeover to the acquirer's lifetime meter", async () => {
+    // The meter is read as a record of what an identity holds, and a takeover
+    // adds a channel to the acquirer without creating one. Charging only
+    // creation let an identity accumulate channels with its meter pinned at
+    // zero.
+
     const shared = await sharedSpace();
     const capped = { ...deps, maxLifetimeChannelsPerOwner: 1 };
     const minted = await processMint(capped, alice.did(), {
@@ -1057,11 +1077,12 @@ describe("ingest-channels control plane", () => {
     expect(err(third)).toContain("lifetime limit");
   });
 
-  // Charging the space meter only for CREATION left the bound useless. A fresh
-  // key that is refused a new channel can revoke an existing one and re-mint
-  // it instead: it acquires a channel, and mints its own permanent by-owner,
-  // lifetime and requests cells, while the space meter never moves.
   it("charges a takeover to the space meter, so churn cannot route around it", async () => {
+    // Charging the space meter only for CREATION left the bound useless. A
+    // fresh key that is refused a new channel can revoke an existing one and
+    // re-mint it instead: it acquires a channel, and mints its own permanent
+    // by-owner, lifetime and requests cells, while the space meter never moves.
+
     const churned = await Identity.generate();
     const shared = await sharedSpace(churned.did());
     const capped = { ...deps, maxLifetimeChannelsPerSpace: 1 };
@@ -1102,15 +1123,17 @@ describe("ingest-channels control plane", () => {
     ).toEqual([]);
   });
 
-  // Revoking an already-revoked channel goes through the transaction rather
-  // than short-circuiting on the registration read. A read-only fast path would
-  // decide "already revoked" from a snapshot, and a re-mint landing in that
-  // window would leave it reporting success while a fresh credential is live.
-  //
-  // Advancing the revision on that write is what keeps it from being an
-  // amplifier: at a stable revision the same request replays forever, each one
-  // a real durable transaction.
   it("makes a repeated revoke self-limiting rather than endlessly writable", async () => {
+    // Revoking an already-revoked channel goes through the transaction rather
+    // than short-circuiting on the registration read. A read-only fast path
+    // would decide "already revoked" from a snapshot, and a re-mint landing in
+    // that window would leave it reporting success while a fresh credential is
+    // live.
+    //
+    // Advancing the revision on that write is what keeps it from being an
+    // amplifier: at a stable revision the same request replays forever, each
+    // one a real durable transaction.
+
     const first = await mint(alice, "req-noop");
     const id = ok(first).id;
     await processRevoke(deps, alice.did(), {
@@ -1144,10 +1167,12 @@ describe("ingest-channels control plane", () => {
     expect(third.status).toBe(409);
   });
 
-  // The registration is read once to authorize and check the generation, then
-  // again inside the write transaction. Only the second read decides, which is
-  // what stops a re-mint in that window from being reported as a revocation.
   it("refuses a revoke whose generation went stale between read and write", async () => {
+    // The registration is read once to authorize and check the generation, then
+    // again inside the write transaction. Only the second read decides, which
+    // is what stops a re-mint in that window from being reported as a
+    // revocation.
+
     const first = await mint(alice, "req-toctou");
     const id = ok(first).id;
     const at = await revOf(id);
@@ -1173,11 +1198,12 @@ describe("ingest-channels control plane", () => {
     expect(live?.enabled).toBe(true);
   });
 
-  // A per-owner quota bounds a KEYPAIR, and keypairs are free: one person can
-  // grant OWNER to as many fresh DIDs as they like and spend a new allowance
-  // from each — while every new DID also mints its own permanent bookkeeping
-  // cells. The space is what they cannot mint for free here.
   it("bounds a space against an owner rotating through fresh keys", async () => {
+    // A per-owner quota bounds a KEYPAIR, and keypairs are free: one person can
+    // grant OWNER to as many fresh DIDs as they like and spend a new allowance
+    // from each — while every new DID also mints its own permanent bookkeeping
+    // cells. The space is what they cannot mint for free here.
+
     const third = await Identity.generate();
     const shared = await sharedSpace(third.did());
     const capped = {
@@ -1218,15 +1244,16 @@ describe("ingest-channels control plane", () => {
       .toEqual([]);
   });
 
-  // Revoking the last channel in a space used to answer the space's real owner
-  // with "not authorized for that space" — a denial that is simply false, on
-  // the path they would walk to confirm the revoke worked.
-  //
-  // Worse, `revoke` requires the channel's current generation and `list` is the
-  // only place a generation is published, so an unlistable revoked channel had
-  // an unknowable generation: every later revoke of it answered 409 telling the
-  // caller to go list something that would never appear.
   it("keeps a revoked channel visible to the space owner, with its generation", async () => {
+    // Revoking the last channel in a space used to answer the space's real
+    // owner with "not authorized for that space" — a denial that is simply
+    // false, on the path they would walk to confirm the revoke worked.
+    //
+    // Worse, `revoke` requires the channel's current generation and `list` is
+    // the only place a generation is published, so an unlistable revoked
+    // channel had an unknowable generation: every later revoke of it answered
+    // 409 telling the caller to go list something that would never appear.
+
     const shared = await sharedSpace();
     const minted = await processMint(deps, alice.did(), {
       space: shared,
@@ -1269,10 +1296,11 @@ describe("ingest-channels control plane", () => {
       .toBe(403);
   });
 
-  // The second revoke re-embeds the deep-frozen `revoked` object into a new
-  // container — the exact round-trip that silently drops values — so the
-  // ORIGINAL attribution surviving it is worth pinning on its own.
   it("keeps revocation state across a second revoke with a fresh id", async () => {
+    // The second revoke re-embeds the deep-frozen `revoked` object into a new
+    // container — the exact round-trip that silently drops values — so the
+    // ORIGINAL attribution surviving it is worth pinning on its own.
+
     const first = await mint(alice, "req-2rv");
     const id = ok(first).id;
     const before = await revOf(id);
@@ -1306,10 +1334,11 @@ describe("ingest-channels control plane", () => {
     ).toBe(1);
   });
 
-  // The audit inventory is the one index that is never pruned, so it is the one
-  // that must not be a single array. Sharding is only correct if a sweep still
-  // sees everything through the one function that enumerates it.
   it("enumerates revoked channels through the sharded audit index", async () => {
+    // The audit inventory is the one index that is never pruned, so it is the
+    // one that must not be a single array. Sharding is only correct if a sweep
+    // still sees everything through the one function that enumerates it.
+
     const first = await mint(alice, "req-au1");
     const id = ok(first).id;
     await processRevoke(deps, alice.did(), {
@@ -1361,10 +1390,11 @@ describe("ingest-channels control plane", () => {
       .toBe(1);
   });
 
-  // The owner and space indexes track live channels; the audit index keeps the
-  // full history. Revoking therefore removes a channel from the caller's list,
-  // which is what bounds those indexes.
   it("drops a revoked channel from the list but keeps it in the audit index", async () => {
+    // The owner and space indexes track live channels; the audit index keeps
+    // the full history. Revoking therefore removes a channel from the caller's
+    // list, which is what bounds those indexes.
+
     const first = await mint(alice, "req-lr1");
     const id = ok(first).id;
     await processRevoke(deps, alice.did(), {
@@ -1382,9 +1412,10 @@ describe("ingest-channels control plane", () => {
       .toBe(alice.did());
   });
 
-  // Gating the cap on "no existing registration" let one owner loop
-  // mint -> revoke -> re-mint past it without limit.
   it("counts a re-minted revoked channel against the live cap", async () => {
+    // Gating the cap on "no existing registration" let one owner loop
+    // mint -> revoke -> re-mint past it without limit.
+
     const capped = { ...deps, maxChannelsPerOwner: 1 };
     const first = await processMint(capped, alice.did(), {
       space,
@@ -1422,6 +1453,7 @@ describe("ingest-channels control plane", () => {
       // Bob owns the space and grants Alice OWNER; Alice mints; the grant is
       // then removed. Alice's token keeps working, so Bob has to be able to
       // discover and revoke it.
+
       const shared = await sharedSpace();
       const minted = await processMint(deps, alice.did(), {
         space: shared,
@@ -1467,10 +1499,11 @@ describe("ingest-channels control plane", () => {
     });
   });
 
-  // Rotating replaces the secret and reassigns `owner`, so without this guard a
-  // co-owner takes a channel over silently: the incumbent's device dies and no
-  // revocation record explains it.
   it("refuses to rotate a channel registered to a different owner", async () => {
+    // Rotating replaces the secret and reassigns `owner`, so without this guard
+    // a co-owner takes a channel over silently: the incumbent's device dies and
+    // no revocation record explains it.
+
     const shared = await sharedSpace();
     const first = await processMint(deps, alice.did(), {
       space: shared,
@@ -1504,6 +1537,7 @@ describe("ingest-channels control plane", () => {
     // Rotate and revoke each decide against a snapshot, so without a
     // precondition an interleaving leaves revoke reporting success on a channel
     // that is live again, or rotate returning an already-dead token.
+
     it("a write loses when the registration moved underneath it", async () => {
       const first = await mint(alice, "req-cc1");
       const id = ok(first).id;
@@ -1545,9 +1579,10 @@ describe("ingest-channels control plane", () => {
     });
   });
 
-  // Every self-serve credential is finite-lived: an unbounded token means the
-  // only bound on a removed owner's access is somebody noticing.
   it("always sets an expiry, even when no ttl is requested", async () => {
+    // Every self-serve credential is finite-lived: an unbounded token means the
+    // only bound on a removed owner's access is somebody noticing.
+
     const res = await mint(alice, "req-ttl0");
     expect(typeof ok(res).expiresAt).toBe("string");
     expect(Date.parse(ok(res).expiresAt!)).toBeGreaterThan(Date.now());
@@ -1556,6 +1591,7 @@ describe("ingest-channels control plane", () => {
   it("clamps an absurd ttlDays instead of throwing a RangeError", async () => {
     // `new Date(now + 1e15 * 86_400_000).toISOString()` throws RangeError, and
     // that line sits outside the try — it would escape as an uncaught 500.
+
     const res = await mint(alice, "req-ttl", { ttlDays: 1e15 });
     expect(res.status).toBe(200);
     expect(Date.parse(ok(res).expiresAt ?? "")).toBeGreaterThan(Date.now());
@@ -1570,7 +1606,8 @@ describe("ingest-channels control plane", () => {
         requestId: "shared-id",
       })).status,
     ).toBe(200);
-    // Same requestId, different caller, different installId -> must not collide.
+    // Same requestId, different caller, different installId -> must not
+    // collide.
     const other = await processMint(deps, mallory.did(), {
       space: shared,
       installId: "phone-2",

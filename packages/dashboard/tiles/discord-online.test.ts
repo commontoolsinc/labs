@@ -76,17 +76,21 @@ class FakeSocket {
     this.closed = true;
   }
 
-  // Deliver a gateway frame the way the real socket would: JSON in a string.
+  /**
+   * Delivers a gateway frame the way the real socket would: JSON in a string.
+   */
   deliver(frame: unknown) {
     this.onmessage!({ data: JSON.stringify(frame) });
   }
 
-  // Deliver whatever is given, untouched, for the frames that are not JSON.
+  /**
+   * Delivers whatever is given, untouched, for the frames that are not JSON.
+   */
   raw(data: unknown) {
     this.onmessage!({ data });
   }
 
-  // The parsed frames the tile sent back up the socket.
+  /** Returns the parsed frames the tile sent back up the socket. */
   frames(): { op: number; d?: unknown }[] {
     return this.sent.map((s) => JSON.parse(s));
   }
@@ -289,12 +293,10 @@ Deno.test("discord snapshot: absent Team aliases do not produce a valid snapshot
   assertEquals(missing, null);
 });
 
-//
-// This is the first test that reaches the history, so it is the one that sees the
-// file being loaded. The load happens once per process, on first use.
-//
-
 Deno.test("discord online: a snapshot -> good; the reloaded history draws the chart, stale samples age out", async () => {
+  // This is the first test that reaches the history, so it is the one that sees
+  // the file being loaded. The load happens once per process, on first use.
+
   clock = T0;
   const persisted = [
     { t: T0 - 90 * DAY, team: 1, visitors: 1 }, // past the 60-day retention window

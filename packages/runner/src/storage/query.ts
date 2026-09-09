@@ -12,32 +12,38 @@ import {
  * The keys for the store map are of the form: `${address.id}/application/json`
  */
 export class StoreObjectManager implements ObjectStorageManager {
-  private readValues = new Map<string, IAttestation>();
-  // Cache our read labels, and any docs we can't read
+  #store: Map<string, Revision<State>>;
+  #readValues = new Map<string, IAttestation>();
+
+  /** The docs we can't read, by store key. */
   public missingDocs = new Map<string, BaseMemoryAddress>();
 
-  constructor(private store = new Map<string, Revision<State>>()) {
+  constructor(store = new Map<string, Revision<State>>()) {
+    this.#store = store;
   }
 
   getReadDocs(): Iterable<IAttestation> {
-    return this.readValues.values();
+    return this.#readValues.values();
   }
 
   getMissingDocs(): Iterable<BaseMemoryAddress> {
     return this.missingDocs.values();
   }
 
-  // Returns null if there is no matching state
+  /**
+   * Loads the state at `address`, or returns `null` if there is no matching
+   * state.
+   */
   load(address: BaseMemoryAddress): IAttestation | null {
     const key = `${address.id}/${address.type ?? "application/json"}`;
-    if (this.readValues.has(key)) {
-      return this.readValues.get(key)!;
+    if (this.#readValues.has(key)) {
+      return this.#readValues.get(key)!;
     }
     // we should only have one match
-    if (this.store.has(key)) {
-      const storeValue = this.store.get(key);
+    if (this.#store.has(key)) {
+      const storeValue = this.#store.get(key);
       const rv = { address: { ...address, path: [] }, value: storeValue?.is };
-      this.readValues.set(key, rv);
+      this.#readValues.set(key, rv);
       return rv;
     } else {
       if (!this.missingDocs.has(key)) {

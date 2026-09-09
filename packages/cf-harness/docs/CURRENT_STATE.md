@@ -1,7 +1,10 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-08-26
+Last verified: 2026-09-03
+
+The [system map](system-map/README.md) moves in lockstep with this current-state
+reference.
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -22,11 +25,14 @@ The runtime has four main boundaries:
    The optional `run_pattern` tool is a distinct trusted-host path whose Fabric
    identity stays outside Docker and whose authority is constrained to one
    configured space.
-4. The artifact store records run state, transcript, reports, capability and
-   policy snapshots, tool outputs, child references, skills provenance, and
-   optional product run manifests. It also records the per-cell CFC labels the
-   run's space holds for the cells the run touched — the one artifact a run does
-   not write out of its own knowledge, read back from the space so a reader
+4. The artifact store records run state, the model-facing transcript, a sibling
+   record of the omission rules and full-artifact locations applied to each tool
+   result, reports, capability and policy snapshots, tool outputs, child
+   references, skills provenance, and optional product run manifests. The
+   omission record carries no withheld values and is read only for retrospective
+   display and audit accounting. The store also records the per-cell CFC labels
+   the run's space holds for the cells the run touched — the one artifact a run
+   does not write out of its own knowledge, read back from the space so a reader
    working from the tree alone can see what a cell is labelled.
 
 The Common Fabric runner or another trusted mediator owns authoritative CFC
@@ -38,6 +44,11 @@ the model to make policy decisions.
 
 The current package provides:
 
+- durable Loom composition, exact inspection, and bounded receipt recovery over
+  an explicitly configured host command transport; current-turn console results
+  include verified authored Loom receipts and the submitted origin. See
+  [Durable Loom authoring](LOOM_AUTHORING.md) for authority, custody, and retry
+  contracts;
 - batch CLI execution with bounded model turns and optional streamed events;
 - machine-readable capability discovery with `--describe-capabilities`;
 - persistent provider configuration and structured config/auth control, with
@@ -46,21 +57,55 @@ The current package provides:
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
 - one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
-  and `pattern-author` profiles;
+  and `pattern-author` profiles, beside the internal `explore` profile that
+  `query_docs` runs and no delegation may name;
+- documentation a child can look something up in: `query_docs` takes one
+  question, selects the matching sections of the operator-provisioned corpus on
+  the host, and returns a bounded answer with inert path-and-heading citations.
+  A run configures the corpus with a repeatable `--docs-corpus-root`, and a run
+  out of a labs checkout that names none defaults to that checkout's
+  `docs/common`, `docs/development`, and `skills`; the resolved roots and their
+  source are recorded in run state and printed in operator output, and a run
+  that resolves none does not offer the tool. Every admitted section carries a
+  `Resource` integrity endorsement of class
+  `CommonFabricHarnessOperatorProvisionedReference` naming the root it was read
+  under, and only an endorsed section is eligible for an answer, so workspace
+  text cannot reach one. The answer comes from one model call under a profile
+  with no tools, recorded as a model attempt with its tokens in descendant
+  usage, and what was sent is kept on the tool-output artifact and stripped
+  before the caller sees it. That call carries no declaration ceiling and runs
+  no boundary policy evaluation, so it sits outside the posture's caveat policy:
+  the corpus is trusted for confidentiality, which is what makes a sink with no
+  ceiling the right shape for it and also the whole of what holds it — the
+  endorsement is an integrity claim and gates nothing on the way out. Which
+  cheap model answers is resolved from the run's transport, since a transport
+  serves only its own models, and a call that ended with no answer is counted on
+  the run, its children's included, and printed in the operator summary;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
-- explicit skill preload, indexed supporting-resource reads, and exact
-  allowlisted Deno/Bash skill scripts;
+- a skills registry over `--skills-root`, defaulting for a run out of a labs
+  checkout to that checkout's own `skills/` tree, with the resolved tree and its
+  source recorded in run state and printed in operator output; skill preload by
+  name, indexed supporting-resource reads, and exact allowlisted Deno/Bash skill
+  scripts (which run in the sandbox, and so still ask for the flag);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
   wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
   the field and the shape expected of it — never the value it rejected — and the
-  run carries on; the call is recorded as a denied policy decision, a `not-run`
-  tool activity, and an `invalid_tool_call` failure record. Only what the model
-  cannot correct — transport, engine invariants, artifact persistence,
+  run carries on; the call is recorded as a policy decision with the outcome
+  `invalid` rather than `denied` — nothing about policy refused it — plus a
+  `not-run` tool activity and an `invalid_tool_call` failure record. Only what
+  the model cannot correct — transport, engine invariants, artifact persistence,
   cancellation, the turn cap — ends the run;
-- transcript-based resume and durable run artifacts;
+- a release a confidentiality boundary refused is recorded as a policy decision
+  with the outcome `withheld` rather than `denied`: the call ran and answered
+  with the reference to the result whose values were held back, so the trace
+  counts it in its own bucket, and the console renders the step as the success
+  its answer states with a withheld marker beside the CFC line. `denied` names a
+  call that did not run;
+- transcript-based resume and durable run artifacts, with retrospective omission
+  joins kept outside the transcript and provider context;
 - server-side Responses context compaction with a default threshold derived from
   the model's input budget, an explicit override/disable control, retained
   compaction evidence, and tool-call/result-safe transcript pruning;
@@ -78,7 +123,9 @@ The current package provides:
   restored session whose recorded history does not pair its tool calls with tool
   results preserves that history and adds explicit unknown-outcome results for
   missing results, while orphan results and duplicate call IDs refuse the
-  session locally rather than sending malformed history to a provider;
+  session locally rather than sending malformed history to a provider; and a
+  listener that cannot take an event is reported to the host as a delivery
+  failure and does not change the outcome of the turn that produced it;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
@@ -104,6 +151,26 @@ The current package provides:
   name-based selection retired for the delegated path — and the child's
   activation records `source: "skill-handle"` with the token and the digest of
   the injected text;
+- pattern references by trusted record: `delegate_task` takes up to eight
+  optional `{ patternId, note? }` entries and resolves each id only from the
+  records that run already holds — successful `search_patterns` results retained
+  by that parent run and restored from its persisted transcript on resume,
+  together with the patterns the task itself attached. A known id contributes a
+  neutral child-context block containing the trusted record's kind and quality
+  where the record carries them, its description, match evidence, import hint,
+  argument shape, result shape, and the parent note verbatim; an unknown id is
+  omitted and named in `patternRefRefusals` as `not-searched-by-parent`.
+  Delegation does not refetch the index;
+- pattern references attached to a task: a run may be configured with up to
+  eight published pattern ids, which it resolves through the index's
+  `getPattern` before its first model turn and seeds as searched hits, so the
+  run names them with no search. The id is the whole of the reference — the
+  content-addressed identity of published source — and a value outside that
+  grammar is refused by the surface it arrives at, while an id the index does
+  not hold fails the run, naming the id, rather than running without what the
+  caller attached. The seeded record carries what the index answers for the id
+  and nothing else: a reference grants what a search hit grants, which is to
+  compose that source by identifier;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while
@@ -121,12 +188,19 @@ The current package provides:
   `const`, `enum`, `default`, `examples`, and free-text annotations never leave
   the tool. Property names do cross, since code cannot be written over data
   without them, so they are bounded in count and length and the model-facing
-  reply is scrubbed of bare fabric identifiers at every depth, keys included.
-  Disclosure is permissive and fixed rather than configurable — no setting
-  narrows it — and is bounded to addresses in the session's own space; that
-  bound is on the handle's own address rather than on everything the document
-  reaches from it. Answering from the fabric establishes the run's fabric
-  session despite the tool's `read` effect class;
+  reply is scrubbed of bare fabric identifiers at every depth, keys included. A
+  referent that declares no schema and whose value is a SQLite database handle
+  reports `database` instead: its tables, one property per table whose own
+  properties are that table's columns with their types, reduced by the same
+  allowlist, and one label entry per column that declares an `ifc`, addressed by
+  table name and column name. That is the one place the tool reads a value, and
+  it is conditional on nothing being declared — a database's tables are the
+  contract it was created under, its rows are in the database file, and nothing
+  here opens one. Disclosure is permissive and fixed rather than configurable —
+  no setting narrows it — and is bounded to addresses in the session's own
+  space; that bound is on the handle's own address rather than on everything the
+  document reaches from it. Answering from the fabric establishes the run's
+  fabric session despite the tool's `read` effect class;
 - bounded request-attribution headers on OpenAI-compatible gateway traffic,
   using persisted operational provenance rather than request content or personal
   identifiers;
@@ -171,39 +245,61 @@ The current package provides:
   runner's named posture bundle (every staged enforcement dial on, the standard
   prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
   with the two per-dial flags applying over it — these are the fabric session's
-  dials, independent of the harness's own `--cfc-enforcement-mode`, and the
+  dials, independent of the harness's own `--cfc-enforcement-mode` up to one tie
+  — under a session raised to `enforce-strict` a harness dial nobody set follows
+  the session, and one stated weaker refuses startup naming both flags — and the
   resolved posture (each dial's value and whether the operator, the named
   bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
-  state and the run report, and printed in the operator summary;
+  state and the run report, and printed in the operator summary — the whole
+  posture record with it, which a delegated child carries from its parent
+  stamped `inherited` because it runs on that parent's session; the session
+  runtime can further run under a read ceiling — the `--max-confidentiality`
+  flag, or `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest,
+  met when both are given — that bounds every `db.query` the run issues, a
+  query's own declaration met with it rather than replacing it; the ceiling
+  governs only query results declared per session (`PerSession<>`,
+  `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
+  runtime refuses any other query under it, so a pattern authored for a bounded
+  run declares its results per session; it is refused without a fabric session,
+  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
+  printed in the operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity
   under the CF1 first-party scheme, and an indexed pattern runs in the session's
   space. It adds the `search_patterns` tool, which finds published patterns by
-  hashtag or free text and reports each hit's description, hashtags, usage
-  signals, declared argument and result shapes, and the `cf:pattern:<patternId>`
-  import specifier that composes it. It also extends `run_pattern`, which takes
-  exactly one of `sourceText` and `patternId`: with a `patternId` the published
-  program is fetched host-side and compiled down the same path, and neither its
-  source nor a compile diagnostic quoting it reaches model context — the
-  diagnostic is retained in the run artifact instead. The run reports
-  `instantiated` and then `run_succeeded` or `run_failed` back to the index,
-  best-effort, so a reporting failure never bears on the tool result. It adds
-  the `record_feedback` tool, which votes a pattern up or down with an optional
-  note, so the index learns which of the patterns it holds were worth offering.
-  And it closes the loop the other way: source the model authored and ran
-  successfully is published back under the identity the compile recorded for it,
-  carrying the `description` and `hashtags` the call named, the run's own task
-  as the request the pattern answers, the compiled argument and result schemas,
-  and the published patterns the source imports. That publication is best-effort
-  in the same way — never awaited, never a failure of a run that worked — and a
-  run that names no `description` publishes nothing, since a pattern nobody can
-  read the purpose of is a pattern nobody finds. `--no-pattern-index-publish`,
-  or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter
-  only. Without the index configuration `search_patterns` and `record_feedback`
-  are absent from the tool surface, for a `pattern-author`-profile subagent as
-  much as for the parent — a child searches through the one client the parent
-  built — and `run_pattern` refuses a `patternId`;
+  hashtag or free text and reports each hit's kind, evidence quality,
+  description, hashtags, usage signals, declared argument and result shapes, and
+  the `cf:pattern:<patternId>` import specifier that composes it. Free-text
+  search removes stopwords, matches whole words plus light suffix variants, and
+  is disjunctive: one content term may return a hit, so extra terms can admit
+  generic matches. `matchedTerms` and `queryTerms` count the stopword-free
+  terms. It also extends `run_pattern`, which takes exactly one of `sourceText`
+  and `patternId`: with a `patternId` the published program is fetched host-side
+  and compiled down the same path, and neither its source nor a compile
+  diagnostic quoting it reaches model context — the diagnostic is retained in
+  the run artifact instead. The run reports `instantiated` and then
+  `run_succeeded` or `run_failed` back to the index, best-effort, so a reporting
+  failure never bears on the tool result. It adds the `record_feedback` tool,
+  which votes a pattern up or down with an optional note, so the index learns
+  which of the patterns it holds were worth offering. And it closes the loop the
+  other way: source the model authored and ran successfully is recorded under
+  the identity the compile recorded for it, carrying the `description` and
+  `hashtags` the call named, the run's own task as the request the pattern
+  answers, the compiled argument and result schemas, and the published patterns
+  the source imports. Automatic publication records the entry without offering
+  it to search; discoverability is earned from later evidence. Curated seeding
+  may offer a passing run immediately by setting
+  `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`, while a render-gate failure
+  remains recorded and non-discoverable with the gate's reason. Publication is
+  best-effort in the same way — never awaited, never a failure of a run that
+  worked — and a run that names no `description` publishes nothing, since its
+  purpose could not be evaluated later. `--no-pattern-index-publish`, or
+  `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter only.
+  Without the index configuration `search_patterns` and `record_feedback` are
+  absent from the tool surface, for a `pattern-author`-profile subagent as much
+  as for the parent — a child searches through the one client the parent built —
+  and `run_pattern` refuses a `patternId`;
 - composition over that index: source the model authors may import a published
   pattern by the specifier a search reported,
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` makes it
@@ -348,12 +444,6 @@ Package behavior is covered by the unit suite:
 
 ```bash
 deno task test
-```
-
-Real sandbox/CFC paths are separately environment-gated:
-
-```bash
-deno task test:integration
 ```
 
 Product adapters maintain their own contract and cancellation tests; package

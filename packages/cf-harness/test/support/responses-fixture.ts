@@ -26,6 +26,7 @@ export interface ChatViewMessage {
    * chat-style content-part array; those few assertions cast to read it.
    */
   content: string;
+
   tool_call_id?: string;
 }
 

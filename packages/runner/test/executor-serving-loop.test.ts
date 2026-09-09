@@ -47,11 +47,15 @@ import {
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { waitUntil } from "./support/wait-until.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
-  // Delegate to the base connectTo (shared-harness extraction, CT-1962):
-  // `new this` gives back this subclass, and the base clears server
-  // ownership so closing this manager never closes the shared server.
+  /**
+   * Delegates to the base `connectTo()`: `new this` gives back this subclass,
+   * and the base clears server ownership so closing this manager never closes
+   * the shared server.
+   */
   static override connectTo(
     server: MemoryV2Server.Server,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
@@ -93,21 +97,6 @@ const serviceSigner = await Identity.fromPassphrase("serving loop service");
 const aliceSigner = await Identity.fromPassphrase("serving loop alice");
 const bobSigner = await Identity.fromPassphrase("serving loop bob");
 
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string | (() => string),
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      const rendered = typeof label === "function" ? label() : label;
-      throw new Error(`timed out waiting for ${rendered}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
-
 describe("stage F serving loop", () => {
   let server: MemoryV2Server.Server;
   let host: ExecutorHost | undefined;
@@ -121,6 +110,7 @@ describe("stage F serving loop", () => {
   let servingFetch:
     | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
     | undefined;
+
   // serving-loop.md §3e: the pattern-update posture flips server-side.
   const newHost = (
     policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],
@@ -1003,7 +993,11 @@ describe("stage F serving loop", () => {
     // v1's pre-swap derived commits.
     const preSwapHead = Engine.serverSeq(engine);
     const pointerTx = clientRuntime.edit();
-    clientResult.withTx(pointerTx).setMetaRaw("patternIdentity", v2Ref!);
+    clientResult.withTx(pointerTx).setMetaRaw(
+      "patternIdentity",
+      v2Ref!,
+      rawMetaWriteAuthorization,
+    );
     expect((await pointerTx.commit()).error).toBeUndefined();
 
     // The SpaceServer's watcher swaps to v2 and the wave serves the new
@@ -1081,6 +1075,72 @@ describe("stage F serving loop", () => {
     );
     expect(host.stats().lease.lost).toBeGreaterThanOrEqual(1);
     expect(host.stats().activeSpaces).toBe(0);
+  });
+
+  it("leaves a space unserved while a rival process holds its lease, and serves it once that lease is gone (serving-loop.md §2)", async () => {
+    const engine = await server.engineForSpace(space);
+    const rival = executionLeaseHolder("did:key:activation-rival");
+    expect(
+      acquireExecutionLease(engine, { space, holder: rival, ttlMs: 600_000 }),
+    ).toBe(true);
+
+    let built = 0;
+    onServingRuntime = () => {
+      built += 1;
+      return Promise.resolve();
+    };
+    host = newHost();
+    openClient();
+    const demand = clientRuntime.getCell<{ value: number }>(
+      space,
+      "rival-lease-demand",
+      undefined,
+    );
+    await demand.sync();
+    // The admission trigger's own precondition, checked rather than
+    // assumed: with a live client session an authored admission
+    // activates, so the notice below reaches the refusal.
+    expect(
+      server.hasLiveSessionsForSpace(space, {
+        excludePrincipal: serviceSigner.did(),
+      }),
+    ).toBe(true);
+    server.noteExecutorCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "rival-lease-issuer",
+      writes: [{ id: "of:rival-lease-c1", scopeKey: "space" }],
+    });
+    // The notice entered the activation synchronously, and close()
+    // awaits every activation in flight — so this is the refusal
+    // landing, not a guess at when it lands.
+    await host.close();
+
+    // The refusal precedes the runtime factory: a second deriver builds
+    // nothing, registers nothing, and leaves the rival's row alone.
+    expect(built).toBe(0);
+    expect(host.stats().lease.held).toBe(0);
+    expect(host.spaceServer(space)).toBeUndefined();
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+
+    // The control: with the row released, the SAME trigger against the
+    // SAME live session serves the space — so the refusal above is the
+    // lease's doing, not a trigger that never fired.
+    releaseExecutionLease(engine, { space, holder: rival });
+    host = newHost();
+    server.noteExecutorCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "rival-lease-issuer",
+      writes: [{ id: "of:rival-lease-c2", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the activation once the rival's lease is gone",
+    );
+    expect(built).toBe(1);
   });
 
   it("parks on a renew-blip mid-wave abort: reacquire succeeds, the aborted wave's space still parks and W does not move (serving-loop.md §2)", async () => {

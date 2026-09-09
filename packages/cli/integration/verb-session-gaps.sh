@@ -56,6 +56,19 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+
+# The host's server-execution posture (same probe as integration.sh): the
+# `deduplicated` key is the OFF arm's receipt-precondition witness and is
+# asserted per arm below. Deadlines as in integration.sh: an
+# accepted-then-silent server must not hold the suite with no output.
+server_execution_on() {
+  case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
+}
 # An id alone does not name an invocation — the session it was chosen within is
 # the other half, and `--invocation` is refused without one.
 if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
@@ -77,7 +90,7 @@ if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
 fi
-SLUG_NAME=$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
+SLUG_NAME=$($CF cell get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
 check "Work tracker" "$SLUG_NAME" "the slug resolves everywhere --piece is taken"
 # The arrival name is discoverable as well as resolvable: the slug index
 # lists what the deploy's --slug wrote — the same wiring the demo's act 1
@@ -143,7 +156,7 @@ $CF piece describe --piece board $ARGS --json 2>/dev/null |
   bad "describe --json is missing purpose, state, or the verb rows"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
-HELP=$($CF call --piece board $ARGS addItem -- --help 2>/dev/null)
+HELP=$($CF piece call --piece board $ARGS addItem --help 2>/dev/null)
 echo "$HELP" | grep -q -- "--title" &&
   ok "the flag is derived from the event schema" ||
   bad "no --title flag in the generated help"
@@ -207,7 +220,7 @@ fi
 # wide open. It is recorded in the walkthrough's table instead, against #5559.
 
 step "4. A create hands back the piece, and the address chains"
-R=$($CF call --quiet --show-links --piece board $ARGS \
+R=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Login rewrite"}' 2>/dev/null)
 check "Login rewrite" "$(echo "$R" | jq -r '.result.item["$NAME"] // empty')" \
   "the result carries the created item"
@@ -221,13 +234,13 @@ fi
 # the writes landed; each call's exit code is checked too, because the
 # readback runs after the write commits — a readback failure leaves the count
 # intact, and only the exit code shows it.
-$CF call --quiet --piece "$EPIC" $ARGS \
+$CF piece call --quiet --piece "$EPIC" $ARGS \
   addChild '{"title":"Session cookies"}' >/dev/null 2>&1 ||
   bad "addChild (Session cookies) exited nonzero"
-$CF call --quiet $ARGS "$EPIC" \
+$CF piece call --quiet $ARGS "$EPIC" \
   addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1 ||
   bad "addChild (CSRF tokens, positional address) exited nonzero"
-KIDS=$($CF get --quiet --piece "$EPIC" children $ARGS \
+KIDS=$($CF cell get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "2" "$(echo "$KIDS" | jq -r 'length')" \
@@ -242,7 +255,7 @@ check "addChild,archive,blockOn,finish,recordNote" \
   "an item lists its own verbs, and not the board's"
 
 step "5. Read addresses instead of contents"
-ADDR=$($CF get --quiet --piece "$EPIC" children $ARGS \
+ADDR=$($CF cell get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
@@ -255,7 +268,7 @@ KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"]
 # nothing about the answer moved. The check above is what gives it force —
 # were the first read already empty, two empty reads would agree and this
 # would pass saying nothing.
-AGAIN=$($CF get --quiet --piece "$EPIC" children $ARGS \
+AGAIN=$($CF cell get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "$ADDR" "$AGAIN" "the same read, run again, answers the same"
@@ -273,29 +286,29 @@ step "6. Two routes hand back an address, and either one addresses the piece"
 # on which it "closes", and a gap that can never fire is a gap that reports
 # nothing. What a caller does depend on is asserted instead — either address,
 # fed back to --piece, reads the same piece.
-MADE=$($CF call --quiet --show-links --piece board $ARGS \
+MADE=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Rate limiting"}' 2>/dev/null |
   jq -r '.links["/item"] // empty')
-VIA_READ=$($CF get --quiet --piece board items $ARGS --step \
+VIA_READ=$($CF cell get --quiet --piece board items $ARGS --step \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null | jq -r '.[] | select(.title=="Rate limiting") | .["$link"]')
 if [ -z "$MADE" ] || [ -z "$VIA_READ" ]; then
   bad "one of the two routes produced no address (call=$MADE read=$VIA_READ)"
 else
   # Both must work as --piece. That is the property a caller depends on.
-  M_T=$($CF get --quiet --piece "$MADE" title $ARGS 2>/dev/null | tr -d '"')
-  R_T=$($CF get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
+  M_T=$($CF cell get --quiet --piece "$MADE" title $ARGS 2>/dev/null | tr -d '"')
+  R_T=$($CF cell get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$M_T" "the address the call returned addresses the piece"
   check "Rate limiting" "$R_T" "the address the read returned addresses the piece too"
   # The same address, standing bare in the first position with the path
   # embedded — the spelling the demo teaches from act 4 on. An address begins
   # with `/` and a relative path never does, so nothing marks it but itself.
-  P_T=$($CF get --quiet "$VIA_READ/title" $ARGS 2>/dev/null | tr -d '"')
+  P_T=$($CF cell get --quiet "$VIA_READ/title" $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$P_T" "the address stands positional, carrying its path"
 fi
 
 step "7. A verb returns what only the pattern could compute"
-N=$($CF call --quiet --piece "$EPIC" $ARGS \
+N=$($CF piece call --quiet --piece "$EPIC" $ARGS \
   recordNote '{"body":"blocked on the cookie spec"}' 2>/dev/null)
 check "1" "$(echo "$N" | jq -r '.result.noteCount // empty')" \
   "recordNote returns the count after the append"
@@ -308,13 +321,13 @@ AT=$(echo "$N" | jq -r '.result.note.at // 0')
 # so an envelope shows the original count and body whether or not a second
 # append actually landed. Only reading the item's own `notes` afterwards can
 # tell those apart, which makes the live length the discriminator for both.
-notes_len() { $CF get --quiet --piece "$EPIC" $ARGS notes 2>/dev/null | jq 'length'; }
+notes_len() { $CF cell get --quiet --piece "$EPIC" $ARGS notes 2>/dev/null | jq 'length'; }
 LIVE0=$(notes_len)
 RCPT=$(echo "$N" | jq -r '.receipt // empty')
 if [ -z "$RCPT" ]; then
   bad "the settled envelope named no receipt to read back"
 else
-  RB=$($CF get --quiet --piece "$RCPT" $ARGS --select note,noteCount 2>/dev/null)
+  RB=$($CF cell get --quiet --piece "$RCPT" $ARGS --select note,noteCount 2>/dev/null)
   check "blocked on the cookie spec" "$(echo "$RB" | jq -r '.note.body // empty')" \
     "the receipt address holds the outcome that handling committed"
   check "1" "$(echo "$RB" | jq -r '.noteCount // empty')" \
@@ -326,30 +339,40 @@ fi
 # The other route: no address kept, so the id is the handle. The replay carries
 # a DIFFERENT payload on purpose, so a returned body of the FIRST text is
 # evidence the second call's event never became an outcome.
-R1=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+R1=$($CF piece call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
   recordNote '{"body":"first attempt"}' 2>/dev/null)
 LIVE1=$(notes_len)
-R2=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+R2=$($CF piece call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
   recordNote '{"body":"a different body entirely"}' 2>/dev/null)
 check "first attempt" "$(echo "$R2" | jq -r '.result.note.body // empty')" \
   "replaying a settled id hands back the original result, not the new payload"
 check "$(echo "$R1" | jq -r '.receipt // empty')" "$(echo "$R2" | jq -r '.receipt // empty')" \
   "and names the same receipt the first call did"
-check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
-  "and says so itself, rather than leaving a caller to infer it"
+if server_execution_on; then
+  # ON: no receipt precondition exists (events.md §4 subsumption) — the
+  # replay is skipped at the dedupe horizon and the two checks above (the
+  # ORIGINAL result and the SAME receipt address, read back from the
+  # serving-side receipt — the ruled result carriage, 2026-08-29) are the
+  # witness; the OFF-arm mechanism key must not be fabricated.
+  check "false" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+    "and does not claim receipt-level dedup under server execution"
+else
+  check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+    "and says so itself, rather than leaving a caller to infer it"
+fi
 check "$LIVE1" "$(notes_len)" \
   "and the piece is unchanged — the replay committed no second note"
 
 step "8. Finishing reports what the caller could not know"
 # Exit code checked for the same reason as step 4's creates.
-$CF call --quiet --piece "$KID" $ARGS \
+$CF piece call --quiet --piece "$KID" $ARGS \
   addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1 ||
   bad "addChild (Rotate signing key) exited nonzero"
 # Unshaped: a PROJECTED read of this path fails once `finish` has run, while
 # the same path unshaped resolves fine. Counting is all this step needs.
-DIRECT=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
+DIRECT=$($CF cell get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-F=$($CF call --quiet --piece "$EPIC" $ARGS \
+F=$($CF piece call --quiet --piece "$EPIC" $ARGS \
   finish '{"body":"shipping behind a flag"}' 2>/dev/null)
 OPEN=$(echo "$F" | jq -r '.result.openBelow // empty')
 # Captured rather than hard-coded: the property is that it counted deeper than
@@ -361,11 +384,11 @@ else
 fi
 
 step "9. A value-less verb settles with the empty witness"
-V=$($CF call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
+V=$($CF piece call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "archive settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. A reference argument dispatches — the envelope, and the address as emitted"
+step "10. A reference argument dispatches — the envelope, the address as emitted, and the object a read renders it in"
 # blockOn declares `on: Writable<ItemOutput>` — a reference. #5880 landed the
 # ENVELOPE spelling: a link envelope in that position passes the gate and the
 # edge that comes back is the target, not a copy. The round-trip spelling
@@ -375,7 +398,7 @@ step "10. A reference argument dispatches — the envelope, and the address as e
 # refuses the two payloads that could only ever be mistakes at a reference
 # position. Every spelling is asserted apart, so none can hide behind
 # another.
-OTHER=$($CF get --quiet --piece board items $ARGS \
+OTHER=$($CF cell get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"] // empty')
 if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
@@ -384,30 +407,52 @@ else
   # The envelope: assembled from the very address the read above emitted, so
   # the target is one the session was handed.
   SIGIL="{\"on\":{\"/\":{\"link@1\":{\"id\":\"${OTHER#/}\"}}}}"
-  BLOCKED=$($CF call --quiet --piece "$KID" $ARGS \
+  BLOCKED=$($CF piece call --quiet --piece "$KID" $ARGS \
     blockOn "$SIGIL" 2>/dev/null)
   check "1" "$(echo "$BLOCKED" | jq -r '.result.blockedOnCount // empty')" \
     "a link envelope names an existing item, and the edge lands"
   # And the edge is the target rather than a copy: the address under
   # blockedOn is the address the envelope named.
-  EDGE=$($CF get --quiet --piece "$KID" blockedOn $ARGS \
+  EDGE=$($CF cell get --quiet --piece "$KID" blockedOn $ARGS \
     --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
     jq -r '.[0]["$link"] // empty')
   check "$OTHER" "$EDGE" "the edge reads back as the address that was named"
   # The emitted spelling: the same address, fed back exactly as printed.
-  BLOCKED2=$($CF call --quiet --piece "$KID" $ARGS \
+  BLOCKED2=$($CF piece call --quiet --piece "$KID" $ARGS \
     blockOn "{\"on\":\"$OTHER\"}" 2>/dev/null)
   check "2" "$(echo "$BLOCKED2" | jq -r '.result.blockedOnCount // empty')" \
     "the address a read emits, fed back as written, dispatches"
-  EDGE2=$($CF get --quiet --piece "$KID" blockedOn $ARGS \
+  EDGE2=$($CF cell get --quiet --piece "$KID" blockedOn $ARGS \
     --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
     jq -r '.[1]["$link"] // empty')
   check "$OTHER" "$EDGE2" "and its edge is the target, not a copy"
+  # The rendered spelling: the same address inside the `{"$link": …}` object
+  # a marked read prints it in, fed back as that object.
+  BLOCKED3=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":{\"\$link\":\"$OTHER\"}}" 2>/dev/null)
+  check "3" "$(echo "$BLOCKED3" | jq -r '.result.blockedOnCount // empty')" \
+    "the \$link object a marked read renders, fed back as printed, dispatches"
+  EDGE3=$($CF cell get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[2]["$link"] // empty')
+  check "$OTHER" "$EDGE3" "and its edge is the target, not a copy"
+  # The same object with the contents the read projected beside the address,
+  # which is what a `--select @,title` row looks like. The address is what the
+  # position takes; the title beside it is not the target's, so a stored copy
+  # would read differently from the edge.
+  BLOCKED4=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":{\"\$link\":\"$OTHER\",\"title\":\"a projected copy\"}}" 2>/dev/null)
+  check "4" "$(echo "$BLOCKED4" | jq -r '.result.blockedOnCount // empty')" \
+    "the \$link object with projected contents beside it dispatches as the address"
+  EDGE4=$($CF cell get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[3]["$link"] // empty')
+  check "$OTHER" "$EDGE4" "and its edge is the target, not the copy beside the address"
   # The refusals guarding the same position, each matched against its
   # SPECIFIC message: a renamed verb or a server hiccup also exits nonzero,
   # and a probe that reads any failure as the refusal is a probe that cannot
   # fail.
-  NOT_ERR=$($CF call --quiet --piece "$KID" $ARGS \
+  NOT_ERR=$($CF piece call --quiet --piece "$KID" $ARGS \
     blockOn '{"on":"not-an-address"}' 2>&1 >/dev/null)
   NOT_RC=$?
   if [ "$NOT_RC" != "0" ] && printf '%s' "$NOT_ERR" | grep -q "is not an address"; then
@@ -415,7 +460,7 @@ else
   else
     bad "the not-an-address refusal did not fire (rc=$NOT_RC): $NOT_ERR"
   fi
-  COPY_ERR=$($CF call --quiet --piece "$KID" $ARGS \
+  COPY_ERR=$($CF piece call --quiet --piece "$KID" $ARGS \
     blockOn '{"on":{"title":"a copy"}}' 2>&1 >/dev/null)
   COPY_RC=$?
   if [ "$COPY_RC" != "0" ] && printf '%s' "$COPY_ERR" | grep -q "detached document"; then
@@ -430,16 +475,16 @@ step "11. a verb returning a child piece renders the circle as an address"
 # readback bounds the result with the verb's own declared result and renders
 # the position where the declared type re-enters itself as an address, so the
 # whole outcome is JSON and the write it reports stays legible.
-BEFORE=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
+BEFORE=$($CF cell get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-CALLED=$($CF call --quiet --piece "$EPIC" $ARGS \
+CALLED=$($CF piece call --quiet --piece "$EPIC" $ARGS \
   addChild '{"title":"Cycle probe"}' 2>/dev/null)
 RC=$?
 check "0" "$RC" "addChild readback on a doubly-linked tree"
 BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"] // ""')
 check "/of:" "${BACKREF:0:4}" \
   "the position that closes the circle returns an address"
-AFTER=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
+AFTER=$($CF cell get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
 check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 
@@ -461,7 +506,7 @@ check "" \
 # on its own address. That is what makes an empty `ls` uninformative rather
 # than conclusive, and it is the inference the document exists to block.
 check "Login rewrite" \
-  "$($CF get --quiet --piece "$EPIC" title $ARGS 2>/dev/null | jq -r '. // empty')" \
+  "$($CF cell get --quiet --piece "$EPIC" title $ARGS 2>/dev/null | jq -r '. // empty')" \
   "the unlisted item still reads through the address the create returned"
 
 ELAPSED=$(($(date +%s) - START))

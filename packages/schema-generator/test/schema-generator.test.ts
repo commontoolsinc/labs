@@ -60,6 +60,7 @@ type CalculatorRequest = {
   /** The mathematical expression to evaluate. */
   expression: string;
 };`;
+
       const { type, checker, typeNode } = await getTypeFromCode(
         code,
         "CalculatorRequest",
@@ -92,6 +93,82 @@ type CalculatorRequest = {
       const schema = generator.generateSchema(type, checker, typeNode);
       // unknown returns { type: "unknown" } to distinguish from any (true)
       expect(schema).toEqual({ type: "unknown" });
+    });
+  });
+
+  describe("synthetic readonly arrays", () => {
+    // The checker prints a ReadonlyArray as the `readonly T[]` type-operator
+    // form, and a synthetic result type built from a cell read is exactly
+    // that: `cell.get()` on a `Cell<T[]>` reads back `readonly T[]`. The
+    // node-based analyzer used to have no branch for the operator node and
+    // fell through to the accept-anything fallback, so a read of `unknown[]`
+    // — the reference-only declaration — came out as `true`.
+    const readonlyArrayOf = (element: ts.TypeNode) =>
+      ts.factory.createTypeOperatorNode(
+        ts.SyntaxKind.ReadonlyKeyword,
+        ts.factory.createArrayTypeNode(element),
+      );
+
+    it("keeps the element shape of a synthetic `readonly unknown[]`", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        readonlyArrayOf(
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+        ),
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("array");
+      expect(schema.items).toEqual({ type: "unknown" });
+    });
+
+    it("keeps the element shape of a synthetic `readonly string[]`", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        readonlyArrayOf(
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        ),
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("array");
+      expect(schema.items).toEqual({ type: "string" });
+    });
+
+    it("analyzes through `readonly` to a synthetic object element", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        readonlyArrayOf(
+          ts.factory.createTypeLiteralNode([
+            ts.factory.createPropertySignature(
+              undefined,
+              ts.factory.createIdentifier("id"),
+              undefined,
+              ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+            ),
+          ]),
+        ),
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("array");
+      expect(schema.items).toEqual({
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+      });
     });
   });
 
@@ -315,12 +392,17 @@ namespace Local {
       });
     });
 
+    //
+    // The synthetic index-signature branch
+    //
     // CT-1615 Berni review §4.2: lock in the new IndexSignatureDeclaration
-    // branch added to `analyzeTypeNodeStructure`'s TypeLiteral handler.
-    // Without it, synthetic `{ [k: string]: V }` / `Record<K, V>` shapes
-    // routed through node-based analysis silently drop their index signature
-    // (e.g. via the SchemaInjection lift-revisit that feeds `any` as the
-    // paired Type — see ts-transformers/src/transformers/schema-injection.ts).
+    // branch added to `analyzeTypeNodeStructure`'s TypeLiteral handler. Without
+    // it, synthetic `{ [k: string]: V }` / `Record<K, V>` shapes routed through
+    // node-based analysis silently drop their index signature (e.g. via the
+    // SchemaInjection lift-revisit that feeds `any` as the paired Type — see
+    // ts-transformers/src/transformers/schema-injection.ts).
+    //
+
     it("emits additionalProperties for synthetic { [k: string]: V } index signature", async () => {
       const generator = new SchemaGenerator();
       const { checker } = await getTypeFromCode(

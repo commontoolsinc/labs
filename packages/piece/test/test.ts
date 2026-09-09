@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 

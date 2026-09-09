@@ -162,9 +162,10 @@ const withRuntime = async (
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     cfcSinkMaxConfidentiality: { fetchJson: [USER_ALICE] },
     cfcPolicyRecords: opts.policyRecords ?? POLICY,
+    // Each case names the policy-evaluation rung it is about, and asserts the
+    // decision or the diagnostic that rung produces over one fixture.
     cfcPolicyEvaluation: opts.policyEvaluation ?? "off",
   });
   try {
@@ -363,6 +364,9 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
   describe("input-requirement maxConfidentiality gate", () => {
     const sinkSchema = {
       type: "object",
+      // The write target holds values derived from the Space-labeled cell,
+      // so its root declares that clause as the audience it keeps.
+      ifc: { confidentiality: [SPACE_ATOM] },
       properties: {
         out: {
           type: "string",
@@ -599,6 +603,9 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
           "mode-change-probe",
           {
             type: "object",
+            // The second prepare below reads back the label the first one
+            // persisted, so the root declares the clause `value` carries.
+            ifc: { confidentiality: ["x"] },
             properties: {
               value: { type: "string", ifc: { confidentiality: ["x"] } },
             },

@@ -468,7 +468,7 @@ function clearActionSchedulingState(
   state.pending.delete(action);
   const record = state.nodes.get(action);
   if (record) {
-    record.invalidCauses = [];
+    record.invalidCauses.clear();
     // Stage B: the fan-out record (known-scope ratchet, per-instance
     // logs) is scheduling state of the LIVE subscription — a re-registered
     // action starts unnarrowed and re-learns by its probe run.

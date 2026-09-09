@@ -6,7 +6,7 @@
 // follow-up that lifts this).
 // Spec: docs/specs/sqlite-builtin/06-cfc.md ("Write — the runner gate").
 
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 import {
@@ -48,6 +48,18 @@ const tables = {
     }),
   ),
   notes: table({ id: "integer primary key", body: "text" }),
+  // A mailbox-keyed table, for what a numeric-affinity column does to a bound
+  // value on the way in.
+  mailboxes: table(
+    { id: "integer primary key", source_id: "integer", note: "text" },
+    (f) => ({
+      confidentiality: all(
+        whenMatches(f.source_id, /^007$/, constant("did:mailbox:007")),
+        whenMatches(f.source_id, /^7$/, constant("did:mailbox:seven")),
+        dbOwner(),
+      ),
+    }),
+  ),
 };
 
 const unlabeled = (_v: unknown): readonly unknown[] => [];
@@ -69,6 +81,128 @@ function expectOk(
   if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
   return res;
 }
+
+describe("checkSqliteRowLabelWrite — the value the column will store", () => {
+  it("refuses a numeric string bound to a numeric-affinity rule input", () => {
+    // The gate reads the BOUND value and the store re-derives from the
+    // STORED one. INTEGER affinity turns "007" into 7, so the gate would
+    // compute [did:mailbox:007, owner] for a row that reads back as
+    // [did:mailbox:seven, owner] — and the no-laundering check, the one
+    // thing the server cannot redo, would have run against a label the row
+    // never carries.
+    expectError(
+      checkSqliteRowLabelWrite({
+        sql: "INSERT INTO mailboxes (source_id) VALUES (?)",
+        params: ["007"],
+        tables,
+        owner: OWNER,
+        confidentialityOf: unlabeled,
+      }),
+      "source_id",
+    );
+  });
+
+  it("takes the number itself", () => {
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id) VALUES (?)",
+      params: [7],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [
+      "did:mailbox:seven",
+      OWNER,
+    ]);
+  });
+
+  it("takes a string the column will store as it stands", () => {
+    // Affinity only converts text that is a well-formed number, so "later"
+    // reaches the row unchanged and the gate reads what the store will.
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id) VALUES (?)",
+      params: ["later"],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [OWNER]);
+  });
+
+  it("binds the canonical text of an integer to an INTEGER column: same text either side", () => {
+    // "7" stored under INTEGER affinity is 7, whose text is "7" again, so the
+    // gate and the read side agree and nothing is refused.
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id, note) VALUES (?, ?)",
+      params: ["7", "n"],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [
+      "did:mailbox:seven",
+      OWNER,
+    ]);
+  });
+
+  it("refuses a spelling the column would store as another text", () => {
+    for (const bound of ["007", "7.0", " 7", "-0", "7e0"]) {
+      const res = checkSqliteRowLabelWrite({
+        sql: "INSERT INTO mailboxes (source_id, note) VALUES (?, ?)",
+        params: [bound, "n"],
+        tables,
+        owner: OWNER,
+        confidentialityOf: unlabeled,
+      });
+      assert("error" in res, `${JSON.stringify(bound)} was admitted`);
+      assertStringIncludes(res.error, "another text");
+    }
+  });
+
+  it("refuses a whole number too large to name one INTEGER exactly", () => {
+    // Bound as a double, stored possibly wrapped; the commit read-back would
+    // render the wrapped digits and accept what the evaluator refuses.
+    const res = checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id, note) VALUES (?, ?)",
+      params: [2 ** 53 + 2, "n"],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    });
+    assert("error" in res);
+    assertStringIncludes(res.error, "bind a bigint");
+  });
+
+  it("refuses an object (a Cell, say) bound to a rule input before any conversion", () => {
+    const res = checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id, note) VALUES (?, ?)",
+      params: [{ get: () => "7" }, "n"],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    });
+    assert("error" in res);
+    assertStringIncludes(res.error, "an object");
+  });
+
+  it("a number bound to a TEXT rule input renders the same text on both sides", () => {
+    // TEXT affinity keeps a bound number as its text, which is what the
+    // evaluator renders for it too; nothing to refuse. (The `note` column is
+    // not a rule input, so the gate never inspects it — this test binds the
+    // number where the rule reads.)
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id, note) VALUES (?, ?)",
+      params: [7, 7],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [
+      "did:mailbox:seven",
+      OWNER,
+    ]);
+  });
+});
 
 describe("checkSqliteRowLabelWrite — INSERT evaluates the rule", () => {
   it("computes the prospective row label from the bound values", () => {

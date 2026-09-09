@@ -26,8 +26,10 @@ import {
   preparedDigestFor,
 } from "../src/cfc/mod.ts";
 import {
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
+  runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import {
@@ -43,11 +45,13 @@ import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -77,11 +81,15 @@ const seedPrivilegedCfc = (
 };
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     return { client, session };
@@ -299,6 +307,22 @@ describe("CFC canonicalization helpers", () => {
 });
 
 describe("ExtendedStorageTransaction CFC gate", () => {
+  // Characterization posture: the cases below describe what the gate does at
+  // the explicit rung with every other dial down, so the suite states that
+  // whole row rather than reaching it by inheritance. Every dial in
+  // RUNTIME_CFC_DIAL_DEFAULTS appears here; a mode passed by a test overrides
+  // the enforcement mode.
+  const characterizationCfcPosture = {
+    cfcEnforcementMode: "enforce-explicit",
+    cfcFlowLabels: "off",
+    cfcWriteFloor: "off",
+    cfcTriggerReadGating: false,
+    cfcDecomposedEnvelopes: false,
+    cfcPolicyEvaluation: "off",
+    cfcLabelMetadataProtection: "off",
+    cfcDeclaredMonotonicity: "off",
+  } as const;
+
   const createRuntime = (cfcEnforcementMode?: CfcEnforcementMode) => {
     const storageManager = StorageManager.emulate({
       as: signer,
@@ -306,6 +330,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      ...characterizationCfcPosture,
       ...(cfcEnforcementMode ? { cfcEnforcementMode } : {}),
     });
     return { runtime, storageManager };
@@ -318,7 +343,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup",
         actingPrincipal: signer.did(),
@@ -409,7 +434,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup-untyped",
         actingPrincipal: signer.did(),
@@ -499,7 +524,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup",
         actingPrincipal: signer.did(),
@@ -565,7 +590,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup-forged-projection",
         actingPrincipal: signer.did(),
@@ -633,7 +658,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
     });
     try {
       const tx = runtime.edit();
@@ -689,7 +714,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-argument-setup",
         actingPrincipal: signer.did(),
@@ -1724,11 +1749,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         }),
       );
 
-      const digestInput = (
-        metadataTx as unknown as {
-          buildPreparedDigestInput(): { consumedReads: unknown[] };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = (metadataTx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(digestInput.consumedReads).toEqual([]);
       expect(metadataTx.getCfcState().relevant).toBe(false);
 
@@ -2008,20 +2030,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       cell.key("secret").set("same");
       expect(tx.getCfcState().relevant).toBe(true);
 
-      const digestInput = (
-        tx as unknown as {
-          buildPreparedDigestInput(): {
-            attemptedWrites: Array<{
-              space: string;
-              scope: "space";
-              id: string;
-              type: string;
-              path: string[];
-            }>;
-            writes: Array<unknown>;
-          };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = (tx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(digestInput.attemptedWrites).toContainEqual({
         space: signer.did(),
         scope: "space",
@@ -2269,10 +2279,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtimeA = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManagerA,
+      ...characterizationCfcPosture,
     });
     const runtimeB = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManagerB,
+      ...characterizationCfcPosture,
     });
     const schema = {
       type: "object",
@@ -2808,7 +2820,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
-      seed.setCfcEnforcementMode("enforce-explicit");
       const target = runtime.getCell(
         signer.did(),
         "cfc-link-same-tx-source-target",
@@ -2823,7 +2834,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect((await seed.commit()).ok).toBeDefined();
 
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       const sameTxSource = runtime.getCell(
         signer.did(),
         "cfc-link-same-tx-source",
@@ -2838,6 +2848,27 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         tx,
       );
       linkedTarget.set(sameTxSource);
+      // The marker `data-updating` records for the child document it splits an
+      // entry into: the child is the runtime's store, filled out of what this
+      // transaction read.
+      const sourceLink = sameTxSource.getAsNormalizedFullLink();
+      const targetLink = linkedTarget.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        target: {
+          space: sourceLink.space,
+          id: sourceLink.id,
+          scope: sourceLink.scope,
+          path: [],
+        },
+        claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+        sources: [{
+          space: targetLink.space,
+          id: targetLink.id,
+          scope: targetLink.scope,
+          path: [],
+        }],
+      }, runtimeWritePolicyAuthorization);
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
@@ -2902,7 +2933,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         type: "object",
         ifc: { confidentiality: ["card-space"] },
         properties: { title: { type: "string" } },
-      });
+      }, rawMetaWriteAuthorization);
       const linkedTarget = runtime.getCell(
         signer.did(),
         "cfc-link-setup-schema-target",
@@ -4297,6 +4328,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      ...characterizationCfcPosture,
     });
     try {
       const firstTx = runtime1.edit();
@@ -4327,6 +4359,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const runtime2 = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        ...characterizationCfcPosture,
       });
       try {
         const secondTx = runtime2.edit();
@@ -4389,6 +4422,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
+      ...characterizationCfcPosture,
     });
     const cellSchema = {
       type: "object",
@@ -4423,6 +4457,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
+      ...characterizationCfcPosture,
     });
     try {
       const secondSchema = {
@@ -4471,6 +4506,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
+      ...characterizationCfcPosture,
     });
     const cellSchema = {
       type: "object",
@@ -4511,6 +4547,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
+      ...characterizationCfcPosture,
     });
     try {
       const secondSchema = {
@@ -5270,7 +5307,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       expect(getMetaLink(plainTarget2, "result", {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-        frozen: false,
       })).toBeDefined();
       plainTarget2.set({ bar: "updated" });
       tx2.prepareCfc();

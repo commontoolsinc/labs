@@ -4,6 +4,7 @@ import { getBinary } from "@astral/astral";
 import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
+import { UNLAUNCHED_MEMBERS_FILE } from "./unlaunched-members.ts";
 
 function jobBlock(workflow: string, jobId: string): string {
   const jobsStart = workflow.indexOf("jobs:\n");
@@ -160,17 +161,14 @@ function workflowTriggers(contents: string): string {
   return contents.slice(0, concurrencyStart);
 }
 
-//
-// Every other check in this file reads the workflow files as TEXT (regex over
-// job and step blocks), so none of them can notice that a file has stopped
-// being valid YAML — and a workflow that does not parse produces ZERO jobs on
-// every push while every text-level check here stays green. That happened: an
-// unquoted `default: ` inside two step names turned deno.yml into a nested
-// mapping the runner refused, and CI silently ran nothing for a whole stack of
-// pushes. This is the one check that would have caught it.
-//
-
 Deno.test("every workflow and composite action is valid YAML", async () => {
+  // Every other check in this file reads the workflow files as TEXT (regex over
+  // job and step blocks), so none of them can notice that a file has stopped
+  // being valid YAML — and a workflow that does not parse produces ZERO jobs on
+  // every push while every text-level check here stays green. Parsing is what
+  // catches that, and an unquoted `default: ` inside a step name is enough to
+  // turn a workflow into a nested mapping the runner refuses.
+
   const broken: string[] = [];
   for await (const path of githubYamlPaths()) {
     const contents = await Deno.readTextFile(path);
@@ -266,7 +264,7 @@ Deno.test("Check preserves a native crash from Deno lint", async () => {
   assertStringIncludes(describe, "if: ${{ failure() }}");
   assertStringIncludes(describe, 'file "$core"');
   assertStringIncludes(upload, "if: ${{ failure() }}");
-  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@");
   assertStringIncludes(
     upload,
     "name: deno-lint-core-a${{ github.run_attempt }}",
@@ -338,6 +336,7 @@ Deno.test("every step we name carries a phase marker", async () => {
   // "other", which is how a job's setup time goes missing from the timings
   // people read when deciding what to make faster. The classifier reads the
   // marker rather than the wording, so the check is the classifier itself.
+
   const unmarked: string[] = [];
   let steps = 0;
   for await (const path of githubYamlPaths()) {
@@ -366,6 +365,7 @@ Deno.test("every work step is bounded before its job is", async () => {
   // upload steps around it normally need. Both bounds are aliases to an anchor,
   // so each is a name here rather than a number, and the minutes behind the
   // names are written once.
+
   const headroom = 10;
   const contents = await workflow("deno.yml");
   const anchors = anchoredMinutes(contents);
@@ -411,13 +411,48 @@ Deno.test("every work step is bounded before its job is", async () => {
   }
 });
 
-Deno.test("Coverage Comment follows the CI workflow by name", async () => {
+Deno.test("Pull Request Comments follows the CI workflow by name", async () => {
   const deno = await workflow("deno.yml");
-  const comment = await workflow("coverage-comment.yml");
+  const comment = await workflow("pull-request-comments.yml");
   const name = deno.match(/^name: (.+)$/m);
   assert(name, "workflow name not found");
 
   assertStringIncludes(comment, `    workflows: ["${name[1]}"]\n`);
+});
+
+// A workflow_run payload describes the run it names, not the run that
+// triggered it, so only a first-level follower of the test workflow can
+// read a run's own event, branch and head. A follower of a follower gets
+// the default branch and its tip whatever the triggering run was.
+Deno.test("each comment job selects runs by the triggering run's own facts", async () => {
+  const comment = await workflow("pull-request-comments.yml");
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.event == 'pull_request' &&",
+  );
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.event == 'push' &&",
+  );
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.head_branch == 'main' &&",
+  );
+});
+
+// The run report reads the tree of the commit it reports on, so that the
+// topology it packs is the pull request's tree as it landed and the diff
+// it reads is the change itself. That commit is on the default branch,
+// which is what makes it safe to run in a job holding a write token; a
+// pull request head in the same job would be running fork-authored code
+// with permission to comment as the repository.
+Deno.test("the run report checks out the commit it reports on", async () => {
+  const comment = await workflow("pull-request-comments.yml");
+  assertStringIncludes(
+    comment,
+    "ref: ${{ github.event.workflow_run.head_sha }}",
+  );
+  assertStringIncludes(comment, "fetch-depth: 2");
 });
 
 Deno.test("coverage requirements follow sharded test matrices", async () => {
@@ -477,6 +512,27 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
   }
 });
 
+Deno.test("every workspace test job uploads its unlaunched-package record", async () => {
+  // The record is written only by a run that stopped early, so a job that
+  // leaves it out of its artifact looks exactly like a job that never left
+  // one, and the coverage gate scores the packages that job never started.
+  const contents = await workflow("deno.yml");
+  const runners = jobIds(contents).filter((jobId) =>
+    stepBlocks(jobBlock(contents, jobId)).some((step) =>
+      /^ +run: deno task test$/m.test(step.body)
+    )
+  );
+
+  assertEquals(runners, ["test"], "jobs running the workspace test runner");
+  for (const jobId of runners) {
+    const upload = stepBlock(
+      jobBlock(contents, jobId),
+      "📤 Upload coverage report",
+    );
+    assertStringIncludes(upload, `coverage/lcov/${UNLAUNCHED_MEMBERS_FILE}\n`);
+  }
+});
+
 Deno.test("sharded pattern caches follow their shard topology", async () => {
   const contents = await workflow("deno.yml");
   for (
@@ -503,6 +559,43 @@ Deno.test("sharded pattern caches follow their shard topology", async () => {
     const restoreKeys = job.match(/restore-keys: \|\n((?: {12}.+\n)+)/);
     assert(restoreKeys, `${jobId} restore prefixes not found`);
     assertEquals(restoreKeys[1].trim().split("\n").length, 1);
+  }
+});
+
+Deno.test("pattern shard selection fails loudly instead of running an empty shard", async () => {
+  // `mapfile -t X < <(deno run … select-pattern-integration-files.ts …)`
+  // discards the selector's exit status: a selector failure leaves the
+  // array empty WITHOUT failing the step, and the step then runs ZERO test
+  // files and exits green — a silently empty shard. The selector itself
+  // throws on an empty selection (every shard carries the
+  // internally-sharded files), so empty output is only ever a failure; the
+  // exit status is the discriminator, and only a plain command
+  // substitution propagates it under `bash -e`.
+
+  const contents = withoutComments(await workflow("deno.yml"));
+  for (
+    // Both stable pattern roles use the same selector contract.
+    const jobId of [
+      "pattern-integration-test",
+      "pattern-integration-test-server-execution-opposite",
+    ]
+  ) {
+    const job = jobBlock(contents, jobId);
+    assert(
+      !/mapfile[^\n]*<\s*<\([^\n]*select-pattern-integration-files/.test(job),
+      `${jobId}: the shard selector must not feed mapfile through a ` +
+        `process substitution — that discards its exit status, and a ` +
+        `selector failure then runs an empty shard green`,
+    );
+    assertStringIncludes(
+      job,
+      "SELECTED_FILES=$(deno run --allow-read " +
+        "../../tasks/select-pattern-integration-files.ts",
+    );
+    assertStringIncludes(
+      job,
+      "::error::select-pattern-integration-files.ts selected no files",
+    );
   }
 });
 
@@ -564,6 +657,146 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
   );
 });
 
+Deno.test("the Dashboard workflow records no tests", async () => {
+  const dashboard = withoutComments(await workflow("dashboard-image.yml"));
+  const relay = withoutComments(await workflow("test-records-relay.yml"));
+
+  // CI runs `packages/dashboard`'s test task on the same commit and records
+  // what it runs. Recording the same task again here would file each of those
+  // tests twice against one commit, so this workflow takes no part in test
+  // records at either end: it spools nothing, and the relay does not follow
+  // it. Reinstating either half alone produces a run whose records are
+  // gathered and never shipped.
+  assertEquals(dashboard.includes("CF_TEST_RECORDS_DIR"), false);
+  assertEquals(dashboard.includes("run-recorded"), false);
+  assertEquals(dashboard.includes("test-records-ship"), false);
+  assertStringIncludes(workflowTriggers(relay), '    workflows: ["CI"]\n');
+});
+
+Deno.test("the Coverage Check job records no tests", async () => {
+  const job = jobBlock(
+    withoutComments(await workflow("deno.yml")),
+    "coverage-check",
+  );
+
+  // The gate reads the coverage artifacts of every test job in this run, so no
+  // lane can be asked to run it, and the criterion in `docs/specs/test-records.md`
+  // under "Recording" puts it outside test records: no spool directory, no
+  // wrapper, no ship step.
+  assert(!job.includes("CF_TEST_RECORDS_DIR"), "the job spools test records");
+  assert(
+    !job.includes("run-recorded"),
+    "the job wraps its command in run-recorded",
+  );
+  assert(!job.includes("test-records-ship"), "the job ships test records");
+  // The gate itself runs.
+  assertStringIncludes(job, "tasks/coverage-check.ts");
+});
+
+Deno.test("the CFC Property Suite workflow records no tests", async () => {
+  const suite = withoutComments(await workflow("cfc-properties.yml"));
+  const relay = withoutComments(await workflow("test-records-relay.yml"));
+
+  // Both of the job's steps fall outside what a record is for, and for the
+  // two different reasons `docs/specs/test-records.md` gives under
+  // "Recording". The suite step runs `deno test` directly, with no
+  // `--junit-path` to ingest and no registration preload, so nothing under
+  // it records; a wrapper passes recording through to what it runs, so one
+  // here would file a line summarizing the invocation and nothing else.
+  // Those tests are units of `workspace-unit` and record when CI runs
+  // them. The audit step reads the corpus the step before it wrote, so no
+  // lane can be asked to run it. The workflow therefore takes no part in
+  // test records at either end: it spools nothing, and the relay does not
+  // follow it. Spooling again without the relay produces a run whose
+  // records are gathered and never shipped, and the relay assertion is
+  // what keeps its follow list honest about which workflows record.
+  assert(
+    !suite.includes("CF_TEST_RECORDS_DIR"),
+    "the workflow spools test records",
+  );
+  assert(
+    !suite.includes("run-recorded"),
+    "the workflow wraps a command in run-recorded",
+  );
+  assert(
+    !suite.includes("test-records-ship"),
+    "the workflow ships test records",
+  );
+  const name = suite.match(/^name: (.+)$/m);
+  assert(name, "the workflow has no name");
+  assertEquals(
+    workflowTriggers(relay).includes(name[1]),
+    false,
+    `the relay follows ${name[1]}, whose records nothing gathers`,
+  );
+
+  // Both checks themselves still run.
+  const job = jobBlock(suite, "cfc-properties");
+  assertStringIncludes(job, "run: deno test -A test/cfc-properties/\n");
+  assertStringIncludes(job, "deno task cfc-audit ");
+});
+
+Deno.test("One commit publishes one set of release artifacts", async () => {
+  // A release artifact is named after the commit it was built from, and the
+  // deploy hands the bastion a commit rather than a build. So a commit has one
+  // tarball and one checksum for that tarball, and they stay as they were
+  // published. Two builds of one commit do not produce the same tarball: the
+  // binaries are compiled again, and `tar` records modification times. Publish
+  // a second build over a first and a reader can come away holding one build's
+  // tarball beside the other build's checksum, which is what the deploy's
+  // `sha256sum -c` reports as a failure. docs/development/deploying.md covers
+  // the invariant.
+
+  const contents = await workflow("deno.yml");
+
+  // Main can receive the same head commit twice, which starts two runs of that
+  // commit. Grouping a push by the commit makes the second run wait for the
+  // first, so the two builds never publish at once. Grouping it by anything
+  // that differs between runs of one commit, `github.run_id` among them, puts
+  // them in separate groups and lets them overlap.
+  assertStringIncludes(
+    contents,
+    "\nconcurrency:\n" +
+      "  group: ${{ github.workflow }}-" +
+      "${{ github.event.pull_request.number || github.sha }}\n" +
+      "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+  );
+
+  // Waiting alone leaves the second run free to publish over the first once the
+  // first has finished, so the publish itself is what holds the bytes still: a
+  // commit that already has both objects keeps them. The pair is published
+  // together, in the one branch, because publishing just one of them is how a
+  // commit ends up with two builds' halves.
+  const upload = stepBlock(
+    jobBlock(contents, "attest-binaries"),
+    "📤 Upload artifacts to Google Cloud Storage",
+  );
+  const guard =
+    'if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then';
+  const guardStart = upload.indexOf(guard);
+  assert(
+    guardStart >= 0,
+    "the published pair is not looked for before it is published",
+  );
+  const branchStart = upload.indexOf("\n          else\n", guardStart);
+  const branchEnd = upload.indexOf("\n          fi\n", branchStart);
+  assert(
+    branchStart >= 0 && branchEnd > branchStart,
+    "publishing branch not found",
+  );
+  const branch = upload.slice(branchStart, branchEnd);
+
+  for (const object of ["$TARBALL", "$CHECKSUM"]) {
+    const copy = `gsutil cp "release/${object}" "$BUCKET/"`;
+    assertStringIncludes(branch, copy);
+    assertEquals(
+      upload.split(copy).length - 1,
+      1,
+      `${copy} runs somewhere other than the branch that publishes the pair`,
+    );
+  }
+});
+
 Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () => {
   // The bastion's /opt/cf/deploy.sh takes an environment name and a
   // 40-character commit SHA, and nothing else. Hand it a third argument, an
@@ -571,6 +804,7 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   // prints its usage and exits 1, failing the deploy job. That script belongs
   // to the infra repository, so nothing else here sees it and the call sites
   // are checked instead. docs/development/deploying.md covers the seam.
+
   const environments = ["estuary", "rapids"];
   // The revision has to expand to a full SHA, which is a property of what the
   // expression reads rather than of the expression itself. `github.ref_name`
@@ -618,18 +852,16 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   }
 });
 
-//
-// Both shells CI builds take their co-presence endpoint from a repository
-// variable, and an unset variable is a supported state that builds a working
-// shell. Every check the wiring performs therefore sits inside an
-// `if [ -n "$PRESENCE_URL" ]` that a repository without the variable never
-// enters, so those checks cannot report on the wiring itself: remove the
-// wiring and the same runs stay green. The properties a configured value
-// depends on are checked here instead, against the workflow text, where
-// repository configuration does not get to decide whether the check runs.
-//
-
 Deno.test("a configured presence URL reaches every shell bundle CI builds", async () => {
+  // Both shells CI builds take their co-presence endpoint from a repository
+  // variable, and an unset variable is a supported state that builds a working
+  // shell. Every check the wiring performs therefore sits inside an
+  // `if [ -n "$PRESENCE_URL" ]` that a repository without the variable never
+  // enters, so those checks cannot report on the wiring itself: remove the
+  // wiring and the same runs stay green. The properties a configured value
+  // depends on are checked here instead, against the workflow text, where
+  // repository configuration does not get to decide whether the check runs.
+
   const deno = await workflow("deno.yml");
 
   // Each job that builds a shell, and the directory its build leaves the
@@ -706,6 +938,7 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   // these names, so distinct names stay distinct in the store. Uniqueness
   // matters per workflow: object names carry the run id, so two different
   // workflows can reuse a name.
+
   let shipSteps = 0;
   for (const name of await workflowNames()) {
     const contents = withoutComments(await workflow(name));
@@ -779,18 +1012,25 @@ Deno.test("test-records-ship forwards its optional variant input", async () => {
   );
   assertStringIncludes(action, "  variant:\n");
   assertStringIncludes(action, "SHIP_VARIANT: ${{ inputs.variant }}");
-  assertStringIncludes(action, 'args+=(--variant "$SHIP_VARIANT")');
+  assertStringIncludes(
+    action,
+    'RESOLVED_VARIANT="${SHIP_VARIANT:-${CF_TEST_RECORDS_VARIANT:-}}"',
+  );
+  assertStringIncludes(action, 'args+=(--variant "$RESOLVED_VARIANT")');
 });
 
-Deno.test("server-execution ON jobs ship records under their variant", async () => {
+Deno.test("server-execution records follow the stable default and opposite roles", async () => {
+  // The default continues the unmarked history. The opposite role exports the
+  // actual implementation arm as CF_TEST_RECORDS_VARIANT, which the shipping
+  // action consumes without hard-coding ON or OFF in the workflow.
   const contents = withoutComments(await workflow("deno.yml"));
   const packageJob = jobBlock(
     contents,
-    "package-integration-test-server-execution-on",
+    "package-integration-test-server-execution-opposite",
   );
   const patternJob = jobBlock(
     contents,
-    "pattern-integration-test-server-execution-on",
+    "pattern-integration-test-server-execution-opposite",
   );
   assertStringIncludes(
     packageJob,
@@ -803,11 +1043,11 @@ Deno.test("server-execution ON jobs ship records under their variant", async () 
   );
   assertStringIncludes(
     patternJob,
-    "--junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+    "--junit-path=../../test-results/patterns-server-execution-opposite-${{ matrix.shard }}.xml",
   );
   assertStringIncludes(
     stepBlock(patternJob, "📤 Ship test records"),
-    "glob=test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+    "glob=test-results/patterns-server-execution-opposite-${{ matrix.shard }}.xml",
   );
 
   for (
@@ -822,30 +1062,208 @@ Deno.test("server-execution ON jobs ship records under their variant", async () 
 
   for (
     const jobId of [
-      "package-integration-test-server-execution-on",
-      "pattern-integration-test-server-execution-on",
+      "package-integration-test-server-execution-opposite",
+      "pattern-integration-test-server-execution-opposite",
     ]
   ) {
-    const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
-    assertStringIncludes(ship, "variant: server-execution");
+    const job = jobBlock(contents, jobId);
+    assertStringIncludes(
+      stepBlock(job, "🧭 Resolve opposite server-execution posture"),
+      "tasks/server-execution-ci-command.ts env opposite",
+    );
+    const ship = stepBlock(job, "📤 Ship test records");
+    assert(
+      !ship.includes("variant:"),
+      `${jobId}: the arm variant must come from the shared role resolver`,
+    );
   }
 });
 
-Deno.test("server-execution ON pattern failures upload the toolshed log", async () => {
+Deno.test("server-execution CI uses stable default and opposite roles", async () => {
+  // Both roles resolve from one helper. The default keeps the flag unset; the
+  // opposite build, server, and test processes inherit its explicit inverse.
+  const contents = await workflow("deno.yml");
+
+  for (
+    const jobId of ["package-integration-test", "pattern-integration-test"]
+  ) {
+    const job = jobBlock(contents, jobId);
+    assertStringIncludes(
+      job,
+      "tasks/server-execution-ci-command.ts env default",
+      `${jobId}: the default lane must resolve from the shared helper`,
+    );
+    assertStringIncludes(
+      job,
+      "tasks/server-execution-ci-command.ts probe default",
+      `${jobId}: the default lane must use the shared posture probe`,
+    );
+    assertStringIncludes(
+      job,
+      "server-execution-on-skips.ts",
+      `${jobId}: the lane must be able to carry the ON-arm skip list`,
+    );
+    assertStringIncludes(
+      job,
+      '[ "$SERVER_EXECUTION_ENABLED" = "true" ]',
+      `${jobId}: the skip list must apply only when this role is ON`,
+    );
+  }
+
+  // The opposite job resolves its role once into the job environment. Both
+  // the toolshed and test steps inherit it; no step may pin today's inverse
+  // value independently and turn a future flip into a mixed posture.
+  for (
+    const { jobId, runStep } of [
+      {
+        jobId: "package-integration-test-server-execution-opposite",
+        runStep: "🧪 Run ${{ matrix.step_name }} (opposite posture)",
+      },
+      {
+        jobId: "pattern-integration-test-server-execution-opposite",
+        runStep:
+          "🧩 Run end-to-end patterns integration tests (opposite posture)",
+      },
+    ]
+  ) {
+    const job = jobBlock(contents, jobId);
+    assertStringIncludes(
+      job,
+      "tasks/server-execution-ci-command.ts env opposite",
+    );
+    assertStringIncludes(
+      job,
+      "tasks/server-execution-ci-command.ts probe opposite",
+    );
+    for (
+      const stepName of [
+        "🔌 Start Toolshed server for testing (opposite posture)",
+        runStep,
+      ]
+    ) {
+      // The selecting steps exist under these names and, like every other
+      // step (asserted over the whole workflow below), carry no literal arm.
+      stepBlock(job, stepName);
+    }
+    assertStringIncludes(
+      job,
+      '[ "$SERVER_EXECUTION_ENABLED" = "true" ]',
+      `${jobId}: the ON-arm skip list follows the resolved posture`,
+    );
+    assertStringIncludes(
+      job,
+      "binary-toolshed-opposite",
+      `${jobId}: the opposite lane runs the opposite-built binary`,
+    );
+  }
+
+  // No step anywhere selects an arm by literal: every assignment of the flag
+  // is the resolve step's output, so a flip of the default moves both roles
+  // together and a value pinned by hand cannot turn a flip into a mixed
+  // posture. Every assignment form counts — a YAML `env:` entry in either
+  // quote style, a shell `NAME=value`, and the shell default-assignment
+  // `${NAME:=value}`. Comments are stripped so a note naming a value is not
+  // read as setting it; the CLI lane's `${EXPERIMENTAL_SERVER_EXECUTION:-…}`
+  // is a read, not an assignment, and does not match.
+  const literal = withoutComments(contents).match(
+    /EXPERIMENTAL_SERVER_EXECUTION\s*(?::=|[:=])\s*['"]?(?:true|false)\b/,
+  );
+  assert(
+    literal === null,
+    `deno.yml selects a server-execution arm by literal: ${literal?.[0]}`,
+  );
+
+  const buildOpposite = jobBlock(contents, "build-toolshed-opposite");
+  assertStringIncludes(
+    buildOpposite,
+    "tasks/server-execution-ci-command.ts env opposite",
+    "the opposite build must bake the posture resolved by the shared helper",
+  );
+
+  // The real bg-piece-service binary and cf-harness fabric session are always
+  // exercised at the first-party default resolution.
+  const gate = jobBlock(contents, "deployed-topology-gate");
+  assertStringIncludes(gate, "binary-bg-piece-service");
+  assertStringIncludes(gate, "integration/posture-gate.test.ts");
+  assertStringIncludes(gate, "integration/fabric-session-posture-gate.test.ts");
+  assertStringIncludes(
+    gate,
+    "tasks/server-execution-ci-command.ts env default",
+  );
+  assertStringIncludes(
+    gate,
+    "tasks/server-execution-ci-command.ts probe default",
+  );
+});
+
+Deno.test("the CLI lane follows the default and refuses a mixed posture", async () => {
+  // `cf` is a deployed CLIENT: it ADOPTS the arm the server publishes on
+  // /api/meta (experimentalOptionsForDeployedClient, authority "server")
+  // unless an explicit EXPERIMENTAL_SERVER_EXECUTION overrides it. A
+  // serving loop therefore proves only the SERVER's half — the review's
+  // finding-7 mixed posture (a client on the other arm) would still read
+  // as a passing ON exercise. The probe has to compare both arms and fail
+  // on a disagreement, which is what this pins.
+  const contents = await workflow("deno.yml");
+  const job = jobBlock(contents, "cli-integration-test");
+  const probe = stepBlock(
+    job,
+    "✅ Verify the default server-execution posture and cf adoption",
+  );
+
+  assertStringIncludes(
+    probe,
+    "tasks/server-execution-ci-command.ts probe default",
+    "the CLI probe must verify the resolved default server posture",
+  );
+  assertStringIncludes(
+    probe,
+    ".experimental.serverExecution",
+    "the CLI probe must read the posture the server PUBLISHES, which is what cf adopts",
+  );
+  assertStringIncludes(
+    probe,
+    'CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"',
+    "the CLI probe must resolve the client arm the way cf does: an explicit env wins, else the published posture",
+  );
+  assertStringIncludes(
+    probe,
+    '[ "$CLIENT_ARM" != "$SERVER_ARM" ]',
+    "the CLI probe must fail on a client/server arm disagreement",
+  );
+  assertStringIncludes(
+    probe,
+    'if .experimental.serverExecution == null then "unpublished"',
+    "the CLI probe must preserve a published JSON false rather than treating it as absent",
+  );
+});
+
+Deno.test("both server-execution pattern roles upload failure logs", async () => {
   const contents = await workflow("deno.yml");
   const patternJob = jobBlock(
     contents,
-    "pattern-integration-test-server-execution-on",
+    "pattern-integration-test-server-execution-opposite",
   );
   const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
 
   assertStringIncludes(upload, "if: failure()");
-  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@");
   assertStringIncludes(
     upload,
-    "name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}",
+    "name: toolshed-log-pattern-integration-server-execution-opposite-${{ matrix.shard }}",
   );
   assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
   assertStringIncludes(upload, "retention-days: 14");
   assertStringIncludes(upload, "if-no-files-found: ignore");
+
+  const defaultJob = jobBlock(contents, "pattern-integration-test");
+  const defaultUpload = stepBlock(
+    defaultJob,
+    "📋 Upload toolshed log on failure",
+  );
+  assertStringIncludes(defaultUpload, "if: failure()");
+  assertStringIncludes(
+    defaultUpload,
+    "name: toolshed-log-pattern-integration-${{ matrix.shard }}",
+  );
 });

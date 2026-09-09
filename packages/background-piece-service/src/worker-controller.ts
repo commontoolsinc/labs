@@ -30,11 +30,19 @@ export interface WorkerOptions {
   };
 }
 
+/** The `error` event a worker controller dispatches on a terminal failure. */
 export class WorkerControllerErrorEvent extends Event {
-  error?: ErrorEvent;
+  #error: ErrorEvent | undefined;
+
+  /** Constructs an instance carrying `cause`, the worker's own error event. */
   constructor(cause?: ErrorEvent) {
     super("error");
-    this.error = cause;
+    this.#error = cause;
+  }
+
+  /** The worker's own error event, if the worker reported one. */
+  get error(): ErrorEvent | undefined {
+    return this.#error;
   }
 }
 
@@ -67,8 +75,6 @@ export class WorkerController extends EventTarget {
    */
   #initializeDeferred = defer();
 
-  /** Promise that resolves when the worker is fully initialized. */
-  public initializeResolve = this.#initializeDeferred.promise;
   #state = WorkerState.Uninitialized;
 
   constructor(options: WorkerOptions) {
@@ -88,8 +94,27 @@ export class WorkerController extends EventTarget {
         name: `worker-${this.#did}`,
       },
     );
-    this.#worker.addEventListener("message", this.onWorkerMessage);
+    this.#worker.addEventListener("message", this.#onWorkerMessage);
     this.#worker.addEventListener("error", this.#onWorkerError);
+  }
+
+  /**
+   * The two steps of this instance that a test drives directly: sending a
+   * request to the worker, and receiving a message from it.
+   */
+  get accessForTestingOnly(): {
+    exec(type: WorkerIPCMessageType, data?: unknown): Promise<void>;
+    onWorkerMessage(event: MessageEvent): void;
+  } {
+    return {
+      exec: (type, data) => this.#exec(type, data),
+      onWorkerMessage: (event) => this.#onWorkerMessage(event),
+    };
+  }
+
+  /** Promise that settles when the worker is initialized or has failed to. */
+  get initializeResolve(): Promise<void> {
+    return this.#initializeDeferred.promise;
   }
 
   async startInitialize() {
@@ -98,7 +123,7 @@ export class WorkerController extends EventTarget {
     }
     this.#state = WorkerState.Initializing;
     try {
-      await this.exec(WorkerIPCMessageType.Initialize, {
+      await this.#exec(WorkerIPCMessageType.Initialize, {
         did: this.#did,
         toolshedUrl: this.#toolshedUrl,
         encodedIdentity: realmValueFromKeyPair(this.#identity.keyPair),
@@ -117,7 +142,7 @@ export class WorkerController extends EventTarget {
     if (this.#state !== WorkerState.Ready) {
       throw new Error("Worker not ready.");
     }
-    return await this.exec(WorkerIPCMessageType.Run, {
+    return await this.#exec(WorkerIPCMessageType.Run, {
       pieceId: bg.get().pieceId,
     });
   }
@@ -137,7 +162,7 @@ export class WorkerController extends EventTarget {
     this.#pending.clear();
 
     try {
-      await this.exec(WorkerIPCMessageType.Cleanup);
+      await this.#exec(WorkerIPCMessageType.Cleanup);
     } catch (err) {
       console.warn(
         `Failed to shutdown worker gracefully: ${err}`,
@@ -151,13 +176,8 @@ export class WorkerController extends EventTarget {
     return this.#state === WorkerState.Ready;
   }
 
-  /**
-   * Sends a message and returns a promise that resolves with the response.
-   *
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
+  /** Sends a message and returns a promise that resolves with the response. */
+  #exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
     const msgId = this.#msgId++;
 
     const message: Record<string, unknown> = {
@@ -202,10 +222,10 @@ export class WorkerController extends EventTarget {
   }
 
   /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
+   * Handles one message from the worker: a `ready` starts initialization,
+   * and anything else settles the pending request it answers.
    */
-  private onWorkerMessage = (event: MessageEvent) => {
+  #onWorkerMessage = (event: MessageEvent) => {
     const response = event.data;
     if (!isWorkerIPCResponse(response)) {
       console.error(

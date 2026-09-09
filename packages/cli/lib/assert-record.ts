@@ -7,7 +7,7 @@
  */
 
 import type { AssertPart, AssertRecord } from "@commonfabric/api";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 
 /**
  * Recognizes the record an `assert(...)` assertion carries. A `computed(...)`

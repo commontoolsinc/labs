@@ -84,6 +84,23 @@ export default pattern(() => {
     profileName: lateName,
     profileAvatar: "",
   });
+  // Lane 4 — the OTHER transient: the display name has resolved but the
+  // profile DOCUMENT has not been pulled yet (a reference into the viewer's
+  // own space, still on its way under a slow link). The button must wait for
+  // the document rather than offer a join that `joinAs` will refuse, and a
+  // refusal left by a headless caller must clear on its own once the document
+  // reads present — without another join.
+  const docLateUsers = new Writable<User[] | Default<[]>>([]);
+  const docLateHost = Writable.of<HostValue>(DEFAULT_HOST);
+  // A cell with no value yet is exactly what an unpulled document reads as.
+  const docLateProfile = new Writable<LunchProfile>();
+  const docLateCard = ParticipantIdentityCard({
+    users: docLateUsers,
+    host: docLateHost,
+    profile: docLateProfile,
+    profileName: "Doc",
+    profileAvatar: "",
+  });
   const otherAlexCard = ParticipantIdentityCard({
     users,
     host,
@@ -121,6 +138,15 @@ export default pattern(() => {
   const action_late_join_after_resolve = action(() => {
     lateCard.joinAs.send({});
   });
+  const action_doc_late_join_too_early = action(() => {
+    docLateCard.joinAs.send({});
+  });
+  const action_doc_late_document_arrives = action(() => {
+    docLateProfile.set({ name: "Doc" });
+  });
+  const action_doc_late_join = action(() => {
+    docLateCard.joinAs.send({});
+  });
 
   // === Assertions ===
 
@@ -154,6 +180,41 @@ export default pattern(() => {
     lateCard.joinMessage === ""
   );
 
+  // While the document is on its way the button is there but waits, saying
+  // so, and a headless join in that window is refused loudly as before.
+  const assert_doc_late_button_waits = assert(() => {
+    const ui = docLateCard[UI];
+    const button = findByProp(ui, "id", "lp-join-button");
+    return button !== undefined &&
+      readValue(propsOf(button)?.disabled) === true &&
+      hasText(ui, "Loading your profile…") &&
+      !hasText(ui, "Join as Doc");
+  });
+  const assert_doc_late_join_refused = assert(() =>
+    (docLateUsers.get() ?? []).length === 0 &&
+    docLateCard.isJoined === false &&
+    docLateCard.joinMessage === JOIN_NEEDS_PROFILE
+  );
+  // Once the document reads present the button enables and the on-screen
+  // complaint goes away — with no further join sent. The EXPORTED verdict
+  // does not: the earlier attempt was refused and nothing has joined, so a
+  // headless caller reading `joinMessage` must not be told otherwise.
+  const assert_doc_late_heals_on_screen_only = assert(() => {
+    const ui = docLateCard[UI];
+    const button = findByProp(ui, "id", "lp-join-button");
+    return button !== undefined &&
+      readValue(propsOf(button)?.disabled) !== true &&
+      hasText(ui, "Join as Doc") &&
+      findByProp(ui, "data-join-message", true) === undefined &&
+      docLateCard.joinMessage === JOIN_NEEDS_PROFILE &&
+      docLateCard.isJoined === false &&
+      (docLateUsers.get() ?? []).length === 0;
+  });
+  const assert_doc_late_joined = assert(() =>
+    (docLateUsers.get() ?? []).length === 1 &&
+    docLateCard.isJoined === true &&
+    docLateCard.joinMessage === ""
+  );
   const assert_offers_join_with_profile = assert(() => {
     const ui = alexCard[UI];
     return hasText(ui, "Join as Alex") &&
@@ -216,6 +277,13 @@ export default pattern(() => {
       { action: action_late_identity_resolves },
       { action: action_late_join_after_resolve },
       { assertion: assert_late_join_healed },
+      { assertion: assert_doc_late_button_waits },
+      { action: action_doc_late_join_too_early },
+      { assertion: assert_doc_late_join_refused },
+      { action: action_doc_late_document_arrives },
+      { assertion: assert_doc_late_heals_on_screen_only },
+      { action: action_doc_late_join },
+      { assertion: assert_doc_late_joined },
       { assertion: assert_offers_join_with_profile },
       { action: action_join_as_alex },
       { assertion: assert_joined_and_hosts },

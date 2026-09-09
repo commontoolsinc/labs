@@ -51,6 +51,7 @@ export interface SpaceSignals {
 
   /** All cross-space link target space DIDs (space ≠ self). */
   crossSpaceDids: string[];
+
   commits: number;
   entities: number;
 }
@@ -209,6 +210,7 @@ export interface GroupedSpace {
 
   /** Present but with zero commits — a pre-created placeholder. */
   empty: boolean;
+
   commits?: number;
   entities?: number;
 
@@ -222,6 +224,7 @@ export interface SpaceGroup {
 
   /** A non-empty home space was found locally for the principal. */
   homePresent: boolean;
+
   spaces: GroupedSpace[];
 }
 

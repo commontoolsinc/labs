@@ -115,11 +115,13 @@ describe("Engine.compileToRecordGraph", () => {
     await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
-  // Step 5 (option C): per-module identities (`cf:module/<hash>`) are
-  // entry-point independent — the whole-program `/<id>` prefix is stripped for
-  // identity computation, so a byte-identical module shared by two different
-  // programs gets the SAME identity (content-addressed cross-program dedup).
   describe("entry-point-independent module identities", () => {
+    // Step 5 (option C): per-module identities (`cf:module/<hash>`) are
+    // entry-point independent — the whole-program `/<id>` prefix is stripped
+    // for identity computation, so a byte-identical module shared by two
+    // different programs gets the SAME identity (content-addressed
+    // cross-program dedup).
+
     const depContents = "export const base = (): number => 20;";
 
     const specifierFor = async (
@@ -172,9 +174,11 @@ describe("Engine.compileToRecordGraph", () => {
     });
   });
 
-  // Step 4.3.4: compileToRecordGraph returns serializable per-module artifacts
-  // and accepts a full set of cached bodies to skip the TypeScript compile.
   describe("precompiled-module seam", () => {
+    // Step 4.3.4: compileToRecordGraph returns serializable per-module
+    // artifacts and accepts a full set of cached bodies to skip the TypeScript
+    // compile.
+
     const MULTI: RuntimeProgram = {
       main: "/main.tsx",
       files: [

@@ -238,9 +238,11 @@ This mirrors the `followPointer` function from `traverse.ts`.
 #### Metadata / Provenance Resolution
 
 In addition to schema-directed references, traversal MUST load provenance and
-runtime metadata documents via top-level metadata links on an entity document.
+runtime metadata documents via top-level metadata links on the documents a
+query names and on the documents those links reach.
 
-When the server loads any document during query evaluation, it MUST inspect the
+When the server loads a document a query NAMES as a root, or one reached
+through such a document's metadata or manifest links, it MUST inspect the
 top-level document object for metadata links and manifest links such as:
 
 ```json
@@ -259,20 +261,53 @@ top-level document object for metadata links and manifest links such as:
 
 The `pattern`, `argument`, and `result` fields use the same sigil link form as
 ordinary cell references. The `internal` field is raw metadata, not a direct
-metadata link. It stores a manifest array, and traversal resolves each
-manifest-entry `link` as an internal cell owned by the result cell. The `cfc`
-metadata field is also special: it uses a compact metadata object, and traversal
-converts its `schemaHash` into a CID sigil link before loading the referenced
-document. If present, the server resolves each metadata link and each internal
-manifest link, loads that document, adds it to the query result and watch
-tracker, and then repeats the same metadata/manifest check on the loaded
-document. This continues until a document without metadata links or manifest
-links is reached or a cycle is detected.
+metadata link. It stores a manifest array, and each manifest-entry `link` names
+an internal cell owned by the result cell. The `cfc` metadata field is also
+special: it uses a compact metadata object, and traversal converts its
+`schemaHash` into a CID sigil link before loading the referenced document.
+
+How much of a document's metadata family the evaluation loads depends on the
+document's ROLE in the query:
+
+- A document the query NAMES as a root is owed its full family: the server
+  MUST resolve every metadata link and every internal manifest link, load
+  each target, add it to the query result and watch tracker, and repeat the
+  same check on each loaded document until a document without metadata or
+  manifest links is reached or a cycle is detected. This is what a caller
+  that intends to load and run what it named relies on, and the role is
+  persistent: a refresh that re-evaluates a named document — including an
+  absent root's first evaluation after it is created — owes it the same
+  full family, and so does one that re-evaluates a document delivered as a
+  member of that family, so a member whose metadata link moves delivers
+  the new target.
+
+- A document the evaluation merely reaches — loaded mid-walk through a link
+  crossing — is owed what the selector that reached it selects, and the
+  schema document its `cfc` metadata names: a reader of a labeled document
+  checks what it may read against that schema, so the server MUST resolve
+  and load it, and track it so an absent one arrives when it is written.
+  The server MUST NOT chase the document's other metadata links or its
+  internal manifest links: none of that family is loaded, delivered, or
+  tracked. A subscriber that wants a document's family names the document.
+  A refresh that re-evaluates a crossing-reached document applies the same
+  rule, so a subscription's delivered shape does not depend on the order in
+  which documents changed.
+
+A metadata family is a same-space structure: a metadata or manifest link
+that resolves to another space selects nothing — the evaluating space's
+engine cannot read it, and its refresh could never deliver it — and the
+server MUST ignore such an entry rather than chase it.
+
+A later query naming a document the evaluation had only reached does not
+count as covered by existing watch state until that document's full family
+has been chased: naming, not reachability, is what entitles a caller to the
+family.
 
 This behavior is not optional provenance decoration. It is part of the query
-result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts`, and is required
-for piece execution metadata to reconstruct the full lineage of a result
-document.
+result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts` and
+`graph-query.ts`, and it is what lets a subscriber reconstruct the full
+lineage of a result document it named without receiving the family of every
+document its walk merely passes through.
 
 Content-addressed schema documents ride the same mechanism
 (`docs/specs/content-addressed-schemas.md`): a link or selector schema

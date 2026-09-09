@@ -593,9 +593,13 @@ describe("mock response gate", () => {
 describe("failureHint", () => {
   const PARAMETERS = "messages, prompt, model, etc.";
 
-  // The hint is the first thing a developer reads in the console when a
-  // request fails, and for most of a working day the failure is not theirs.
-  // Each status class has to send them to the right place.
+  //
+  // The failure hint
+  //
+  // The hint is the first thing a developer reads in the console when a request
+  // fails, and for most of a working day the failure is not theirs. Each status
+  // class has to send them to the right place.
+  //
 
   it("sends a rate-limited caller away to wait rather than to their arguments", () => {
     for (const status of [429, 503]) {

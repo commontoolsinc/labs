@@ -210,10 +210,75 @@ describe("junit", () => {
       });
       const bare = records.find((r) => r.test.n === "bare deno test case");
       expect(bare?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("gives a leaf the file of the container that registered it", () => {
+      const records = ingestJUnit(DENO_SAMPLE, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+      });
       const leaf = records.find(
         (r) => r.test.n === "glaze > thickness > thickens when heated",
       );
-      expect(leaf?.file).toBeUndefined();
+      expect(leaf?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("prefers the preload's map over what the report claims", () => {
+      const records = ingestJUnit(DENO_SAMPLE, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+        fileByName: new Map([["glaze", "packages/bakery/test/moved.test.ts"]]),
+      });
+      const leaf = records.find(
+        (r) => r.test.n === "glaze > thickness > thickens when heated",
+      );
+      expect(leaf?.file).toBe("packages/bakery/test/moved.test.ts");
+      const bare = records.find((r) => r.test.n === "bare deno test case");
+      expect(bare?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("records no file for a name two files both report", () => {
+      // The two are one identity, and which file a leaf came from is not
+      // a question the report can answer, so it answers neither.
+      // A second case under the same name, from another file — which is
+      // what two packages reporting one test name looks like.
+      const collided = DENO_SAMPLE.replace(
+        '    </testsuite>\n    <testsuite name="ext:cli/40_test.js"',
+        '        <testcase name="bare deno test case" ' +
+          'classname="test/other.test.ts" time="0.000" line="4" col="1">\n' +
+          "        </testcase>\n    </testsuite>\n" +
+          '    <testsuite name="ext:cli/40_test.js"',
+      );
+      const records = ingestJUnit(collided, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+      });
+      const bare = records.find((r) => r.test.n === "bare deno test case");
+      expect(bare?.file).toBeUndefined();
+      // The names that did not collide keep theirs.
+      const leaf = records.find(
+        (r) => r.test.n === "glaze > thickness > thickens when heated",
+      );
+      expect(leaf?.file).toBe("packages/bakery/test/glaze.test.ts");
+    });
+
+    it("declines a classname naming the registration wrapper", () => {
+      // A path that does not climb, so `isRelativeSourcePath` accepts it
+      // and the rejection under test is the one that fires. A classname
+      // with `..` in it is refused before ever reaching that check.
+      const wrapped = DENO_SAMPLE.replaceAll(
+        'classname="test/glaze.test.ts"',
+        'classname="packages/test-support/src/records/registration.ts"',
+      );
+      const records = ingestJUnit(wrapped, {
+        kind: "unit",
+        scope: "bakery",
+        filePrefix: "packages/bakery",
+      });
+      for (const record of records) expect(record.file).toBeUndefined();
     });
 
     it("records no file without a prefix", () => {

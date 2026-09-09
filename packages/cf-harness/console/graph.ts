@@ -31,16 +31,21 @@ export interface ConsoleGraphNode {
   /** The step this node first appeared at. */
   atStep: number;
 
-  /** For a pattern: how the call turned out, and what CFC said about it. */
+  /** For a pattern: how the call turned out. */
   status?: ConsoleStep["status"];
+
+  /** For a pattern: what CFC said about it. */
   policyDecision?: string;
+
   disclosure?: ConsoleDisclosure;
 
   /** For a pattern run from the index rather than from fresh source. */
   patternId?: string;
 
-  /** For a cell: the handle that named it, and the address it stands for. */
+  /** For a cell: the handle that named it. */
   token?: string;
+
+  /** For a cell: the address that handle stands for. */
   address?: string;
 
   /** For a cell: the slug `assign_slug` gave it, once it has one. */

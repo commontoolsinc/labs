@@ -86,9 +86,9 @@ export const CFC_TRANSFORMER_STAGE_NAMES: readonly string[] =
   CFC_TRANSFORMER_STAGES.map((stage) => stage.name);
 
 export class CommonFabricTransformerPipeline {
-  private readonly transformers: Transformer[];
-  private readonly diagnosticsCollector: TransformationDiagnostic[];
-  private readonly state: CrossStageState;
+  readonly #transformers: Transformer[];
+  readonly #diagnosticsCollector: TransformationDiagnostic[];
+  readonly #state: CrossStageState;
 
   constructor(options: TransformationOptions = {}) {
     const state = options.state ?? new CrossStageState();
@@ -101,18 +101,18 @@ export class CommonFabricTransformerPipeline {
       ...ops,
       diagnosticsCollector: [],
     };
-    this.transformers = CFC_TRANSFORMER_STAGES.map(
+    this.#transformers = CFC_TRANSFORMER_STAGES.map(
       (Stage) => new Stage(sharedOps),
     );
 
     // Store reference to shared collector
     // Note: We need to access it after construction, so we store the array reference
-    this.diagnosticsCollector = sharedOps.diagnosticsCollector!;
-    this.state = state;
+    this.#diagnosticsCollector = sharedOps.diagnosticsCollector!;
+    this.#state = state;
   }
 
   toFactories(program: ts.Program): ts.TransformerFactory<ts.SourceFile>[] {
-    return this.transformers.map((t) => t.toFactory(program));
+    return this.#transformers.map((t) => t.toFactory(program));
   }
 
   /**
@@ -120,7 +120,7 @@ export class CommonFabricTransformerPipeline {
    * Call this after running the pipeline to get errors and warnings.
    */
   getDiagnostics(): readonly TransformationDiagnostic[] {
-    return this.diagnosticsCollector;
+    return this.#diagnosticsCollector;
   }
 
   /**
@@ -128,17 +128,17 @@ export class CommonFabricTransformerPipeline {
    * Call this if reusing the pipeline for multiple files.
    */
   clearDiagnostics(): void {
-    this.diagnosticsCollector.length = 0;
+    this.#diagnosticsCollector.length = 0;
   }
 
   getBuilderSourceSites(): ReadonlyMap<string, BuilderSourceSitesV1> {
-    return this.state.getBuilderSourceSites();
+    return this.#state.getBuilderSourceSites();
   }
 
   getPolicyManifests(): ReadonlyMap<
     string,
     readonly CfcPolicyCompilerManifestV1[]
   > {
-    return this.state.getPolicyManifests();
+    return this.#state.getPolicyManifests();
   }
 }

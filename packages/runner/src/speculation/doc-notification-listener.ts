@@ -73,6 +73,7 @@ export class CoalescedDocListener {
   /** DIAGNOSTIC: notifications that touched a wanted doc; microtask
    * checks dispatched. */
   #relevantNotifications = 0;
+
   #dispatches = 0;
 
   constructor(

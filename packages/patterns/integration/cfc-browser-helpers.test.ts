@@ -24,7 +24,10 @@ import {
   submitViaEnter,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
-import { clickButtonWithText } from "./note-button-helpers.ts";
+import {
+  clickButtonWithText,
+  readNoteButtonCandidates,
+} from "./note-button-helpers.ts";
 
 /** One element's live click marks, in attribute order. */
 type MarkProbe = { clicks: number; marksAtClick: string[]; marks: string[] };
@@ -802,10 +805,14 @@ describe("CFC browser helpers", () => {
     );
   });
 
+  //
+  // Co-resident marks
+  //
   // Every mark predicate adds its token to the marks already on the element, so
   // a target another click has spoken for keeps that claim. The grouped test
   // above exercises that for the by-selector predicate; these two cover the
   // indexed and trusted-action ones.
+  //
 
   it("keeps a co-resident mark when tagging an indexed target", async () => {
     await page.evaluate((clickTargetAttr: string) => {
@@ -910,12 +917,16 @@ describe("CFC browser helpers", () => {
     assertEquals(result.marks, ["held-by-another-click"]);
   });
 
+  //
+  // Click helpers that reach a control
+  //
   // The three tests below cover the click helpers that reach their control by
   // index, by `data-ui-action`, and by button text. Each drives a control that
   // is in the DOM from the start but receives its click handler only when the
   // view settles — the ordinary case of a vdom batch that has not yet crossed
   // to the main thread. A helper that marks its control without settling around
   // it clicks an element with nothing bound, and `clickedAtSettle` stays zero.
+  //
 
   it("settles the view before clicking an indexed control", async () => {
     await page.evaluate(() => {
@@ -1082,6 +1093,186 @@ describe("CFC browser helpers", () => {
     );
     assertEquals(result.settleCalls, 2);
   });
+
+  it("passes over a disabled button carrying the text it was given", async () => {
+    // Text names a button, and a page can show the same words twice: a
+    // disabled control and, beside it, the one that is ready for the click.
+    // A disabled control is laid out and has a box, so rendered-ness alone
+    // answers it, and the browser raises no click on it. This fixture leaves
+    // the pointer events alone, so it covers that half; the case above, whose
+    // control carries `cf-button`'s `pointer-events: none`, covers the other.
+    await page.evaluate(() => {
+      const surface = document.createElement("div");
+      // Fixed and on screen, clear of the surfaces the cases above leave on
+      // the shared page, so the aim's scroll cannot move it and nothing else
+      // reaches the point this click is aimed at.
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "950px",
+        top: "120px",
+        width: "220px",
+      });
+      document.body.append(surface);
+
+      // Both carry the `cf-button` shape: a host whose shadow root holds the
+      // control that takes the click.
+      const make = (disabled: boolean): HTMLElement => {
+        const host = document.createElement("cf-button");
+        const root = host.attachShadow({ mode: "open" });
+        const button = document.createElement("button");
+        button.setAttribute("data-cf-button", "");
+        button.disabled = disabled;
+        button.textContent = "Publish the note";
+        Object.assign(button.style, {
+          display: "block",
+          width: "200px",
+          height: "40px",
+          padding: "0",
+          margin: "0",
+        });
+        host.toggleAttribute("disabled", disabled);
+        host.textContent = "Publish the note";
+        root.append(button);
+        surface.append(host);
+        return host;
+      };
+
+      const disabledHost = make(true);
+      const enabledHost = make(false);
+
+      let disabledHostClicks = 0;
+      let enabledClicks = 0;
+      disabledHost.addEventListener("click", () => void disabledHostClicks++);
+      enabledHost.addEventListener("click", () => void enabledClicks++);
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __twinButtonClicks: () => { disabledHost: number; enabled: number };
+        __twinButtonTeardown: () => void;
+      }).__twinButtonClicks = () => ({
+        disabledHost: disabledHostClicks,
+        enabled: enabledClicks,
+      });
+      (globalThis as typeof globalThis & {
+        __twinButtonTeardown: () => void;
+      }).__twinButtonTeardown = () => surface.remove();
+    });
+
+    try {
+      await clickButtonWithText(page, "Publish the note");
+    } finally {
+      // The surface is fixed and would otherwise stand over these coordinates
+      // for every case below.
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __twinButtonTeardown: () => void;
+        }).__twinButtonTeardown()
+      );
+    }
+
+    const clicks = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __twinButtonClicks: () => { disabledHost: number; enabled: number };
+      }).__twinButtonClicks()
+    );
+    expect(clicks).toEqual({ disabledHost: 0, enabled: 1 });
+  });
+
+  it("reports why each candidate was passed over when none can be clicked", async () => {
+    // Waiting for a control to be enabled is waiting on the page, and a page
+    // that never enables it runs the wait out. What is on screen then is a
+    // button whose words are the ones that were asked for, sitting there
+    // disabled — which reads, to a report that says only that no button was
+    // found, as a button that was never on the page at all. The probe behind
+    // that report answers the finder's three decisions per candidate, so the
+    // one that failed only the last of them is distinguishable from the rest.
+    await page.evaluate(() => {
+      const surface = document.createElement("div");
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "950px",
+        top: "240px",
+        width: "220px",
+      });
+      document.body.append(surface);
+
+      const add = (
+        id: string,
+        text: string,
+        disabled: boolean,
+        rendered: boolean,
+      ) => {
+        const host = document.createElement("cf-button");
+        host.id = id;
+        const root = host.attachShadow({ mode: "open" });
+        const button = document.createElement("button");
+        button.setAttribute("data-cf-button", "");
+        button.disabled = disabled;
+        Object.assign(button.style, { display: "block", height: "20px" });
+        root.append(button);
+        host.textContent = text;
+        host.toggleAttribute("disabled", disabled);
+        if (!rendered) host.style.display = "none";
+        surface.append(host);
+      };
+
+      // One of each: named but disabled, named but not rendered, and one whose
+      // words are simply different.
+      add("probe-disabled", "Archive the ledger", true, true);
+      add("probe-hidden", "Archive the ledger", false, false);
+      add("probe-other", "Restore the ledger", false, true);
+    });
+
+    const report = await readNoteButtonCandidates(
+      page,
+      "cf-button",
+      "includes",
+      "Archive the ledger",
+    );
+    const byTag = report.candidates.filter((candidate) =>
+      candidate.text.includes("the ledger")
+    ).map(({ text, named, rendered, disabled }) => ({
+      text,
+      named,
+      rendered,
+      disabled,
+    }));
+    assertEquals(
+      byTag,
+      [
+        {
+          text: "Archive the ledger",
+          named: true,
+          rendered: true,
+          disabled: true,
+        },
+        {
+          text: "Archive the ledger",
+          named: true,
+          rendered: false,
+          disabled: false,
+        },
+        {
+          text: "Restore the ledger",
+          named: false,
+          rendered: true,
+          disabled: false,
+        },
+      ],
+      "the probe did not separate the three reasons a candidate was passed over",
+    );
+  });
+
+  //
+  // Filling, typing, and submitting
+  //
+  // The helpers that work a control without clicking it — filling a value,
+  // typing into it, pressing Enter to submit: the same settle discipline as
+  // the click helpers, and what happens when a commit replaces the control
+  // they were typing into.
+  //
 
   it("settles the view before pressing Enter in a submit input", async () => {
     await page.evaluate(() => {
@@ -1479,6 +1670,13 @@ describe("CFC browser helpers", () => {
     }
   });
 
+  //
+  // A target that moves under the aim
+  //
+  // The control is found, then its box or its surface changes before the click
+  // lands.
+  //
+
   it("waits for a marked target's shifting box to settle before clicking", async () => {
     await page.evaluate((clickTargetAttr: string) => {
       const host = document.createElement("div");
@@ -1538,6 +1736,126 @@ describe("CFC browser helpers", () => {
       clicked,
       "the click never reached the target after its hidden surface returned",
     );
+  });
+
+  it("waits for a disabled control to be enabled before clicking it", async () => {
+    // A control the page has rendered disabled takes no click. The inner
+    // control carries `disabled`, and `cf-button`'s stylesheet gives it
+    // `pointer-events: none`, so the browser delivers the press to the host
+    // instead. The host does not carry the mark, so the click is stopped at the
+    // window and aimed again at the same pixel, which is where the aim gives
+    // up.
+    //
+    // A pattern renders a control disabled while the state that enables it is
+    // still arriving. A parking coordinator's "This is me" is disabled until
+    // the acting identity resolves, and the surface above it collapses as that
+    // same state lands. Marking a control in that state aims the click both at
+    // a point that takes it nowhere and at a position the page is about to
+    // leave.
+    //
+    // The settle is what carries the page through those steps, so the fixture
+    // advances one step per settle: the surface above the control shrinks, and
+    // on the last step the control is enabled. Each step mutates the DOM, which
+    // re-enters the wait, so the run is driven by the page's own progress
+    // rather than by a timer.
+    await page.evaluate(() => {
+      const surface = document.createElement("div");
+      // Fixed and on screen, clear of the surfaces the cases above leave on the
+      // shared page, so the aim's scroll cannot move it and nothing else
+      // reaches the point this click is aimed at.
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "950px",
+        top: "400px",
+        width: "220px",
+      });
+      document.body.append(surface);
+
+      // Stands in for the join surface a pattern drops once the identity it was
+      // collecting has resolved. It shrinks a step at a time, carrying the
+      // control up the page as it goes.
+      const filler = document.createElement("div");
+      Object.assign(filler.style, { width: "200px", height: "72px" });
+
+      // The `cf-button` shape: a host whose shadow root holds the control that
+      // takes the click, and a stylesheet that stops pointer events at the
+      // control while the host is disabled.
+      const host = document.createElement("div");
+      host.id = "gated-claim-button";
+      const root = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent =
+        ":host([disabled]) [data-cf-button] { pointer-events: none; }";
+      const button = document.createElement("button");
+      button.setAttribute("data-cf-button", "");
+      button.textContent = "This is me";
+      Object.assign(button.style, {
+        display: "block",
+        width: "200px",
+        height: "40px",
+        padding: "0",
+        margin: "0",
+      });
+      const setDisabled = (disabled: boolean) => {
+        button.disabled = disabled;
+        host.toggleAttribute("disabled", disabled);
+      };
+      setDisabled(true);
+      root.append(style, button);
+      surface.append(filler, host);
+
+      let clicks = 0;
+      button.addEventListener("click", () => void clicks++);
+
+      let stepsLeft = 3;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          if (stepsLeft > 0) {
+            stepsLeft--;
+            filler.style.height = `${stepsLeft * 24}px`;
+            if (stepsLeft === 0) setDisabled(false);
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __gatedClaimState: () => { clicks: number; disabled: boolean };
+        __gatedClaimTeardown: () => void;
+      }).__gatedClaimState = () => ({ clicks, disabled: button.disabled });
+      (globalThis as typeof globalThis & {
+        __gatedClaimTeardown: () => void;
+      }).__gatedClaimTeardown = () => surface.remove();
+    });
+
+    const readState = () =>
+      page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __gatedClaimState: () => { clicks: number; disabled: boolean };
+        }).__gatedClaimState()
+      );
+
+    // Without this the case says nothing: a fixture whose control starts
+    // enabled passes whether or not the helper waits for one.
+    assert(
+      (await readState()).disabled,
+      "the fixture should start with its control disabled",
+    );
+
+    try {
+      await clickCfButton(page, "#gated-claim-button");
+    } finally {
+      // The surface is fixed and would otherwise stand over these coordinates
+      // for every case below.
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __gatedClaimTeardown: () => void;
+        }).__gatedClaimTeardown()
+      );
+    }
+
+    expect((await readState()).clicks).toBe(1);
   });
 
   it("clicks a control its surface keeps rebuilding under the aim", async () => {
@@ -1805,6 +2123,14 @@ describe("CFC browser helpers", () => {
       "the click did not reach the control after the press and release split",
     );
   });
+
+  //
+  // Where the click actually landed
+  //
+  // A click can reach the DOM and still not reach the control the caller
+  // aimed at. These cover what the helper does about that — report it, re-mark
+  // the control, or stand aside for an interaction that is not its own.
+  //
 
   it("leaves the page's own clicks to the page while a click is in flight", async () => {
     // Components raise clicks of their own — a label forwarding to its control,
@@ -2196,6 +2522,13 @@ describe("CFC browser helpers", () => {
     }
   });
 
+  //
+  // A control the page does not fully render
+  //
+  // A page that is not rendering at all, a control only partly inside the
+  // viewport, one the edge cuts off, and one with no part inside it.
+  //
+
   it("clicks a control on a page that is not being rendered", async () => {
     // A page sharing a browser with a fronted page is hidden, and a hidden page
     // produces no animation frames. A settle that waits for a frame there waits
@@ -2478,8 +2811,8 @@ describe("CFC browser helpers", () => {
       assertStringIncludes(error.message, "outside the page");
       // The size of the page, so a message that names some other 800 cannot
       // satisfy this.
-      assertStringIncludes(error.message, '"width": 800');
-      assertStringIncludes(error.message, '"height": 600');
+      assertStringIncludes(error.message, "width: 800");
+      assertStringIncludes(error.message, "height: 600");
 
       const clicks = await narrow.evaluate(() =>
         (globalThis as typeof globalThis & {
@@ -2491,6 +2824,13 @@ describe("CFC browser helpers", () => {
       await narrow.close();
     }
   });
+
+  //
+  // The click-to-own-render echo
+  //
+  // Not about where a control sits, but about what the sender observes coming
+  // back from its own click — including through a shadow root.
+  //
 
   it("samples the sender's click-to-own-render echo, shadow roots included", async () => {
     const echoPage = await browser.newPage();

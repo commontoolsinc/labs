@@ -31,10 +31,11 @@ import {
 } from "./retire-ingest-channels.ts";
 
 describe("ingest channel operator scripts", () => {
-  // The two operator scripts behind the retirement procedure. They are the only
-  // tooling that makes a trust-condition cutover answerable, so the selection
-  // logic — what gets retired, what is skipped, what the audit reports — is
-  // worth pinning even though the entrypoints themselves are thin.
+  // The operator scripts behind the retirement procedure — audit, retire, and
+  // the break-glass provision path. They are the only tooling that makes a
+  // trust-condition cutover answerable, so the selection logic — what gets
+  // retired, what is skipped, what the audit reports — is worth pinning even
+  // though the entrypoints themselves are thin.
 
   let signer: Identity;
   let serviceSpace: string;
@@ -92,26 +93,28 @@ describe("ingest channel operator scripts", () => {
     );
   });
 
-  // Operator-provisioned channels have no verified owner, and they are exactly
-  // the ones no user can revoke for themselves — so the audit must name them.
   it("marks a channel with no verified owner", async () => {
+    // Operator-provisioned channels have no verified owner, and they are
+    // exactly the ones no user can revoke for themselves — so the audit must
+    // name them.
+
     await saveRegistration(runtime, serviceSpace, reg());
     const rows = await collectRows(runtime, serviceSpace);
     expect(rows[0].owner).toBe("<operator-provisioned>");
   });
 
-  // Until this change the audit-index write was best-effort and its failure
-  // swallowed, so a channel can exist that the index never learned about. An
-  // audit that walks only the index cannot find it — repairing an index by
-  // enumerating that same index only ever confirms what is already there —
-  // and the affected space's owner cannot see or revoke it.
   describe("recovering a channel the index never learned about", () => {
+    // A channel can exist that the audit index never learned about. An audit
+    // that walks only the index cannot find it — repairing an index by
+    // enumerating that same index only ever confirms what is already there —
+    // and the affected space's owner cannot see or revoke it.
+
     const space = "did:key:z6MkspaceAAAA";
     const installId = "lost-phone";
     const lost = () => channelId(space, installId);
 
-    // What a swallowed index write leaves behind: a live registration cell and
-    // no index entry anywhere.
+    // The state under recovery: a live registration cell and no index entry
+    // anywhere.
     const orphan = async () => {
       await saveRegistration(
         runtime,
@@ -142,9 +145,10 @@ describe("ingest channel operator scripts", () => {
       expect(await collectRows(runtime, serviceSpace)).toEqual([]);
     });
 
-    // The id is derived from (space, installId), and the operator chose both
-    // when they provisioned it — so their own record is an exact probe.
     it("is found and reindexed from the operator's provisioning record", async () => {
+      // The id is derived from (space, installId), and the operator chose both
+      // when they provisioned it — so their own record is an exact probe.
+
       await orphan();
       const candidates = recoverIds(
         `# a channel we know we handed out\n${space} ${installId}\n`,
@@ -237,9 +241,10 @@ describe("ingest channel operator scripts", () => {
       .toBe("operator:first");
   });
 
-  // A rotate that read the registration before the sweep reached it must not
-  // still satisfy its own precondition afterwards and undo the retirement.
   it("advances the revision so a stale write cannot undo a retirement", async () => {
+    // A rotate that read the registration before the sweep reached it must not
+    // still satisfy its own precondition afterwards and undo the retirement.
+
     await saveRegistration(runtime, serviceSpace, reg());
     const stale = await getRegistration(runtime, serviceSpace, "ing_a");
 
@@ -315,10 +320,12 @@ describe("ingest channel operator scripts", () => {
     expect(USAGE).toContain("space-key-derivation-fix");
   });
 
-  // The command entrypoints: argv parsing, the exit code, and the output sink.
-  // Each gets its OWN runtime because `main` disposes what it is handed, and a
-  // spread copy is not an option — `Runtime` reads private class fields.
   describe("entrypoints", () => {
+    // The command entrypoints: argv parsing, the exit code, and the output
+    // sink. Each gets its OWN runtime because `main` disposes what it is
+    // handed, and a spread copy is not an option — `Runtime` reads private
+    // class fields.
+
     const freshRuntime = async () => {
       const owner = await Identity.fromPassphrase(
         `entrypoint-${crypto.randomUUID()}`,
@@ -331,10 +338,12 @@ describe("ingest channel operator scripts", () => {
       return { rt, space: owner.did() };
     };
 
-    // The factory each script uses when nobody injects one. Constructing it
-    // opens no connection — sessions are created lazily on first space access —
-    // so this stays a unit test while still pinning that the wiring is valid.
     it("the default runtime factories construct and dispose cleanly", async () => {
+      // The factory each script uses when nobody injects one. Constructing it
+      // opens no connection — sessions are created lazily on first space access
+      // — so this stays a unit test while still pinning that the wiring is
+      // valid.
+
       for (const make of [auditRuntime, retireRuntime]) {
         const rt = make();
         await rt.dispose();
@@ -351,9 +360,10 @@ describe("ingest channel operator scripts", () => {
       expect(JSON.parse(lines.join("\n")).channels.length).toBe(1);
     });
 
-    // The reason is what makes the audit trail say WHY, so omitting it must not
-    // quietly retire everything with a blank attribution.
     it("retire main refuses without --reason and prints usage", async () => {
+      // The reason is what makes the audit trail say WHY, so omitting it must
+      // not quietly retire everything with a blank attribution.
+
       const { rt, space } = await freshRuntime();
       const errors: string[] = [];
       expect(
@@ -390,10 +400,11 @@ describe("ingest channel operator scripts", () => {
     });
   });
 
-  // Values read back from a cell are deep-frozen and do not round-trip when
-  // spread into a new object, so the history has to be rebuilt to survive a
-  // second retirement.
   it("preserves revocation history across a retire cycle", async () => {
+    // Values read back from a cell are deep-frozen and do not round-trip when
+    // spread into a new object, so the history has to be rebuilt to survive a
+    // second retirement.
+
     await saveRegistration(
       runtime,
       serviceSpace,
@@ -411,11 +422,12 @@ describe("ingest channel operator scripts", () => {
     expect(stored?.revocations?.[0].by).toBe("did:key:zA");
   });
 
-  // The break-glass path. It bypasses the ownership check entirely, so the
-  // lifecycle state it carries forward is the only thing standing between an
-  // operator re-provision and silently un-revoking a retired channel, dropping
-  // its history, or issuing a credential that never expires.
   describe("provision-ingest-channel", () => {
+    // The break-glass path. It bypasses the ownership check entirely, so the
+    // lifecycle state it carries forward is the only thing standing between an
+    // operator re-provision and silently un-revoking a retired channel,
+    // dropping its history, or issuing a credential that never expires.
+
     const SPACE = "did:key:z6MkspaceProvisionAAAA";
     const provision = (over: Record<string, unknown> = {}) =>
       provisionChannel(runtime, serviceSpace, {
@@ -507,11 +519,12 @@ describe("ingest channel operator scripts", () => {
         .toBe("elsewhere");
     });
 
-    // A trusted action should conflict visibly rather than silently undo a
-    // security action someone else just took. Two provisions racing the same
-    // channel both read one revision and both write against it, so exactly one
-    // must lose — which is the code-1 branch.
     it("fails visibly instead of overwriting a concurrent write", async () => {
+      // A trusted action should conflict visibly rather than silently undo a
+      // security action someone else just took. Two provisions racing the same
+      // channel both read one revision and both write against it, so exactly
+      // one must lose — which is the code-1 branch.
+
       const id = channelId(SPACE, "phone-race");
       await saveRegistration(
         runtime,
@@ -565,10 +578,11 @@ describe("ingest channel operator scripts", () => {
         .toBe(3);
     });
 
-    // Distinct from the race above: re-provisioning a channel someone has
-    // already revoked is allowed — it is an operator re-authorizing it — but
-    // the record of that revocation has to survive.
     it("preserves a revocation it re-authorizes over", async () => {
+      // Distinct from the race above: re-provisioning a channel someone has
+      // already revoked is allowed — it is an operator re-authorizing it — but
+      // the record of that revocation has to survive.
+
       const id = channelId(SPACE, "phone-revoked");
       await saveRegistration(
         runtime,
@@ -595,10 +609,11 @@ describe("ingest channel operator scripts", () => {
       expect(after?.revocations?.[0].by).toBe("did:key:zAlice");
     });
 
-    // Building a runtime reads MEMORY_URL, so validating after it turned a
-    // plain usage error into an uncaught construction failure — the two things
-    // an operator most needs to tell apart.
     it("rejects bad input without ever constructing a runtime", async () => {
+      // Building a runtime reads MEMORY_URL, so validating after it turned a
+      // plain usage error into an uncaught construction failure — the two
+      // things an operator most needs to tell apart.
+
       const errors: string[] = [];
       const explode = () => {
         throw new Error("runtime must not be constructed for invalid input");

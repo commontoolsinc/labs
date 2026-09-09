@@ -55,13 +55,21 @@ empty object:
   [05](./05-reactivity.md)). It exists so `reactOn: db` re-runs after a write and
   so concurrent writes serialize; patterns do not read it directly.
 
+That descriptor is what the compiler emits as the schema of a `SqliteDb`
+position (`NativeTypeFormatter`, `packages/schema-generator`), keyed on the
+`SQLITE_DB_BRAND` the handle type carries: the brand's own members describe
+nothing, so a schema derived from them would shape every read of a handle down
+to `{}`. `tables` therefore reads back whole, per-column `ifc` labels included
+— a pattern needs the declared columns to write a query against the database,
+and the disclosure is the same one `describe_handle` makes deliberately.
+
 ```ts
 // Shown at module scope.
-declare const __sqliteDb: unique symbol;
-/** Opaque database handle value (the SqliteDb cell's readable value). Patterns
- *  forward the SqliteDb cell to db.query / db.exec / reactOn; they do not read
- *  the handle fields directly. */
-export type SqliteDatabase = { readonly [__sqliteDb]: true };
+export declare const SQLITE_DB_BRAND: unique symbol;
+/** The SqliteDb cell's readable value: the `{ id, tables, rev }` descriptor
+ *  above, behind a nominal brand. Patterns usually just forward the SqliteDb
+ *  cell to db.query / db.exec / reactOn. */
+export type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 
 /** Imperative write: records a SQLite write onto the current transaction. */
 export interface ISqliteExecutable {
@@ -104,6 +112,12 @@ export interface SqliteDb<T = SqliteDatabase>
   extends BrandedCell<T, "sqlite">, IAnyCell<T>, IReadable<T>,
     ISqliteExecutable, ISqliteQueryable {}
 ```
+
+The brand symbol is exported. Nothing reads it — it exists to keep
+`SqliteDatabase` nominal — but a pattern that names `SqliteDb` in an exported
+signature emits a declaration that refers to it, and a symbol the pattern's
+module cannot name is one the compiler refuses to emit past. Every brand in the
+pattern API is exported for that reason.
 
 Why a cell variant rather than `Cell<SqliteDatabase>` or an opaque empty value:
 
@@ -374,11 +388,17 @@ records the op through the storage seam `recordSqliteWrite` → `getNativeCommit
 
 ```ts
 // Shown at module scope.
-export type SqliteColumnSpec = string | JSONSchema;
+export interface SqliteColumnSchema {
+  type: JSONSchemaTypes;
+  sqlType?: string;
+  cfLink?: true;
+  [keyword: string]: FabricValue;
+}
+export type SqliteColumnSpec = string | SqliteColumnSchema;
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,
 ) => JSONSchema;
-export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 ```
 
 `table(...)` and `cfLink<T>()` compile to plain JSON Schema; `cfLink<T>()` emits

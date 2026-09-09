@@ -28,5 +28,5 @@ const MAX_RENDERED_LENGTH = 60;
 export function toReportableTag(tag: any): string {
   return (typeof tag === "string")
     ? tag
-    : toCompactDebugString(tag, MAX_RENDERED_LENGTH);
+    : toCompactDebugString(tag, { maxLength: MAX_RENDERED_LENGTH });
 }

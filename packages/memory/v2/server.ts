@@ -107,7 +107,9 @@ import {
   queryEvaluationCacheDiagnostics,
   queryGraph,
   type QueryGraphReuseContext,
+  type QueryTraversalStats,
   refreshTrackedGraph,
+  type SlowestQueryRoot,
   toDirtyKey,
   type TrackedGraphState,
   trackGraph,
@@ -206,7 +208,23 @@ const timing = getLogger("memory", { enabled: false });
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
-const SLOW_QUERY_THRESHOLD_MS = 100;
+// Operations slower than this are recorded for `/api/health/stats`. The
+// default suits a deployment, where the interesting operations are the ones
+// well past it; a local investigation of a fast machine sets
+// `CF_SLOW_QUERY_THRESHOLD_MS` lower — to `0` to record every one — so the
+// buffer carries the per-operation root, read and upsert counts for
+// operations the default would leave invisible.
+const SLOW_QUERY_THRESHOLD_MS = (() => {
+  try {
+    const raw = typeof Deno !== "undefined"
+      ? Deno.env.get("CF_SLOW_QUERY_THRESHOLD_MS")
+      : undefined;
+    const parsed = raw === undefined || raw === "" ? NaN : Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 100;
+  } catch {
+    return 100;
+  }
+})();
 const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
 // ~5 board-scale corpora (a full board evaluation retains ~6k entities).
 // Entity count is the byte proxy: what an entry holds alive is its cloned
@@ -232,21 +250,115 @@ export type SlowQuery = {
   space: string;
   roots?: number;
   watches?: number;
+
   /** transact only: milliseconds the commit waited for the space
    * publication lock before evaluation began. Flush passes hold the same
    * lock, so a large value is head-of-line blocking behind fan-out rather
    * than the commit's own cost. */
   lockWaitMs?: number;
+
   /** transact only: the commit's operation count. */
   operations?: number;
+
   /** transact only: the commit's confirmed read count. */
   readsConfirmed?: number;
+
   /** transact only: the commit's pending read count. */
   readsPending?: number;
+
   /** transact only: "ok", the response error's name (a rejected commit
    * that took this long is at least as interesting as an applied one), or
    * "threw" when evaluation raised instead of responding. */
   outcome?: string;
+
+  /** Query and watch operations: how many roots the request's evaluations
+   * visited across every branch group. Zero means no root was traversed,
+   * which has two causes and the same consequence: the evaluation cache
+   * served the request, or the session's existing graph already covered
+   * every added root. Either way none of the elapsed time was traversal,
+   * so a slow entry reporting zero spent it somewhere else — assembling
+   * the response, or attaching operation fields.
+   *
+   * `session.watch.refresh` carries none of these fields. It re-evaluates
+   * by dirty document rather than by root, so it has no roots to
+   * attribute; absent is the honest answer there, not zero. */
+  rootsVisited?: number;
+
+  /** Query and watch operations: summed elapsed time of those root visits.
+   * Against the entry's own `elapsed` this is the share of the request
+   * that traversal accounts for; the remainder is entity assembly,
+   * schema-closure staging, operation-field attachment, and (for
+   * `watch.add`, whose `elapsed` runs through response assembly) mapping
+   * the delivered snapshots to the wire. */
+  rootsElapsedMs?: number;
+
+  /** Query and watch operations: engine document reads across every branch
+   * group. Unlike `rootsVisited`, this exposes roots whose declarations fan
+   * out over many documents, and unlike `slowestRoot.reads`, it accounts for
+   * the complete request rather than only its costliest root. */
+  managerReads?: number;
+
+  /** watch.add and watch.refresh: changed entity snapshots delivered to the
+   * client. This is the delivered-width counterpart to `watches` and
+   * `managerReads`: a wide traversal that yields few upserts is repeated
+   * server work, while a wide frame is also transport and client-ingest
+   * work. A refresh that produced no upserts answers with an empty catch-up
+   * and is not recorded, so a refresh entry never reports zero here. */
+  upserts?: number;
+
+  /** Query and watch operations: the costliest single root, which is what
+   * a watch COUNT cannot say. A `watch.add` unions the roots of every
+   * watch it carries, so 78 watches and 5,377 watches are the same
+   * measurement until this names which declaration spent the time.
+   *
+   * The root that paid, not necessarily the root to blame — see
+   * {@link SlowestQueryRoot} for why overlapping closures charge whichever
+   * root ran first, and what to check before calling one the cause. */
+  slowestRoot?: SlowestQueryRoot;
+};
+
+/** The root attribution accumulated across one request's branch groups. */
+type RootAttribution = {
+  rootsVisited: number;
+  rootsElapsedMs: number;
+  managerReads: number;
+  slowestRoot?: SlowestQueryRoot;
+};
+
+const createRootAttribution = (): RootAttribution => ({
+  rootsVisited: 0,
+  rootsElapsedMs: 0,
+  managerReads: 0,
+});
+
+/**
+ * Fold one evaluation's root attribution into a request's running total.
+ *
+ * The counts sum because a request's groups are evaluated in sequence; the
+ * slowest root is a max rather than a sum, because it names one place in
+ * one query and merging two would name neither.
+ */
+const foldRootAttribution = (
+  into: RootAttribution,
+  stats: QueryTraversalStats,
+): void => {
+  into.rootsVisited += stats.rootsVisited;
+  into.rootsElapsedMs += stats.rootsElapsedMs;
+  into.managerReads += stats.managerReads;
+  if (
+    stats.slowestRoot !== undefined &&
+    (into.slowestRoot === undefined ||
+      stats.slowestRoot.elapsedMs > into.slowestRoot.elapsedMs)
+  ) {
+    into.slowestRoot = stats.slowestRoot;
+  }
+};
+
+/** The attribution for a request that evaluated exactly one query. */
+const rootAttributionOf = (stats: QueryTraversalStats): RootAttribution => {
+  const attribution = createRootAttribution();
+  foldRootAttribution(attribution, stats);
+  return attribution;
 };
 
 const slowQueries: SlowQuery[] = [];
@@ -278,7 +390,8 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query, watch, and commit operations (>100ms). */
+/** Returns the last N slow query, watch, and commit operations — those over
+ * `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
@@ -297,7 +410,7 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
  *   are an ORDERING witness, not a delivered-frame metric.
  * All-zero in the OFF arm by construction: only the serving loop's wave
  * commits classify dirty keys as derived. Registered by the Server
- * instance (last registration wins — one co-hosted server per process);
+ * instance (the newest live server is reported; close() withdraws it);
  * surfaced under the health route's `servingLoop.push` block.
  */
 export type PushPriorityStats = {
@@ -306,10 +419,54 @@ export type PushPriorityStats = {
   mixedFlushes: number;
 };
 
-let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
+/** Live servers' push-priority providers in construction order; a server
+ * withdraws its own on close(), so the newest LIVE server is the one
+ * reported, and closing one hands back to the one registered before it. */
+const pushPriorityStatsProviders: (() => PushPriorityStats)[] = [];
 
 export const getPushPriorityStats = (): PushPriorityStats | undefined =>
-  pushPriorityStatsProvider?.();
+  pushPriorityStatsProviders.at(-1)?.();
+
+/** Withdraw one server's health-route provider, leaving every other's. */
+const withdrawProvider = <T>(providers: T[], provider: T): void => {
+  const index = providers.indexOf(provider);
+  if (index >= 0) providers.splice(index, 1);
+};
+
+/** Every open engine's decoded-document cache, keyed by space, under the
+ * total budget this server holds across them: `bytes` is the total retained
+ * now and `totalBudgetEvictions` what holding it has cost, lifetime. */
+export type DocumentCachesDiagnostics = {
+  totalBudgetBytes: number;
+  bytes: number;
+  totalBudgetEvictions: number;
+  spaces: Record<string, Engine.DocumentCacheDiagnostics>;
+};
+
+/**
+ * Default bound on decoded documents retained across every space one Server
+ * serves: twice the per-space default, room for two active corpora at their
+ * full per-space allowance (a Topics-board page load retains 17.7 MB; see
+ * DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing). Held by the server's
+ * `Engine.DocumentCacheCoordinator` on every cache access, least recently
+ * used space first and oldest entries first within it. Per Server instance,
+ * not per process: the toolshed hosts one memory server, so in deployment
+ * this is the process's bound, while a second live server (tests construct
+ * them) keeps its own total under its own budget.
+ */
+export const DOCUMENT_CACHE_TOTAL_BUDGET_BYTES = 256 * 1024 * 1024;
+
+/** Live servers' providers in construction order; a server removes its own
+ * on close(), so the newest LIVE server is always the one reported. */
+const documentCachesDiagnosticsProviders: (() => DocumentCachesDiagnostics)[] =
+  [];
+
+/** The co-hosted memory server's document-cache counters for the health
+ * route — the most recently constructed server still open; undefined when
+ * none is. */
+export const getDocumentCachesDiagnostics = ():
+  | DocumentCachesDiagnostics
+  | undefined => documentCachesDiagnosticsProviders.at(-1)?.();
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -638,9 +795,14 @@ class Connection {
   }
 
   #send(message: ServerMessage): void {
-    this.#sendRaw(
-      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
-    );
+    const schemaStart = performance.now();
+    const prepared = this.#syncSchemaTable
+      ? compressServerMessageSchemas(message)
+      : message;
+    timing.time(schemaStart, "memory", "response", "prepareSchemas");
+    const sendStart = performance.now();
+    this.#sendRaw(prepared);
+    timing.time(sendStart, "memory", "response", "sendRaw");
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -1259,6 +1421,17 @@ class Connection {
   }
 }
 
+/**
+ * The engine opener a test supplies in place of `Server`'s own step, which
+ * opens the engine for a space or hands back the one already open. It
+ * receives that step as `open`, so it can pause before it or fail in its
+ * stead, and returns what that step returns.
+ */
+export type EngineOpener = (
+  space: string,
+  open: (space: string) => Promise<Engine.Engine>,
+) => Promise<Engine.Engine>;
+
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
@@ -1267,28 +1440,52 @@ export class Server {
    * query.ts for the sharing, purity, and seq-rotation rules), held for at
    * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
   #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
+
   #engines = new Map<string, Promise<Engine.Engine>>();
-  // The resolved-engine index for the SYNC cross-engine lease lookup
-  // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
+
+  /**
+   * The resolved-engine index for the synchronous cross-engine lease lookup
+   * in `#liveCoHostedLeaseSpaceFor()`; `#openEngineInner()` populates it.
+   */
   #resolvedEngines = new Map<string, Engine.Engine>();
-  // Synthesized session state for direct out-of-band document writes, such as blob uploads.
+
+  /**
+   * The opener a test supplies around the engine open; `undefined` means the
+   * server's own.
+   */
+  #engineOpener: EngineOpener | undefined = undefined;
+
+  /** Holds `documentCacheTotalBudgetBytes` across this server's engines and
+   * keeps their recency; every engine this server opens reports to it. */
+  #documentCacheCoordinator: Engine.DocumentCacheCoordinator;
+
+  /**
+   * Synthesized session id for direct out-of-band document writes, such as
+   * blob uploads.
+   */
   #directSessionId = `server:${crypto.randomUUID()}`;
+
+  /** Local sequence counter for the synthesized direct-write session. */
   #directLocalSeq = 0;
+
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
-  // Push priority (Phase 6, protocol.md §3): the subset of each space's
-  // dirty keys whose LATEST novelty came from a `derived` commit — a
-  // PARALLEL annotation, deliberately not a `DirtyOrigin` field: the
-  // origin record is load-bearing for own-echo suppression and is
-  // DELETED on mixed provenance (CT-1927), which must not erase the
-  // priority class. Populated only by `noteExecutorCommit` (the wave
-  // commits), consumed and cleared with the dirty batch, re-merged by
-  // the requeue arm on fan-out failure. A key later re-dirtied by an
-  // authored commit stays in the set — the doc still carries derived
-  // novelty the subscriber has not seen, and priority is best-effort
-  // ordering, never a correctness gate.
+
+  /**
+   * Push priority (`protocol.md` §3): the subset of each space's dirty keys
+   * whose _latest_ novelty came from a `derived` commit — a _parallel_
+   * annotation, deliberately not a `DirtyOrigin` field: the origin record is
+   * load-bearing for own-echo suppression and is _deleted_ on mixed
+   * provenance, which must not erase the priority class. Populated only by
+   * `noteExecutorCommit()` (the wave commits), consumed and cleared with the
+   * dirty batch, re-merged by the requeue arm on fan-out failure. A key later
+   * re-dirtied by an authored commit stays in the set — the doc still carries
+   * derived novelty the subscriber has not seen, and priority is best-effort
+   * ordering, never a correctness gate.
+   */
   #derivedDirtyBySpace = new Map<string, Set<string>>();
+
   #pushPriorityStats: PushPriorityStats = {
     prioritizedSessions: 0,
     followerSessions: 0,
@@ -1296,44 +1493,66 @@ export class Server {
   };
   #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
-  // Transactions and fan-out share one publication turn per space. A verdict
-  // is sent while its transaction owns the turn, so a sync frame cannot expose
-  // the decision first. Different spaces retain independent turns.
+
+  /**
+   * The publication turn per space, which transactions and fan-out share. A
+   * verdict is sent while its transaction owns the turn, so a sync frame
+   * cannot expose the decision first. Different spaces retain independent
+   * turns.
+   */
   #publicationBySpace = new Map<string, Promise<void>>();
+
   #lastRefreshDurationMs = 0;
-  // The ExecutorHost's in-process observer (serving-loop.md §1 planes
-  // (b)/(d)); undefined until a host attaches. One observer: there is one
-  // host per process.
+
+  /**
+   * The `ExecutorHost`'s in-process observer (`serving-loop.md` §1, planes (b)
+   * and (d)); `undefined` until a host attaches. One observer: there is one
+   * host per process.
+   */
   #serverExecutionObserver: ServerExecutionObserver | undefined;
-  // Per-frame delivery record: the wire strips instance keys (frames
-  // carry scope NAMES), so a delivery rollback cannot recover WHICH
-  // instances a frame carried from the frame alone — a lease holder's
-  // explicit foreign instances would mis-resolve to its own. Keyed by
-  // the frame object (in-process only, never serialized), populated at
-  // frame build, consumed by rollbackUndeliveredSync; a WeakMap so
-  // delivered frames cost nothing.
+
+  /**
+   * Per-frame delivery record: the wire strips instance keys (frames carry
+   * scope _names_), so a delivery rollback cannot recover _which_ instances a
+   * frame carried from the frame alone — a lease holder's explicit foreign
+   * instances would mis-resolve to its own. Keyed by the frame object
+   * (in-process only, never serialized), populated at frame build, consumed by
+   * `rollbackUndeliveredSync()`; a `WeakMap` so delivered frames cost nothing.
+   */
   #deliveredFrameEntries = new WeakMap<SessionEffectMessage, {
     upserts: SessionCacheEntry[];
     removes: SessionCacheEntry[];
   }>();
+
   #store?: URL;
   #operationCodecs: OperationCodecRegistry;
-  // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
-  // registered id is attached read-only from its descriptor path instead of the
-  // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
-  // docs/specs/sqlite-builtin/plans/on-disk-source.md).
+
+  /**
+   * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
+   * is attached read-only from its descriptor path instead of the cell-derived
+   * per-(space, id) file. In-memory only: a registration does not survive a
+   * restart.
+   */
   #diskSources = new DiskSourceRegistry();
-  // Pooled read-only connections (keyed by canonical file path) for SQLite
-  // reads — injected on-disk sources and cell-derived dbs alike run here,
-  // unattached, instead of attach/detach-per-op on the engine connection.
+
+  /**
+   * Pooled read-only connections (keyed by canonical file path) for SQLite
+   * reads — injected on-disk sources and cell-derived dbs alike run here,
+   * unattached, instead of attach/detach-per-op on the engine connection.
+   */
   #readPool = new ReadConnectionPool();
-  // Schemas already created on the write path, keyed by `(space, id, schema)`.
-  // `ensureTables` (additive `CREATE TABLE IF NOT EXISTS` per declared table)
-  // runs only the first time a given schema is seen for a cell-db, not on every
-  // write. Bounded LRU; a miss (eviction / restart) just re-runs ensureTables,
-  // which is idempotent. Keyed by the full schema JSON so a changed declaration
-  // re-ensures (additive migration) with no hash-collision risk.
+
+  /**
+   * Schemas already created on the write path, keyed by `(space, id, schema)`.
+   * `ensureTables()` (additive `CREATE TABLE IF NOT EXISTS` per declared
+   * table) runs only the first time a given schema is seen for a cell-db, not
+   * on every write. Bounded LRU; a miss (eviction or restart) just re-runs
+   * `ensureTables()`, which is idempotent. Keyed by the full schema JSON so a
+   * changed declaration re-ensures (additive migration) with no hash-collision
+   * risk.
+   */
   #ensuredSchemas = new Map<string, true>();
+
   #ensuredSchemasMax = 4096;
 
   #recordSchemaEnsured(key: string): void {
@@ -1352,8 +1571,10 @@ export class Server {
       store?: URL;
 
       operationCodecs?: OperationCodecRegistry;
+
       /** Engine-owned interval for operation checkpoints and bounded retention. */
       operationCheckpointInterval?: number;
+
       /**
        * Coalescing delay for the batched subscription fan-out, in
        * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
@@ -1366,6 +1587,7 @@ export class Server {
        * dirty spaces held for the next explicit call.
        */
       subscriptionRefreshDelayMs?: number | "manual";
+
       /** Cross-space retained-entity budget for the query evaluation
        * caches (default QUERY_EVALUATION_CACHE_BUDGET). An entry's weight
        * is the entity count of the evaluation it retains — the proxy for
@@ -1374,6 +1596,17 @@ export class Server {
        * fits. A single evaluation heavier than the whole budget is not
        * retained at all. */
       queryEvaluationCacheBudget?: number;
+
+      /** Bounds for each space's decoded-document cache, handed to
+       * Engine.open (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES there). */
+      documentCacheBudgetBytes?: number;
+      documentCacheMaxEntries?: number;
+
+      /** Bound on decoded documents retained across every space this
+       * server serves (default DOCUMENT_CACHE_TOTAL_BUDGET_BYTES; per
+       * instance, see there), held least-recently-used space first. */
+      documentCacheTotalBudgetBytes?: number;
+
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1448,10 +1681,74 @@ export class Server {
     this.#store = options.store;
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
-    // Push-priority counters (Phase 6): module-level provider for the
-    // health route, same last-registration-wins posture as the runner's
-    // serving-loop stats registry (one co-hosted server per process).
-    pushPriorityStatsProvider = () => this.pushPriorityStats();
+    // Every document-cache bound is checked here, where it is configured,
+    // not at the first request that opens a space (Engine.open checks the
+    // per-space pair again for its own callers) — and before this server
+    // registers anything a throw would leave behind.
+    Engine.validateDocumentCacheBounds({
+      documentCacheBudgetBytes: options.documentCacheBudgetBytes,
+      documentCacheMaxEntries: options.documentCacheMaxEntries,
+      documentCacheTotalBudgetBytes: options.documentCacheTotalBudgetBytes,
+    });
+    this.#documentCacheCoordinator = new Engine.DocumentCacheCoordinator(
+      options.documentCacheTotalBudgetBytes ??
+        DOCUMENT_CACHE_TOTAL_BUDGET_BYTES,
+    );
+    // Module-level providers for the health route (push-priority counters,
+    // Phase 6; document caches): the newest live server is reported, and
+    // close() withdraws exactly this server's.
+    pushPriorityStatsProviders.push(this.#pushPriorityStatsProvider);
+    documentCachesDiagnosticsProviders.push(
+      this.#documentCachesDiagnosticsProvider,
+    );
+  }
+
+  /**
+   * The engine opener a test may supply, and the timer-driven refresh pass
+   * and the per-space publication lock, which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    engineOpener: EngineOpener | undefined;
+    flushScheduledSessions(): Promise<void>;
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get engineOpener() {
+        return outerThis.#engineOpener;
+      },
+      set engineOpener(value) {
+        outerThis.#engineOpener = value;
+      },
+      flushScheduledSessions: () => this.#flushScheduledSessions(),
+      withSpacePublicationLock: (space, run) =>
+        this.#withSpacePublicationLock(space, run),
+    };
+  }
+
+  /** This server's health-route providers, kept so close() can withdraw
+   * exactly them and no other server's. */
+  #pushPriorityStatsProvider = () => this.pushPriorityStats();
+  #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
+
+  /** Every open engine's document-cache counters, keyed by space. A peek:
+   * nothing is opened by asking. */
+  documentCachesDiagnostics(): DocumentCachesDiagnostics {
+    const spaces: Record<string, Engine.DocumentCacheDiagnostics> = {};
+    for (const [space, engine] of this.#resolvedEngines) {
+      spaces[space] = Engine.documentCacheDiagnostics(engine);
+    }
+    const coordinator = this.#documentCacheCoordinator;
+    return {
+      totalBudgetBytes: coordinator.budgetBytes,
+      bytes: coordinator.bytes,
+      totalBudgetEvictions: coordinator.evictions,
+      spaces,
+    };
   }
 
   memoryProtocolFlags(): MemoryProtocolFlags {
@@ -1696,7 +1993,7 @@ export class Server {
     // return, then independently await their read engine/evaluation. Some
     // legacy runtime ordering depends on those two yield points.
     if (this.#aclMode() === "off") return null;
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     return this.#authorizeMessageWithEngine(
       engine,
       space,
@@ -1801,8 +2098,10 @@ export class Server {
     return null;
   }
 
-  // Writer sessions that de-authorized themselves in a commit: their
-  // session/revoked is held until after the transact verdict goes out.
+  /**
+   * Writer sessions that de-authorized themselves in a commit: their
+   * `session/revoked` is held until after the transact verdict goes out.
+   */
   #deferredSelfRevocations = new Map<string, string | null>();
 
   deliverDeferredSelfRevocation(space: string, sessionId: string): void {
@@ -1943,6 +2242,17 @@ export class Server {
   }
 
   async close(): Promise<void> {
+    // Withdraw this server's health-route providers so a closed server is
+    // neither reported nor kept alive by the route; synchronous, ahead of
+    // the first await, so an un-awaited close still withdraws them at once.
+    withdrawProvider(
+      pushPriorityStatsProviders,
+      this.#pushPriorityStatsProvider,
+    );
+    withdrawProvider(
+      documentCachesDiagnosticsProviders,
+      this.#documentCachesDiagnosticsProvider,
+    );
     this.#cancelScheduledRefresh();
     await this.#refreshing;
     await this.#drainSpacePublicationLocks();
@@ -1986,7 +2296,7 @@ export class Server {
     space: string,
     id: string,
   ): Promise<EntityDocument | null> {
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     return Engine.read(engine, { id });
   }
 
@@ -1995,8 +2305,8 @@ export class Server {
     id: string,
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
-    return await this.withSpacePublicationLock(space, async () => {
-      const engine = await this.openEngine(space);
+    return await this.#withSpacePublicationLock(space, async () => {
+      const engine = await this.#openEngine(space);
       if (this.#aclMode() !== "off") {
         if (id === aclDocId(space)) {
           throw new Engine.ProtocolError(
@@ -2082,7 +2392,7 @@ export class Server {
     // multi-statement) is refused even against a never-written cell-db rather
     // than silently returning [].
     assertReadOnly(sql);
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const path = this.#cellDbPath(engine, space, db.id, scopeKey);
     // A never-written cell-db has no file yet (its schema is created on the
     // first write, via the attach path). Treat a missing file as an empty
@@ -2152,7 +2462,7 @@ export class Server {
     } catch {
       throw new Engine.ProtocolError(`disk source path not found: ${path}`);
     }
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     if (engine.url.protocol === "file:") {
       // Canonicalize the store dir too (not just the source path): `canonical`
       // is realpath-resolved, so comparing it against a NON-canonical storeDir
@@ -2448,6 +2758,7 @@ export class Server {
      * `stream` field; stage-G-era rows fall back to a path-less link
      * at the sidecar id. */
     targetStreamLink?: StreamLinkRef;
+
     eventId: string;
     payload: unknown;
     actingPrincipal?: string;
@@ -2457,6 +2768,7 @@ export class Server {
      * Phase-3 floor carve-out): admits an ABSENT acting principal;
      * the entry stamps `firedAt = { session: "server" }`. */
     sessionlessSpaceScope?: boolean;
+
     capabilityRef: string;
 
     /** The delivering SpaceServer's service session — the commit's
@@ -2472,7 +2784,7 @@ export class Server {
      * is the one and only re-send dedupe. */
     localSeq: number;
   }): Promise<{ seq?: number; deduped: boolean }> {
-    const engine = await this.openEngine(entry.targetSpace);
+    const engine = await this.#openEngine(entry.targetSpace);
     // Read-check-append runs synchronously from here (no await), so the
     // horizon check and the commit are atomic on the single-threaded
     // co-hosted engine. The engine's event-append admission re-runs the
@@ -2625,7 +2937,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -2750,7 +3062,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       // Maps a server filesystem path into the space — operator surface.
       const deny = aclEngine === undefined
@@ -2818,7 +3130,7 @@ export class Server {
         authContext,
       );
       connection.consumeSessionOpenChallenge(authContext.challenge);
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       // The delegated READ binding (OW31, READ side RULED 2026-08-19):
       // `actingAs: "space-owner"` is admitted only for a DELEGATING-class
       // envelope (the co-hosted process identity under the flag — the
@@ -3002,7 +3314,7 @@ export class Server {
       );
     }
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       return {
         type: "response",
         requestId: message.requestId,
@@ -3033,7 +3345,7 @@ export class Server {
     publishVerdict?: PublishTransactVerdict,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     const requestedAt = performance.now();
-    return await this.withSpacePublicationLock(message.space, async () => {
+    return await this.#withSpacePublicationLock(message.space, async () => {
       const lockWaitMs = performance.now() - requestedAt;
       let outcome = "threw";
       try {
@@ -3088,7 +3400,7 @@ export class Server {
   async resolveEventAttention(
     message: EventAttentionResolveRequest,
   ): Promise<ResponseMessage<EventAttentionResolveResult>> {
-    return await this.withSpacePublicationLock(message.space, async () => {
+    return await this.#withSpacePublicationLock(message.space, async () => {
       try {
         const session = this.#sessions.get(message.space, message.sessionId);
         if (session === null) {
@@ -3097,7 +3409,7 @@ export class Server {
             toError("SessionError", "Unknown session for space"),
           );
         }
-        const engine = await this.openEngine(message.space);
+        const engine = await this.#openEngine(message.space);
         if (this.#sessions.get(message.space, message.sessionId) !== session) {
           return respondTypedError<EventAttentionResolveResult>(
             message.requestId,
@@ -3456,8 +3768,9 @@ export class Server {
           span.setAttribute("user.did", session.principal);
         }
         try {
-          const engine = await this.openEngine(message.space);
-          // The session may be revoked or replaced while openEngine awaits.
+          const engine = await this.#openEngine(message.space);
+          // The session may be revoked or replaced while `#openEngine()`
+          // awaits.
           // Re-check the exact registry object before using the captured
           // principal so an old connection cannot commit after takeover.
           if (
@@ -3688,7 +4001,7 @@ export class Server {
               session,
               message.commit,
             );
-            const engine = await this.openEngine(message.space);
+            const engine = await this.#openEngine(message.space);
             retryAfterSeq = Engine.serverSeq(engine);
           }
           const messageText = error instanceof Error
@@ -3757,7 +4070,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -3861,7 +4174,7 @@ export class Server {
       );
     }
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       const deny = this.#authorizeCurrentSessionWithEngine(
         engine,
         message.space,
@@ -3925,7 +4238,7 @@ export class Server {
     }
 
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       const deny = this.#authorizeCurrentSessionWithEngine(
         engine,
         message.space,
@@ -4020,7 +4333,7 @@ export class Server {
     }
 
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       const deny = this.#authorizeCurrentSessionWithEngine(
         engine,
         message.space,
@@ -4063,7 +4376,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -4200,7 +4513,20 @@ export class Server {
     }
   }
 
+  /** Add session watches, timing admission through the handler's completion. */
   async watchAdd(
+    message: WatchAddRequest,
+  ): Promise<ResponseMessage<WatchAddResult>> {
+    const startedAt = performance.now();
+    try {
+      return await this.#watchAdd(message);
+    } finally {
+      timing.time(startedAt, "memory", "watchAdd", "total");
+    }
+  }
+
+  /** Helper for watchAdd(), which authorizes, evaluates, and installs watches. */
+  async #watchAdd(
     message: WatchAddRequest,
   ): Promise<ResponseMessage<WatchAddResult>> {
     const session = this.#sessions.get(message.space, message.sessionId);
@@ -4212,7 +4538,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -4269,7 +4595,7 @@ export class Server {
 
     try {
       const startedAt = performance.now();
-      const engine = aclEngine ?? await this.openEngine(message.space);
+      const engine = aclEngine ?? await this.#openEngine(message.space);
       const nextOperationCursors = new Map(session.operationCursors);
       const existingById = new Map(
         session.watches.map((watch) => [watch.id, watch] as const),
@@ -4322,6 +4648,7 @@ export class Server {
           entry,
         );
       };
+      const attribution = createRootAttribution();
       for (const [branch, query] of groupedQueries(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
@@ -4336,6 +4663,7 @@ export class Server {
               evaluationCache: this.#evaluationCacheFor(message.space),
             },
           );
+          foldRootAttribution(attribution, tracked.stats);
           // Enforced per evaluation, not per request: a later group's
           // failure (or a failing operation-field attachment) must not
           // leave an already-inserted entry over budget.
@@ -4359,6 +4687,7 @@ export class Server {
           staged,
           query,
         );
+        foldRootAttribution(attribution, extended.stats);
         for (const [docKey, entity] of extended.updates) {
           recordUpdate(docKey, entity);
         }
@@ -4378,15 +4707,22 @@ export class Server {
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
       const entities = new Map(session.entities);
-      const trackedIds = new Set(session.trackedIds);
       for (const [key, entry] of updates) {
         entities.set(key, entry);
-        trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
       }
-      addOperationWatchTrackedIds(trackedIds, nextWatches, {
-        principal: session.principal,
-        sessionId: message.sessionId,
-      });
+      // Rebuilt from provenance — entities, operation watches, and every
+      // graph's misses — never unioned from the previous set: an interest
+      // a refresh RETIRED (a link edited away, its miss released) must
+      // leave the wake set with it, or every later commit to the orphaned
+      // document keeps waking this session.
+      const trackedIds = addOperationWatchTrackedIds(
+        trackedIdsFromEntries(entities.values()),
+        nextWatches,
+        {
+          principal: session.principal,
+          sessionId: message.sessionId,
+        },
+      );
       this.#addMissedToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
@@ -4412,13 +4748,7 @@ export class Server {
       session.lastSyncedSeq = serverSeq;
       session.operationCursors = nextOperationCursors;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
-      recordSlowQueryDuration(
-        "session.watch.add",
-        message.space,
-        startedAt,
-        { watches: message.watches.length },
-      );
-      return {
+      const response: ResponseMessage<WatchAddResult> = {
         type: "response",
         requestId: message.requestId,
         ok: {
@@ -4434,6 +4764,17 @@ export class Server {
           },
         },
       };
+      recordSlowQueryDuration(
+        "session.watch.add",
+        message.space,
+        startedAt,
+        {
+          watches: message.watches.length,
+          upserts: upserts.length,
+          ...attribution,
+        },
+      );
+      return response;
     } catch (error) {
       // Evaluation state is staged (the session's graphs and watches are
       // assigned only on success), so a failure answers the requester —
@@ -4537,9 +4878,11 @@ export class Server {
     const cacheEligible = query.atSeq === undefined &&
       scopeContext.keyedSnapshots !== true;
     try {
-      const result = queryGraph(
+      // `stats` is diagnostics, not wire: split it off here so the
+      // response carries exactly the declared result shape.
+      const { stats, ...result } = queryGraph(
         space,
-        engine ?? await this.openEngine(space),
+        engine ?? await this.#openEngine(space),
         query,
         reuse,
         {
@@ -4551,6 +4894,7 @@ export class Server {
       );
       recordSlowQueryDuration("graph.query", space, startedAt, {
         roots: query.roots.length,
+        ...rootAttributionOf(stats),
       });
       return result;
     } finally {
@@ -4573,7 +4917,7 @@ export class Server {
     entities: Map<string, SessionCacheEntry>;
   }> {
     const startedAt = performance.now();
-    const resolvedEngine = engine ?? await this.openEngine(space);
+    const resolvedEngine = engine ?? await this.#openEngine(space);
     const reuse: QueryGraphReuseContext = {
       managers: new Map(),
     };
@@ -4581,6 +4925,7 @@ export class Server {
     const entities = new Map<string, SessionCacheEntry>();
     let serverSeq = Engine.serverSeq(resolvedEngine);
 
+    const attribution = createRootAttribution();
     for (const [branch, query] of groupedQueries(watches)) {
       const result = trackGraph(
         space,
@@ -4592,6 +4937,7 @@ export class Server {
           evaluationCache: this.#evaluationCacheFor(space),
         },
       );
+      foldRootAttribution(attribution, result.stats);
       serverSeq = result.serverSeq;
       this.#enforceEvaluationCacheBudget();
       graphs.set(branch, result.state);
@@ -4612,6 +4958,7 @@ export class Server {
 
     recordSlowQueryDuration("session.watch.set", space, startedAt, {
       watches: watches.length,
+      ...attribution,
     });
     return {
       serverSeq,
@@ -4862,7 +5209,7 @@ export class Server {
             toSeq?: number,
           ): Promise<SessionEffectMessage | null> => {
             const serverSeq = toSeq ??
-              Engine.serverSeq(await this.openEngine(space));
+              Engine.serverSeq(await this.#openEngine(space));
             const mayCarryOperations = session.watches.some((watch) =>
               watch.kind === "operation"
             ) && serverSeq > fromSeq;
@@ -4895,7 +5242,7 @@ export class Server {
             if (session.entities.size === 0) {
               return await emptyCatchUp();
             }
-            const serverSeq = Engine.serverSeq(await this.openEngine(space));
+            const serverSeq = Engine.serverSeq(await this.#openEngine(space));
             const sync: SessionSync = {
               type: "sync",
               fromSeq: session.lastSyncedSeq,
@@ -4965,7 +5312,7 @@ export class Server {
               return await emptyCatchUp();
             }
 
-            const engine = await this.openEngine(space);
+            const engine = await this.#openEngine(space);
             const fromSeq = session.lastSyncedSeq;
             const identity = this.#sessionScopeIdentity(session);
             const updates = new Map<string, SessionCacheEntry>();
@@ -5065,23 +5412,52 @@ export class Server {
             // lost frame's docs as already-snapshotted (CT-1927 review,
             // round 6).
             const commitEntities = () => {
-              // (d′) — design §2.8 flag 2: a push pass that
-              // GROWS the session's tracked set is a demand change (a
-              // newly reachable doc entered the closure through the
-              // tracker's re-traversal); notify so the demand pass sees
-              // it without waiting for the next input.
-              const sizeBefore = session.trackedIds.size;
+              // (d′) — design §2.8 flag 2: a push pass that changes the
+              // session's tracked set is a demand change; notify so the
+              // demand pass sees it without waiting for the next input.
+              // The set is rebuilt rather than grown, so the change can
+              // be a same-size swap (a link retargeted from one absent
+              // document to another) or a shrink — compared by
+              // membership, exactly as the full-evaluation branch below
+              // does, and like there the O(tracked) scan runs only when
+              // a demand observer is attached (the serving posture; its
+              // NIT-6 note covers the `push-growth` reason on a shrink).
+              const wantsDemandNotify =
+                this.#serverExecutionObserver?.demandChanged !== undefined;
+              const previous = session.trackedIds;
               for (const [key, entry] of updates) {
                 session.entities.set(key, entry);
-                session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
-              // A refresh's re-walk can DEAD-END on new absent targets;
-              // their misses are wake-reactivity the next commit needs.
+              // Rebuilt from provenance rather than grown in place: the
+              // refresh above may have RETIRED interests (a link edited
+              // away releases its miss), and a retired interest must
+              // leave the wake set with it — while a re-walk's new absent
+              // dead-ends are wake-reactivity the next commit needs.
+              session.trackedIds = addOperationWatchTrackedIds(
+                trackedIdsFromEntries(session.entities.values()),
+                session.watches,
+                {
+                  principal: session.principal,
+                  sessionId: session.id,
+                },
+              );
               this.#addMissedToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
               );
-              if (session.trackedIds.size > sizeBefore) {
+              let changed = false;
+              if (wantsDemandNotify) {
+                changed = previous.size !== session.trackedIds.size;
+                if (!changed) {
+                  for (const key of session.trackedIds) {
+                    if (!previous.has(key)) {
+                      changed = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (changed) {
                 this.#notifyDemandChanged(
                   space,
                   "push-growth",
@@ -5102,6 +5478,7 @@ export class Server {
             }
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
+              upserts: upserts.length,
             });
             const message = await finishCatchUp({
               type: "sync",
@@ -5180,7 +5557,10 @@ export class Server {
           // the space is offered every batch — so no tracked key is
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
-          this.#addMissedToTrackedIds(evaluatedTrackedIds, graphs.values());
+          this.#addMissedToTrackedIds(
+            evaluatedTrackedIds,
+            graphs.values(),
+          );
           addOperationWatchTrackedIds(
             evaluatedTrackedIds,
             session.watches,
@@ -5276,7 +5656,7 @@ export class Server {
     if (operationWatches.length === 0) return;
     operationActiveWatchCount.record(operationWatches.length);
     const cursors = operationCursors ?? session.operationCursors;
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     sync.operationFields = operationWatches.map((watch) => {
       const after = cursors.get(watch.id) ?? watch.query.after;
       const field = Engine.queryOperationField(engine, {
@@ -5572,7 +5952,10 @@ export class Server {
       // the graph-only provenance from delivered entries plus traversal misses
       // before producing demand rows.
       const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
-      this.#addMissedToTrackedIds(graphTrackedIds, session.graphs.values());
+      this.#addMissedToTrackedIds(
+        graphTrackedIds,
+        session.graphs.values(),
+      );
       const emit = (dirtyKey: string, root: boolean) => {
         const rowKey = `${dirtyKey}\0${session.id}`;
         if (rows.has(rowKey)) {
@@ -5839,7 +6222,7 @@ export class Server {
           "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §2)",
       );
     }
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const fullHolder = session.principal === undefined
       ? undefined
       : executionLeaseHolder(session.principal);
@@ -5904,7 +6287,7 @@ export class Server {
     // keeps receiving the foreign instances its cross-space serving
     // reads named). Full-holder equality throughout (the per-process
     // sharpening).
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const fullHolder = executionLeaseHolder(session.principal);
     const holdsReadSpace = liveExecutionLeaseHolder(engine, space) ===
       fullHolder;
@@ -6115,18 +6498,18 @@ export class Server {
     this.#refreshTurn = armTurn(
       () => {
         this.#refreshTurn = null;
-        void this.flushScheduledSessions();
+        void this.#flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
     );
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/v2-verdict-catchup.test.ts` reaches this member and a `#` name would
-   * put it out of reach.
+   * Helper for the refresh timer, which waits for the connection queues to
+   * drain and then flushes the scheduled sessions, logging a failure rather
+   * than throwing it, since the timer has no caller to surface one to.
    */
-  private async flushScheduledSessions(): Promise<void> {
+  async #flushScheduledSessions(): Promise<void> {
     await this.#waitForConnectionQueuesToDrain(
       Math.max(
         MIN_REFRESH_QUEUE_DRAIN_WAIT_MS,
@@ -6190,11 +6573,8 @@ export class Server {
    * A transaction arriving during fan-out waits for that turn to finish. Locks
    * for other spaces remain independent, so the latency coupling is local to
    * one space.
-   *
-   * TypeScript-private rather than a `#` name, because `test/v2-server.test.ts`
-   * reaches this member and a `#` name would put it out of reach.
    */
-  private async withSpacePublicationLock<T>(
+  async #withSpacePublicationLock<T>(
     space: string,
     run: () => Promise<T>,
   ): Promise<T> {
@@ -6254,7 +6634,7 @@ export class Server {
       });
 
       for (const space of spaces) {
-        await this.withSpacePublicationLock(space, async () => {
+        await this.#withSpacePublicationLock(space, async () => {
           // Removed at its own processing turn (CT-1927): pre-deleting the
           // whole selection meant a failure mid-batch stranded every
           // not-yet-processed space — dirty maps intact but the space no
@@ -6427,7 +6807,7 @@ export class Server {
    * tests only — nothing session-facing reaches an engine directly.
    */
   engineForSpace(space: string): Promise<Engine.Engine> {
-    return this.openEngine(space);
+    return this.#openEngine(space);
   }
 
   /**
@@ -6450,7 +6830,7 @@ export class Server {
    *   creating commit is what makes it the actor's (CT-1650's
    *   deterministic per-user-per-event DIDs; quota attribution stays
    *   the recorded residual, README §3.8). Probed WITHOUT creating:
-   *   the open-engine map first, then the store path — `openEngine`
+   *   the open-engine map first, then the store path — `#openEngine()`
    *   materializes a store as a side effect, which is exactly what an
    *   ungranted probe must not do.
    * - **acl**: the target's OWN ACL document grants the principal (or
@@ -6496,7 +6876,7 @@ export class Server {
     if (!(await this.#spaceStoreExists(space))) {
       return { granted: true, via: "creation" };
     }
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const state = this.#aclState(engine, space);
     if (state.kind === "valid") {
       const capability = state.acl[principal] ?? state.acl[ANYONE_USER] ??
@@ -6521,7 +6901,7 @@ export class Server {
   }
 
   /** Whether a store for `space` already exists, WITHOUT creating one
-   * (the foreignWriteAuthorityFor probe's creation arm — `openEngine`
+   * (the foreignWriteAuthorityFor probe's creation arm — `#openEngine()`
    * materializes stores as a side effect). An open (or opening) engine
    * exists by definition; a file-backed store exists iff its file
    * does; a memory-backed store exists only while an engine holds it. */
@@ -6541,11 +6921,24 @@ export class Server {
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/v2-server-acl.test.ts` reaches this member and a `#` name would put
-   * it out of reach.
+   * Opens the engine for `space`, or hands back the one already open or
+   * opening. An opener a test supplied wraps the whole step.
    */
-  private openEngine(space: string): Promise<Engine.Engine> {
+  #openEngine(space: string): Promise<Engine.Engine> {
+    const opener = this.#engineOpener;
+    if (opener !== undefined) {
+      return opener(space, (space) => this.#openEngineInner(space));
+    }
+    return this.#openEngineInner(space);
+  }
+
+  /**
+   * Helper for `#openEngine()`, which does the opening: an engine already
+   * open or opening is handed back; otherwise one is opened at the space's
+   * store URL, its directory created first when the store is a file, and
+   * indexed while it opens.
+   */
+  #openEngineInner(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
@@ -6565,6 +6958,9 @@ export class Server {
         url,
         operationCodecs: this.#operationCodecs,
         operationCheckpointInterval: this.options.operationCheckpointInterval,
+        documentCacheBudgetBytes: this.options.documentCacheBudgetBytes,
+        documentCacheMaxEntries: this.options.documentCacheMaxEntries,
+        documentCacheCoordinator: this.#documentCacheCoordinator,
       });
     })();
     // The SYNC engine view (server-execution v2 Phase 5): the read-row
@@ -6601,10 +6997,10 @@ export class Server {
    *   process-instance component the co-hosted ExecutorHost mints
    *   holders from — so a second process authenticated as the same
    *   service DID no longer passes on this process's lease rows.
-   * - SYNCHRONOUS: scans the RESOLVED engine map only (see openEngine),
-   *   so callers on the read path add no microtask boundary. Sound
-   *   because a lease row can only be written through an open co-hosted
-   *   engine.
+   * - SYNCHRONOUS: scans the RESOLVED engine map only (see
+   *   `#openEngineInner()`), so callers on the read path add no microtask
+   *   boundary. Sound because a lease row can only be written through an
+   *   open co-hosted engine.
    */
   #liveCoHostedLeaseSpaceFor(principal: string): string | undefined {
     const holder = executionLeaseHolder(principal);

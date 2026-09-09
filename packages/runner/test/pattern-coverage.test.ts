@@ -833,6 +833,7 @@ Deno.test("ingest merges hit-only data against another realm's spans", () => {
   // The realm that compiled the pattern owns the spans; a realm that only
   // warm-loaded the already-instrumented bytes reports hits with no spans. The
   // union carries both, keyed by the fileName the transformer baked in.
+
   const compiler = new PatternCoverageCollector();
   compiler.registerSpan({
     fileName: "/subject.tsx",
@@ -868,6 +869,7 @@ Deno.test("ingest merges hit-only data against another realm's spans", () => {
 Deno.test("ingest ignores zero-count hits", () => {
   // A realm that ran the instrumented bytes but never reached a statement
   // reports it with count 0; merging that must not mark the line covered.
+
   const collector = new PatternCoverageCollector();
   collector.registerSpan({
     fileName: "/subject.tsx",
@@ -1101,6 +1103,7 @@ Deno.test("pattern coverage records a piece authored without coverage and resume
   // exist. The resume then falls back to cold recovery — a recompile from the
   // stored source closure — which is the only place the instrumentation can
   // come from.
+
   const signer = await Identity.fromPassphrase(
     "cold-recovery pattern coverage",
   );

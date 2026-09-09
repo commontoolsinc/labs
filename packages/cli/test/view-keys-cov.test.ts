@@ -203,6 +203,10 @@ Deno.test("decode: SS3 unknown final is 'unknown'", () => {
   assertEquals(only(raw(0x1b, 0x4f, 0x58)).name, "unknown");
 });
 
+//
+// A batch across branches
+//
+
 Deno.test("decode: mixed batch crosses SS3, CSI-mod and tilde branches", () => {
   // Sanity: a longer batch threading several of the above branches together.
   const input = new Uint8Array([

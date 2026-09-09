@@ -114,6 +114,7 @@ export interface WaveRunContext {
   /** Durable action identity for basis rows (serving-loop.md §3b):
    * restart-stable, never per-process. */
   actionId: string;
+
   kind: WaveRunKind;
 
   /** ATTRIBUTION — the acting identity, one per action run, where the run
@@ -415,6 +416,7 @@ export interface WaveSpaceCommit {
    * (§3's sealing-order MUST binds the loop's processing order; this step
    * preserves what it was handed). */
   operations: Operation[];
+
   preconditions: CommitPrecondition[];
 
   /** Owning contribution index per precondition — home batch only; lets a
@@ -426,6 +428,7 @@ export interface WaveSpaceCommit {
    * letting the accumulator identify the one event whose deterministic write
    * was refused without terminalizing unrelated events in the same wave. */
   operationOwners?: number[];
+
   annotations: WaveWriteAnnotation[];
 
   /** Every eventId whose handler consequences ride this commit. */
@@ -485,6 +488,7 @@ export interface WaveCommitRejection {
   message: string;
   conflictedDocs?: readonly string[];
   failedPreconditions?: readonly number[];
+
   /** Operation index for a deterministic RowLabelCommitError. */
   failedOperation?: number;
 }
@@ -527,6 +531,7 @@ export interface WaveCommitSink {
     doc: { id: string; scope?: CellScope; scopeKey: string },
     sinceSeq: number,
   ): Promise<ReadonlyArray<readonly string[]>>;
+
   commitWave(
     batch: WaveSpaceCommit,
   ): Promise<Result<{ seq: number }, WaveCommitRejection>>;
@@ -605,6 +610,7 @@ export interface WaveCommitOutcome {
   /** The home commit's store seq; absent when the wave had nothing to
    * commit or aborted. */
   seq?: number;
+
   aborted?: "lease-lost" | "abandoned" | "foreign-commit-failed" | "rejected";
 
   /** Superseded pure-derivation writes dropped at the per-doc CAS —
@@ -645,6 +651,7 @@ export interface WaveCommitOutcome {
    * NOT reported as requeued (there is no entry to retry); the serving
    * loop's `events.orphanDeliveriesRefused` feeds from this. */
   orphanDeliveriesRefused: number;
+
   dispositions: ContributionDisposition[];
 
   /** Foreign provisioning batches this wave DURABLY COMMITTED, in commit
@@ -754,6 +761,7 @@ interface PendingAssembly {
   /** Undefined until the post-seal emptiness check: a tx with writes and
    * no context is refused; an empty tx needs none. */
   context: WaveRunContext | undefined;
+
   spaces: SealedSpaceContribution[];
   readOnlyReadKeys: Set<string>;
   discoveredScope: CellScope;
@@ -803,6 +811,7 @@ export class WaveAccumulator
     string,
     "owner" | "creation" | "acl"
   >();
+
   readonly #onForeignWriteRefusal:
     | ((info: { space: MemorySpace; actionId?: string }) => void)
     | undefined;
@@ -843,6 +852,7 @@ export class WaveAccumulator
    * A post-seal enqueue on the same tx is refused — it could no longer
    * ride this wave's transaction. */
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
+
   readonly #sealedTxs = new WeakSet<object>();
   readonly #onUnstampedSeal: (() => void) | undefined;
   readonly #onEarlyEmitRefusal: (() => void) | undefined;
@@ -864,6 +874,7 @@ export class WaveAccumulator
      * loop supplies per-run demanded identities when it builds real
      * accumulators. */
     scopeKeyIdentity: ScopeKeyIdentity;
+
     replicaFor: (space: MemorySpace) => ISpaceReplica;
     lease?: WaveLease;
 
@@ -1494,13 +1505,23 @@ export class WaveAccumulator
     if (this.#closed) return;
     this.#closed = true;
     for (const contribution of this.#contributions) {
-      this.#withdraw(contribution, `wave abandoned: ${reason}`);
+      this.#withdraw(
+        contribution,
+        `wave abandoned: ${reason}`,
+        "wave-abandoned",
+      );
     }
   }
 
-  #withdraw(contribution: WaveContribution, message: string): void {
+  #withdraw(
+    contribution: WaveContribution,
+    message: string,
+    cause?: "contribution-dropped" | "wave-abandoned",
+  ): void {
     for (const space of contribution.spaces) {
-      space.resolveVerdict({ withdrawn: { message } });
+      space.resolveVerdict({
+        withdrawn: { message, ...(cause !== undefined ? { cause } : {}) },
+      });
     }
   }
 
@@ -1604,6 +1625,7 @@ export class WaveAccumulator
      * withdrawn foreign write into the withdrawal (the cross-space half
      * of the closure below). */
     const byLocalSeq = new Map<MemorySpace, Map<number, number>>();
+
     for (const contribution of this.#contributions) {
       for (const sealed of contribution.spaces) {
         let perSpace = byLocalSeq.get(sealed.space);
@@ -1632,6 +1654,7 @@ export class WaveAccumulator
      * (`orphanRefusedEvents`), since an orphan-refused copy takes its
      * same-eventId siblings down with it (the sibling fold below). */
     const orphanRefused = new Set<number>();
+
     const orphanRefusedEvents = new Set<string>();
 
     /** eventId → the contribution (and its home sidecar doc-instance
@@ -2958,7 +2981,7 @@ export class WaveAccumulator
             "contribution; its own reads re-run it when fresh state " +
             "lands (serving-loop.md §3d)";
         this.#warnDropped(contribution, message);
-        this.#withdraw(contribution, message);
+        this.#withdraw(contribution, message, "contribution-dropped");
         continue;
       }
       if (droppedDocs[idx].size > 0) {
@@ -2986,6 +3009,7 @@ export class WaveAccumulator
           contribution,
           "superseded pure derivation writes dropped from the wave commit " +
             "(serving-loop.md §3d)",
+          allDropped ? "contribution-dropped" : undefined,
         );
         continue;
       }

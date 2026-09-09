@@ -23,6 +23,7 @@ import {
   type FabricPatternInstantiations,
 } from "../src/fabric-instantiations.ts";
 import { comparableEntityHash } from "../src/fabric-observations.ts";
+import { scrubBareFabricIdentifiers } from "../src/fabric-identifier-scrub.ts";
 import { resolveWellKnownGrantRefs } from "../src/well-known-grants.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
@@ -33,7 +34,6 @@ import {
   type RunPatternToolErrorOutput,
   type RunPatternToolInput,
   type RunPatternToolSuccessOutput,
-  scrubBareFabricIdentifiers,
 } from "../src/tools/run-pattern.ts";
 import type {
   CfcAddress,
@@ -224,21 +224,25 @@ const EXPENSE_SCHEMA = {
 } as const;
 
 /**
- * A fabric session at enforce-strict with persisted flow labels, for the
- * tests that pin what a pattern over labelled data leaves in the store.
+ * A fabric session with persisted flow labels, at the enforcement posture the
+ * caller names: `enforce-strict` for the tests that pin what a pattern over
+ * labelled data leaves in the store and what its answer may release, and
+ * `observe` for the one that pins that nothing rejects there.
  */
-async function createStrictFabric() {
+async function createFabric(
+  cfcEnforcementMode: "observe" | "enforce-strict" = "enforce-strict",
+) {
   const storage = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL("http://toolshed.test"),
     storageManager: storage,
-    cfcEnforcementMode: "enforce-strict",
+    cfcEnforcementMode,
     cfcFlowLabels: "persist",
   });
   const pieces = new PiecesController(
     await createSession({
       identity: signer,
-      spaceName: `run-pattern-strict-${crypto.randomUUID()}`,
+      spaceName: `run-pattern-${cfcEnforcementMode}-${crypto.randomUUID()}`,
     }),
     runtime,
   );
@@ -253,6 +257,8 @@ async function createStrictFabric() {
     },
   };
 }
+
+const createStrictFabric = () => createFabric("enforce-strict");
 
 /**
  * A pattern over one plain input and one optional referenced input, where the
@@ -311,6 +317,133 @@ async function seedLabelledSecret(
   });
   expect((await seed.commit()).ok).toBeDefined();
   return createLLMFriendlyLink(sourceCell.getAsNormalizedFullLink(), space);
+}
+
+/**
+ * A pattern over an operator-shaped account: a balance and a list of
+ * transactions, the spending summed from the negative amounts. The input is
+ * typed as plain data, which is how a model wires a cell it was handed.
+ */
+const SPENDING_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Transaction { amount: number; }",
+  "interface Account { balance: number; transactions: Transaction[]; }",
+  "interface Input { account: Account; }",
+  "interface Output { totalSpending: number; }",
+  "export default pattern<Input, Output>(({ account }) => ({",
+  "  totalSpending: computed(() => account.transactions.reduce(",
+  "    (sum, t) => sum + (t.amount < 0 ? -t.amount : 0),",
+  "    0,",
+  "  )),",
+  "}));",
+  "",
+].join("\n");
+
+const TOTAL_SPENDING_RESULT_SCHEMA = {
+  type: "object",
+  properties: { totalSpending: { type: "number" } },
+  required: ["totalSpending"],
+} as const;
+
+/**
+ * How the holder document an agent is handed reaches the labeled account:
+ * through a link in its `account` field, the way an operator attaches one;
+ * through a link at its own root, above the field the agent addresses; or
+ * through its `account` field beside a `notes` field linking to an
+ * unlabeled document, so a dereference the holder records leads somewhere
+ * the account never goes.
+ */
+type AccountHolderShape = "field-link" | "root-link" | "two-fields";
+
+/**
+ * Seeds an account the way an operator attaches one: a holder document that
+ * reaches the account document by a link, with the confidentiality on the
+ * account document and not on the holder. Returns the LLM-friendly link to
+ * the holder's `account` position, which is what the agent is handed — so
+ * the labeled document is one the agent's address never names, reached only
+ * by dereferencing what the holder holds — and, for the two-field shape, the
+ * link to its `notes` position as well.
+ */
+async function seedAccountHolder(
+  runtime: Runtime,
+  space: ReturnType<PiecesController["getSpace"]>,
+  cause: string,
+  shape: AccountHolderShape,
+): Promise<{ account: string; notes: string }> {
+  const seed = runtime.edit();
+  const account = {
+    balance: 2000,
+    transactions: [{ amount: -120 }, { amount: 2000 }, { amount: -25 }],
+  };
+  const accountCell = runtime.getCell(
+    space,
+    `${cause}-account`,
+    undefined,
+    seed,
+  );
+  const accountId = accountCell.getAsNormalizedFullLink().id;
+  writeSeedEnvelopeDoc(seed, space);
+  // A root-linked holder continues into the account document at `account`,
+  // so that document carries the field and the label sits on it; the others
+  // link straight at the account, labeled at its root.
+  seed.writeOrThrow({ space, scope: "space", id: accountId, path: [] }, {
+    value: shape === "root-link" ? { account } : account,
+    cfc: {
+      version: 1,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: shape === "root-link" ? ["account"] : [],
+          label: { confidentiality: ["finance"] },
+        }],
+      },
+    },
+  });
+  const notesCell = runtime.getCell(space, `${cause}-notes`, undefined, seed);
+  const notesId = notesCell.getAsNormalizedFullLink().id;
+  seed.writeOrThrow({ space, scope: "space", id: notesId, path: [] }, {
+    value: { text: "unlabeled" },
+  });
+  const linkTo = (id: string) => ({
+    "/": { "link@1": { id, path: [], scope: "space", space } },
+  });
+  const holderCell = runtime.getCell(space, `${cause}-holder`, undefined, seed);
+  seed.writeOrThrow(
+    {
+      space,
+      scope: "space",
+      id: holderCell.getAsNormalizedFullLink().id,
+      path: [],
+    },
+    {
+      value: shape === "root-link"
+        ? linkTo(accountId)
+        : shape === "two-fields"
+        ? { account: linkTo(accountId), notes: linkTo(notesId) }
+        : { account: linkTo(accountId) },
+    },
+  );
+  expect((await seed.commit()).ok).toBeDefined();
+  return {
+    account: createLLMFriendlyLink(
+      holderCell.key("account").getAsNormalizedFullLink(),
+      space,
+    ),
+    notes: createLLMFriendlyLink(
+      holderCell.key("notes").getAsNormalizedFullLink(),
+      space,
+    ),
+  };
+}
+
+/** {@link seedAccountHolder} in the operator's shape, the account link alone. */
+async function seedLabelledAccount(
+  runtime: Runtime,
+  space: ReturnType<PiecesController["getSpace"]>,
+  cause: string,
+): Promise<string> {
+  return (await seedAccountHolder(runtime, space, cause, "field-link")).account;
 }
 
 /**
@@ -385,10 +518,13 @@ function refusalDetail(
 }
 
 /** Resolves a refused read to an input key by the document it names. */
-function inputKeyByDocument(
-  owned: Readonly<Record<string, string>>,
-): (read: CfcAddress) => string | undefined {
-  return (read) => owned[read.id];
+function inputKeysByDocument(
+  owned: Readonly<Record<string, string | string[]>>,
+): (read: CfcAddress) => readonly string[] {
+  return (read) => {
+    const keys = owned[read.id];
+    return keys === undefined ? [] : typeof keys === "string" ? [keys] : keys;
+  };
 }
 
 /**
@@ -434,7 +570,6 @@ function createStrictEngine(pieces: PiecesController): CfHarnessEngine {
   return new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `run-pattern-strict-${crypto.randomUUID()}`,
-    cfcEnforcementMode: "disabled",
     fabricSessionFactory: () => Promise.resolve({ pieces }),
   });
 }
@@ -571,7 +706,6 @@ describe("run-pattern", () => {
     return new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, instantiations }),
     });
   }
@@ -650,8 +784,9 @@ describe("run-pattern", () => {
       );
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("error");
-      expect(output.message).toContain("only be opened by this session");
-      expect(output.message).toContain("computed()");
+      expect(output.message).toContain("detected");
+      expect(output.message).toContain("session-only pattern pointer");
+      expect(output.message).not.toContain("computed()");
       expect(output.message).not.toContain("keyless:zStranded");
       expect(output.rawCauseMessage).toContain("keyless:zStranded");
     });
@@ -662,7 +797,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -939,16 +1073,99 @@ describe("run-pattern", () => {
       expect(output.message).not.toContain("boom in lift");
       expect(output.rawCauseMessage).toContain("boom in lift");
       expect(output.pieceId).toBeDefined();
-      expect(result.runState.status).toBe("completed");
+      expect(result.runState.status).not.toBe("failed");
     });
 
-    it("returns an error naming the policy refusal when the commit boundary refuses the result write", async () => {
-      // A strict flow-label runtime over a labelled source: the pattern's
-      // secret-derived write is refused at the commit boundary. The refusal
-      // is terminal — the scheduler surfaces it on its error channel rather
-      // than retrying — and the tool reports it as a policy refusal, with
-      // the reason (which names the labels and documents involved) kept in
-      // the artifact channel rather than the model-facing message.
+    it("reports a commit the boundary refused as a refusal, not as a thrown computation", async () => {
+      // The two exits share a guard — a piece whose result never landed — and
+      // are told apart only by the error's name, so a refusal reported as a
+      // thrown computation would carry the wrong message and lose its
+      // structured refusals. A pattern this PR's ownership route cannot get
+      // refused any more (every store such a run writes is one the runtime
+      // owns), so the record is raised by name here rather than by provoking
+      // the boundary: what is under test is which exit the tool takes and
+      // what it puts in the model-facing message, both of which read the name
+      // and nothing else about how the record arrived.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Output { boom: number; }",
+          "export default pattern<Record<string, never>, Output>(() => ({",
+          "  boom: computed(() => {",
+          "    const refusal = new Error('refused: /of:doc at //x');",
+          "    refusal.name = 'CfcCommitRefusalError';",
+          "    throw refusal;",
+          "  }),",
+          "}));",
+          "",
+        ].join("\n"),
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("policy refused to commit");
+      expect(output.message).not.toContain("failed while settling");
+      // A refusal the boundary described only in prose carries no structured
+      // refusals, so the message is the opaque one and the detail stays in
+      // the artifact field the prompt loop strips from model context.
+      expect(output.message).not.toContain("of:doc");
+      expect(output.rawCauseMessage).toContain("of:doc");
+      expect(output.pieceId).toBeDefined();
+      // The decision the run's policy trace carries: the commit boundary
+      // refused, and it states no sink or ceiling of its own, since the
+      // runner refused at the pattern's own sink requests.
+      expect(output.releaseDecision).toEqual({
+        reasonCode: "cfc_commit_refused",
+        boundary: "commit",
+      });
+    });
+
+    it("names the clause and the gate when the refused commit carried structured refusals", async () => {
+      // The other arm of the same exit: a refusal the boundary described
+      // structurally gets the described message rather than the opaque one,
+      // and the atoms reach the model while the documents do not.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Output { boom: number; }",
+          "export default pattern<Record<string, never>, Output>(() => ({",
+          "  boom: computed(() => {",
+          "    const refusal = new Error('refused: /of:ledger at //total') as",
+          "      Error & { refusals?: unknown[] };",
+          "    refusal.name = 'CfcCommitRefusalError';",
+          "    refusal.refusals = [{",
+          "      gate: 'writer-fit',",
+          "      offendingAtoms: ['\"expense-note\"'],",
+          "      inputs: [],",
+          "      attribution: 'none',",
+          "      reason: 'writer-fit confidentiality misfit',",
+          "    }];",
+          "    throw refusal;",
+          "  }),",
+          "}));",
+          "",
+        ].join("\n"),
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("policy refused to commit");
+      expect(output.message).toContain("expense-note");
+      expect(output.policyRefusal).toBeDefined();
+      // Document identifiers stay out of the model-facing message either way.
+      expect(output.message).not.toContain("of:ledger");
+      expect(output.rawCauseMessage).toContain("of:ledger");
+      expect(output.releaseDecision?.reasonCode).toBe("cfc_commit_refused");
+      expect(output.releaseDecision?.refusal).toEqual(output.policyRefusal);
+    });
+
+    it("returns an error naming the policy refusal when the answer carries a label the model may not read", async () => {
+      // A strict flow-label runtime over a labelled source: the pattern
+      // derives from the secret, and its result carries the secret's label.
+      // The answer is an egress, so the tool measures what it would release
+      // and refuses, with the reason (which names the labels and documents
+      // involved) kept in the artifact channel rather than the model-facing
+      // message.
       const strictStorage = StorageManager.emulate({ as: signer });
       const strictRuntime = new Runtime({
         apiUrl: new URL("http://toolshed.test"),
@@ -1004,7 +1221,6 @@ describe("run-pattern", () => {
         const engine = new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: `run-pattern-strict-${crypto.randomUUID()}`,
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces: strictPieces }),
         });
         const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -1019,17 +1235,23 @@ describe("run-pattern", () => {
             "",
           ].join("\n"),
           inputs: { source: sourceRef },
+          resultSchema: {
+            type: "object",
+            properties: { copied: { type: "string" } },
+            required: ["copied"],
+          },
         });
-        const output = result.output as RunPatternToolErrorOutput;
-        expect(output.status).toBe("error");
-        expect(output.message).toContain("policy refused to commit");
-        expect(output.message).toContain("result never landed");
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.valueError).toContain("policy refused to release");
+        expect(output.valueError).toContain("withheld here");
         // The refusal reason is a data channel: it stays in the artifact
         // field the prompt loop strips from model context, never in the
-        // message.
-        expect(output.message).not.toContain("CFC enforcement rejected");
+        // model-facing text.
+        expect(output.valueError).not.toContain("exceeds ceiling");
         expect(output.rawCauseMessage).toContain(
-          "CFC enforcement rejected commit",
+          'confidentiality exceeds ceiling for run_pattern: "secret"',
         );
         expect(output.pieceId).toBeDefined();
       } finally {
@@ -1054,15 +1276,16 @@ describe("run-pattern", () => {
             resultSchema: TOTAL_RESULT_SCHEMA,
           },
         );
-        const output = result.output as RunPatternToolErrorOutput;
-        expect(output.status).toBe("error");
-        expect(output.message).toContain("policy refused to commit");
-        expect(output.message).toContain('input "source"');
-        expect(output.message).toContain("without it proceeds");
-        expect(output.message).not.toContain('"amount"');
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.valueError).toContain("policy refused to release");
+        expect(output.valueError).toContain('input "source"');
+        expect(output.valueError).toContain("without it releases its values");
+        expect(output.valueError).not.toContain('"amount"');
         expect(output.policyRefusal).toEqual({
-          gates: ["writer-fit"],
-          sinks: [],
+          gates: ["sink-ceiling"],
+          sinks: ["run_pattern"],
           offendingAtoms: ['"secret"'],
           inputKeys: ["source"],
           attribution: "complete",
@@ -1092,8 +1315,9 @@ describe("run-pattern", () => {
           sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
           inputs,
           resultSchema: TOTAL_RESULT_SCHEMA,
-        })).output as RunPatternToolErrorOutput;
-        expect(refused.status).toBe("error");
+        })).output as RunPatternToolSuccessOutput;
+        expect(refused.status).toBe("ok");
+        expect(refused.value).toBeUndefined();
         expect(refused.policyRefusal?.attribution).toBe("complete");
         const named = refused.policyRefusal?.inputKeys ?? [];
         expect(named).toEqual(["source"]);
@@ -1132,7 +1356,7 @@ describe("run-pattern", () => {
             resultSchema: TOTAL_RESULT_SCHEMA,
           },
         );
-        const output = result.output as RunPatternToolErrorOutput;
+        const output = result.output as RunPatternToolSuccessOutput;
         const encoded = JSON.stringify(output.policyRefusal);
         expect(scrubBareFabricIdentifiers(encoded)).toBe(encoded);
         expect(encoded).not.toContain(space);
@@ -1141,12 +1365,243 @@ describe("run-pattern", () => {
       }
     });
 
-    it("counts the reads only the argument document accounted for when the piece's argument cell will not resolve", async () => {
-      // The argument document is the second of the two routes from a refused
-      // read back to an input key. With it gone the report stands on the
-      // addresses the caller's own links resolved to, and states the gap
-      // rather than closing over it: what those addresses do not reach is
-      // counted, and the remedy drops to `partial`.
+    it("refuses an answer whose label sits on a field of the document it passes through", async () => {
+      // Resolving a value reads the links it holds; a label on a field is
+      // consumed where that field is read. This answer is the labelled
+      // document itself, passed through by reference, and its label sits one
+      // level down — so the measurement has to walk what it releases.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-field-label",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { source: Reactive<Source>; }",
+              "interface Output { copy: Reactive<Source>; }",
+              "export default pattern<Input, Output>(({ source }) => ({",
+              "  copy: source,",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { source: sourceRef },
+            resultSchema: {
+              type: "object",
+              properties: {
+                copy: {
+                  type: "object",
+                  properties: { secret: { type: "string" } },
+                },
+              },
+              required: ["copy"],
+            },
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.valueError).toContain("policy refused to release");
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("names both keys when one labelled document is supplied under two", async () => {
+      // The remedy has to name every alias: dropping one of them leaves the
+      // other handing the same document to the pattern. With the argument
+      // document gone, one read of the shared document is all there is to
+      // trace, and both aliases resolve from the addresses the caller's own
+      // links reached.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-aliased-input",
+        );
+        const result = await createStrictEngine(
+          piecesWithUnresolvableArgument(pieces),
+        ).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input {",
+              "  amount: number;",
+              "  source?: Reactive<Source>;",
+              "  alsoSource?: Reactive<Source>;",
+              "}",
+              "interface Output { total: number; }",
+              "export default pattern<Input, Output>(({ amount, source }) => ({",
+              "  total: computed(() => {",
+              "    const secret = source?.secret;",
+              "    return amount + (typeof secret === 'string'",
+              "      ? secret.length",
+              "      : 0);",
+              "  }),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { amount: 2, source: sourceRef, alsoSource: sourceRef },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(
+          expect.arrayContaining(["source", "alsoSource"]),
+        );
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("refuses an answer whose label is two links down", async () => {
+      // The leaf the answer carries sits inside a nested object, behind a
+      // computed cell, behind the result document. Resolving the result is
+      // not the same as reading what it resolves to, so this is what says
+      // the measurement reaches the whole answer rather than its first hop.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-nested-label",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { source: Reactive<Source>; }",
+              "interface Output { wrapper: { note: string } }",
+              "export default pattern<Input, Output>(({ source }) => ({",
+              "  wrapper: { note: computed(() => `${source.secret}!`) },",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { source: sourceRef },
+            resultSchema: {
+              type: "object",
+              properties: {
+                wrapper: {
+                  type: "object",
+                  properties: { note: { type: "string" } },
+                },
+              },
+              required: ["wrapper"],
+            },
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.valueError).toContain("policy refused to release");
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("answers at the observe posture, where no gate rejects", async () => {
+      // The enforcement ladder decides whether a recorded reason rejects, and
+      // at `observe` none of them do. The answer carries the label either
+      // way; what changes is that nothing refuses over it.
+      const { runtime, pieces, space, dispose } = await createFabric("observe");
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-observe",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect((output.value as { total: number }).total).toBe(8);
+        // Nothing rejects here, and the measurement still ran: what raising
+        // the rung would refuse is recorded for whoever is staging it.
+        expect(output.releaseObservation?.offendingAtoms).toEqual(['"secret"']);
+        expect(output.releaseObservation?.inputKeys).toEqual(["source"]);
+        // The measurement said as a decision: it did not reject, and it
+        // carries the same attribution the observation does.
+        expect(output.releaseDecision).toEqual({
+          reasonCode: "cfc_release_observed",
+          boundary: "release",
+          sink: "run_pattern",
+          ceiling: [],
+          refusal: output.releaseObservation,
+        });
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("answers when a labelled input reaches the argument document and not the result", async () => {
+      // What the answer carries is what releasing it resolves, not what the
+      // caller handed over. This pattern names the labelled input and never
+      // reads it, so the total it returns derives from the plain one alone.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-unread-input",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { amount: number; source?: Reactive<Source>; }",
+              "interface Output { total: number; }",
+              "export default pattern<Input, Output>(({ amount }) => ({",
+              "  total: computed(() => amount + 1),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect((output.value as { total: number }).total).toBe(3);
+        // The boundary ran and admitted the flow, which the trace records as
+        // readily as a refusal: an operator reading only refusals cannot tell
+        // a gate that passed from one that never ran.
+        expect(output.releaseDecision).toEqual({
+          reasonCode: "cfc_release_allowed",
+          boundary: "release",
+          sink: "run_pattern",
+          ceiling: [],
+        });
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("names the input from the caller's own addresses when the piece's argument cell will not resolve", async () => {
+      // The argument document is one of the two routes from a released clause
+      // back to an input key. With it gone the report stands on the addresses
+      // the caller's own links resolved to, which account for this clause on
+      // their own.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const sourceRef = await seedLabelledSecret(
@@ -1161,12 +1616,11 @@ describe("run-pattern", () => {
           inputs: { amount: 2, source: sourceRef },
           resultSchema: TOTAL_RESULT_SCHEMA,
         });
-        const output = result.output as RunPatternToolErrorOutput;
-        expect(output.status).toBe("error");
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
         expect(output.policyRefusal?.inputKeys).toEqual(["source"]);
-        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
-        expect(output.policyRefusal?.attribution).toBe("partial");
-        expect(output.message).toContain("narrows the flow");
+        expect(output.policyRefusal?.attribution).toBe("complete");
+        expect(output.valueError).toContain("without it releases its values");
       } finally {
         await dispose();
       }
@@ -1191,9 +1645,269 @@ describe("run-pattern", () => {
             resultSchema: TOTAL_RESULT_SCHEMA,
           },
         );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("returns the result reference without consulting the ceiling when no `resultSchema` asks for values", async () => {
+      // A reference names the result without carrying it, so handing one
+      // back discloses nothing: the ceiling gates values, and a call that
+      // asks for none is not measured against it. This is the shape an
+      // agent that routes data it never reads relies on — the pattern
+      // derives from a labeled input, and the reference to what it derived
+      // comes back all the same.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const accountRef = await seedLabelledAccount(
+          runtime,
+          space,
+          "release-reference-only",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: SPENDING_PATTERN_SOURCE,
+            inputs: { account: accountRef },
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.resultRef).toMatch(/^\/of:/);
+        expect(output.value).toBeUndefined();
+        expect(output.valueError).toBeUndefined();
+        expect(output.policyRefusal).toBeUndefined();
+        expect(output.releaseObservation).toBeUndefined();
+        // Nothing was measured, so the trace records no decision about a
+        // boundary this call never reached.
+        expect(output.releaseDecision).toBeUndefined();
+        // The result did derive from the labeled input: the reference names
+        // exactly what the ceiling withholds as a value.
+        expect((output.rawValue as { totalSpending: number }).totalSpending)
+          .toBe(145);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("withholds the values the ceiling refuses and still returns the result reference", async () => {
+      // Asking for values is what consults the ceiling, and a refusal
+      // withholds exactly what was measured: the values. The reference comes
+      // back with them withheld, so the agent can still pass the result on
+      // by reference, and the refusal reaches it as data and as an
+      // instruction while the reason stays in the artifact.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const accountRef = await seedLabelledAccount(
+          runtime,
+          space,
+          "release-values-withheld",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: SPENDING_PATTERN_SOURCE,
+            inputs: { account: accountRef },
+            resultSchema: TOTAL_SPENDING_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.resultRef).toMatch(/^\/of:/);
+        expect(output.value).toBeUndefined();
+        expect(output.linkedStringCount).toBeUndefined();
+        expect(output.valueError).toContain(
+          "policy refused to release its values",
+        );
+        expect(output.valueError).toContain("resultRef still names the result");
+        expect(output.valueError).not.toContain("exceeds ceiling");
+        expect(output.rawCauseMessage).toContain(
+          'confidentiality exceeds ceiling for run_pattern: "finance"',
+        );
+        expect(output.policyRefusal?.gates).toEqual(["sink-ceiling"]);
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"finance"']);
+        expect(output.releaseDecision).toEqual({
+          reasonCode: "cfc_release_withheld",
+          boundary: "release",
+          sink: "run_pattern",
+          ceiling: [],
+          refusal: output.policyRefusal,
+        });
+        expect(output.releaseDecision?.refusal?.inputKeys).toEqual(["account"]);
+        expect((output.rawValue as { totalSpending: number }).totalSpending)
+          .toBe(145);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("keeps the withheld decision on a run that fails to settle after the fit", async () => {
+      // The fit runs before the result is read for its value, so a run that
+      // exits at a settle failure is a run the boundary already decided at.
+      // The decision is attached to that exit too: dropping it there would
+      // lose the trace's record of exactly the refusals a failing run
+      // provoked.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-decision-settle-failure",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { amount: number; source: Reactive<Source>; }",
+              "interface Output { total: number; boom: number; }",
+              "export default pattern<Input, Output>(({ amount, source }) => ({",
+              "  total: computed(() => amount + (source.secret ?? '').length),",
+              "  boom: computed(() => { throw new Error('boom in lift'); }),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: {
+              type: "object",
+              properties: {
+                total: { type: "number" },
+                boom: { type: "number" },
+              },
+              required: ["total", "boom"],
+            },
+          },
+        );
         const output = result.output as RunPatternToolErrorOutput;
         expect(output.status).toBe("error");
-        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+        expect(output.message).toContain("failed while settling");
+        expect(output.releaseDecision?.reasonCode).toBe("cfc_release_withheld");
+        expect(output.releaseDecision?.refusal?.offendingAtoms).toEqual([
+          '"secret"',
+        ]);
+        expect(output.releaseDecision?.refusal?.inputKeys).toEqual(["source"]);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("names the input whose link reaches the labeled document through a link it holds", async () => {
+      // The caller's address names the holder document; the label lives on
+      // the document the holder's `account` field links to, which the
+      // caller's address never names. The refused read is of that second
+      // document, and what ties it back to `account` is the dereference the
+      // attribution read performed to get there. The refusal names `account`
+      // as the whole remedy rather than counting the document as one no
+      // input accounts for.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const accountRef = await seedLabelledAccount(
+          runtime,
+          space,
+          "release-field-addressed-input",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: SPENDING_PATTERN_SOURCE,
+            inputs: { account: accountRef },
+            resultSchema: TOTAL_SPENDING_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal).toEqual({
+          gates: ["sink-ceiling"],
+          sinks: ["run_pattern"],
+          offendingAtoms: ['"finance"'],
+          inputKeys: ["account"],
+          attribution: "complete",
+        });
+        expect(output.valueError).toContain('input "account"');
+        expect(output.valueError).toContain("without it releases its values");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("names the input when the link it follows sits above the input's address", async () => {
+      // The holder's root is itself a link, and the caller's address names
+      // the `account` field beneath it: the dereference the attribution read
+      // records starts above the address, so the address continues on the
+      // far side of the link, into the account document's own `account`
+      // field, where the label sits.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const refs = await seedAccountHolder(
+          runtime,
+          space,
+          "release-root-linked-holder",
+          "root-link",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: SPENDING_PATTERN_SOURCE,
+            inputs: { account: refs.account },
+            resultSchema: TOTAL_SPENDING_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(["account"]);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("does not name an input for a dereference the holder made somewhere else", async () => {
+      // The holder links to the labeled account under `account` and to an
+      // unlabeled document under `notes`, and both are inputs. The `notes`
+      // dereference is recorded against the same holder document, but it
+      // starts beside the `account` address rather than at, below, or above
+      // it, so it leads the `account` input nowhere — and `notes` is not
+      // named, since nothing it reaches carries the label.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const refs = await seedAccountHolder(
+          runtime,
+          space,
+          "release-two-field-holder",
+          "two-fields",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern } from 'commonfabric';",
+              "interface Transaction { amount: number; }",
+              "interface Account { balance: number; transactions: Transaction[]; }",
+              "interface Notes { text: string; }",
+              "interface Input { account: Account; notes: Notes; }",
+              "interface Output { totalSpending: number; noteLength: number; }",
+              "export default pattern<Input, Output>(({ account, notes }) => ({",
+              "  totalSpending: computed(() => account.transactions.reduce(",
+              "    (sum, t) => sum + (t.amount < 0 ? -t.amount : 0),",
+              "    0,",
+              "  )),",
+              "  noteLength: computed(() => notes.text.length),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { account: refs.account, notes: refs.notes },
+            resultSchema: TOTAL_SPENDING_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(["account"]);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+        expect(output.valueError).not.toContain('"notes"');
       } finally {
         await dispose();
       }
@@ -1202,11 +1916,18 @@ describe("run-pattern", () => {
     it("commits no unlabelled copy when a pattern-body map reads labelled values inline", async () => {
       // A pattern-body `.map()` runs as the built-in map, whose coordinator
       // reads the list raw. With the labelled values inline in that list, the
-      // read carries their confidentiality, so under enforce-strict the
-      // output write is refused and nothing lands: the labelled text exists
-      // at rest only in the seeded source document, and the tool reports the
-      // refusal — the coordinator carries the piece's observation identity,
-      // which is what attributes a `raw:map` action's refusal to its piece.
+      // read carries their confidentiality into the stores the map writes —
+      // its result container and one result document per element. Those are
+      // stores the runtime owns, so each declares that confidentiality
+      // (§8.12.5 route 2) rather than refusing the write, and the run
+      // commits. Nothing copies the text even so: each element result is a
+      // link into the labelled source path, so the labelled text exists at
+      // rest only in the seeded source document.
+      //
+      // What the labels stop is the ANSWER. The model's context is outside
+      // every space, so the answer ceiling withholds the value the tool would
+      // return, and the handle it returns instead names a result that stays
+      // in the space.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const seed = runtime.edit();
@@ -1268,18 +1989,25 @@ describe("run-pattern", () => {
             ),
           },
         });
-        const output = result.output as RunPatternToolErrorOutput;
-        expect(output.status).toBe("error");
-        expect(output.message).toContain("policy refused to commit");
-        const pieceId = output.pieceId;
-        expect(pieceId).toBeDefined();
+        const output = result.output as RunPatternToolSuccessOutput;
+        // The run commits and returns its handle; the answer ceiling gates the
+        // VALUE, which stays in the space. The sibling below reaches the same
+        // outcome from the linked shape, so inline values and linked ones now
+        // differ only in which document holds the text.
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal).toBeUndefined();
         await runtime.idle();
         await pieces.synced();
 
-        const piece = await pieces.get(pieceId!);
-        expect(await piece.result.get([])).toBeUndefined();
-        expect(docsHolding(runtime, space, `of:${pieceId}`, "alpha-secret"))
-          .toEqual([sourceId]);
+        const piece = await pieces.get(output.pieceId);
+        expect(await piece.result.get(["notes"])).toEqual([
+          "alpha-secret",
+          "beta-secret",
+        ]);
+        expect(
+          docsHolding(runtime, space, `of:${output.pieceId}`, "alpha-secret"),
+        ).toEqual([sourceId]);
       } finally {
         await dispose();
       }
@@ -1289,9 +2017,10 @@ describe("run-pattern", () => {
       // With each labelled value in its own document behind a link, the
       // built-in map's coordinator reads only links, and each element result
       // is itself a link into the labelled source path. The result reads
-      // back as the values, but no document at rest holds an unlabelled
-      // copy: a reader reaching the text does so through the source's own
-      // label map.
+      // back as the values, but no document at rest holds a copy at all: a
+      // reader reaching the text does so through the source's own label map.
+      // The call asks for no values, so what leaves the fabric for the model
+      // is the reference alone, and nothing is measured or withheld.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const expenseIds: string[] = [];
@@ -1376,6 +2105,8 @@ describe("run-pattern", () => {
         });
         const output = result.output as RunPatternToolSuccessOutput;
         expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal).toBeUndefined();
         await runtime.idle();
         await pieces.synced();
 
@@ -1403,7 +2134,7 @@ describe("run-pattern", () => {
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("compile-error");
       expect(output.message.length).toBeGreaterThan(0);
-      expect(result.runState.status).toBe("completed");
+      expect(result.runState.status).not.toBe("failed");
     });
 
     it("returns an error when `sourceText` is missing", async () => {
@@ -1812,7 +2543,60 @@ describe("run-pattern", () => {
       expect(output.status).toBe("cancelled");
       expect(output.message).toContain("cancelled");
       expect(stopped.length).toBe(1);
-      expect(result.runState.status).toBe("completed");
+      expect(result.runState.status).not.toBe("failed");
+    });
+
+    it("returns a `cancelled` output when the signal aborts during the release measurement", async () => {
+      // The measurement opens its transactions before it awaits anything, so
+      // aborting on that call lands the signal while the phase is in flight.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-cancelled",
+        );
+        const controller = new AbortController();
+        const pristineEdit = runtime.edit.bind(runtime);
+        let measurementReached = false;
+        const runtimeWithEdit = runtime as unknown as {
+          edit: () => ReturnType<typeof pristineEdit>;
+        };
+        runtimeWithEdit.edit = () => {
+          // Every earlier transaction belongs to setup; the release
+          // measurement is what opens one after the piece has settled.
+          if (measurementReached) controller.abort();
+          return pristineEdit();
+        };
+        const stopped: unknown[] = [];
+        const runner = runtime.runner as unknown as {
+          stop: (cell: unknown) => unknown;
+        };
+        const originalStop = runner.stop.bind(runtime.runner);
+        runner.stop = (cell) => {
+          stopped.push(cell);
+          return originalStop(cell);
+        };
+        const engine = createStrictEngine(pieces);
+        const settledBefore = pieces.synced.bind(pieces);
+        (pieces as unknown as { synced: () => Promise<void> }).synced =
+          async () => {
+            await settledBefore();
+            measurementReached = true;
+          };
+
+        const result = await engine.invokeBuiltinTool("run_pattern", {
+          sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+          inputs: { amount: 2, source: sourceRef },
+          resultSchema: TOTAL_RESULT_SCHEMA,
+        }, { signal: controller.signal });
+
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("cancelled");
+        expect(stopped.length).toBe(1);
+      } finally {
+        await dispose();
+      }
     });
 
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
@@ -1820,7 +2604,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => {
           factoryCalls += 1;
           return Promise.reject(
@@ -1907,7 +2690,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
         sourceText: DOUBLING_PATTERN_SOURCE,
@@ -2001,7 +2783,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces: readerPieces }),
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -2054,7 +2835,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces: readerPieces }),
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -2070,7 +2850,7 @@ describe("run-pattern", () => {
 
   describe("runPatternPolicyRefusal()", () => {
     it("returns `undefined` for an empty refusal list", () => {
-      expect(runPatternPolicyRefusal([], () => undefined)).toBeUndefined();
+      expect(runPatternPolicyRefusal([], () => [])).toBeUndefined();
     });
 
     it("names the sink whose ceiling refused for a `sink-ceiling` detail", () => {
@@ -2081,7 +2861,7 @@ describe("run-pattern", () => {
             sink: "fetchText",
             inputs: [refusalInput("source-doc")],
           }),
-        ], inputKeyByDocument({ "source-doc": "source" })),
+        ], inputKeysByDocument({ "source-doc": "source" })),
       ).toEqual({
         gates: ["sink-ceiling"],
         sinks: ["fetchText"],
@@ -2112,7 +2892,7 @@ describe("run-pattern", () => {
               inputs: [refusalInput("other-doc")],
             }),
           ],
-          inputKeyByDocument({
+          inputKeysByDocument({
             "source-doc": "source",
             "other-doc": "notes",
           }),
@@ -2138,7 +2918,7 @@ describe("run-pattern", () => {
             ],
             inputs: [refusalInput("source-doc")],
           }),
-        ], inputKeyByDocument({ "source-doc": "source" })),
+        ], inputKeysByDocument({ "source-doc": "source" })),
       ).toEqual({
         gates: ["writer-fit"],
         sinks: [],
@@ -2159,7 +2939,7 @@ describe("run-pattern", () => {
             offendingAtoms: ['"secret"', "undefined"],
             inputs: [refusalInput("source-doc")],
           }),
-        ], inputKeyByDocument({ "source-doc": "source" })),
+        ], inputKeysByDocument({ "source-doc": "source" })),
       ).toEqual({
         gates: ["writer-fit"],
         sinks: [],
@@ -2170,13 +2950,30 @@ describe("run-pattern", () => {
       });
     });
 
+    it("names every input key one refused document was supplied under", () => {
+      // One document handed in under two keys is reached by dropping either
+      // alias alone, so a remedy naming one of them leaves the other
+      // carrying the label.
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({ inputs: [refusalInput("source-doc")] }),
+        ], inputKeysByDocument({ "source-doc": ["source", "alsoSource"] })),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source", "alsoSource"],
+        attribution: "complete",
+      });
+    });
+
     it("returns `partial` with the unowned read counted when one offending read belongs to no input key", () => {
       expect(
         runPatternPolicyRefusal([
           refusalDetail({
             inputs: [refusalInput("source-doc"), refusalInput("hidden-doc")],
           }),
-        ], inputKeyByDocument({ "source-doc": "source" })),
+        ], inputKeysByDocument({ "source-doc": "source" })),
       ).toEqual({
         gates: ["writer-fit"],
         sinks: [],
@@ -2197,7 +2994,7 @@ describe("run-pattern", () => {
               refusalInput("source-doc"),
             ],
           }),
-        ], inputKeyByDocument({ "source-doc": "source" })),
+        ], inputKeysByDocument({ "source-doc": "source" })),
       ).toEqual({
         gates: ["writer-fit"],
         sinks: [],
@@ -2217,7 +3014,7 @@ describe("run-pattern", () => {
               refusalInput("other-hidden-doc"),
             ],
           }),
-        ], () => undefined),
+        ], () => []),
       ).toEqual({
         gates: ["writer-fit"],
         sinks: [],
@@ -2235,7 +3032,7 @@ describe("run-pattern", () => {
             attribution: "partial",
             inputs: [refusalInput("source-doc")],
           }),
-        ], inputKeyByDocument({ "source-doc": "source" })),
+        ], inputKeysByDocument({ "source-doc": "source" })),
       ).toEqual({
         gates: ["writer-fit"],
         sinks: [],
@@ -2254,13 +3051,32 @@ describe("run-pattern", () => {
         offendingAtoms: ['"secret"'],
         inputKeys: ["source"],
         attribution: "complete",
-      });
+      }, "commit");
       expect(message).toContain(
         'the sink "fetchText" does not admit the confidentiality ("secret")',
       );
       expect(message).toContain(
         'Every label refused here came in through input "source", so the same run without it proceeds',
       );
+    });
+
+    it("says the values are withheld and the reference stands when the release boundary refused", () => {
+      // The answer's own sink refuses what the run already landed, so what
+      // the caller is told became of the result differs from a refused
+      // commit: it exists, in the space, under its own labels, and the
+      // caller holds its reference with the values withheld — so the remedy
+      // releases values rather than making the run proceed.
+      const message = policyRefusalMessage({
+        gates: ["sink-ceiling"],
+        sinks: ["run_pattern"],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        attribution: "complete",
+      }, "release");
+      expect(message).toContain("policy refused to release its values");
+      expect(message).toContain("resultRef still names the result");
+      expect(message).toContain("without it releases its values");
+      expect(message).not.toContain("never landed");
     });
 
     it("names both sinks when two ceilings refused", () => {
@@ -2270,7 +3086,9 @@ describe("run-pattern", () => {
         offendingAtoms: ['"secret"'],
         inputKeys: ["source"],
         attribution: "complete",
-      })).toContain('the sinks "fetchText", "postMessage" does not admit');
+      }, "commit")).toContain(
+        'the sinks "fetchText", "postMessage" does not admit',
+      );
     });
 
     it("names the write it attempted and both inputs to drop when no sink refused", () => {
@@ -2280,7 +3098,7 @@ describe("run-pattern", () => {
         offendingAtoms: ['"secret"', '"medical"'],
         inputKeys: ["source", "notes"],
         attribution: "complete",
-      });
+      }, "commit");
       expect(message).toContain(
         'the write it attempted does not admit the confidentiality ("secret", "medical")',
       );
@@ -2297,7 +3115,7 @@ describe("run-pattern", () => {
         withheldAtomCount: 2,
         inputKeys: ["source"],
         attribution: "complete",
-      });
+      }, "commit");
       expect(message).toContain(
         "the write it attempted does not admit the confidentiality this run carries",
       );
@@ -2311,7 +3129,7 @@ describe("run-pattern", () => {
         inputKeys: ["source", "notes"],
         unattributedInputCount: 1,
         attribution: "partial",
-      })).toContain(
+      }, "commit")).toContain(
         'Some of what was refused came in through inputs "source", "notes"; dropping them narrows the flow without necessarily clearing it, since reads this call does not own carry refused labels too',
       );
     });
@@ -2324,7 +3142,7 @@ describe("run-pattern", () => {
         inputKeys: ["source"],
         unattributedInputCount: 1,
         attribution: "partial",
-      })).toContain(
+      }, "commit")).toContain(
         'came in through input "source"; dropping it narrows the flow',
       );
     });
@@ -2337,7 +3155,7 @@ describe("run-pattern", () => {
         inputKeys: [],
         unattributedInputCount: 1,
         attribution: "none",
-      })).toContain(
+      }, "commit")).toContain(
         "No input of this call accounts for what was refused, so dropping an input will not clear it",
       );
     });

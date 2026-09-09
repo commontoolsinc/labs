@@ -26,7 +26,7 @@
 // `seq` is per-space and is NOT comparable across spaces; divergence is judged
 // by value equality, with per-space write metadata offered as evidence.
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 
 import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, linksWithPaths, type LinkWalkBounds } from "./decode.ts";
@@ -41,6 +41,7 @@ import {
 export interface SpaceRef {
   /** Display label — usually the space DID (DB file basename). */
   label: string;
+
   space: SpaceDb;
 }
 
@@ -120,6 +121,7 @@ export interface CrossSpaceLinkIndex {
 
   /** `${toSpace} ${toId}` for every entity referenced cross-space. */
   targets: Set<string>;
+
   examinedEntities: number;
 }
 
@@ -443,6 +445,7 @@ export interface ScanOptions {
 export interface ScanResult {
   /** Entity ids present in >= 2 spaces. */
   sharedEntities: number;
+
   examined: number;
   examineCapped: boolean;
 
@@ -454,6 +457,7 @@ export interface ScanResult {
 
   /** Findings labeled no-cross-space-link (likely independent instances). */
   unlinkedFindings: number;
+
   findings: ConvergenceResult[];
 }
 
@@ -461,6 +465,7 @@ export interface ScanResult {
 export interface ExactScanResult extends Omit<ScanResult, "findings"> {
   /** Findings whose values could not all be reconstructed. */
   unknownFindings: number;
+
   findings: ExactConvergenceResult[];
 }
 

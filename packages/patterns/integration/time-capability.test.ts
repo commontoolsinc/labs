@@ -70,16 +70,12 @@ async function timeCapabilityErrors(rel: string): Promise<string[]> {
 // Patterns touched by the #now clock migration that instantiate fully offline
 // (no network/LLM/oauth needed to materialize their initial lifts). The network-
 // or oauth-bound migrated patterns (Google/Airtable/Gmail) still render offline,
-// but are out of this offline suite's scope. budget-tracker/expense-form pulls
-// record-backup transitively compiles the birthday.tsx module, so it also guards
-// that fix. budget-tracker/expense-form is intentionally omitted: its migration
-// moved the only clock read into handlers, so it has no lift/body clock read for
-// the gate to catch and its assertion would be vacuous (it also throws an
-// unrelated TypeError when instantiated standalone without seeded input).
+// but are out of this offline suite's scope. budget-tracker/expense-form is
+// intentionally omitted: its migration moved the only clock read into handlers,
+// so it has no lift/body clock read for the gate to catch and its assertion
+// would be vacuous (it also throws an unrelated TypeError when instantiated
+// standalone without seeded input).
 const MIGRATED_OFFLINE_PATTERNS = [
-  "birthday.tsx",
-  "occurrence-tracker.tsx",
-  "record-backup.tsx",
   "habit-tracker/habit-tracker.tsx",
   "calendar/calendar.tsx",
   "factory-outputs/parking-coordinator/main.tsx",

@@ -10,9 +10,9 @@
  */
 
 import { assert } from "@std/assert";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
+import type { FabricValue } from "@commonfabric/data-model";
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   diffOracles,
   listFixturePaths,

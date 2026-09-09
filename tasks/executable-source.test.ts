@@ -187,12 +187,13 @@ describe("executable-source", () => {
       expect(hasExecutableCode("// nothing here\n", "mod.js")).toBe(false);
     });
 
-    // The coverage gate rests on a claim about Deno: a file this function calls
-    // non-executable has no line Deno's coverage can report as uncovered, so
-    // charging it nothing loses nothing. Deno transpiles with swc and this
-    // function asks the TypeScript compiler, so a real coverage pass over
-    // fixture modules holds the two to the same answer.
     describe("against a real coverage run", () => {
+      // The coverage gate rests on a claim about Deno: a file this function
+      // calls non-executable has no line Deno's coverage can report as
+      // uncovered, so charging it nothing loses nothing. Deno transpiles with
+      // swc and this function asks the TypeScript compiler, so a real coverage
+      // pass over fixture modules holds the two to the same answer.
+
       // Resolved, because the report names the real path and a temporary
       // directory can be reached through a symlink (macOS puts one in front of
       // it).

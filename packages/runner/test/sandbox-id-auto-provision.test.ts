@@ -533,10 +533,11 @@ describe("auto-provided sandboxId", () => {
   );
 });
 
-// Direct unit tests for the framework-provided-field helpers, covering the
-// defensive branches the dialog-driven cases above don't reach: malformed
-// schemas and the fail-closed path when no stable instance id can be derived.
 describe("framework-provided field helpers", () => {
+  // Direct unit tests for the framework-provided-field helpers, covering the
+  // defensive branches the dialog-driven cases above don't reach: malformed
+  // schemas and the fail-closed path when no stable instance id can be derived.
+
   const { stripFrameworkProvidedFields, applyAutoProvidedSandboxId } =
     llmToolExecutionHelpers;
 

@@ -629,6 +629,8 @@ describe("ESM compile via content-addressed cell cache", () => {
     const disabled = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // The disabled rung is what this test is about. The compile cache stats
+      // assertion below reads back all zeroes only at this rung.
       cfcEnforcementMode: "disabled",
     });
     const dtx = disabled.edit();

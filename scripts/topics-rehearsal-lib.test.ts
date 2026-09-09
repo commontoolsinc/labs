@@ -1,6 +1,7 @@
 /** Unit coverage for the pure halves of the Topics export/restore pair; the
  * live halves are exercised by the rehearsal drill
  * (`packages/cli/integration/topics-restore-drill.sh`). */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
@@ -16,9 +17,10 @@ import {
 
 describe("topics-rehearsal-lib", () => {
   describe("retiredKeys", () => {
-    // The case this exists for: an export taken before a migration carries a
-    // field the migrated schema no longer declares.
     it("names a key the live read does not surface", () => {
+      // The case this exists for: an export taken before a migration carries a
+      // field the migrated schema no longer declares.
+
       const exported = [{ author: { name: "a" }, authorName: "a", body: "x" }];
       const live = [{ author: { name: "a" }, body: "x" }];
       expect(retiredKeys(exported, live)).toEqual(["[].authorName"]);
@@ -30,9 +32,15 @@ describe("topics-rehearsal-lib", () => {
       );
     });
 
+    //
+    // A retired field leaves no record to be missing from
+    //
     // A migration that retires a whole top-level field leaves no surviving
     // record for a key to be missing from, so absence is reported about the
-    // compared value itself.
+    // compared value itself — and where neither side carried a value, there
+    // is no retirement to report at all.
+    //
+
     it("names the whole value when a retired scalar reads back absent", () => {
       expect(retiredKeys("a legacy display name", undefined)).toEqual([
         WHOLE_VALUE,
@@ -49,9 +57,14 @@ describe("topics-rehearsal-lib", () => {
       expect(retiredKeys(undefined, undefined)).toEqual([]);
     });
 
+    //
+    // Present but changed is not absence
+    //
     // The distinction the whole approach rests on: a field the schema still
-    // declares reads back present even when its value was lost, so genuine
-    // loss is a difference rather than a gap and must not be forgiven.
+    // declares reads back present even when its value was lost, so genuine loss
+    // is a difference rather than a gap and must not be forgiven.
+    //
+
     it("does not name a key that is present but changed", () => {
       expect(retiredKeys({ body: "kept" }, { body: "" })).toEqual([]);
     });
@@ -60,9 +73,10 @@ describe("topics-rehearsal-lib", () => {
       expect(retiredKeys("a legacy display name", "changed")).toEqual([]);
     });
 
-    // `null` is how a declared-but-empty field reads back, so it is a present
-    // value that lost its content — a difference, never a retirement.
     it("does not name a whole value that reads back null", () => {
+      // `null` is how a declared-but-empty field reads back, so it is a present
+      // value that lost its content — a difference, never a retirement.
+
       expect(retiredKeys("a legacy display name", null)).toEqual([]);
     });
   });
@@ -80,8 +94,13 @@ describe("topics-rehearsal-lib", () => {
         .toBeUndefined();
     });
 
+    //
+    // The two together
+    //
     // Together these are what let a restore across a migration report success
     // for a retired field while still failing on a body that came back wrong.
+    //
+
     it("leaves a changed value in place for the comparison to catch", () => {
       const retired = retiredKeys({ authorName: "a", body: "x" }, {
         body: "wrong",
@@ -90,10 +109,11 @@ describe("topics-rehearsal-lib", () => {
         .toEqual({ body: "x" });
     });
 
-    // The verdict the restore actually reaches, asked the way it asks it:
-    // read the field back, forgive what the schema retired, compare the rest.
-    // A retired top-level field passes; a damaged one still fails.
     it("forgives a wholly retired field and nothing else", () => {
+      // The verdict the restore actually reaches, asked the way it asks it:
+      // read the field back, forgive what the schema retired, compare the rest.
+      // A retired top-level field passes; a damaged one still fails.
+
       const survives = (exported: unknown, live: unknown) =>
         deepEqual(
           live,
@@ -115,9 +135,10 @@ describe("topics-rehearsal-lib", () => {
   describe("isAbsentPathError", () => {
     // The restore forgives an absent field as retired, so only a read that
     // landed and reported the path missing may present as absent.
+
     it("recognizes the runtime's missing-property failure through cf", () => {
       const error = new Error(
-        "cf get -q --input authorName exited 1\nCannot access path " +
+        "cf cell get -q --input authorName exited 1\nCannot access path " +
           '"authorName" - property "authorName" not found. ' +
           "Available keys: body, title",
       );
@@ -128,7 +149,7 @@ describe("topics-rehearsal-lib", () => {
       expect(
         isAbsentPathError(
           new Error(
-            "cf get -q --input body exited 1\nerror sending request for url " +
+            "cf cell get -q --input body exited 1\nerror sending request for url " +
               "(http://localhost:8020/): connection refused",
           ),
         ),
@@ -205,13 +226,28 @@ describe("topics-rehearsal-lib", () => {
     });
 
     it("routes known link fields aside instead of into the document", () => {
+      // Every wiring input the topic pattern declares, so a new one that never
+      // reached STRUCTURAL_LINK_SOURCES fails here rather than at a restore.
+
       const { doc, structural, legacy } = buildRestoreDocument(
-        { title: "t", mentionable: link, myName: link },
+        {
+          title: "t",
+          mentionable: link,
+          boardCrossrefs: link,
+          boardNames: link,
+          myName: link,
+        },
         resolved,
       );
-      expect(structural).toEqual(["mentionable"]);
+      expect(structural).toEqual([
+        "mentionable",
+        "boardCrossrefs",
+        "boardNames",
+      ]);
       expect(legacy).toEqual(["myName"]);
       expect(doc.mentionable).toBeUndefined();
+      expect(doc.boardCrossrefs).toBeUndefined();
+      expect(doc.boardNames).toBeUndefined();
       expect(doc.myName).toBeUndefined();
     });
 
@@ -221,16 +257,17 @@ describe("topics-rehearsal-lib", () => {
     });
   });
 
-  // `topics-restore.ts` declares `--allow-run --allow-read --allow-env` in its
-  // shebang and talks to a running server over `cf`. `@db/sqlite` opens its
-  // dynamic library with a top-level `await dlopen`, and the only entry point
-  // `@commonfabric/state-inspector` publishes re-exports the module that
-  // imports it — so one import of that barrel anywhere in the restore's graph
-  // makes the script die at module load with a permission error, whatever
-  // permissions the pure function it wanted actually needs. Twice now that
-  // failure was hidden by testing the script under `deno run -A`, which is why
-  // this asks the graph rather than trusting the run.
   describe("import graph", () => {
+    // `topics-restore.ts` declares `--allow-run --allow-read --allow-env` in
+    // its shebang and talks to a running server over `cf`. `@db/sqlite` opens
+    // its dynamic library with a top-level `await dlopen`, and the only entry
+    // point `@commonfabric/state-inspector` publishes re-exports the module
+    // that imports it — so one import of that barrel anywhere in the restore's
+    // graph makes the script die at module load with a permission error,
+    // whatever permissions the pure function it wanted actually needs. Twice
+    // now that failure was hidden by testing the script under `deno run -A`,
+    // which is why this asks the graph rather than trusting the run.
+
     it("names no store-reader dependency in the restore's graph", async () => {
       // Static `from "…"` specifiers followed through relative hops, which is
       // the whole of these scripts' own graph: they use no dynamic import and

@@ -2,6 +2,7 @@ import {
   action,
   cellFromUrl,
   type ComparableCell,
+  computed,
   Default,
   equals,
   handler,
@@ -17,6 +18,8 @@ import {
   wish,
   Writable,
 } from "commonfabric";
+
+import { type NamesTableRow, ownName } from "../collection-naming/naming.ts";
 
 // ===== Shared types =====
 
@@ -53,11 +56,9 @@ export interface AgentAuthoredEvent {
    * identity key. Fabric authenticates the write with that key; this says
    * which agent acted under it.
    *
-   * Required, and required from the start of a caller's life rather than
-   * eventually: acceptance can widen later but not narrow, so a verb that
-   * tolerates an unsigned call can never stop tolerating one without a break.
-   * Taking it here means the arrival of execution provenance can relax this
-   * to optional compatibly, which is the direction that costs nothing. */
+   * Required so every authored-content call carries structured attribution.
+   * Authenticated execution provenance can supersede the field by relaxing it
+   * to optional without breaking existing callers. */
   agentName: string;
 }
 
@@ -78,9 +79,7 @@ export interface AddLinkEvent extends AgentAuthoredEvent {
    * viewer's session. */
   url: string;
 
-  /** Display label. Optional, and a blank one falls back to the URL — the
-   * handler has always done that, and requiring the field only kept callers
-   * from relying on it. */
+  /** Display label. Optional, and a blank one falls back to the URL. */
   label?: string;
 }
 
@@ -96,8 +95,7 @@ export interface SetTitleEvent {
   title: string;
 
   /** The agent making this mutation, stored as structured attribution beside
-   * the write time. Required: this verb postdates the unsigned-caller era,
-   * so it carries no legacy fallback. */
+   * the write time. Required so every successful rename is attributed. */
   agentName: string;
 }
 
@@ -113,15 +111,12 @@ export interface MentionEvent {
   /** The piece to reference — the piece itself, not an address. Identity here
    * is the cell, so this is what a caller passes and what gets stored.
    *
-   * Declared through the ONE field every topic has rather than `unknown`, and
-   * the narrowness is what makes a non-reference CHEAP TO CATCH — not what
-   * catches it. An `asCell` payload is wrapped whole without validating what
-   * is behind it, so naming a property refuses nothing at the boundary: an
-   * address sent as text, which an inline CLI call argument produces by being
-   * parsed as plain JSON, arrives here as readily as a piece does. What the
-   * named property buys is a one-field read that tells the two apart —
-   * `topic.get()` is `undefined` for a value that is not a reference and an
-   * object for any piece — and `mention` spends it before storing anything.
+   * Declared through the one field every Topic has rather than `unknown`. The
+   * cell declaration marks this as a reference position, so the CLI resolves a
+   * canonical `/of:...` value from an inline JSON event into the live piece
+   * link. It also bounds the validation read: `topic.get()` is `undefined` for
+   * a value that is not a reference and an object for any piece, and `mention`
+   * checks it before storing anything.
    *
    * `title` is also the most this can safely name: this schema reaches every
    * topic in `mentionable`, so a property without a default would be demanded
@@ -134,6 +129,98 @@ export interface MentionEvent {
    * Nothing reads THROUGH it beyond that one field — the value is stored and
    * compared. */
   topic: Writable<{ title: string | Default<""> }>;
+}
+
+/**
+ * Retract a comment. The record stays, stamped; nothing is deleted.
+ *
+ * The comment is named by reference, which is the rule `TopicComment` states:
+ * array elements have stable entity identity, so a caller passes the element
+ * rather than a synthetic key nobody minted. A reader hands one over from the
+ * row it is already rendering.
+ */
+export interface RemoveCommentEvent extends AgentAuthoredEvent {
+  /** The comment to retract — the stored element, not a copy of its fields.
+   * Names only what this verb reads and writes, for the reason
+   * `MentionEvent.topic` names only `title`: the declaration bounds the
+   * validation read, and a payload that is not a reference reads back
+   * `undefined` and is refused rather than silently matching nothing.
+   * `sentAt` carries a default, so it is what makes a real element read back
+   * as an object; the stamp fields are optional, which is what lets this
+   * schema reach comments written before they existed. */
+  comment: Writable<{
+    sentAt: number | Default<0>;
+    removedAt?: number;
+    removedBy?: TopicAuthor;
+  }>;
+}
+
+/** Revise a comment's body in place. */
+export interface EditCommentEvent extends AgentAuthoredEvent {
+  /** The comment to revise, named and checked as in `RemoveCommentEvent`,
+   * and additionally naming `body`, which this verb writes. */
+  comment: Writable<{
+    sentAt: number | Default<0>;
+    body: string | Default<"">;
+    editedAt?: number;
+    removedAt?: number;
+  }>;
+
+  /** The complete replacement text, trimmed. Must be non-empty: emptying a
+   * comment is a retraction, and `removeComment` is what says so. */
+  body: string;
+}
+
+/**
+ * Retract a link. The record stays, stamped, and stops resolving into
+ * `mentions`.
+ *
+ * Takes EITHER the stored link or its `url`, and the url spelling is the
+ * reason this verb differs from the others. A link record is not a piece and
+ * carries no fid, so a caller that reaches this verb over the CLI has no way
+ * to name one by reference — and `addLink` is the verb agents use most.
+ * Exactly one of the two must be supplied.
+ */
+export interface RemoveLinkEvent extends AgentAuthoredEvent {
+  /** The stored link element. What a reader passes, from the row it renders.
+   * Named as in `RemoveCommentEvent`, with `url` playing the defaulted-field
+   * role `sentAt` plays there. */
+  link?: Writable<{
+    url: string | Default<"">;
+    removedAt?: number;
+    removedBy?: TopicAuthor;
+  }>;
+
+  /** The link's URL, for a caller that cannot pass a reference. Retracts the
+   * most recently added link still present with this URL, so retracting twice
+   * retracts two rather than re-stamping one.
+   *
+   * Sequentially. Two concurrent retractions naming the same URL both resolve
+   * the same newest-present element and merge into one stamped record, so
+   * they retract one link between them rather than two. Naming the link by
+   * reference is what makes a caller's target unambiguous under concurrency;
+   * this spelling trades that for being reachable at all. */
+  url?: string;
+}
+
+export interface RemoveCommentResult {
+  /** The retraction as stamped, so a caller need not read back to confirm. */
+  removedAt: number;
+  removedBy: TopicAuthor;
+}
+
+export interface EditCommentResult {
+  /** The body as persisted, and when the revision was stamped. */
+  body: string;
+  editedAt: number;
+}
+
+export interface RemoveLinkResult {
+  /** The URL of the link that was retracted, which tells a caller using the
+   * url spelling which of several same-url links it reached. */
+  url: string;
+  removedAt: number;
+  removedBy: TopicAuthor;
 }
 
 /** Stop referencing a piece. */
@@ -169,9 +256,8 @@ export interface SetBodyResult {
    * whitespace-sensitive Markdown survived the round trip. */
   body: string;
 
-  /** Attribution written for this save. Both are absent when the caller sent
-   * no `agentName`: an unattributed save leaves the previous attribution
-   * standing rather than overwriting it. */
+  /** Attribution written for this save. A successful call includes both
+   * fields because `setBody` requires `agentName`. */
   bodyUpdatedBy?: TopicAuthor;
   bodyUpdatedAt?: number;
 }
@@ -192,16 +278,25 @@ export interface TopicComment {
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key.
    *
-   * Every comment written from now on carries one, because `addComment`
-   * requires a signature. Still OPTIONAL, and that is not a hedge: a comment
-   * stored by the unsigned path has no author, and a stored record type has to
-   * accept what is already stored. Requiring it here does not make old comments
-   * signed — it makes a deployed piece holding one impossible to update at all,
-   * which `deno task pattern-vintage` refuses rather than discovers in
-   * production. */
+   * Optional because durable Topics may contain a comment without structured
+   * authorship. Current `addComment` calls require `agentName` and always write
+   * this snapshot. */
   author?: TopicAuthor;
   body: string | Default<"">;
   sentAt: number | Default<0>;
+
+  /** When the body was last revised, absent on a comment never edited. The
+   * original `sentAt` and `author` are left alone: an edit changes what was
+   * said, not who said it or when the thread reached this point. */
+  editedAt?: number;
+
+  /** Set when the comment was retracted, and the retraction is the whole of
+   * it — the record stays, carrying what it always said. A reader hides it;
+   * `commentCount` stops counting it; `lastActivityOf` keeps reading its
+   * `sentAt`, which is what stops a retraction moving a topic backwards in
+   * the board's ordering. */
+  removedAt?: number;
+  removedBy?: TopicAuthor;
 }
 
 export interface TopicLink {
@@ -210,7 +305,57 @@ export interface TopicLink {
   label: string | Default<"">;
   addedBy?: TopicAuthor;
   addedAt?: number;
+
+  /** As on a comment, and with one consequence of its own: a retracted link
+   * stops resolving into `mentions`, so the reference it contributed goes
+   * with it rather than outliving the link that made it. */
+  removedAt?: number;
+  removedBy?: TopicAuthor;
 }
+
+/**
+ * Whether `candidate` is one of `array`'s own elements.
+ *
+ * "Is a reference" is not the check these verbs need. A cell that reads back
+ * as an object satisfies that while belonging to another piece entirely, and a
+ * verb that then stamps it writes into a document this topic does not own. So
+ * membership is proved by identity against the stored positions, which is the
+ * `equals()` addressing `TopicComment` names in place of a synthetic key.
+ *
+ * This is a tightening rather than a privilege boundary, and it was argued
+ * both ways before landing. A caller gains no authority here they lack
+ * calling the other topic's own verb under the same principal, and
+ * `MentionEvent.topic` accepts a foreign reference by design. What the check
+ * buys is that a wrong argument fails loudly instead of succeeding against
+ * something the caller did not mean to name — the write would otherwise land,
+ * report success, and move a count on a topic nobody was looking at.
+ */
+const isElementOf = (
+  array: {
+    get(): readonly unknown[];
+    key(index: number): { equals(other: object): boolean };
+  },
+  candidate: object,
+): boolean => {
+  const stored = array.get();
+  for (let index = 0; index < stored.length; index++) {
+    if (array.key(index).equals(candidate)) return true;
+  }
+  return false;
+};
+
+/** Whether a stamped record is still live.
+ *
+ * Used where the read is not reactive: `removeLink`'s own body scans the
+ * stored links for the url spelling, and callers outside the pattern — a
+ * test, a script — ask the same question. Inside a `computed()` the predicate
+ * is written out instead, and that is not a style
+ * choice: the schema a reactive read declares is what it can SEE, and a
+ * property tested behind a helper call is not named in it. Filtering through
+ * this function there yields a count that never changes, because `removedAt`
+ * was never demanded and so reads back absent on every element. */
+export const isPresent = (record: { removedAt?: number }): boolean =>
+  record.removedAt === undefined;
 
 export interface TopicInput {
   title?: Writable<string | Default<"">>;
@@ -234,11 +379,24 @@ export interface TopicInput {
   >;
   titleUpdatedAt?: Writable<number | Default<0>>;
 
-  /** The board's own topics list — the mention universe the body editor
-   * autocompletes over. A reference to the tracker's array, wired at creation
-   * like `myName` (and backfillable as a one-time link-bind on pieces created
-   * before it existed). Absent, the editor simply offers no completions. */
-  mentionable?: Writable<TopicMentionable[] | Default<[]>>;
+  /** The board's mention universe — what the body editor autocompletes
+   * over. Wired at creation to the board's mention index (one derived
+   * document of copies; `MentionableRow` in
+   * `../collection-naming/mentionable.ts`), and rewired onto a piece from
+   * before the index as a one-time link-bind. A plain list of the pieces
+   * themselves also satisfies the demand — a board not yet rewired, or a
+   * composer without a board. Absent, the editor simply offers no
+   * completions.
+   *
+   * Declared readable, which is what settles the retained link's proof. A
+   * writable handle adds a write-back leg to that proof, asking this
+   * three-field projection to accept every field the board's row publishes,
+   * and the row carries a required `piece` this projection deliberately omits
+   * — so a topic wired to a board is refused even the source it is running.
+   * The declaration is not a runtime gate: a write through the handle is
+   * refused by nothing, and where the universe is a plain list of pieces the
+   * editor's name write-back reaches a member's own title through it. */
+  mentionable?: ReadonlyCell<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
@@ -269,6 +427,16 @@ export interface TopicInput {
    * has no business writing into it. Declaring the narrower cell says so where
    * a reader can see it, rather than leaving it to convention. */
   boardCrossrefs?: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
+
+  /** The board's names table, one row per named topic. The topic reads its own
+   * row out of it and nothing else; absent, the topic shows no number.
+   *
+   * Readable, not writable, for the reason `boardCrossrefs` states: the table
+   * is the board's derivation, and a topic has no business writing into it.
+   * Wired at creation by the board's create, and rewired onto a topic filed
+   * before the namespace as a one-time link-bind — the same operator step
+   * `mentionable` states for itself. */
+  boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>;
 }
 
 /**
@@ -341,18 +509,41 @@ export interface TopicCrossrefRow {
 }
 
 /**
- * What the body editor's `@`-mention autocomplete needs of a sibling: the
- * display name it lists, and the title it matches on.
+ * What the body editor's `@`-mention autocomplete needs of a mention
+ * universe entry: the display name it lists and matches on, the title — the
+ * persisted scalar other readers of the universe select, though the editor's
+ * own schema does not — and the board's name for the topic as `shortName`,
+ * which is what a `#42` query matches.
+ *
+ * `shortName` is OPTIONAL rather than defaulted, which is a fact about the
+ * compatibility proof: a defaulted property moves the demand's defaults below
+ * an array constraint the proof cannot show stable under default insertion,
+ * and dropping the default without making the property optional makes it a
+ * newly required field. No spelling makes the demand applicable over a topic
+ * deployed before the namespace — a property added to a per-member demand is
+ * refused over members that do not publish it, for the reason
+ * `TopicDemand.shortName` in `./main.tsx` states. `TopicPiece` publishes it the
+ * same way, so a plain list of topics satisfies this demand as the input
+ * documents it may.
  *
  * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
  * `Mentionable`, whose schema carries `required: [NAME]`
  * (`packages/ui/src/v2/core/mentionable.ts`), so a sibling projection without
  * it silently offers no completions — the JSX prop binding is loose enough
  * that TypeScript does not object.
+ *
+ * These three are also deliberately the WHOLE demand. A board's universe row
+ * carries its topic as a `piece` reference besides them, and leaving that
+ * out of this projection is what keeps every walk under a topic's argument
+ * out of the sibling topics: a property the declared demand does not select
+ * is invisible to the walks that warm and watch the argument. The editor
+ * reaches `piece` through its own declared contract instead, at the moment
+ * a completion is picked.
  */
 export interface TopicMentionable {
   [NAME]: string | Default<""> | undefined;
   title: string | Default<"">;
+  shortName?: string;
 }
 
 /**
@@ -402,15 +593,46 @@ export interface TopicPiece extends TopicSummary {
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
 
+  /** The name the board calls this topic by, read out of the board's names
+   * table by identity. The display name stays the title — this rides beside
+   * it, under the name a mention pill reads it by (`Mentionable.shortName` in
+   * `packages/ui/src/v2/core/mentionable.ts`), so a mention of this topic
+   * elsewhere gains the number as soon as the board names it.
+   *
+   * Absent for a topic no board has named, or one wired to no board: the
+   * lookup produces nothing and the property is simply not there. Every
+   * consumer treats that as no name — the badge renders nothing, a universe
+   * row matches no `#42` query, and a mention pill shows no number
+   * (`_trackRefShortName` in
+   * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
+   * absent name exactly as it reads a blank one).
+   *
+   * Optional rather than defaulted, and the difference is the compatibility
+   * proof's: this is what a board's stored list is validated against, and a
+   * defaulted property there moves the demand's defaults below an array
+   * constraint the proof cannot show stable under default insertion. It is not
+   * what lets the projection apply over a board whose members predate the
+   * property, and nothing is; `TopicDemand.shortName` in `./main.tsx` states
+   * why. */
+  shortName?: string;
+
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
 
-  /** The thread, in arrival order: append-only point-in-time records, each
-   * carrying its author snapshot and `sentAt`. */
+  /** The thread, in arrival order, each record carrying its author snapshot
+   * and `sentAt`.
+   *
+   * MEMBERSHIP is append-only; a record is not. Nothing is ever removed from
+   * this array — `removeComment` stamps `removedAt` and leaves the record in
+   * place, and `editComment` revises a body and stamps `editedAt` — so a
+   * reader that wants the live thread filters on `removedAt` rather than
+   * taking the array as it stands. `commentCount` is that filtered count. */
   comments: TopicComment[];
 
-  /** Typed outbound links, in arrival order, each carrying its author
-   * snapshot and `addedAt`. */
+  /** Typed outbound links, in arrival order, each carrying its author snapshot
+   * and `addedAt`. Append-only in membership on the same terms as `comments`:
+   * `removeLink` stamps rather than removes, and a stamped link additionally
+   * stops resolving into `mentions`. */
   links: TopicLink[];
 
   /** Every piece this topic's prose and links point at, as references.
@@ -464,28 +686,17 @@ export interface TopicPiece extends TopicSummary {
 
   /** Replace the living document whole — read it, revise it, write it back
    * complete; the body is one value with whole-value conflict semantics.
-   * Returns the persisted body and any attribution written. */
+   * Requires `agentName` and returns the persisted body with its attribution. */
   setBody: Stream<SetBodyEvent, SetBodyResult>;
 
   /** Reference another piece from this topic — the payload is the piece
-   * itself, stored as a reference. The browser equivalent is picking a
-   * completion in the body editor, which writes the same map.
-   *
-   * Required, like the verbs beside them. They were optional because a topic
-   * deployed before they existed carries neither, and a required property a
-   * piece cannot produce refuses its update — but an optional verb is its own
-   * defect: it pushes a maybe to every call site whose obvious spelling,
-   * `piece.verb?.send(...)`, skips in silence rather than failing. This change
-   * is already a rehearsed break that rewrites every topic, so the generation
-   * that lacked them does not survive it, and the reason for the optionality
-   * goes with it. */
+   * itself, stored as a reference. Takes no `agentName` and returns no value;
+   * Fabric retains the authenticated principal behind the edge. */
   mention: Stream<MentionEvent>;
 
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
-   * this. Required on the projection for the same reason as `mention`, and
-   * the pair has to move together: a caller that can make a reference and
-   * only maybe retract it is the worse half of both contracts. */
+   * this. Takes no `agentName` and returns no value. */
   unmention: Stream<UnmentionEvent>;
 }
 
@@ -496,12 +707,16 @@ export interface TopicPiece extends TopicSummary {
  * to sibling pieces.
  *
  * Durable conclusions get folded up into the body — revise it whole with
- * `setBody`; the thread holds the deliberation as append-only, point-in-time
- * `addComment` records. Sign every mutation with `agentName`: Fabric records
- * the human principal behind the key; the name says which agent acted under
- * it. The session-draft cells and `submit*` streams below belong to the
- * rendered page, not the headless contract — they read state only this
- * session holds.
+ * `setBody`; the thread holds the deliberation as point-in-time `addComment`
+ * records. The thread only ever grows: `removeComment` and `removeLink` stamp
+ * a record as retracted and leave it where it is, and `editComment` revises a
+ * body in place, so what a reader shows is the array filtered rather than the
+ * array itself. Sign every authored-content mutation with `agentName`:
+ * Fabric records the human principal behind the key; the name says which
+ * agent acted under it. Reference-only `mention` and `unmention` calls carry
+ * no content signature. The session-draft cells and `submit*` streams below
+ * belong to the rendered page, not the headless contract — they read state
+ * only this session holds.
  */
 export interface TopicOutput extends TopicPiece {
   [UI]: VNode;
@@ -512,8 +727,33 @@ export interface TopicOutput extends TopicPiece {
    */
   commentDraft: PerSession<Writable<string>>;
   bodyDraft: PerSession<Writable<string>>;
+
+  /**
+   * Whether the body editor is open.
+   *
+   * A bare session-scoped value rather than a cell-wrapped one, and that
+   * spelling costs a capability worth knowing about before reaching for it: a
+   * verb cannot take a whole Topic as captured state while any required
+   * property is published this way. The piece does not materialize through the
+   * verb's state schema, so the argument arrives undefined and the runtime
+   * declines to run the verb at all — "stream action argument is undefined
+   * (potential schema mismatch)", logged rather than thrown, with the write
+   * silently absent.
+   *
+   * Nothing needs that today. A board names a member by writing the piece into
+   * its namespace, and every path that does so builds the piece inside the
+   * verb (`addTopic`, the browser composer) or resolves it out of the board's
+   * own list (`backfillNames`); none of them takes a Topic as an argument, so
+   * none reads one through a state schema. Cell-wrapping these two would buy
+   * the capability at the cost of a `scope changed` break on every deployed
+   * Topic, so it waits for a verb that needs it.
+   */
   editingBody: PerSession<boolean>;
   titleDraft: PerSession<Writable<string>>;
+
+  /** Whether the rename editor is open. Bare for the reason `editingBody`
+   * states, and the constraint is per property: cell-wrapping one and not the
+   * other buys nothing. */
   editingTitle: PerSession<boolean>;
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
@@ -533,16 +773,35 @@ export interface TopicOutput extends TopicPiece {
    */
   referencesDraft: PerSession<Writable<TopicMentionRefMap>>;
 
-  /** Rename the topic. Lives on the direct interface rather than the shared
-   * `TopicPiece` projection, and the placement is the contract: a holder's
-   * required demands are write-once, so a required verb added to the
-   * projection every board embeds refuses those boards' updates unless an
-   * acknowledged break rewrites them. That is what `mention` above costs, and
-   * it is worth paying only for a verb the projection has to carry. A rename
-   * is a direct-address mutation with no place on the projection at all, so
-   * it never faces the question. Requires `agentName` and returns the
-   * persisted title with the attribution written. */
+  /** Rename the topic. Requires `agentName` and returns the persisted title
+   * with its attribution. This direct-address verb stays outside the board's
+   * narrow `TopicPiece` demand. */
   setTitle: Stream<SetTitleEvent, SetTitleResult>;
+
+  /**
+   * Retract a comment, naming it by reference. The record is stamped rather
+   * than deleted, so the thread keeps its evidence while a reader stops
+   * showing it and `commentCount` stops counting it.
+   *
+   * Here rather than on `TopicPiece`, for the reason `setTitle` is: boards
+   * store that projection, so it is a demand on every topic they already
+   * hold, and a required verb added to it would refuse every one deployed
+   * before the verb existed. A verb has no default to be rescued by, so there
+   * is no compatible way to demand a new one. Addressing the topic directly
+   * reaches all three of these.
+   */
+  removeComment: Stream<RemoveCommentEvent, RemoveCommentResult>;
+
+  /** Revise a comment's body in place, naming it by reference. Stamps
+   * `editedAt` and leaves `author` and `sentAt` as they were. Outside the
+   * projection for the reason `removeComment` states. */
+  editComment: Stream<EditCommentEvent, EditCommentResult>;
+
+  /** Retract a link, by reference or by `url`. Stamped like a comment, and a
+   * retracted link stops resolving into `mentions`. The url spelling exists
+   * because a link record carries no fid for a CLI caller to name. Outside
+   * the projection for the reason `removeComment` states. */
+  removeLink: Stream<RemoveLinkEvent, RemoveLinkResult>;
 
   /** Attribution of the last rename; unset until the first `setTitle`.
    * Beside `setTitle` rather than on the projection, for the same reason. */
@@ -692,10 +951,10 @@ const LINK_KIND_ITEMS = [
 ];
 
 /** The one place a comment record is built and appended. The contract verb
- * and the browser composer both ride it, so the trim rule, the legacy-name
- * mirror, and the write-time stamp cannot drift between them. Callers guard
- * emptiness on their own terms first — the verb rejects, the composer
- * silently declines. Mergeable append: concurrent comments all land. */
+ * and the browser composer both ride it, so the trim rule, structured author,
+ * and write-time stamp cannot drift between them. Callers guard emptiness on
+ * their own terms first — the verb rejects, the composer silently declines.
+ * Mergeable append: concurrent comments all land. */
 export const appendComment = (
   comments: Writable<TopicComment[] | Default<[]>>,
   body: string,
@@ -747,6 +1006,38 @@ export const submitProfileComment = handler<void, {
   if (!text.trim() || !author) return;
   appendComment(comments, text, author);
   commentDraft.set("");
+});
+
+/** Browser comment retraction under the current Profile snapshot.
+ *
+ * Bound to the element the thread renders, which is an element of a filtered,
+ * sorted `computed()`. Such an element keeps the identity of the position it
+ * was derived from, so `equals()` matches it against the stored array and the
+ * two writes below land on the stored record rather than on a copy of it.
+ * That is a measured property rather than an assumed one — it is what
+ * `view-identity.test.tsx` pins, and what
+ * `integration/topic-retraction-controls.test.ts` proves through a real click.
+ *
+ * The membership check is therefore not redundant. It is what decides how a
+ * regression in that property presents: refused here, a control bound to a
+ * copy does nothing, where without it the copy would be stamped and the
+ * reader would be shown a thread the topic does not hold. */
+export const retractProfileComment = handler<void, {
+  comments: Writable<TopicComment[] | Default<[]>>;
+  // A CELL, for the reason `dropMention` gives about `topic`: bound as a plain
+  // value it arrives resolved, matches no stored position, and removes
+  // nothing.
+  comment: Writable<TopicComment>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { comments, comment, profileName, profileAvatar }) => {
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!author) return;
+  if (!comment || comment.get() === undefined) return;
+  if (!isElementOf(comments, comment)) return;
+  if (comment.get()?.removedAt !== undefined) return;
+  comment.key("removedAt").set(Date.now());
+  comment.key("removedBy").set(author);
 });
 
 /** The one place a rename lands. The contract verb and the browser save both
@@ -870,6 +1161,27 @@ export const dropMention = handler<void, {
   mentioned.removeByValue(topic);
 });
 
+/** Browser link retraction under the current Profile snapshot.
+ *
+ * The reference form of `removeLink`, bound the way
+ * {@link retractProfileComment} is bound and for the same reasons. A stamped
+ * link additionally stops resolving into `mentions`, so this control retracts
+ * a reference as well as a row. */
+export const retractProfileLink = handler<void, {
+  links: Writable<TopicLink[] | Default<[]>>;
+  link: Writable<TopicLink>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { links, link, profileName, profileAvatar }) => {
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!author) return;
+  if (!link || link.get() === undefined) return;
+  if (!isElementOf(links, link)) return;
+  if (link.get()?.removedAt !== undefined) return;
+  link.key("removedAt").set(Date.now());
+  link.key("removedBy").set(author);
+});
+
 /** Browser link submit under the current Profile snapshot. */
 export const submitProfileLink = handler<void, {
   links: Writable<TopicLink[] | Default<[]>>;
@@ -972,22 +1284,45 @@ const mentionsOf = lift((
   ].filter((destination) => destination !== undefined && destination !== null)
 );
 
+/** How many comments are there to read — retracted ones excluded, because the
+ * board's card would otherwise promise more than the topic shows.
+ *
+ * A module-scope `lift` rather than a `computed()` in the pattern body, and
+ * the difference is load-bearing: this value is in the board's demand, so it
+ * is projected onto every stored topic including generations written before
+ * retraction existed. The lift declares `removedAt` in its own parameter,
+ * which is what makes the property visible to the read at all. */
+const presentCommentCountOf = lift((
+  { comments }: { comments: { removedAt?: number }[] },
+): number => comments.filter((c) => c.removedAt === undefined).length);
+
 /** Max of creation, the newest comment, the newest link, the last body save,
- * and the last rename — declared over just those five timestamp surfaces. */
+ * and the last rename — declared over just those five timestamp surfaces.
+ *
+ * Every retracted and edited record still counts here, and that is the point
+ * rather than an oversight. This is a max over what the arrays hold, so
+ * skipping a retracted record would let the answer move BACKWARDS when the
+ * newest comment is the one retracted, reordering the board under a reader.
+ * A stamped retraction cannot do that, and a retraction is itself activity,
+ * so its own stamp moves the clock forward. */
 const lastActivityOf = lift((
   { comments, links, createdAt, bodyUpdatedAt, titleUpdatedAt }: {
-    comments: { sentAt: number }[];
-    links: { addedAt?: number }[];
+    comments: { sentAt: number; editedAt?: number; removedAt?: number }[];
+    links: { addedAt?: number; removedAt?: number }[];
     createdAt: number;
     bodyUpdatedAt: number;
     titleUpdatedAt: number;
   },
 ): number => {
   let newest = Math.max(createdAt, bodyUpdatedAt, titleUpdatedAt);
-  for (const c of comments) newest = Math.max(newest, c.sentAt);
+  for (const c of comments) {
+    newest = Math.max(newest, c.sentAt, c.editedAt ?? 0, c.removedAt ?? 0);
+  }
   // `addedAt` is optional on TopicLink: links written before it existed carry
   // no timestamp and simply do not move the clock.
-  for (const l of links) newest = Math.max(newest, l.addedAt ?? 0);
+  for (const l of links) {
+    newest = Math.max(newest, l.addedAt ?? 0, l.removedAt ?? 0);
+  }
   return newest;
 });
 
@@ -1020,6 +1355,7 @@ export default pattern<TopicInput, TopicOutput>(
       references,
       mentioned,
       boardCrossrefs,
+      boardNames,
       [SELF]: self,
     },
   ) => {
@@ -1050,6 +1386,9 @@ export default pattern<TopicInput, TopicOutput>(
     const profileAvatar = profileWish.result?.avatar ?? "";
     const hasProfile = profileName.trim().length > 0;
     const createdByView = createdByOf({ createdBy });
+    // The board has already derived the table; this is a lookup by identity,
+    // and it is written as one.
+    const shortName = ownName({ table: boardNames, self });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -1076,16 +1415,113 @@ export default pattern<TopicInput, TopicOutput>(
       },
     );
 
+    const removeComment = action<RemoveCommentEvent, RemoveCommentResult>(
+      ({ comment, agentName }) => {
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("removeComment", "agentName must be non-blank");
+        // The same reference check `mention` makes, and it earns its place for
+        // the same reason: a payload that is not a reference has no stored
+        // element behind it, so the writes below would land on nothing and
+        // report success.
+        if (!comment || comment.get() === undefined) {
+          rejectMutation("removeComment", "comment must be a reference");
+        }
+        if (!isElementOf(comments, comment)) {
+          rejectMutation("removeComment", "comment is not on this topic");
+        }
+        if (comment.get()?.removedAt !== undefined) {
+          rejectMutation("removeComment", "comment is already retracted");
+        }
+        const removedAt = Date.now();
+        // Two field writes into the element the caller named, not a rewrite of
+        // the array. Concurrent retractions of distinct comments merge, and
+        // every surviving reference stays a reference.
+        comment.key("removedAt").set(removedAt);
+        comment.key("removedBy").set(author);
+        return { removedAt, removedBy: author };
+      },
+    );
+
+    const editComment = action<EditCommentEvent, EditCommentResult>(
+      ({ comment, body: text, agentName }) => {
+        // Checked, not bound: `editComment` requires a signature like every
+        // other mutation here, and then stores nothing from it. `author` and
+        // `sentAt` stay as the comment was written — an edit changes what was
+        // said, not who said it. Fabric still records the principal behind
+        // the write.
+        if (!topicAuthorFromAgent(agentName)) {
+          rejectMutation("editComment", "agentName must be non-blank");
+        }
+        if (!comment || comment.get() === undefined) {
+          rejectMutation("editComment", "comment must be a reference");
+        }
+        if (!isElementOf(comments, comment)) {
+          rejectMutation("editComment", "comment is not on this topic");
+        }
+        if (comment.get()?.removedAt !== undefined) {
+          rejectMutation("editComment", "comment is retracted");
+        }
+        const trimmed = (text ?? "").trim();
+        if (!trimmed) rejectMutation("editComment", "body must be non-empty");
+        const editedAt = Date.now();
+        comment.key("body").set(trimmed);
+        comment.key("editedAt").set(editedAt);
+        return { body: trimmed, editedAt };
+      },
+    );
+
+    const removeLink = action<RemoveLinkEvent, RemoveLinkResult>(
+      ({ link, url, agentName }) => {
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("removeLink", "agentName must be non-blank");
+        const named = (url ?? "").trim();
+        if (link && named) {
+          rejectMutation("removeLink", "pass link or url, not both");
+        }
+        let target = link;
+        if (!target) {
+          if (!named) {
+            rejectMutation("removeLink", "pass link or url");
+          }
+          // The url spelling resolves to an element the same way the reference
+          // spelling arrives as one, so both paths stamp a stored record.
+          // Newest first, so retracting twice retracts two rather than
+          // re-stamping the one already gone.
+          const stored = links.get();
+          for (let i = stored.length - 1; i >= 0; i--) {
+            const candidate = stored[i];
+            if (candidate?.url === named && isPresent(candidate)) {
+              target = links.key(i) as typeof link;
+              break;
+            }
+          }
+          if (!target) {
+            rejectMutation("removeLink", `no link present with url ${named}`);
+          }
+        } else if (target.get() === undefined) {
+          rejectMutation("removeLink", "link must be a reference");
+        } else if (!isElementOf(links, target)) {
+          rejectMutation("removeLink", "link is not on this topic");
+        } else if (target.get()?.removedAt !== undefined) {
+          rejectMutation("removeLink", "link is already retracted");
+        }
+        const removedAt = Date.now();
+        target!.key("removedAt").set(removedAt);
+        target!.key("removedBy").set(author);
+        return {
+          url: target!.get()?.url ?? named,
+          removedAt,
+          removedBy: author,
+        };
+      },
+    );
+
     const setBody = action<SetBodyEvent, SetBodyResult>(
       ({ body: text, agentName }) => {
         const author = topicAuthorFromAgent(agentName) ??
           rejectMutation("setBody", "agentName must be non-blank");
         const persisted = text ?? "";
         body.set(persisted);
-        // Every edit stamps. The unsigned path used to write the body and
-        // leave these alone, which left the PREVIOUS author's name sitting on
-        // content they did not write — a misattribution the verb reported as
-        // success.
         const bodyUpdatedAtValue = Date.now();
         bodyUpdatedBy.set(author);
         bodyUpdatedAt.set(bodyUpdatedAtValue);
@@ -1100,8 +1536,6 @@ export default pattern<TopicInput, TopicOutput>(
     const setTitle = action<SetTitleEvent, SetTitleResult>(
       ({ title: text, agentName }) => {
         const trimmed = (text ?? "").trim();
-        // No legacy fallback and no omission tolerance: this verb postdates
-        // the unsigned-caller era, so attribution is simply required.
         const author = topicAuthorFromAgent(agentName ?? "") ??
           rejectMutation("setTitle", "agentName must be non-blank");
         if (!trimmed) rejectMutation("setTitle", "title must be non-empty");
@@ -1229,7 +1663,16 @@ export default pattern<TopicInput, TopicOutput>(
     // Each of these reads its own topic's data, which the page renders in full
     // anyway, and the shrunk schemas say so: a `.length` read declares
     // `items: unknown` and never expands an element.
-    const commentCount = comments.get().length;
+    //
+    // Each filtered view goes inside `computed()`: a method call on an opaque
+    // pattern value is not lowerable on its own. The retraction rule is the
+    // same in all three — a stamped record is not there to read — and only
+    // `lastActivityAt` below is deliberately exempt from it.
+
+    // A count of what is there to read, so retracted comments are excluded —
+    // the board's card would otherwise promise more comments than the topic
+    // shows.
+    const commentCount = presentCommentCountOf({ comments });
 
     const lastActivityAt = lastActivityOf({
       comments,
@@ -1239,11 +1682,21 @@ export default pattern<TopicInput, TopicOutput>(
       titleUpdatedAt,
     });
 
-    const commentsView = comments.get().toSorted((a, b) => a.sentAt - b.sentAt);
+    const commentsView = computed(() =>
+      comments.get().filter((c) => c.removedAt === undefined).toSorted((a, b) =>
+        a.sentAt - b.sentAt
+      )
+    );
 
-    const linksView = links.get();
-    const hasLinks = linksView.length > 0;
-    const hasComments = commentCount > 0;
+    const linksView = computed(() =>
+      links.get().filter((l) => l.removedAt === undefined)
+    );
+    const hasLinks = computed(() =>
+      links.get().filter((l) => l.removedAt === undefined).length > 0
+    );
+    const hasComments = computed(() =>
+      comments.get().filter((c) => c.removedAt === undefined).length > 0
+    );
     const hasBody = body.get().trim().length > 0;
 
     // Inbound: who points at this topic, looked up in the board's pivot rather
@@ -1297,12 +1750,25 @@ export default pattern<TopicInput, TopicOutput>(
               )
               : (
                 <cf-hstack gap="2" justify="between" align="center">
-                  <cf-text
-                    block
-                    style="font-size: 1.25rem; font-weight: 600;"
+                  <cf-hstack
+                    gap="2"
+                    align="center"
+                    style="flex: 1; min-width: 0;"
                   >
-                    {topicName}
-                  </cf-text>
+                    {shortName
+                      ? (
+                        <cf-badge size="sm" color="primary" data-member-name="">
+                          {shortName}
+                        </cf-badge>
+                      )
+                      : null}
+                    <cf-text
+                      block
+                      style="font-size: 1.25rem; font-weight: 600;"
+                    >
+                      {topicName}
+                    </cf-text>
+                  </cf-hstack>
                   <cf-button
                     variant="ghost"
                     disabled={!hasProfile}
@@ -1406,7 +1872,7 @@ export default pattern<TopicInput, TopicOutput>(
                   ? (
                     <cf-vstack gap="1">
                       {linksView.map((link) => (
-                        <cf-hstack gap="2" align="center">
+                        <cf-hstack gap="2" align="center" data-link-row="">
                           <cf-badge size="xs" color="neutral">
                             {link.kind}
                           </cf-badge>
@@ -1433,6 +1899,20 @@ export default pattern<TopicInput, TopicOutput>(
                               </cf-text>
                             )
                             : null}
+                          <cf-button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!hasProfile}
+                            data-retract="link"
+                            onClick={retractProfileLink({
+                              links,
+                              link,
+                              profileName,
+                              profileAvatar,
+                            })}
+                          >
+                            Retract
+                          </cf-button>
                         </cf-hstack>
                       ))}
                     </cf-vstack>
@@ -1485,6 +1965,7 @@ export default pattern<TopicInput, TopicOutput>(
                       {commentsView.map((comment) => (
                         <cf-vstack
                           gap="0"
+                          data-comment-row=""
                           style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
                         >
                           <cf-hstack gap="2" align="center">
@@ -1499,6 +1980,37 @@ export default pattern<TopicInput, TopicOutput>(
                             <cf-text variant="caption" tone="muted">
                               {whenLabel(comment.sentAt)}
                             </cf-text>
+                            {
+                              /* An edit is only honest if a reader can see one
+                                happened. `editedAt` says the body is no longer
+                                what its author sent, and `sentAt` deliberately
+                                still reads as when the thread reached here. */
+                            }
+                            {comment.editedAt
+                              ? (
+                                <cf-text
+                                  variant="caption"
+                                  tone="muted"
+                                  data-edited=""
+                                >
+                                  edited
+                                </cf-text>
+                              )
+                              : null}
+                            <cf-button
+                              variant="ghost"
+                              size="sm"
+                              disabled={!hasProfile}
+                              data-retract="comment"
+                              onClick={retractProfileComment({
+                                comments,
+                                comment,
+                                profileName,
+                                profileAvatar,
+                              })}
+                            >
+                              Retract
+                            </cf-button>
                           </cf-hstack>
                           <cf-text block style="white-space: pre-wrap;">
                             {comment.body}
@@ -1582,8 +2094,18 @@ export default pattern<TopicInput, TopicOutput>(
 
     // A link's URL, asked of `cellFromUrl` once per link. Most answer with no
     // cell — they are web pages — and those simply are not mentions.
-    const linkUrls = links.get().map((link) => link.url ?? "");
-    const linkTargets = linkUrls.map((url) => cellFromUrl({ url }));
+    // One map over an explicitly reactive receiver rather than two chained
+    // ones, which is #6465's shape, adopted here because this rule needs the
+    // whole link record: a retracted link stops resolving, so the reference
+    // it contributed to `mentions` goes with it instead of outliving the
+    // link that made it. The intermediate url-only array could not carry
+    // `removedAt` to say so.
+    const linksToResolve = computed(() =>
+      links.get().filter((l) => l.removedAt === undefined)
+    );
+    const linkTargets = linksToResolve.map((link) =>
+      cellFromUrl({ url: link.url ?? "" })
+    );
     // Outbound: what this topic points at. Only this half depends on the
     // topic's own content, which is what keeps the board's join reading one
     // small list per topic.
@@ -1598,6 +2120,7 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy: createdByView,
+      shortName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       commentCount,
@@ -1610,6 +2133,9 @@ export default pattern<TopicInput, TopicOutput>(
       titleUpdatedAt,
       addComment,
       addLink,
+      removeComment,
+      editComment,
+      removeLink,
       setBody,
       setTitle,
       mention,

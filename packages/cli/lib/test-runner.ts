@@ -38,7 +38,10 @@ import {
 } from "@commonfabric/test-support/records";
 
 import { internSchema } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
+  toCompactDebugString,
+  toDebugKindString,
+} from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -418,6 +421,10 @@ export interface TestRunnerOptions {
    * run reached: the runtime that wrote it can no longer commit into it. A
    * teardown that does not complete is RAISED, so a caller never reads a store
    * whose writer never stopped.
+   *
+   * A multi-user test refuses this option: its participants instantiate and
+   * write in workers of their own, against a storage server the multi-user
+   * runner starts, so neither the store nor the observer below would see them.
    */
   storageHost?: {
     identity: Identity;
@@ -1367,7 +1374,7 @@ export async function runTestPattern(
     if (!Array.isArray(testSteps)) {
       throw new Error(
         "Test pattern must return { [TESTS]: TestStep[] }. Got: " +
-          toCompactDebugString(typeof testSteps),
+          toDebugKindString(testSteps),
       );
     }
 

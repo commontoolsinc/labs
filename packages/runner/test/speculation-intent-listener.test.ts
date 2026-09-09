@@ -80,6 +80,7 @@ import {
   flushMicrotasks,
   scriptedIntentManager,
 } from "./speculation-intent-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const SPACE = "did:key:z6MkIntentListenerSpace" as MemorySpace;
 const SIDECAR = "of:stream-events:listener-a";
@@ -707,6 +708,7 @@ const cascadeDestination = () => {
 
   /** The confirmed read seq the NEXT seal reports (the entry's floor). */
   let nextFloor = 40;
+
   const confirmedSeqs = new Map<string, number>();
   const verdicts = new Map<number, Promise<unknown>>();
   const replica = {
@@ -768,6 +770,10 @@ const cascadeDestination = () => {
     const tx = {
       tx: {
         sourceAction: { name: "handler" },
+        // These doubles hand-build the ops they seal, so the mark has nothing
+        // to shape; it is present because the seal refuses a transaction that
+        // cannot take it.
+        markWholeDocumentWrites: () => {},
         sealInto: async (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
@@ -832,6 +838,7 @@ const cascadeDestination = () => {
       value.entries![index].consequenced = true;
     }, [["value", "entries", String(index), "consequenced"]]);
   };
+
   const markDropped = (index: number, markSeq = 42 + index) => {
     confirmedSeqs.set(W21_SIDECAR, markSeq);
     scripted.deliver(SPACE, W21_SIDECAR, (value) => {
@@ -1202,20 +1209,6 @@ const JOIN_CASCADE_PATTERN = [
   "  };",
   "});",
 ].join("\n");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(

@@ -176,7 +176,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-empty-goal",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
       }),
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["default"],
@@ -227,6 +226,24 @@ describe("prompt-loop invalid tool calls", () => {
         field: "maxModelTurns",
       },
       {
+        name: "too-many-pattern-refs",
+        arguments: {
+          goal: "Inspect",
+          patternRefs: Array.from({ length: 9 }, (_, index) => ({
+            patternId: `pattern-${index}`,
+          })),
+        },
+        field: "patternRefs",
+      },
+      {
+        name: "pattern-ref-note-too-long",
+        arguments: {
+          goal: "Inspect",
+          patternRefs: [{ patternId: "pattern-1", note: "x".repeat(501) }],
+        },
+        field: "patternRefs",
+      },
+      {
         name: "unknown-profile",
         arguments: { goal: "Inspect", profile: "unknown" },
         field: "profile",
@@ -251,7 +268,6 @@ describe("prompt-loop invalid tool calls", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: `run-invalid-delegate-${testCase.name}`,
           model: "gpt-5.4",
-          cfcEnforcementMode: "enforce-explicit",
         }),
         allowedToolIds: ["delegate_task"],
         allowedSubagentProfiles: ["default"],
@@ -287,7 +303,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-delegate-profile-contract",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
       }),
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["pattern-author"],
@@ -336,7 +351,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-arguments-json",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn: scriptedFetch([
         toolCallTurn("call-bad-json", "read_file", '{"path": '),
@@ -368,7 +382,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-arguments-array",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn: scriptedFetch([
         toolCallTurn("call-array-args", "read_file", '["notes/todo.txt"]'),
@@ -392,7 +405,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-unknown-tool",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       allowedToolIds: ["read_file"],
       fetchFn: scriptedFetch([
@@ -426,7 +438,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-inert-text",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
       }),
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["default"],
@@ -468,7 +479,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-child-identifiers",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["default"],
@@ -489,7 +499,10 @@ describe("prompt-loop invalid tool calls", () => {
       ], requestCount),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the work." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the work.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const delegateOutput = result.transcript
       .filter((message) => message.role === "tool")
@@ -512,7 +525,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-recorded",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
       }),
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["default"],
@@ -537,8 +549,11 @@ describe("prompt-loop invalid tool calls", () => {
     expect(failure?.toolId).toEqual("delegate_task");
     expect(failure?.toolCallId).toEqual("call-recorded");
 
+    // `invalid`, not `denied`: policy refused nothing here, and an audit that
+    // reads a denial expects a policy event and a typed deny observation this
+    // rejection has neither of.
     const decision = result.runState.policyDecisions?.at(-1);
-    expect(decision?.decision).toEqual("denied");
+    expect(decision?.decision).toEqual("invalid");
     expect(decision?.reasonCodes).toEqual(["invalid_tool_call"]);
     expect(decision?.toolCallId).toEqual("call-recorded");
 
@@ -547,7 +562,7 @@ describe("prompt-loop invalid tool calls", () => {
     const activity = report?.toolActivity.at(-1);
     expect(activity?.toolId).toEqual("delegate_task");
     expect(activity?.executionStatus).toEqual("not-run");
-    expect(activity?.policyDecision).toEqual("denied");
+    expect(activity?.policyDecision).toEqual("invalid");
     expect(typeof activity?.errorDetail).toBe("string");
   });
 
@@ -558,7 +573,6 @@ describe("prompt-loop invalid tool calls", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-invalid-fatal-transport",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn: () => Promise.reject(new Error("gateway boom")),
     });

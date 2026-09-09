@@ -248,12 +248,12 @@ export class CFLocation extends BaseElement {
     `,
   ];
 
-  // Theme context
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
-  // Cell binding for location data
+  /** The location data, or a cell binding for it. */
   @property({ attribute: false })
   accessor location: CellHandle<LocationData | null> | LocationData | null =
     null;

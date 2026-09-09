@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import ports from "@commonfabric/ports" with { type: "json" };
+import { preloadArgument } from "@commonfabric/test-support/records";
 import {
   buildFilteredTestArgs,
   chooseGeneratedPortOffset,
@@ -19,8 +20,8 @@ Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () 
   const files = [
     "packages/patterns/notes/note.test.tsx",
     "packages/patterns/notes/notebook.test.tsx",
-    "packages/patterns/record.test.tsx",
-    "packages/patterns/record-module-fields.test.tsx",
+    "packages/patterns/dice.test.tsx",
+    "packages/patterns/shopping-list.test.tsx",
     "packages/patterns/lunch-poll/main.test.tsx",
     "packages/patterns/lunch-poll/multi-user.test.tsx",
   ];
@@ -29,11 +30,13 @@ Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () 
     [
       "packages/patterns/lunch-poll/multi-user.test.tsx",
       "packages/patterns/notes/note.test.tsx",
-      "packages/patterns/record-module-fields.test.tsx",
     ],
-    ["packages/patterns/record.test.tsx"],
+    ["packages/patterns/shopping-list.test.tsx"],
     ["packages/patterns/lunch-poll/main.test.tsx"],
-    ["packages/patterns/notes/notebook.test.tsx"],
+    [
+      "packages/patterns/dice.test.tsx",
+      "packages/patterns/notes/notebook.test.tsx",
+    ],
   ];
 
   for (
@@ -206,6 +209,7 @@ Deno.test("buildFilteredTestArgs adds a junit path when a junit dir is given", (
       "test",
       "-A",
       "--junit-path=out/junit/shell.xml",
+      preloadArgument(),
       "./integration/a.test.ts",
     ],
   );
@@ -371,6 +375,8 @@ function generatedPortOffsets(): number[] {
 }
 
 //
+// Port offsets, and the ports they must not land on
+//
 // A port offset shifts every dev server together, and the servers bind whatever
 // port arithmetic lands on. Browsers and Deno's `fetch` both refuse to open a
 // connection to a port on the WHATWG bad-port list, so an offset that lands a
@@ -404,6 +410,7 @@ Deno.test("every recorded blocked port is one fetch refuses", async () => {
   // probes at a host that cannot resolve reaches no network service: the
   // blocked answer arrives first, and any other port would fail on the name
   // instead.
+
   const stillBlocked: number[] = [];
   for (const port of ports.blockedPorts) {
     try {

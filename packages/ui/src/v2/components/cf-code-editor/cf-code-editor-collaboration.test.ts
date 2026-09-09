@@ -955,6 +955,30 @@ describe("CFCodeEditor collaboration", () => {
     expect(flushes).toBe(2);
   });
 
+  it("reports a final send that fails while detaching", async () => {
+    const events: unknown[] = [];
+    const element = new CFCodeEditor();
+    (element as any)._collaboration = {
+      active: true,
+      stop: () => Promise.reject(new Error("pending edit")),
+    };
+    (element as any).emit = (name: string, detail: unknown) =>
+      events.push([name, detail]);
+    element.collaborative = true;
+
+    (element as any)._cleanupCollaboration();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect((element as any)._collaboration).toBeUndefined();
+    expect(events).toEqual([
+      ["cf-error", {
+        error: new Error("pending edit"),
+        message: "pending edit",
+      }],
+    ]);
+  });
+
   it("detaches without releasing and explicitly releases active collaboration", async () => {
     const events: string[] = [];
     const element = new CFCodeEditor();

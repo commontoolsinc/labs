@@ -233,6 +233,7 @@ export interface PiecePlanRow {
 
   /** A grouping label for reports and for stopping between groups; not a sort key. */
   phase?: string;
+
   expect: PieceExpect;
   op?: PieceOp;
 }
@@ -266,6 +267,7 @@ export interface PiecePlanHeader {
 
   /** Which selector produced the rows: a holder's collection, or a list. */
   selector: "collection" | "list";
+
   enumerated: PlanEnumeration;
 
   /**

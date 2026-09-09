@@ -24,7 +24,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
     const visit = (node: ts.Node): ts.Node => {
       // Check for .get() calls
       if (ts.isCallExpression(node)) {
-        this.validateGetCall(node, context, checker);
+        this.#validateGetCall(node, context, checker);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
@@ -37,7 +37,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
    * Checks if a call expression is a .get() call on a Reactive type
    * and reports a helpful error if so.
    */
-  private validateGetCall(
+  #validateGetCall(
     node: ts.CallExpression,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -74,7 +74,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
 
     // Determine if the receiver is a reactive value (type-based or structural)
     const isReactive = cellKind === "opaque" ||
-      this.isReactiveExpression(receiverExpr, checker);
+      this.#isReactiveExpression(receiverExpr, checker);
 
     if (isReactive) {
       // Get the receiver text for the error message
@@ -103,7 +103,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
    * Lift/handler/action callback parameters keep their declared cell
    * semantics and must not be inferred as opaque from structure alone.
    */
-  private isReactiveExpression(
+  #isReactiveExpression(
     expr: ts.Expression,
     checker: ts.TypeChecker,
   ): boolean {
@@ -113,21 +113,22 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
 
       for (const decl of symbol.declarations ?? []) {
         if (
-          ts.isParameter(decl) && this.isPatternCallbackParameter(decl, checker)
+          ts.isParameter(decl) &&
+          this.#isPatternCallbackParameter(decl, checker)
         ) {
           return true;
         }
 
         if (ts.isVariableDeclaration(decl) && decl.initializer) {
-          if (this.isReactiveInitializer(decl.initializer, checker)) {
+          if (this.#isReactiveInitializer(decl.initializer, checker)) {
             return true;
           }
         }
 
         if (ts.isBindingElement(decl)) {
-          const parameter = this.getOwningParameter(decl);
+          const parameter = this.#getOwningParameter(decl);
           if (
-            parameter && this.isPatternCallbackParameter(parameter, checker)
+            parameter && this.#isPatternCallbackParameter(parameter, checker)
           ) {
             return true;
           }
@@ -141,7 +142,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
             parent = parent.parent;
           }
           if (ts.isVariableDeclaration(parent) && parent.initializer) {
-            if (this.isReactiveInitializer(parent.initializer, checker)) {
+            if (this.#isReactiveInitializer(parent.initializer, checker)) {
               return true;
             }
           }
@@ -152,13 +153,13 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
     if (
       ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)
     ) {
-      return this.isReactiveExpression(expr.expression, checker);
+      return this.#isReactiveExpression(expr.expression, checker);
     }
 
     return false;
   }
 
-  private getOwningParameter(
+  #getOwningParameter(
     node: ts.BindingElement,
   ): ts.ParameterDeclaration | undefined {
     let current: ts.Node = node;
@@ -172,7 +173,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
     return ts.isParameter(current) ? current : undefined;
   }
 
-  private isPatternCallbackParameter(
+  #isPatternCallbackParameter(
     param: ts.ParameterDeclaration,
     checker: ts.TypeChecker,
   ): boolean {
@@ -193,7 +194,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
       (callKind.builderName === "pattern" || callKind.builderName === "render");
   }
 
-  private isReactiveInitializer(
+  #isReactiveInitializer(
     expr: ts.Expression,
     checker: ts.TypeChecker,
   ): boolean {

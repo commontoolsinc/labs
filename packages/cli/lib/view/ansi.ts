@@ -22,8 +22,10 @@ export interface Style {
 export const ESC = "\x1b";
 export const CSI = `${ESC}[`;
 
-/** Operating System Command introducer and its BEL terminator. */
+/** Operating System Command introducer. */
 const OSC = `${ESC}]`;
+
+/** The BEL terminator that closes an OSC sequence. */
 const BEL = "\x07";
 export const RESET = `${CSI}0m`;
 
@@ -92,6 +94,8 @@ export function visibleWidth(text: string): number {
 export const term = {
   enterAltScreen: `${CSI}?1049h`,
   leaveAltScreen: `${CSI}?1049l`,
+  enableMouse: `${CSI}?1000h${CSI}?1006h`,
+  disableMouse: `${CSI}?1006l${CSI}?1000l`,
   hideCursor: `${CSI}?25l`,
   showCursor: `${CSI}?25h`,
   clearScreen: `${CSI}2J`,

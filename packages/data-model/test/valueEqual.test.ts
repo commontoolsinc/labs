@@ -4,8 +4,8 @@
  *
  * Two values are comparable only once they are the same kind of thing, so a
  * plain object and an array are unequal without their contents being consulted
- * at all, as are two `FabricValue`s of different concrete classes. The cases
- * walk that branch deliberately rather than sampling it.
+ * at all. Special values are measured by their canonical type and state,
+ * including state held outside enumerable properties.
  *
  * Frozen state must not change a result, which is what the matrix over it is
  * for: equality is about what a value holds, not about whether it can still be
@@ -21,15 +21,238 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { type FabricValue, valueEqual } from "@/fabric-value.ts";
+import { type FabricValue, hashStringOf, valueEqual } from "@/index.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { codecOf } from "@/codec-common/codecOf.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 describe("valueEqual()", () => {
+  describe("shared and cyclic graphs", () => {
+    it("compares shared descendants once per pair, regardless of freezing", () => {
+      for (const frozen of [false, true]) {
+        let reads = 0;
+        const graph = () => {
+          let node: FabricValue = { label: "leaf" };
+          for (let depth = 0; depth < 14; depth++) {
+            const target: Record<string, FabricValue> = {
+              left: node,
+              right: node,
+            };
+            node = new Proxy(frozen ? Object.freeze(target) : target, {
+              get(target, key, receiver) {
+                if (key === "left" || key === "right") {
+                  if (++reads > 1_000) {
+                    throw new Error(
+                      "The comparison expanded the shared graph.",
+                    );
+                  }
+                }
+                return Reflect.get(target, key, receiver);
+              },
+            });
+          }
+          return node;
+        };
+
+        expect(valueEqual(graph(), graph())).toBe(true);
+        expect(reads).toBeLessThanOrEqual(4 * 14);
+      }
+    });
+
+    it("leaves an identical descendant unread", () => {
+      const shared = new Proxy({}, {
+        ownKeys() {
+          throw new Error("An unchanged descendant was enumerated.");
+        },
+      });
+
+      expect(valueEqual({ shared }, { shared })).toBe(true);
+    });
+
+    it("compares deep containers without consuming the JavaScript stack", () => {
+      let left: FabricValue = "leaf";
+      let right: FabricValue = "leaf";
+      for (let depth = 0; depth < 20_000; depth++) {
+        left = { next: left };
+        right = { next: right };
+      }
+
+      expect(valueEqual(left, right)).toBe(true);
+    });
+
+    it("compares cyclic contents and still detects differences after a back edge", () => {
+      const left: Record<string, FabricValue> = { label: "same" };
+      const right: Record<string, FabricValue> = { label: "same" };
+      left.self = left;
+      right.self = right;
+
+      expect(valueEqual(left, right)).toBe(true);
+      right.label = "different";
+      expect(valueEqual(left, right)).toBe(false);
+    });
+
+    it("compares a shared object against each distinct counterpart", () => {
+      const shared = { value: 1 };
+      expect(valueEqual(
+        { left: shared, right: shared },
+        { left: { value: 1 }, right: { value: 2 } },
+      )).toBe(false);
+      expect(valueEqual(
+        { left: shared, right: shared },
+        { left: { value: 1 }, right: { value: 1 } },
+      )).toBe(true);
+    });
+
+    it("compares cyclic instance state through its codec", () => {
+      const leftState: Record<string, FabricValue> = { label: "same" };
+      const rightState: Record<string, FabricValue> = { label: "same" };
+      const left = new UnknownValue("Node@1", leftState);
+      const right = new UnknownValue("Node@1", rightState);
+      leftState.self = left;
+      rightState.self = right;
+
+      expect(valueEqual(left, right)).toBe(true);
+      rightState.label = "different";
+      expect(valueEqual(left, right)).toBe(false);
+      expect(valueEqual(left, new UnknownValue("Node@2", leftState))).toBe(
+        false,
+      );
+    });
+
+    it("observes mutation between comparisons", () => {
+      const left = { child: { value: 1 } };
+      const right = { child: { value: 1 } };
+      expect(valueEqual(left, right)).toBe(true);
+      right.child.value = 2;
+      expect(valueEqual(left, right)).toBe(false);
+    });
+
+    it("reuses available immutable hashes without reading their contents", () => {
+      let reads = 0;
+      const graph = () =>
+        new Proxy(Object.freeze({ value: "same" }), {
+          get(target, key, receiver) {
+            if (key === "value") reads++;
+            return Reflect.get(target, key, receiver);
+          },
+        });
+      const left = graph();
+      const right = graph();
+      expect(hashStringOf(left)).toBe(hashStringOf(right));
+      reads = 0;
+
+      expect(valueEqual(left, right)).toBe(true);
+      expect(reads).toBe(0);
+    });
+  });
+
+  describe("canonical hash agreement", () => {
+    it("preserves UTF-8 replacement and key order before and after caching", () => {
+      const pairs: [FabricValue, FabricValue, boolean][] = [
+        [{ s: "\ud800" }, { s: "\ufffd" }, true],
+        [{ s: Symbol.for("\ud800") }, { s: Symbol.for("\ufffd") }, true],
+        [{ "\ud800": 1 }, { "\ufffd": 1 }, true],
+        [{ "\ud800": 1, "\ue000": 2 }, { "\ufffd": 1, "\ue000": 2 }, false],
+        [
+          Object.fromEntries([["\ud800", 1], ["\ud801", 2]]),
+          Object.fromEntries([["\ud802", 1], ["\ud803", 2]]),
+          true,
+        ],
+        [
+          Object.fromEntries([["\ud800", 1], ["\ud801", 2]]),
+          Object.fromEntries([["\ud802", 2], ["\ud803", 1]]),
+          false,
+        ],
+      ];
+      for (const [left, right, equal] of pairs) {
+        expect(valueEqual(left, right)).toBe(equal);
+        expect(hashStringOf(left) === hashStringOf(right)).toBe(equal);
+        hashStringOf(deepFreeze(left));
+        hashStringOf(deepFreeze(right));
+        expect(valueEqual(left, right)).toBe(equal);
+      }
+      expect(valueEqual("\ud800", "\ufffd")).toBe(false);
+      expect(valueEqual(Symbol.for("\ud800"), Symbol.for("\ufffd"))).toBe(
+        false,
+      );
+    });
+
+    it("agrees on primitive, container, and codec content in every cache state", () => {
+      const values = (): FabricValue[] => [
+        undefined,
+        null,
+        false,
+        true,
+        -0,
+        0,
+        1,
+        NaN,
+        Infinity,
+        -Infinity,
+        1n,
+        "1",
+        Symbol.for("valueEqual"),
+        {},
+        { value: undefined },
+        { a: 1, b: 2 },
+        { b: 2, a: 1 },
+        [],
+        [undefined],
+        [,],
+        [1, , 3],
+        [1, undefined, 3],
+        { nested: [{ value: -0 }] },
+        { nested: [{ value: 0 }] },
+        new FabricBytes(new Uint8Array([1])),
+        new FabricBytes(new Uint8Array([2])),
+        new FabricRegExp(/a/g),
+        new FabricRegExp(/a/i),
+        new FabricEpochDay(1n),
+        new FabricEpochDay(2n),
+        new UnknownValue("Node@1", { value: 1 }),
+        new UnknownValue("Node@2", { value: 1 }),
+        new UnknownValue("Node@1", { value: 2 }),
+      ];
+      for (const cached of [false, true]) {
+        const leftValues = values();
+        const rightValues = values();
+        if (cached) {
+          for (const value of [...leftValues, ...rightValues]) {
+            hashStringOf(deepFreeze(value));
+          }
+        }
+        for (const left of leftValues) {
+          for (const right of rightValues) {
+            const equal = valueEqual(left, right);
+            expect(equal).toBe(hashStringOf(left) === hashStringOf(right));
+            expect(valueEqual({ nested: left }, { nested: right })).toBe(equal);
+          }
+        }
+      }
+    });
+
+    it("compares an instance with its preserved wire form consistently", () => {
+      const error = FabricError.fromNativeError(new Error("same"));
+      const codec = codecOf(error);
+      const preserved = new UnknownValue(
+        codec.tagForValue(error),
+        codec.encode(error, NULL_LIVE_ENVIRONMENT),
+      );
+
+      expect(valueEqual(error, preserved)).toBe(true);
+      expect(valueEqual({ error }, { error: preserved })).toBe(true);
+      expect(hashStringOf(error)).toBe(hashStringOf(preserved));
+      hashStringOf(deepFreeze(error));
+      hashStringOf(deepFreeze(preserved));
+      expect(valueEqual(error, preserved)).toBe(true);
+    });
+  });
+
   it("returns `true` for equal primitives", () => {
     expect(valueEqual(1, 1)).toBe(true);
     expect(valueEqual("a", "a")).toBe(true);
@@ -62,6 +285,15 @@ describe("valueEqual()", () => {
     expect(() => valueEqual(fn, { a: 1 })).toThrow();
     // The function on the right (`b`) is rejected symmetrically.
     expect(() => valueEqual({ a: 1 }, fn)).toThrow();
+  });
+
+  it("rejects distinct functions reached through containers", () => {
+    const fn = (() => 1) as unknown as FabricValue;
+    const other = (() => 1) as unknown as FabricValue;
+    for (const [left, right] of [[fn, other], [fn, 1], [1, fn]]) {
+      expect(() => valueEqual({ nested: [left] }, { nested: [right] }))
+        .toThrow("Cannot compare a function value.");
+    }
   });
 
   it("throws when given a non-record object (not a `FabricValue`)", () => {
@@ -119,19 +351,17 @@ describe("valueEqual()", () => {
     expect(valueEqual([1, , 3], [1, , 3])).toBe(true);
   });
 
-  // Value equality follows `Object.is()`: `-0` and `+0` are distinct, all
-  // `NaN`s are equal, and the two infinities are distinct (spec §6.7).
-  //
-  // Two different mechanisms produce that, and they need separate tests. A
-  // top-level primitive is settled by the `Object.is()` fast path; a primitive
-  // nested in a container never reaches that path, and is settled by the
-  // canonical content hash instead. Testing only the top level would leave the
-  // nested behavior resting on an untested second implementation.
-  //
-  // Each assertion below is on a boolean, so the matcher never has to tell
-  // `-0` from `+0` itself -- the weird number is always an input, and it is
-  // the implementation's comparison that decides the result.
   describe("non-finite and signed-zero values", () => {
+    // Value equality follows `Object.is()`: `-0` and `+0` are distinct, all
+    // `NaN`s are equal, and the two infinities are distinct (spec §6.7).
+    //
+    // Primitive distinctions must survive nesting, including when immutable
+    // containers already have hashes available for comparison.
+    //
+    // Each assertion below is on a boolean, so the matcher never has to tell
+    // `-0` from `+0` itself -- the weird number is always an input, and it is
+    // the implementation's comparison that decides the result.
+
     it("holds `-0` distinct from `+0` at the top level", () => {
       expect(valueEqual(-0, 0)).toBe(false);
       expect(valueEqual(0, -0)).toBe(false);
@@ -173,13 +403,10 @@ describe("valueEqual()", () => {
       expect(valueEqual({ a: { b: [NaN] } }, { a: { b: [NaN] } })).toBe(true);
     });
 
-    // Every case above uses the literal `NaN` on both sides, which pins that a
-    // `NaN` equals itself through the hash path but not that distinct `NaN`
-    // payloads unify. That unification is a deliberate step -- the hash feeds a
-    // canonical byte sequence for any `NaN` rather than the value's own bits --
-    // and arithmetic never produces a second payload, so reaching one takes a
-    // typed-array view.
     it("holds distinct `NaN` payloads equal inside a container", () => {
+      // Distinct NaN payloads represent the same logical value. A typed-array
+      // view supplies a payload that ordinary arithmetic does not produce.
+
       const buffer = new ArrayBuffer(8);
       const bytes = new Uint8Array(buffer);
       const doubles = new Float64Array(buffer);
@@ -205,10 +432,11 @@ describe("valueEqual()", () => {
     });
   });
 
-  // CT-1770: FabricPrimitives keep their state in private fields, so a
-  // generic enumerable-own-prop comparison (`deepEqual`) conflates every
-  // distinct same-class instance. `valueEqual` compares them by content.
   describe("FabricSpecialObject values (CT-1770)", () => {
+    // CT-1770: FabricPrimitives keep their state in private fields, so a
+    // generic enumerable-own-prop comparison (`deepEqual`) conflates every
+    // distinct same-class instance. `valueEqual` compares them by content.
+
     it("distinguishes FabricBytes by content", () => {
       const a = new FabricBytes(new Uint8Array([1, 2, 3, 4]));
       const b = new FabricBytes(new Uint8Array([9, 8, 7, 6]));
@@ -245,8 +473,7 @@ describe("valueEqual()", () => {
 
     describe("given two non-deep-frozen special objects of different classes", () => {
       it("short-circuits to unequal without hashing", () => {
-        // A fresh `UnknownValue` is not auto-frozen, so the pair skips the
-        // both-deep-frozen early hash and reaches the constructor check.
+        // An instance and a primitive have distinct canonical representations.
         const u = new UnknownValue("Tag@1", 1);
         const fb = new FabricBytes(new Uint8Array([1]));
         expect(valueEqual(u, fb)).toBe(false);
@@ -255,16 +482,10 @@ describe("valueEqual()", () => {
     });
   });
 
-  // Content equality is independent of frozen-state. The three states differ
-  // only in which internal path decides them:
-  //   DF (deep-frozen)            -> the both-deep-frozen early-hash fast-path
-  //                                  (only when BOTH sides are DF).
-  //   F  (frozen, NOT deep-frozen) -> shallow `Object.freeze` with a non-frozen
-  //                                  nested value fails `isDeepFrozen()`, so it
-  //                                  takes the general subtype + hash path.
-  //   U  (unfrozen)                -> likewise the general subtype + hash path.
-  // Every pairing must agree on the result regardless of state.
   describe("frozen-state matrix", () => {
+    // Every pairing must agree regardless of whether either container is
+    // deep-frozen (DF), shallow-frozen (F), or unfrozen (U).
+
     // The nested array keeps the shallow-frozen `F` build genuinely
     // not-deep-frozen (an all-primitive shallow freeze reads as deep-frozen).
     const equalShape = () => ({ a: 1, b: [2, 3] });
@@ -299,9 +520,9 @@ describe("valueEqual()", () => {
     }
   });
 
-  // The cheap subtype short-circuits that resolve an object comparison
-  // without computing a hash (taken when the sides are not both deep-frozen).
   describe("object-subtype-check branch", () => {
+    // Different container kinds are unequal without reading their contents.
+
     describe("given a plain object and an array", () => {
       it("returns `false`", () => {
         expect(valueEqual({ 0: 1, 1: 2 }, [1, 2])).toBe(false);
@@ -393,7 +614,6 @@ describe("valueEqual()", () => {
 
     describe("given two same-subtype plain containers", () => {
       it("compares them by content", () => {
-        // Same subtype + same content -> hash -> true; differing -> false.
         expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
         expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 9 })).toBe(false);
         expect(valueEqual([1, 2, 3], [1, 2, 3])).toBe(true);

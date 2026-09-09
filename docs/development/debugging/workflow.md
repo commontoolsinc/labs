@@ -29,7 +29,7 @@ context menu".
 ### 4. Inspect Deployed Piece
 
 ```bash
-deno task cf piece inspect --identity key.json --api-url URL --space SPACE --piece ID
+deno task cf piece inspect --identity key.json --api-url URL --space SPACE --cell ID
 ```
 
 ### 5. Simplify Until It Works

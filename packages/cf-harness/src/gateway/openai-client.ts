@@ -4,20 +4,35 @@ import {
   type HarnessFetch,
 } from "../contracts/http-fetch.ts";
 import {
+  type HarnessProviderError,
+  isTransientHttpStatus,
+  providerErrorFromJsonText,
+} from "../model/provider-error.ts";
+import {
+  type HarnessModelAttemptRetry,
+  type HarnessTransportRetryOptions,
+  TransportRetrySchedule,
+} from "../model/transport-retry.ts";
+import {
   currentProvenance,
   type HarnessProvenance,
   provenanceHeaders,
   provenanceUserAgent,
 } from "../provenance.ts";
 
-export interface OpenAICompatibleGatewayClientOptions {
+export interface OpenAICompatibleGatewayClientOptions
+  extends HarnessTransportRetryOptions {
   baseUrl: string;
   authMode?: "bearer" | "none";
   apiKey?: string;
   apiKeySource?: string;
-  chatCompletionTransportRetries?: number;
-  chatCompletionRetryDelayMs?: number;
   fetchFn?: HarnessFetch;
+
+  /**
+   * Monotonic milliseconds, the source of every measured duration. Defaults to
+   * `performance.now()`.
+   */
+  monotonicNowMs?: () => number;
 
   /**
    * What caused these requests. Resolved from the process when absent.
@@ -80,6 +95,7 @@ export interface OpenAIChatCompletionMessage {
 
   /** Absent on tool-call-only turns from some providers, not just null. */
   content?: OpenAIChatMessageContent;
+
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
   tool_call_id?: string;
   grounding_metadata?: unknown;
@@ -122,6 +138,7 @@ export interface OpenAIResponsesRequest {
     type: "compaction";
     compact_threshold: number;
   }[];
+
   prompt_cache_key?: string;
   prompt_cache_options?: {
     mode: "implicit" | "explicit";
@@ -162,7 +179,23 @@ export interface OpenAIChatCompletionAttemptDiagnostic {
   maxTransportAttempts: number;
   startedAt: string;
   endedAt: string;
+
+  /**
+   * Elapsed time from request dispatch until the response headers arrive. A
+   * gateway that sends headers ahead of the generated tokens ends this long
+   * before the model is done, so it measures the transport rather than the
+   * turn.
+   */
   durationMs: number;
+
+  /**
+   * Elapsed time from request dispatch until the whole response body has been
+   * read — the model's own working time, and the number to compare a turn
+   * against wall clock with. Absent when the caller was handed the response
+   * before its body was read, so this client never saw the exchange end.
+   */
+  responseCompleteDurationMs?: number;
+
   request: OpenAIChatCompletionRequestDiagnosticSummary;
   outcome: OpenAIChatCompletionAttemptOutcome;
   httpStatus?: number;
@@ -173,6 +206,15 @@ export interface OpenAIChatCompletionAttemptDiagnostic {
   responseBodyExcerpt?: string;
   responseBodyTruncated?: boolean;
   errorDetail?: string;
+
+  /** The provider's stated reason, when a non-2xx body carried one. */
+  providerError?: HarnessProviderError;
+
+  /**
+   * Present when this attempt failed transiently and the client issued
+   * another: what was transient, and the backoff before the next attempt.
+   */
+  retry?: HarnessModelAttemptRetry;
 }
 
 export interface OpenAIChatCompletionAttemptOptions {
@@ -198,8 +240,6 @@ export interface OpenAIChatCompletionResponse {
   sources?: readonly unknown[];
 }
 
-const DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES = 1;
-const DEFAULT_CHAT_COMPLETION_RETRY_DELAY_MS = 1_000;
 const MAX_ERROR_BODY_EXCERPT_CHARS = 2_048;
 const SELECTED_RESPONSE_HEADERS = [
   "x-request-id",
@@ -217,14 +257,6 @@ const REQUEST_ID_HEADER_NAMES = [
   "cf-ray",
 ] as const;
 
-const nonNegativeIntegerOrDefault = (
-  input: number | undefined,
-  fallback: number,
-): number =>
-  input !== undefined && Number.isInteger(input) && input >= 0
-    ? input
-    : fallback;
-
 const chatCompletionAbortReason = (signal: AbortSignal): unknown =>
   signal.reason ?? new DOMException(
     "chat completion request aborted",
@@ -235,27 +267,6 @@ const throwIfChatCompletionAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {
     throw chatCompletionAbortReason(signal);
   }
-};
-
-const sleep = (ms: number, signal?: AbortSignal): Promise<void> => {
-  throwIfChatCompletionAborted(signal);
-  if (ms <= 0) {
-    return Promise.resolve();
-  }
-  if (signal === undefined) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timeout);
-      reject(chatCompletionAbortReason(signal));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 };
 
 const errorMessage = (error: unknown): string =>
@@ -358,6 +369,15 @@ const transportErrorAfterRetries = (
 interface ChatCompletionFetchResult {
   response: Response;
   diagnostic: OpenAIChatCompletionAttemptDiagnostic;
+
+  /** Monotonic reading taken as the returned attempt was dispatched. */
+  dispatchedAtMs: number;
+
+  /**
+   * The body of a non-2xx response, read to classify and record the failure.
+   * Absent for a 2xx response, whose body is left for the caller.
+   */
+  errorBody?: string;
 }
 
 export class OpenAICompatibleGatewayClient {
@@ -366,9 +386,9 @@ export class OpenAICompatibleGatewayClient {
   readonly apiKey?: string;
   readonly apiKeySource?: string;
   readonly #fetchFn: HarnessFetch;
-  readonly #chatCompletionTransportRetries: number;
-  readonly #chatCompletionRetryDelayMs: number;
+  readonly #retrySchedule: TransportRetrySchedule;
   readonly #provenance?: HarnessProvenance;
+  readonly #monotonicNowMs: () => number;
 
   constructor(options: OpenAICompatibleGatewayClientOptions) {
     this.baseUrl = new URL(options.baseUrl);
@@ -377,14 +397,13 @@ export class OpenAICompatibleGatewayClient {
     this.apiKeySource = options.apiKeySource;
     this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
     this.#provenance = options.provenance;
-    this.#chatCompletionTransportRetries = nonNegativeIntegerOrDefault(
-      options.chatCompletionTransportRetries,
-      DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES,
-    );
-    this.#chatCompletionRetryDelayMs = nonNegativeIntegerOrDefault(
-      options.chatCompletionRetryDelayMs,
-      DEFAULT_CHAT_COMPLETION_RETRY_DELAY_MS,
-    );
+    this.#retrySchedule = new TransportRetrySchedule(options);
+    this.#monotonicNowMs = options.monotonicNowMs ?? (() => performance.now());
+  }
+
+  /** Whole milliseconds elapsed since a monotonic reading. */
+  #elapsedMsSince(startedAtMs: number): number {
+    return Math.max(0, Math.round(this.#monotonicNowMs() - startedAtMs));
   }
 
   #requireApiKey(): string {
@@ -430,14 +449,24 @@ export class OpenAICompatibleGatewayClient {
     });
   }
 
+  /**
+   * Issues a chat completion and returns the response for the caller to read.
+   * A non-2xx response has already been read to record it, and comes back
+   * with its body restored; a 2xx body is untouched.
+   */
   async createChatCompletion(
     payload: OpenAIChatCompletionRequest,
     options: OpenAIChatCompletionAttemptOptions = {},
   ): Promise<Response> {
-    const { response, diagnostic } = await this.#fetchChatCompletion(
-      payload,
-      options,
-    );
+    const { response, diagnostic, errorBody } = await this
+      .#fetchChatCompletion(payload, options);
+    if (errorBody !== undefined) {
+      return new Response(errorBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
     await emitChatCompletionAttempt(options, diagnostic);
     return response;
   }
@@ -470,6 +499,12 @@ export class OpenAICompatibleGatewayClient {
     );
   }
 
+  /**
+   * Issues one operation until an attempt gets a 2xx response, a non-2xx
+   * response the schedule does not retry, or the schedule runs out. Every
+   * attempt is recorded; a non-2xx response is recorded here with its body,
+   * and a 2xx response by whichever caller reads the body.
+   */
   async #fetchOperation(
     endpoint: URL,
     operation: OpenAIGatewayOperation,
@@ -483,86 +518,102 @@ export class OpenAICompatibleGatewayClient {
       body: serializedPayload,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     };
-    const maxTransportAttempts = this.#chatCompletionTransportRetries + 1;
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= maxTransportAttempts; attempt += 1) {
+    const maxTransportAttempts = this.#retrySchedule.maxAttempts;
+    for (let attempt = 1;; attempt += 1) {
       throwIfChatCompletionAborted(options.signal);
       const startedAt = new Date();
-      const startedAtMs = performance.now();
+      const startedAtMs = this.#monotonicNowMs();
+      const attemptBase = {
+        type: "cf-harness.gateway.chat-completion-attempt" as const,
+        operation,
+        endpoint: endpoint.toString(),
+        attempt,
+        maxTransportAttempts,
+        startedAt: startedAt.toISOString(),
+        request,
+      };
+      let response: Response;
       try {
-        const response = await this.#fetchFn(endpoint, init);
-        const endedAt = new Date();
-        const responseHeaders = selectResponseHeaders(response.headers);
-        const requestId = selectRequestId(response.headers);
-        return {
-          response,
-          diagnostic: {
-            type: "cf-harness.gateway.chat-completion-attempt",
-            operation: operation,
-            endpoint: endpoint.toString(),
-            attempt,
-            maxTransportAttempts,
-            startedAt: startedAt.toISOString(),
-            endedAt: endedAt.toISOString(),
-            durationMs: Math.max(
-              0,
-              Math.round(performance.now() - startedAtMs),
-            ),
-            request,
-            outcome: "http_response",
-            httpStatus: response.status,
-            httpStatusText: response.statusText,
-            ...(requestId !== undefined ? { requestId } : {}),
-            ...(responseHeaders !== undefined ? { responseHeaders } : {}),
-          },
-        };
+        response = await this.#fetchFn(endpoint, init);
       } catch (error) {
-        lastError = error;
         const endedAt = new Date();
+        // A transport failure ends the exchange where it is thrown, so the
+        // two durations are one measurement.
+        const durationMs = this.#elapsedMsSince(startedAtMs);
+        // An aborted attempt is followed by nothing, so its record claims no
+        // retry.
+        const retry = options.signal?.aborted
+          ? undefined
+          : this.#retrySchedule.retryAfter(attempt, "transport_error");
         await emitChatCompletionAttempt(options, {
-          type: "cf-harness.gateway.chat-completion-attempt",
-          operation: operation,
-          endpoint: endpoint.toString(),
-          attempt,
-          maxTransportAttempts,
-          startedAt: startedAt.toISOString(),
+          ...attemptBase,
           endedAt: endedAt.toISOString(),
-          durationMs: Math.max(0, Math.round(performance.now() - startedAtMs)),
-          request,
+          durationMs,
+          responseCompleteDurationMs: durationMs,
           outcome: "transport_error",
           errorDetail: errorMessage(error),
+          ...(retry !== undefined ? { retry } : {}),
         });
         if (options.signal?.aborted) {
           throw chatCompletionAbortReason(options.signal);
         }
-        if (attempt >= maxTransportAttempts) {
+        if (retry === undefined) {
           throw transportErrorAfterRetries(operation, endpoint, attempt, error);
         }
-        await sleep(this.#chatCompletionRetryDelayMs * attempt, options.signal);
+        await this.#retrySchedule.waitBefore(attempt + 1, options.signal);
+        continue;
       }
+      const endedAt = new Date();
+      const responseHeaders = selectResponseHeaders(response.headers);
+      const requestId = selectRequestId(response.headers);
+      const diagnostic: OpenAIChatCompletionAttemptDiagnostic = {
+        ...attemptBase,
+        endedAt: endedAt.toISOString(),
+        durationMs: this.#elapsedMsSince(startedAtMs),
+        outcome: "http_response",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        ...(requestId !== undefined ? { requestId } : {}),
+        ...(responseHeaders !== undefined ? { responseHeaders } : {}),
+      };
+      if (response.ok) {
+        return { response, diagnostic, dispatchedAtMs: startedAtMs };
+      }
+      const errorBody = await response.text();
+      const providerError = providerErrorFromJsonText(errorBody);
+      const retry = this.#retrySchedule.retryAfter(
+        attempt,
+        isTransientHttpStatus(response.status) ? "http_status" : undefined,
+      );
+      const recorded: OpenAIChatCompletionAttemptDiagnostic = {
+        ...diagnostic,
+        responseCompleteDurationMs: this.#elapsedMsSince(startedAtMs),
+        ...responseBodyDiagnosticFields(errorBody),
+        ...(providerError !== undefined ? { providerError } : {}),
+        ...(retry !== undefined ? { retry } : {}),
+      };
+      await emitChatCompletionAttempt(options, recorded);
+      throwIfChatCompletionAborted(options.signal);
+      if (retry === undefined) {
+        return {
+          response,
+          diagnostic: recorded,
+          dispatchedAtMs: startedAtMs,
+          errorBody,
+        };
+      }
+      await this.#retrySchedule.waitBefore(attempt + 1, options.signal);
     }
-    throw transportErrorAfterRetries(
-      operation,
-      endpoint,
-      maxTransportAttempts,
-      lastError,
-    );
   }
 
   async createChatCompletionJson(
     payload: OpenAIChatCompletionRequest,
     options: OpenAIChatCompletionAttemptOptions = {},
   ): Promise<OpenAIChatCompletionResponse> {
-    const { response, diagnostic } = await this.#fetchChatCompletion(
-      payload,
-      options,
-    );
-    if (!response.ok) {
-      const body = await response.text();
-      await emitChatCompletionAttempt(options, {
-        ...diagnostic,
-        ...responseBodyDiagnosticFields(body),
-      });
+    const { response, diagnostic, dispatchedAtMs, errorBody } = await this
+      .#fetchChatCompletion(payload, options);
+    if (errorBody !== undefined) {
+      const body = errorBody;
       if (response.status === 401) {
         const sourceText = this.authMode === "none"
           ? "unauthenticated caller mode was used; gateway or upstream credentials rejected the request"
@@ -577,24 +628,22 @@ export class OpenAICompatibleGatewayClient {
         `chat completion request failed (${response.status}): ${body}`,
       );
     }
-    await emitChatCompletionAttempt(options, diagnostic);
-    return await response.json() as OpenAIChatCompletionResponse;
+    return await this.#readJsonEmittingAttempt<OpenAIChatCompletionResponse>(
+      response,
+      diagnostic,
+      dispatchedAtMs,
+      options,
+    );
   }
 
   async createResponseJson(
     payload: OpenAIResponsesRequest,
     options: OpenAIChatCompletionAttemptOptions = {},
   ): Promise<OpenAIResponsesResponse> {
-    const { response, diagnostic } = await this.#fetchResponses(
-      payload,
-      options,
-    );
-    if (!response.ok) {
-      const body = await response.text();
-      await emitChatCompletionAttempt(options, {
-        ...diagnostic,
-        ...responseBodyDiagnosticFields(body),
-      });
+    const { response, diagnostic, dispatchedAtMs, errorBody } = await this
+      .#fetchResponses(payload, options);
+    if (errorBody !== undefined) {
+      const body = errorBody;
       if (response.status === 401) {
         const sourceText = this.authMode === "none"
           ? "unauthenticated caller mode was used; gateway or upstream credentials rejected the request"
@@ -618,7 +667,37 @@ export class OpenAICompatibleGatewayClient {
         `responses request failed (${response.status}): ${body}`,
       );
     }
-    await emitChatCompletionAttempt(options, diagnostic);
-    return await response.json() as OpenAIResponsesResponse;
+    return await this.#readJsonEmittingAttempt<OpenAIResponsesResponse>(
+      response,
+      diagnostic,
+      dispatchedAtMs,
+      options,
+    );
+  }
+
+  /**
+   * Parses the body of a successful response and emits the one record this
+   * attempt gets, whichever way the parse goes. A body that fails to arrive or
+   * to parse never completed, so its record carries no
+   * `responseCompleteDurationMs`.
+   */
+  async #readJsonEmittingAttempt<T>(
+    response: Response,
+    diagnostic: OpenAIChatCompletionAttemptDiagnostic,
+    dispatchedAtMs: number,
+    options: OpenAIChatCompletionAttemptOptions,
+  ): Promise<T> {
+    let parsed: T;
+    try {
+      parsed = await response.json() as T;
+    } catch (error) {
+      await emitChatCompletionAttempt(options, diagnostic);
+      throw error;
+    }
+    await emitChatCompletionAttempt(options, {
+      ...diagnostic,
+      responseCompleteDurationMs: this.#elapsedMsSince(dispatchedAtMs),
+    });
+    return parsed;
   }
 }

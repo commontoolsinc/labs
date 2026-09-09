@@ -62,9 +62,9 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     const visit = (node: ts.Node): ts.Node => {
       // Check for type assertions (both `as X` and `<X>` syntax)
       if (ts.isAsExpression(node)) {
-        this.validateAsExpression(node, context);
+        this.#validateAsExpression(node, context);
       } else if (ts.isTypeAssertionExpression(node)) {
-        this.validateTypeAssertion(node, context);
+        this.#validateTypeAssertion(node, context);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
@@ -73,12 +73,12 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
   }
 
-  private validateAsExpression(
+  #validateAsExpression(
     node: ts.AsExpression,
     context: TransformationContext,
   ): void {
     // Check for double-cast pattern: `as unknown as X`
-    if (this.isDoubleUnknownCast(node)) {
+    if (this.#isDoubleUnknownCast(node)) {
       context.reportDiagnostic({
         severity: "error",
         type: "cast-validation:double-unknown",
@@ -90,15 +90,15 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     }
 
     // Check the target type of the cast
-    this.validateCastTargetType(node.type, node, context);
+    this.#validateCastTargetType(node.type, node, context);
   }
 
-  private validateTypeAssertion(
+  #validateTypeAssertion(
     node: ts.TypeAssertion,
     context: TransformationContext,
   ): void {
     // Check for double-cast pattern with angle bracket syntax: `<X><unknown>expr`
-    if (this.isDoubleUnknownTypeAssertion(node)) {
+    if (this.#isDoubleUnknownTypeAssertion(node)) {
       context.reportDiagnostic({
         severity: "error",
         type: "cast-validation:double-unknown",
@@ -110,32 +110,32 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     }
 
     // Check the target type of the cast
-    this.validateCastTargetType(node.type, node, context);
+    this.#validateCastTargetType(node.type, node, context);
   }
 
   /**
    * Checks if this is a double-cast pattern: `expr as unknown as X`
    * Also handles mixed syntax: `(<unknown>expr) as X`
    */
-  private isDoubleUnknownCast(node: ts.AsExpression): boolean {
+  #isDoubleUnknownCast(node: ts.AsExpression): boolean {
     // Check if inner expression is an `as` expression casting to `unknown`
     if (ts.isAsExpression(node.expression)) {
       const innerType = node.expression.type;
-      return this.isUnknownType(innerType);
+      return this.#isUnknownType(innerType);
     }
     // Check for mixed syntax: `(<unknown>expr) as X`
     if (ts.isTypeAssertionExpression(node.expression)) {
       const innerType = node.expression.type;
-      return this.isUnknownType(innerType);
+      return this.#isUnknownType(innerType);
     }
     // Check for parenthesized expressions: `(expr as unknown) as X`
     if (ts.isParenthesizedExpression(node.expression)) {
       const inner = node.expression.expression;
-      if (ts.isAsExpression(inner) && this.isUnknownType(inner.type)) {
+      if (ts.isAsExpression(inner) && this.#isUnknownType(inner.type)) {
         return true;
       }
       if (
-        ts.isTypeAssertionExpression(inner) && this.isUnknownType(inner.type)
+        ts.isTypeAssertionExpression(inner) && this.#isUnknownType(inner.type)
       ) {
         return true;
       }
@@ -147,27 +147,27 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
    * Checks if this is a double-cast with angle bracket syntax: `<X><unknown>expr`
    * Also handles mixed syntax: `<X>(expr as unknown)`
    */
-  private isDoubleUnknownTypeAssertion(
+  #isDoubleUnknownTypeAssertion(
     node: ts.TypeAssertion,
   ): boolean {
     // Check for angle bracket inner: `<X><unknown>expr`
     if (ts.isTypeAssertionExpression(node.expression)) {
       const innerType = node.expression.type;
-      return this.isUnknownType(innerType);
+      return this.#isUnknownType(innerType);
     }
     // Check for mixed syntax: `<X>(expr as unknown)`
     if (ts.isAsExpression(node.expression)) {
       const innerType = node.expression.type;
-      return this.isUnknownType(innerType);
+      return this.#isUnknownType(innerType);
     }
     // Check for parenthesized expressions
     if (ts.isParenthesizedExpression(node.expression)) {
       const inner = node.expression.expression;
-      if (ts.isAsExpression(inner) && this.isUnknownType(inner.type)) {
+      if (ts.isAsExpression(inner) && this.#isUnknownType(inner.type)) {
         return true;
       }
       if (
-        ts.isTypeAssertionExpression(inner) && this.isUnknownType(inner.type)
+        ts.isTypeAssertionExpression(inner) && this.#isUnknownType(inner.type)
       ) {
         return true;
       }
@@ -178,7 +178,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
   /**
    * Checks if a type node represents the `unknown` type
    */
-  private isUnknownType(typeNode: ts.TypeNode): boolean {
+  #isUnknownType(typeNode: ts.TypeNode): boolean {
     return (
       typeNode.kind === ts.SyntaxKind.UnknownKeyword ||
       (ts.isTypeReferenceNode(typeNode) &&
@@ -190,13 +190,13 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
   /**
    * Validates the target type of a cast and reports appropriate diagnostics
    */
-  private validateCastTargetType(
+  #validateCastTargetType(
     typeNode: ts.TypeNode,
     castNode: ts.Node,
     context: TransformationContext,
   ): void {
-    const typeNames = this.extractTypeNames(typeNode, context);
-    const classification = this.classifyCastTarget(typeNames);
+    const typeNames = this.#extractTypeNames(typeNode, context);
+    const classification = this.#classifyCastTarget(typeNames);
     if (!classification) return;
 
     if (classification.kind === "forbidden") {
@@ -219,7 +219,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     });
   }
 
-  private classifyCastTarget(
+  #classifyCastTarget(
     typeNames: readonly string[],
   ): CastTargetClassification | undefined {
     const forbiddenTypeName = typeNames.find((typeName) =>
@@ -244,7 +244,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
    * For example, `Cell<number>` returns "Cell".
    * A nested type like `Cell<number> | undefined` returns "Cell".
    */
-  private extractTypeNames(
+  #extractTypeNames(
     typeNode: ts.TypeNode,
     context: TransformationContext,
     seenSymbols = new Set<ts.Symbol>(),
@@ -260,7 +260,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
         for (const child of node.types) visit(child);
         return;
       }
-      const name = this.extractTypeReferenceName(
+      const name = this.#extractTypeReferenceName(
         node,
         context,
         seenSymbols,
@@ -272,25 +272,25 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     return [...names];
   }
 
-  private extractTypeReferenceName(
+  #extractTypeReferenceName(
     typeNode: ts.TypeNode,
     context: TransformationContext,
     seenSymbols: Set<ts.Symbol>,
   ): string | undefined {
     if (ts.isTypeReferenceNode(typeNode)) {
-      return this.resolveWrapperTypeName(
+      return this.#resolveWrapperTypeName(
         typeNode.typeName,
         context,
         seenSymbols,
       );
     }
     if (ts.isImportTypeNode(typeNode)) {
-      return this.resolveImportTypeName(typeNode);
+      return this.#resolveImportTypeName(typeNode);
     }
     return undefined;
   }
 
-  private resolveImportTypeName(
+  #resolveImportTypeName(
     typeNode: ts.ImportTypeNode,
   ): string | undefined {
     const qualifier = typeNode.qualifier;
@@ -305,20 +305,20 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     const typeName = ts.isIdentifier(qualifier)
       ? qualifier.text
       : qualifier.right.text;
-    return this.isWrapperTypeName(typeName) ? typeName : undefined;
+    return this.#isWrapperTypeName(typeName) ? typeName : undefined;
   }
 
-  private resolveWrapperTypeName(
+  #resolveWrapperTypeName(
     typeName: ts.EntityName,
     context: TransformationContext,
     seenSymbols: Set<ts.Symbol>,
   ): string | undefined {
     const symbol = context.checker.getSymbolAtLocation(typeName);
     return symbol &&
-      this.resolveWrapperSymbolName(symbol, context, seenSymbols);
+      this.#resolveWrapperSymbolName(symbol, context, seenSymbols);
   }
 
-  private resolveWrapperSymbolName(
+  #resolveWrapperSymbolName(
     symbol: ts.Symbol,
     context: TransformationContext,
     seenSymbols: Set<ts.Symbol>,
@@ -328,7 +328,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
 
     if (symbol.flags & ts.SymbolFlags.Alias) {
       const aliasedSymbol = context.checker.getAliasedSymbol(symbol);
-      const aliasedName = this.resolveWrapperSymbolName(
+      const aliasedName = this.#resolveWrapperSymbolName(
         aliasedSymbol,
         context,
         seenSymbols,
@@ -338,27 +338,27 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
 
     const symbolName = symbol.getName();
     if (
-      this.isWrapperTypeName(symbolName) &&
-      this.hasCommonFabricDeclaration(symbol)
+      this.#isWrapperTypeName(symbolName) &&
+      this.#hasCommonFabricDeclaration(symbol)
     ) {
       return symbolName;
     }
 
     for (const declaration of symbol.declarations ?? []) {
       if (ts.isTypeAliasDeclaration(declaration)) {
-        const typeNames = this.extractTypeNames(
+        const typeNames = this.#extractTypeNames(
           declaration.type,
           context,
           seenSymbols,
         );
         const wrapperName = typeNames.find((name) =>
-          this.isWrapperTypeName(name)
+          this.#isWrapperTypeName(name)
         );
         if (wrapperName) return wrapperName;
       }
 
       if (ts.isInterfaceDeclaration(declaration)) {
-        const wrapperName = this.resolveInterfaceHeritageWrapperName(
+        const wrapperName = this.#resolveInterfaceHeritageWrapperName(
           declaration,
           context,
           seenSymbols,
@@ -370,7 +370,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     return undefined;
   }
 
-  private resolveInterfaceHeritageWrapperName(
+  #resolveInterfaceHeritageWrapperName(
     declaration: ts.InterfaceDeclaration,
     context: TransformationContext,
     seenSymbols: Set<ts.Symbol>,
@@ -381,7 +381,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
           heritageType.expression,
         );
         if (!symbol) continue;
-        const wrapperName = this.resolveWrapperSymbolName(
+        const wrapperName = this.#resolveWrapperSymbolName(
           symbol,
           context,
           seenSymbols,
@@ -393,12 +393,12 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     return undefined;
   }
 
-  private isWrapperTypeName(typeName: string): boolean {
+  #isWrapperTypeName(typeName: string): boolean {
     return FORBIDDEN_CAST_TYPE_NAMES.has(typeName) ||
       CELL_LIKE_TYPE_NAMES.has(typeName);
   }
 
-  private hasCommonFabricDeclaration(symbol: ts.Symbol): boolean {
+  #hasCommonFabricDeclaration(symbol: ts.Symbol): boolean {
     return (symbol.declarations ?? []).some((declaration) =>
       isCommonFabricDeclaration(declaration)
     );

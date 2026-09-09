@@ -79,6 +79,7 @@ export {
 export { PiecesController } from "./pieces-controller.ts";
 export {
   type PatternCompatibilityReport,
+  type PatternUpdateReceipt,
   PieceController,
   type PiecePatternRef,
   type PiecePatternSourceRef,

@@ -13,7 +13,7 @@
  * the traversal's internals.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { internPathSelector } from "@commonfabric/data-model-schema";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";
@@ -29,6 +29,7 @@ import {
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
+  loadLabelSchemaDoc,
   loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
@@ -194,15 +195,48 @@ export class GraphQueryWalk {
             : this.#keyOverrides.get(referrerKey) ?? referrerKey,
         );
       },
+      undefined,
+      undefined,
+      // A document this walk loads through a link crossing is delivered
+      // under the selector that reached it, without its metadata family
+      // beyond the schema document its `cfc` envelope names, which a
+      // reader of a labeled document checks its reads against. The family
+      // belongs to the documents a query names: `visit()` chases every
+      // rail for its named document, which is what a caller that intends
+      // to load and run one — a piece resume, a setsrc staging read —
+      // relies on. Chasing it at every crossing instead multiplies a wide
+      // walk by each visited piece's whole doc set (pattern, argument,
+      // internal and their recursion) for documents nothing asked to run.
+      false,
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
   }
 
   /**
+   * Tracker keys of every document whose metadata family this walk has
+   * chased: each named document a `visit()` was owed the family of, each
+   * document loaded as a member of such a family, whose own family the
+   * chase followed in turn, and each absent target a family link named,
+   * which is owed its family when it arrives. A document a caller named
+   * under its own `docKey` is reported under that key. A caller keeping
+   * watch state records these so a later re-walk of a member chases its
+   * family again.
+   */
+  get chasedFamilyKeys(): ReadonlySet<string> {
+    const keys = new Set<string>();
+    for (const key of this.#context.metaDocsVisited) {
+      keys.add(this.#keyOverrides.get(key) ?? key);
+    }
+    return keys;
+  }
+
+  /**
    * Walks `document` under `selector`, recording every document the schema
-   * reaches — including the metadata documents a reader needs to interpret
-   * them — in the walk's schema tracker.
+   * reaches in the walk's schema tracker. The named document's own metadata
+   * family — pattern, source, cfc, and the rest — is recorded with it;
+   * documents the walk merely reaches through link crossings are recorded
+   * under the selectors that reached them, without their families.
    *
    * The document records under `schemaTrackerKey` over the walk's identity
    * unless the caller passes `docKey`: a caller that named an explicit
@@ -214,6 +248,14 @@ export class GraphQueryWalk {
     document: IAttestation,
     selector: SchemaPathSelector,
     docKey?: `${string}/${ScopeKey}/${string}`,
+    // Whether the visited document is owed its metadata family. A document
+    // a query NAMES, or one delivered as a member of a named document's
+    // family, is a "root": the whole family, eagerly. A tracked document
+    // being re-walked that no query ever named or chased — dirty-refresh
+    // territory — is a "crossing": no family, exactly as when a mid-walk
+    // crossing first reached it, so a document's delivered shape does not
+    // depend on its update history.
+    role: "root" | "crossing" = "root",
   ): void {
     const effectiveSelector = selector.schema === undefined
       ? { ...selector, schema: false }
@@ -230,17 +272,16 @@ export class GraphQueryWalk {
       this.#keyOverrides.set(derivedKey, docKey);
     }
     const internedSelector = internPathSelector(effectiveSelector);
-    if (
-      schemaTrackerCoversSelector(
-        this.#context.schemaTracker,
-        docKey,
-        internedSelector,
-      )
-    ) {
+    const covered = schemaTrackerCoversSelector(
+      this.#context.schemaTracker,
+      docKey,
+      internedSelector,
+    );
+    if (covered) {
       this.stats.coveredSelectorSkips++;
-      return;
+    } else {
+      this.#context.schemaTracker.add(docKey, internedSelector);
     }
-    this.#context.schemaTracker.add(docKey, internedSelector);
 
     if (!isObjectNotArray(document.value)) {
       return;
@@ -249,42 +290,52 @@ export class GraphQueryWalk {
     const tx = new ExtendedStorageTransaction(
       new ManagedStorageTransaction(this.#manager),
     );
-    const value = (document.value as { value: FabricValue }).value;
-    const root: IMemorySpaceValueAttestation = {
-      address: { ...document.address, space: this.#space, path: ["value"] },
-      value,
-    };
-    const [nextDoc, nextSelector] = getAtPath(
-      tx,
-      root,
-      effectiveSelector.path.slice(1),
-      this.#context,
-      effectiveSelector,
-    );
-    if (
-      nextDoc.value !== undefined &&
-      nextSelector !== undefined &&
-      nextSelector.schema !== false
-    ) {
-      const traverser = new SchemaObjectTraverser(
+    if (!covered) {
+      const value = (document.value as { value: FabricValue }).value;
+      const root: IMemorySpaceValueAttestation = {
+        address: { ...document.address, space: this.#space, path: ["value"] },
+        value,
+      };
+      const [nextDoc, nextSelector] = getAtPath(
         tx,
-        nextSelector,
+        root,
+        effectiveSelector.path.slice(1),
         this.#context,
-        undefined,
-        this.#memo,
+        effectiveSelector,
       );
-      traverser.traverse(nextDoc);
-      this.#addTraverserStats(traverser);
+      if (
+        nextDoc.value !== undefined &&
+        nextSelector !== undefined &&
+        nextSelector.schema !== false
+      ) {
+        const traverser = new SchemaObjectTraverser(
+          tx,
+          nextSelector,
+          this.#context,
+          undefined,
+          this.#memo,
+        );
+        traverser.traverse(nextDoc);
+        this.#addTraverserStats(traverser);
+      }
     }
 
-    loadMetaLinkedDocs(
-      tx,
-      {
-        address: { ...document.address, space: this.#space },
-        value: document.value,
-      },
-      this.#context,
-    );
+    // A named root's FULL family — every rail, eagerly — chased even when
+    // selector coverage skips the traversal above: a crossing may have
+    // covered this document before a root named it, and coverage proves
+    // reach, not family. What a caller names, it may intend to load; what
+    // a walk merely reaches, it does not, so a crossing-role visit chases
+    // nothing beyond the schema document its `cfc` envelope names. The
+    // family chase dedupes through `metaDocsVisited`.
+    const loaded = {
+      address: { ...document.address, space: this.#space },
+      value: document.value,
+    };
+    if (role === "root") {
+      loadMetaLinkedDocs(tx, loaded, this.#context);
+    } else {
+      loadLabelSchemaDoc(tx, loaded, this.#context);
+    }
   }
 
   #addTraverserStats(traverser: SchemaObjectTraverser<FabricValue>): void {

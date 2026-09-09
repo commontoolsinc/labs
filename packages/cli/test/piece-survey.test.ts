@@ -49,7 +49,7 @@ const OPTIONS = {
   apiUrl: "http://localhost:8000",
   identity: "/tmp/test-identity.pem",
   space: "home",
-  piece: "board",
+  cell: "board",
   quiet: true,
 };
 
@@ -227,6 +227,21 @@ describe("piece-survey", () => {
       expect(hints).toEqual(["members: 1 on idA#default"]);
     });
 
+    it("refuses a path on the holder's address, which the selector cannot carry", async () => {
+      // `--path` names the collection, so a path on the address has nowhere
+      // to go. The parse lets a slug's through — only the walk can tell a
+      // member from a cell path — and a selector built without it would run
+      // against the piece the first segment named and say nothing.
+      await expect(
+        surveyFromCommand(
+          { ...OPTIONS, cell: "/board/topics", path: "topics" },
+          {
+            runSurvey: () => Promise.resolve(COMPLETE),
+          },
+        ),
+      ).rejects.toThrow(/drop the path on "topics"/);
+    });
+
     it("refuses a --side that is neither input nor result", async () => {
       await expect(
         surveyFromCommand({ ...OPTIONS, path: "topics", side: "bogus" }, {
@@ -314,7 +329,7 @@ describe("piece-survey", () => {
       let request: SurveyRunRequest | undefined;
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: ["of:fid1:x"] },
+          { ...OPTIONS, cell: undefined, list: ["of:fid1:x"] },
           {
             runSurvey: (_config, req) => {
               request = req;
@@ -363,13 +378,13 @@ describe("piece-survey", () => {
     it("throws for a scoped holder or a scoped list entry", async () => {
       await expect(
         surveyFromCommand(
-          { ...OPTIONS, piece: "board@user", path: "topics" },
+          { ...OPTIONS, cell: "board@user", path: "topics" },
           { runSurvey: () => Promise.resolve(COMPLETE) },
         ),
       ).rejects.toThrow("scope");
       await expect(
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: ["fid1:x@user"] },
+          { ...OPTIONS, cell: undefined, list: ["fid1:x@user"] },
           { runSurvey: () => Promise.resolve(COMPLETE) },
         ),
       ).rejects.toThrow("scope");
@@ -379,7 +394,7 @@ describe("piece-survey", () => {
       let request: SurveyRunRequest | undefined;
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: [`/of:fid1:${HANDLE}`] },
+          { ...OPTIONS, cell: undefined, list: [`/of:fid1:${HANDLE}`] },
           {
             runSurvey: (_config, req) => {
               request = req;
@@ -416,7 +431,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: undefined,
-            piece: undefined,
+            cell: undefined,
             list: [
               withEmbedded,
             ],
@@ -436,7 +451,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: SPACE_DID,
-            piece: undefined,
+            cell: undefined,
             list: [
               withEmbedded,
             ],
@@ -449,7 +464,7 @@ describe("piece-survey", () => {
       // A --space name: the comparison defers to the session open.
       await captureStdout(() =>
         surveyFromCommand(
-          { ...OPTIONS, piece: undefined, list: [withEmbedded] },
+          { ...OPTIONS, cell: undefined, list: [withEmbedded] },
           deps as never,
         )
       );
@@ -463,7 +478,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: OTHER_SPACE_DID,
-            piece: undefined,
+            cell: undefined,
             list: [`/@${SPACE_DID}/of:fid1:${HANDLE}`],
           },
           { runSurvey: () => Promise.resolve(COMPLETE) },
@@ -476,7 +491,7 @@ describe("piece-survey", () => {
           {
             ...OPTIONS,
             space: undefined,
-            piece: undefined,
+            cell: undefined,
             list: [
               `/@${SPACE_DID}/of:fid1:${HANDLE}`,
               `/@${OTHER_SPACE_DID}/of:fid1:${HANDLE}`,
@@ -493,11 +508,15 @@ describe("piece-survey", () => {
           [`/of:fid1:${HANDLE}/topics/0`, "drop the path"],
           [`/of:fid1:${HANDLE}@user`, "@scope suffix"],
           [`/of:fid1:${HANDLE}#argument`, "#argument suffix"],
+          // The bare spelling reaches the same refusal: an entry is one
+          // whole piece however the caller wrote it.
+          [`of:fid1:${HANDLE}#argument`, "#argument suffix"],
+          [`of:fid1:${HANDLE}#result`, 'Unknown suffix "#result"'],
         ]
       ) {
         await expect(
           surveyFromCommand(
-            { ...OPTIONS, piece: undefined, list: [entry] },
+            { ...OPTIONS, cell: undefined, list: [entry] },
             { runSurvey: () => Promise.resolve(COMPLETE) },
           ),
         ).rejects.toThrow(message);

@@ -53,6 +53,7 @@ export interface DisplayCell {
 
   /** Exclusive source column represented by this display cell. */
   readonly sourceEnd: number;
+
   readonly syntax: Style;
   readonly ansi?: Style;
 }

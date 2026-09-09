@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 
 import {
@@ -38,7 +38,11 @@ const keyFor = (id: string) =>
 class StubObjectManager implements ObjectStorageManager {
   readonly requested: string[] = [];
 
-  constructor(private readonly documents: Map<string, FabricValue>) {}
+  readonly #documents: Map<string, FabricValue>;
+
+  constructor(documents: Map<string, FabricValue>) {
+    this.#documents = documents;
+  }
 
   load(address: BaseMemoryAddress): IAttestation | null {
     const key = schemaTrackerKey(
@@ -48,7 +52,7 @@ class StubObjectManager implements ObjectStorageManager {
       TEST_SCOPE_IDENTITY,
     );
     this.requested.push(key);
-    const value = this.documents.get(key);
+    const value = this.#documents.get(key);
     if (value === undefined) {
       return null;
     }

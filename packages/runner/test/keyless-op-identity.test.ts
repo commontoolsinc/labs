@@ -22,7 +22,7 @@ import type { RuntimeProgram } from "./engine-test-support.ts";
  * ref-less remnant path: PR #4454 sealed the harness load path by
  * registration; this test pins the remnant.
  *
- * Now `Runner.substituteOpPatternRefs` mints the op's `keyless:` content-hash
+ * Now `Runner.#substituteOpPatternRefs` mints the op's `keyless:` content-hash
  * session identity (the same pointer a keyless ROOT pattern gets via
  * `entryRefForPattern`), so the op rides a `$patternRef` to its pristine
  * artifact and the embedded round-trip never happens.

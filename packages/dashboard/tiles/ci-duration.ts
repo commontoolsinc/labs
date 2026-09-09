@@ -15,7 +15,7 @@ import {
   type Tile,
   type TileView,
 } from "../types.ts";
-import { escapeHtml, friendlyError, SPARK_FADE, sparkline } from "../lib.ts";
+import { escapeHtml, friendlyError, median, sparkline } from "../lib.ts";
 import {
   CI_WORKFLOW,
   DUR_GOOD,
@@ -747,25 +747,13 @@ function makeCiDuration(
         extra: sparkline(series, CHART_LINE, {
           count: window.length,
           color: CHART_HIGHLIGHT,
-        }, SPARK_FADE[s]),
+        }, true),
         duration: spanMs,
         href: opts.href,
         hint: opts.hint,
       };
     },
   };
-}
-
-// The middle of a sorted series. An even count has no single middle run, so it is
-// the mean of the two: taking the upper one alone reports a duration no run had,
-// and always the higher of the pair. The default window is 20 runs, so even is the
-// normal case rather than the edge. Exported for unit testing.
-export function median(sorted: number[]): number {
-  if (sorted.length === 0) return 0;
-  const mid = sorted.length / 2;
-  return sorted.length % 2
-    ? sorted[Math.floor(mid)]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 export const labsCiDuration = makeCiDuration({

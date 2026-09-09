@@ -15,6 +15,7 @@ import {
   getMetaLink,
   parseLink,
 } from "../link-utils.ts";
+import { rawMetaWriteAuthorization } from "../meta-seam.ts";
 
 export function resolvedCellScope(
   runtime: Runtime,
@@ -137,6 +138,7 @@ export function exposedResultCell<T>(
         base: exposed,
         includeSchema: true,
       }),
+      rawMetaWriteAuthorization,
     );
   }
   const value = initialCell.get();

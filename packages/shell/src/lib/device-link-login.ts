@@ -174,6 +174,7 @@ export async function handleDeviceLink(
      * and picks the new key up directly.
      */
     reloadOnReplace?: boolean;
+
     reload?: () => void;
     report?: (reason: DeviceLinkFailure) => Promise<void>;
     login?: (entropy: Uint8Array) => Promise<DeviceLinkOutcome>;

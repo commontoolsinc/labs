@@ -196,6 +196,48 @@ describe("computeEntryIdentity (light, drift-free)", () => {
     );
   });
 
+  it("gives an entry a new identity when only its authored declaration file changed", async () => {
+    // An authored declaration file is a module like any other: a type-only
+    // import edge resolves to it, so editing one moves the importer's identity
+    // and the entry's. Without this a declaration-only change would reuse the
+    // compiled bytes built against the old types.
+    const entry = 'import type { N } from "./types.d.ts";\n' +
+      "export default (): N => 1;\n";
+    const program = (declarations: string): RuntimeProgram => ({
+      main: "/entry.tsx",
+      files: [
+        { name: "/entry.tsx", contents: entry },
+        { name: "/types.d.ts", contents: declarations },
+      ],
+    });
+    const before = program("export type N = number;\n");
+    const after = program("export type N = 1 | 2 | 3;\n");
+
+    const beforeIdentity = computeEntryIdentity(before.main, before.files);
+    const afterIdentity = computeEntryIdentity(after.main, after.files);
+    expect(afterIdentity).not.toBe(beforeIdentity);
+
+    // The engine agrees with the light path on both sides, so the light path
+    // does not merely differ — it differs the same way.
+    expect((await engine.compileToRecordGraph(before)).entryIdentity).toBe(
+      beforeIdentity,
+    );
+    expect((await engine.compileToRecordGraph(after)).entryIdentity).toBe(
+      afterIdentity,
+    );
+  });
+
+  it("ignores an ambient declaration file, which is not authored source", () => {
+    const files = (declarations: string) => [
+      { name: "/entry.tsx", contents: "export default () => 1;\n" },
+      { name: "ambient.d.ts", contents: declarations },
+    ];
+    expect(computeEntryIdentity("/entry.tsx", files("declare const x: 1;\n")))
+      .toBe(
+        computeEntryIdentity("/entry.tsx", files("declare const x: 2;\n")),
+      );
+  });
+
   it("throws when the entry is named as a data file", () => {
     const files = [{ name: "/entry.ts", contents: "export default 1;\n" }];
     expect(() =>

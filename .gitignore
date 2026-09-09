@@ -1,5 +1,6 @@
 node_modules
 dist
+.ci-cache
 *.tsbuildinfo
 .DS_Store
 .vscode
@@ -19,7 +20,9 @@ dist/
 .cf/
 .ct/
 .cf-harness-artifacts/
-.cf-harness-console/
+.cf-harness-console*/
+.cf-harness-hostile-demo*/
+.cf-harness-demo-*/
 claude-research.key
 *.key
 # Backup keys the tailscale share script rotates aside (e.g. cf.key.implicit-trust.bak)

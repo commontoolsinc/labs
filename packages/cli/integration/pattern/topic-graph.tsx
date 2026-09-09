@@ -33,6 +33,7 @@ interface CreateTopicEvent {
 
   /** The topic's initial body, part of the create's atomic unit. */
   body: string;
+
   agentName: string;
 
   /** Ids the body references, recorded as explicit edges. */
@@ -75,6 +76,7 @@ interface TopicGraphOutput {
    * ids of the topics whose `references` name it. A derived result over a list
    * of children, which is what this fixture exercises the CLI against. */
   referencedBy: Record<string, string[]>;
+
   createTopic: Stream<CreateTopicEvent, CreateTopicResult>;
   reviseBody: Stream<ReviseBodyEvent, ReviseBodyResult>;
 }

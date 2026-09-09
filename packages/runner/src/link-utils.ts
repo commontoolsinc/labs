@@ -1,12 +1,14 @@
-import { MetaLinkField } from "@commonfabric/api";
+import {
+  deepFreeze,
+  type FabricValue,
+  isDeepFrozen,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isNontrivialSchema,
 } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   decomposeSchema,
@@ -20,6 +22,8 @@ import {
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
+import type { MetaLinkField } from "./meta-seam.ts";
+import type { IReadOptions } from "./storage/interface.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -224,6 +228,17 @@ export function areMaybeLinkAndNormalizedLinkSame(
 // ./link-types.ts — one canonical implementation — and reaches importers of
 // this module through the `export *` above.
 
+// Successful externalization depends on schema documents registered during
+// the current lease epoch. Frozen source schemas keep stable identity, so the
+// external reference can be reused until that registry clears.
+let externalizedLinkSchemaCache = new WeakMap<
+  object,
+  Map<KeepAsCell, JSONSchema>
+>();
+onSchemaRegistryClear(() => {
+  externalizedLinkSchemaCache = new WeakMap();
+});
+
 /**
  * Replaces an inline schema with a reference to content-addressed schema
  * documents (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2;
@@ -279,7 +294,7 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
 }
 
 /**
- * Creates a sigil reference (link or alias) with shared logic
+ * Creates a sigil link, optionally a write redirect, with shared logic
  */
 export function createSigilLinkFromParsedLink(
   link: NormalizedLink,
@@ -328,14 +343,12 @@ export function createSigilLinkFromParsedLink(
   // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
     // Default to keeping streams unless a broader mode was requested.
-    const schema = sanitizeSchemaForLinks(
-      link.schema,
-      options.keepAsCell ?? KeepAsCell.OnlyStream,
-    );
+    const keepAsCell = options.keepAsCell ?? KeepAsCell.OnlyStream;
+    const schema = getContentAddressedSchemasConfig()
+      ? externalizeLinkSchema(link.schema, keepAsCell)
+      : sanitizeSchemaForLinks(link.schema, keepAsCell);
     if (isNontrivialSchema(schema)) {
-      reference.schema = getContentAddressedSchemasConfig()
-        ? externalizeSchema(schema as JSONSchemaObj)
-        : schema;
+      reference.schema = schema;
     }
   }
 
@@ -481,6 +494,36 @@ export function sanitizeSchemaForLinks(
   }
 
   return output;
+}
+
+/** Sanitizes and externalizes a link schema, memoizing frozen inputs. */
+function externalizeLinkSchema(
+  schema: JSONSchema,
+  keepAsCell: KeepAsCell,
+): JSONSchema {
+  const cacheable = isObjectOrArray(schema) && isDeepFrozen(schema);
+  const cached = cacheable
+    ? externalizedLinkSchemaCache.get(schema)?.get(keepAsCell)
+    : undefined;
+  if (cached !== undefined) return cached;
+  const sanitized = sanitizeSchemaForLinks(schema, keepAsCell);
+  if (!isObjectNotArray(sanitized) || !isNontrivialSchema(sanitized)) {
+    return sanitized;
+  }
+  const externalized = externalizeSchema(sanitized);
+  if (
+    cacheable && isObjectNotArray(externalized) &&
+    typeof externalized.$ref === "string" &&
+    isExternalSchemaRef(externalized.$ref)
+  ) {
+    let byMode = externalizedLinkSchemaCache.get(schema);
+    if (byMode === undefined) {
+      byMode = new Map();
+      externalizedLinkSchemaCache.set(schema, byMode);
+    }
+    byMode.set(keepAsCell, externalized);
+  }
+  return externalized;
 }
 
 interface SanitizeContext {
@@ -840,7 +883,7 @@ const META_READ_OPTIONS = {
 export function getMetaLink(
   resultCell: Cell<unknown>,
   field: MetaLinkField,
-  options: unknown = META_READ_OPTIONS,
+  options: IReadOptions = META_READ_OPTIONS,
 ): NormalizedFullLink | undefined {
   const linkObj = resultCell.getMetaRaw(field, options);
   if (linkObj === undefined) return undefined;

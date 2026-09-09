@@ -37,8 +37,9 @@ Deno.test("importsAlias matches a dynamic import", () => {
 });
 
 //
-// These next few pin the specifier shapes that the matcher must keep handling:
-// dropping the `\s*` or an alternative from the lead would reintroduce a false
+// The specifier shapes the lead must keep matching
+//
+// Dropping the `\s*` or an alternative from the lead would reintroduce a false
 // positive on ordinary code, yet leave the happy-path tests above green.
 //
 
@@ -92,6 +93,8 @@ Deno.test("importsAlias matches a @deno-types companion comment", () => {
 });
 
 //
+// The current `@ts-types` spelling of the companion-type comment
+//
 // `@ts-types` is Deno's current spelling of the companion-type comment; the
 // older `@deno-types` above still works and both must be recognized, or an
 // `@types/*` alias reached through the current form would be reported unused.
@@ -109,6 +112,14 @@ Deno.test("importsAlias matches @ts-types with single quotes and spaces", () => 
   assert(importsAlias("// @ts-types = '@types/leaflet'", "@types/leaflet"));
 });
 
+//
+// What an alias reaches, and what it does not
+//
+// Subpaths and slash-terminated forms, against the near misses: a longer
+// sibling, a bare identifier, a substring of another specifier — and the
+// deliberate over-match, where an occurrence inside a comment counts.
+//
+
 Deno.test("importsAlias matches a subpath import of a bare alias", () => {
   assert(
     importsAlias(
@@ -121,6 +132,7 @@ Deno.test("importsAlias matches a subpath import of a bare alias", () => {
 Deno.test("importsAlias does not treat a longer alias as importing a shorter sibling by name only", () => {
   // "@std/http-extras" is not "@std/http": the slash boundary in the subpath
   // rule is what separates them, so a bare "@std/http" must not match here.
+
   assertEquals(
     importsAlias('import x from "@std/http-extras";', "@std/http"),
     false,
@@ -134,6 +146,7 @@ Deno.test("importsAlias matches any specifier under a slash-terminated alias", (
 
 Deno.test("importsAlias ignores a slash-terminated alias with nothing after it", () => {
   // "@/" maps a prefix; a specifier that is only the prefix imports no module.
+
   assertEquals(importsAlias('const s = "@/";', "@/"), false);
 });
 
@@ -143,6 +156,7 @@ Deno.test("importsAlias ignores a bare identifier that is not an import", () => 
 
 Deno.test("importsAlias ignores a substring of a different specifier", () => {
   // "notesEntry" contains "sentry" but imports nothing named sentry.
+
   assertEquals(
     importsAlias('import { notesEntry } from "./notes.ts";', "sentry"),
     false,
@@ -153,6 +167,7 @@ Deno.test("importsAlias counts a commented-out import as used", () => {
   // The loose matching is deliberate: an occurrence inside a comment or string
   // counts as used. That can only ever hide a dead alias, never flag a live
   // one, so the check does not misfire on a real dependency.
+
   assert(importsAlias('// import { x } from "zod";', "zod"));
 });
 
@@ -186,6 +201,7 @@ Deno.test("owningMember returns undefined for a file under no member", () => {
 
 Deno.test("owningMember does not match a member that is only a path-segment prefix", () => {
   // "packages/mem" must not own a file under "packages/memory".
+
   assertEquals(
     owningMember("packages/memory/interface.ts", ["packages/mem"]),
     undefined,
@@ -193,7 +209,7 @@ Deno.test("owningMember does not match a member that is only a path-segment pref
 });
 
 //
-// parsing
+// Parsing the config files
 //
 
 Deno.test("parseImportMap returns the imports block", () => {
@@ -220,10 +236,18 @@ Deno.test("parseWorkspaceMembers returns empty when there is no workspace array"
   assertEquals(parseWorkspaceMembers(`{ "name": "x" }`), []);
 });
 
+//
+// The entry point, and the git fallback
+//
+// The entry point over the real tree, and what the git helper answers when
+// the `git` binary is not there to run.
+//
+
 Deno.test("runs as a command-line program against the repository", async () => {
   // Exercises the module's command-line entry point (the import.meta.main
   // guard). It runs against the real repository, which the "no unused import
   // map entries" test asserts is clean, so the check prints success and exits 0.
+
   const script = fromFileUrl(
     new URL("./check-unused-deps.ts", import.meta.url),
   );
@@ -241,6 +265,7 @@ Deno.test("runs as a command-line program against the repository", async () => {
 Deno.test("gitTrackedFiles returns null when git is not available", async () => {
   // A missing git binary makes Deno.Command throw; the scan falls back to a
   // filesystem walk rather than failing.
+
   assertEquals(
     await gitTrackedFiles(".", "git-binary-that-does-not-exist-xyz"),
     null,
@@ -370,6 +395,7 @@ Deno.test("main returns 1 and names the offender on an unused entry", async () =
 Deno.test("main checks a member whose config is deno.json", async () => {
   // Deno accepts deno.json as well as deno.jsonc for a member. An unused entry
   // in a deno.json member must still be found, and reported at its real path.
+
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(
@@ -400,6 +426,7 @@ Deno.test("main reads a deno.json root's own import map", async () => {
   // reported at deno.json, which happens only if the root deno.json is read at
   // all. With deno.json support absent the root goes unread, no entries are
   // collected, and the check passes — so this fails unless the path works.
+
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(
@@ -438,6 +465,7 @@ Deno.test("main reads a deno.json root's own import map", async () => {
 Deno.test("main flags a member alias imported only by another member", async () => {
   // The alias is imported, but under a different member, so the declaring
   // member's entry is still unused: its own files never reach it.
+
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(
@@ -479,6 +507,7 @@ Deno.test("main flags a member alias imported only by another member", async () 
 Deno.test("main counts an importer under an output-named directory", async () => {
   // A file under a directory named `build` is authored source, not generated
   // output: the scan must read it, or its imports' aliases look unused.
+
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(
@@ -509,6 +538,7 @@ Deno.test("main counts an importer under an output-named directory", async () =>
 Deno.test("main tolerates a workspace member with no config file", async () => {
   // A directory listed as a member but carrying neither deno.jsonc nor
   // deno.json contributes no entries; collecting from it must not fail.
+
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(
@@ -543,6 +573,7 @@ Deno.test("main tolerates a workspace member with no config file", async () => {
 Deno.test("main skips a tracked file missing from the working tree", async () => {
   // In a real git tree, git may list a file the working tree no longer holds.
   // Reading it fails, and the scan must skip it rather than throw.
+
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(

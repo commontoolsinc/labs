@@ -5,13 +5,25 @@
  * token that is not a piece, a position inside one, another space's
  * reference.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
-import { assignSlug, resolvePieceAddress } from "@commonfabric/piece";
+import {
+  assignSlug,
+  resolvePieceAddress,
+  resolveSlugTarget,
+  setSlugLink,
+} from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { entityIdFrom, Runtime, slugIdForSpace } from "@commonfabric/runner";
+import {
+  entityIdFrom,
+  getEntityId,
+  Runtime,
+  slugIdForSpace,
+} from "@commonfabric/runner";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -91,12 +103,22 @@ describe("assign-slug", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let pieces: PiecesController;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    const patternFetch: typeof globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(DEFAULT_PATTERN_SOURCE, {
+          headers: { "content-type": "text/typescript-jsx" },
+        }),
+      );
+    globalThis.fetch = patternFetch;
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
+      fetch: patternFetch,
     });
     pieces = new PiecesController(
       await createSession({
@@ -111,13 +133,13 @@ describe("assign-slug", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
+    globalThis.fetch = originalFetch;
   });
 
   function createEngine() {
     return new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `assign-slug-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces }),
     });
   }
@@ -170,9 +192,11 @@ describe("assign-slug", () => {
     });
 
     it("refuses a slug that already names another piece, leaving the address where it pointed", async () => {
-      // Assigning a slug is a blind write, so a second call naming the same
-      // slug would repoint an address a person already opens. The refusal is
-      // a pre-flight one, so the attempt costs a message and nothing else.
+      // A second call naming the same slug would repoint an address a person
+      // already opens. The refusal is a pre-flight one, so the attempt costs
+      // a message and nothing else — and it is the one that names which kind
+      // of address is in the way, where the assignment's own refusal
+      // underneath would only say the name is taken.
       await linkDefaultPattern();
       const engine = createEngine();
       const first = await createPiece(engine, 21);
@@ -194,6 +218,120 @@ describe("assign-slug", () => {
       // protected the name rather than merely reporting on it.
       expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
         first.pieceId,
+      );
+    });
+
+    it("refuses a slug that names a collection, leaving the address where it pointed", async () => {
+      // A slug pointing at a cell inside a piece names a collection, which is
+      // an address a person opens as much as a piece is. Reading that as an
+      // operational failure would report a positive statement about what the
+      // space holds as a "try again", and reading it as vacancy would repoint
+      // the name.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const held = await createPiece(engine, 21);
+      const taking = await createPiece(engine, 22);
+      const cell = pieces.runtime.getCellFromLink(
+        parseLLMFriendlyLink(held.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await setSlugLink(pieces, "doubling-report", cell.key("doubled"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: taking.resultRef,
+        slug: "doubling-report",
+      });
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("already names a collection");
+      expect(output.message).not.toContain("could not establish");
+      // The refusal names the caller's own slug and nothing behind it, the
+      // way the refusal for a name already taken by a piece does: the address
+      // the name resolves to stays trusted-side.
+      expect(output.message).not.toContain(held.pieceId);
+      // The name still points into the piece it pointed into, so the refusal
+      // protected the address rather than merely reporting on it.
+      expect(await resolveSlugTarget(pieces, "doubling-report")).toEqual({
+        piece: held.pieceId,
+        pathInside: ["doubled"],
+      });
+    });
+
+    it("takes a name whose document points at no piece, which this tool calls free", async () => {
+      // The tool's availability rule competes only with pieces and
+      // collections, so a name redirecting to a plain document is free here
+      // even though the assignment underneath refuses a bound name by
+      // default. Carrying the binding this rule was judged against into the
+      // write is what lets the wider rule stand without spending the claim.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const plain = pieces.runtime.getCell(
+        pieces.getSpace(),
+        { space: pieces.getSpace(), random: "plain" },
+      );
+      await pieces.runtime.editWithRetry((tx) => {
+        plain.withTx(tx).set({ value: 1 });
+      });
+      await setSlugLink(pieces, "doubling-report", plain);
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        created.pieceId,
+      );
+    });
+
+    it("gives a free name to the first of two calls and refuses the second", async () => {
+      // Two calls for one free name, started together and settling one after
+      // the other. What this asserts is the outcome — exactly one takes the
+      // name — and nothing about the interleaving: the assertions hold
+      // whether the two overlapped or ran in sequence. Forcing over the read
+      // instead of carrying it into the write would let the loser overwrite
+      // the winner and report success, which is what the assertions catch.
+      //
+      // The racing path is the library's, pinned over two sessions where the
+      // losing replica is provably behind: `packages/piece/test/slug.test.ts`,
+      // under "the read a refusal claims on".
+      //
+      // The two tokens name different pieces, so the address the name ends
+      // up holding says which call won rather than being true either way.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const first = await createPiece(engine, 21);
+      const second = await createPiece(engine, 22);
+      expect(first.pieceId).not.toBe(second.pieceId);
+
+      const results = await Promise.all([
+        engine.invokeBuiltinTool("assign_slug", {
+          token: first.resultRef,
+          slug: "doubling-report",
+        }),
+        engine.invokeBuiltinTool("assign_slug", {
+          token: second.resultRef,
+          slug: "doubling-report",
+        }),
+      ]);
+      const outputs = results.map((result) =>
+        result.output as AssignSlugToolSuccessOutput | AssignSlugToolErrorOutput
+      );
+
+      expect(outputs.filter((output) => output.status === "ok")).toHaveLength(
+        1,
+      );
+      const loser = outputs.find((output) => output.status === "error") as
+        | AssignSlugToolErrorOutput
+        | undefined;
+      expect(loser?.message).toContain("doubling-report");
+      expect(loser?.message).toContain("Choose another slug");
+      const winner = outputs[0].status === "ok" ? first : second;
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        winner.pieceId,
       );
     });
 
@@ -243,10 +381,7 @@ describe("assign-slug", () => {
       expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
     });
 
-    it("reports the listing failure when an already-named piece cannot join a missing registry", async () => {
-      // Same pre-state as above, but the space has no default pattern, so
-      // ensuring membership has no registry to join. Both halves of the
-      // contract cannot hold, and the answer says which one failed.
+    it("initializes the space when an already-named piece has no registry to join", async () => {
       const engine = createEngine();
       const created = await createPiece(engine);
       const cell = pieces.runtime.getCellFromLink(
@@ -259,9 +394,88 @@ describe("assign-slug", () => {
         token: created.resultRef,
         slug: "doubling-report",
       });
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(await pieces.getDefaultPattern(false)).toBeDefined();
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
+    });
+
+    it("reports an initialization failure while listing an already-named piece", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const cell = pieces.runtime.getCellFromLink(
+        parseLLMFriendlyLink(created.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await assignSlug(pieces, cell, "doubling-report");
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern;
+      pieces.ensureDefaultPattern = () =>
+        Promise.reject(new Error("space root unavailable"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
       const output = result.output as AssignSlugToolErrorOutput;
       expect(output.status).toBe("error");
       expect(output.message).toContain("failed while listing");
+      expect(output.message).toContain("space root unavailable");
+    });
+
+    it("reports a name released between the availability read and the write as one to retry", async () => {
+      // The tool judges a name free, and the name comes to point nowhere
+      // before the write lands. That is not the same outcome as a name
+      // somebody else took: nobody holds it, so the answer is to read it
+      // again rather than to choose another name. The registry join sits
+      // between the two, which is where the release is staged.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      // A name pointing at a plain document: free by this tool's rule, and a
+      // binding the claim carries, so the release below is a change to it.
+      const plain = pieces.runtime.getCell(
+        pieces.getSpace(),
+        { space: pieces.getSpace(), random: "released-target" },
+      );
+      await pieces.runtime.editWithRetry((tx) => {
+        plain.withTx(tx).set({ value: 1 });
+      });
+      await setSlugLink(pieces, "doubling-report", plain);
+
+      const slugCell = pieces.runtime.getCellFromEntityId(
+        pieces.getSpace(),
+        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
+      );
+      const originalAdd = pieces.add.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        // The join has landed and the availability answer is already read;
+        // the name now points at nothing.
+        await pieces.runtime.editWithRetry((tx) => {
+          slugCell.withTx(tx).setRawUntyped("not a redirect");
+        });
+      };
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.add = originalAdd;
+
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("doubling-report");
+      expect(output.message).toContain("names nothing");
+      expect(output.message).toContain("Try the same call again");
+      // The registry join landed before the refusal, so the answer says the
+      // piece is listed rather than that nothing happened.
+      expect(output.message).toContain("the piece is listed");
+      expect(output.message).not.toContain("Nothing was assigned");
+      // Told to retry rather than to choose another name, which is the
+      // answer a name somebody else holds gets.
+      expect(output.message).not.toContain("Choose another slug");
     });
 
     it("does not list the piece twice when retried after a failed assignment", async () => {
@@ -271,22 +485,25 @@ describe("assign-slug", () => {
       const engine = createEngine();
       const created = await createPiece(engine);
 
-      const originalGetSpace = pieces.getSpace.bind(pieces);
       const originalAdd = pieces.add.bind(pieces);
+      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
       pieces.add = async (cells) => {
         await originalAdd(cells);
         // The join has landed; make the assignment that follows fail once.
-        pieces.getSpace = () => {
-          pieces.getSpace = originalGetSpace;
+        // Through a call only the slug write makes, so the failure is the
+        // assignment's rather than the listing's — the tool reports those
+        // separately, because only one of them leaves a listed piece.
+        runtime.getCellFromEntityId = (() => {
+          runtime.getCellFromEntityId = originalGetCell;
           throw new Error("slug assignment refused");
-        };
+        }) as Runtime["getCellFromEntityId"];
       };
       const first = await engine.invokeBuiltinTool("assign_slug", {
         token: created.resultRef,
         slug: "doubling-report",
       });
       pieces.add = originalAdd;
-      pieces.getSpace = originalGetSpace;
+      runtime.getCellFromEntityId = originalGetCell;
       const failed = first.output as AssignSlugToolErrorOutput;
       expect(failed.status).toBe("error");
       expect(failed.message).toContain("failed while naming");
@@ -335,8 +552,9 @@ describe("assign-slug", () => {
     it("refuses when the slug's availability could not be established, assigning nothing", async () => {
       // A resolution that fails operationally — storage error, sync that
       // never landed — says nothing about what the slug holds. Reading it as
-      // vacancy would send the call on to the blind assignment the
-      // availability check exists to prevent.
+      // vacancy would send the call on to take a name this side never
+      // established was free, which is what the availability check exists to
+      // prevent.
       await linkDefaultPattern();
       const engine = createEngine();
       const created = await createPiece(engine);
@@ -405,7 +623,6 @@ describe("assign-slug", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `assign-slug-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces: didPieces }),
       });
       const created = await engine.invokeBuiltinTool("run_pattern", {
@@ -516,7 +733,6 @@ describe("assign-slug", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `assign-slug-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
       });
       const result = await engine.invokeBuiltinTool("assign_slug", {
         token: "/of:fid1:abc",
@@ -538,27 +754,94 @@ describe("assign-slug", () => {
       expect(output.message).toContain("requires a token");
     });
 
-    it("reports the naming failure when the space has no piece registry to join", async () => {
-      // No default pattern linked, so `pieces.add` has nothing to register
-      // through. The piece stays reachable by its handle; only the naming
-      // failed, and the message says which step.
+    it("initializes a fresh space before registering and naming the piece", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      expect(await pieces.getDefaultPattern(false)).toBeUndefined();
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(await pieces.getDefaultPattern(false)).toBeDefined();
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        created.pieceId,
+      );
+    });
+
+    it("reports the listing failure when the space root cannot be initialized, claiming no listing", async () => {
+      // The registry join is where this fails, so it is the listing that is
+      // reported and the piece is not listed. The refusals on the other side
+      // of the join say the piece IS listed, and a report that conflated the
+      // two would send a caller looking for a piece that is not there.
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern;
+      pieces.ensureDefaultPattern = () =>
+        Promise.reject(new Error("space root unavailable"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("failed while listing");
+      expect(output.message).toContain("space root unavailable");
+      expect(output.message).not.toContain("the piece is listed");
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
+    });
+
+    it("leaves an initialized space root untouched while assigning the slug", async () => {
+      await linkDefaultPattern();
+      const existingRoot = await pieces.getDefaultPattern(false);
+      expect(existingRoot).toBeDefined();
+      const existingRootId = getEntityId(existingRoot!);
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern.bind(
+        pieces,
+      );
+      const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+      let ensureCalls = 0;
+      let rootWriteAttempts = 0;
+      pieces.ensureDefaultPattern = async () => {
+        ensureCalls++;
+        runtime.editWithRetry = ((fn, maxRetries) => {
+          rootWriteAttempts++;
+          return originalEditWithRetry(fn, maxRetries);
+        }) as typeof runtime.editWithRetry;
+        try {
+          return await originalEnsureDefaultPattern();
+        } finally {
+          runtime.editWithRetry = originalEditWithRetry;
+        }
+      };
+
       const engine = createEngine();
       const created = await createPiece(engine);
       const result = await engine.invokeBuiltinTool("assign_slug", {
         token: created.resultRef,
         slug: "doubling-report",
       });
-      const output = result.output as AssignSlugToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("failed while naming");
-      expect(output.message).toContain("default pattern");
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(ensureCalls).toBe(1);
+      expect(rootWriteAttempts).toBe(0);
+      const rootAfterAssignment = await pieces.getDefaultPattern(false);
+      expect(getEntityId(rootAfterAssignment!)).toEqual(existingRootId);
     });
 
     it("surfaces a rejected session construction as a structured error", async () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `assign-slug-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () =>
           Promise.reject(new Error("authorization denied")),
       });

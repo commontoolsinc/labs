@@ -10,6 +10,7 @@ import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 export interface MaterializerIndexState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly materializersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   getMaterializerWriteEnvelopes(
@@ -21,11 +22,11 @@ export interface MaterializerIndexState {
 export class SchedulerMaterializers implements MaterializerIndexState {
   readonly materializers = new Set<Action>();
   readonly materializersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
-  private readonly writeEnvelopes = new WeakMap<
+  readonly #writeEnvelopes = new WeakMap<
     Action,
     IMemorySpaceAddress[]
   >();
-  private readonly actionEntities = new WeakMap<
+  readonly #actionEntities = new WeakMap<
     Action,
     Set<SpaceScopeAndURI>
   >();
@@ -57,7 +58,7 @@ export class SchedulerMaterializers implements MaterializerIndexState {
     if (writes.length === 0) return;
 
     this.materializers.add(action);
-    this.writeEnvelopes.set(action, writes);
+    this.#writeEnvelopes.set(action, writes);
 
     const entities = new Set<SpaceScopeAndURI>();
     // Reader→writer TOPOLOGY, keyed by scope NAME (server-execution v2
@@ -75,13 +76,13 @@ export class SchedulerMaterializers implements MaterializerIndexState {
       }
       materializers.add(action);
     }
-    this.actionEntities.set(action, entities);
+    this.#actionEntities.set(action, entities);
   }
 
   clearAction(action: Action): void {
     this.materializers.delete(action);
-    this.writeEnvelopes.delete(action);
-    const entities = this.actionEntities.get(action);
+    this.#writeEnvelopes.delete(action);
+    const entities = this.#actionEntities.get(action);
     if (!entities) return;
 
     for (const entity of entities) {
@@ -91,7 +92,7 @@ export class SchedulerMaterializers implements MaterializerIndexState {
         this.materializersByEntity.delete(entity);
       }
     }
-    this.actionEntities.delete(action);
+    this.#actionEntities.delete(action);
   }
 
   isMaterializer(action: Action): boolean {
@@ -101,7 +102,7 @@ export class SchedulerMaterializers implements MaterializerIndexState {
   getMaterializerWriteEnvelopes(
     action: Action,
   ): readonly IMemorySpaceAddress[] | undefined {
-    return this.writeEnvelopes.get(action);
+    return this.#writeEnvelopes.get(action);
   }
 }
 

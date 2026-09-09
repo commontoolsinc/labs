@@ -116,13 +116,18 @@ Deno.test(
   },
 );
 
-// The following cases place the generic alias parameter *inside* the schema
-// type argument of WriteAuthorizedBy, wrapped in a distinct type shape. When the
+//
+// The substitution walker's branches
+//
+// These cases place the generic alias parameter *inside* the schema type
+// argument of WriteAuthorizedBy, wrapped in a distinct type shape. When the
 // validator substitutes the actual type into the alias parameter, it must
-// descend through that shape to rebuild the WriteAuthorizedBy reference. Each
-// case pins one branch of the substitution walker (array, union, intersection,
-// type operator, parenthesized, index signature) and asserts the binding is
-// still validated afterward.
+// descend through that shape to rebuild the WriteAuthorizedBy reference. The
+// cases pin the walker's branches — array, union with parenthesization,
+// intersection, type operator, index signature, and a type literal with
+// non-property members — and each asserts the binding is still validated
+// afterward.
+//
 
 Deno.test(
   "generic alias substitutes schema through array element types",
@@ -249,6 +254,13 @@ Deno.test(
     assertEquals(diagnostics.length, 1);
   },
 );
+
+//
+// A binding the walker never has to enter
+//
+// The parentheses and assertions here wrap the binding VALUE, not a type, so
+// no substitution happens and the walker is not reached at all.
+//
 
 Deno.test(
   "supported binding wrapped in parentheses and assertions is accepted",

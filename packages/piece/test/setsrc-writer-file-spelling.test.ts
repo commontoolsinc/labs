@@ -40,21 +40,23 @@ function writerAuthorizedProgram(fileName: string): RuntimeProgram {
   };
 }
 
-// End-to-end counterpart to the writer-claim cases in
-// `schema-compatibility.test.ts`, exercised through the real `cf piece setsrc`
-// boundary (`piece.setPattern`) rather than the compatibility helper alone.
-//
-// A field typed `WriteAuthorizedBy` lowers to a writer claim that records the
-// authoring module three ways: its content hash (`moduleIdentity`), its
-// source-file spelling (`file`), and the binding `path` within the module. The
-// runtime authorizes a write on `moduleIdentity` plus the binding `path` and
-// never consults `file`. Relocating the pattern to a new source file, with the
-// handler and its binding path unchanged, re-spells `file` (and, because the
-// hash covers the module's name, re-hashes `moduleIdentity`), while the
-// backward-compatibility gate ignores both of those and holds the `path` and
-// `uiContract` fixed. So the update carries the same authorization and is
-// accepted, and the settled piece points at the relocated pattern.
 describe("setsrc over a writer-authorized field's source-file spelling", () => {
+  // End-to-end counterpart to the writer-claim cases in
+  // `schema-compatibility.test.ts`, exercised through the real `cf piece
+  // setsrc` boundary (`piece.setPattern`) rather than the compatibility helper
+  // alone.
+  //
+  // A field typed `WriteAuthorizedBy` lowers to a writer claim that records the
+  // authoring module three ways: its content hash (`moduleIdentity`), its
+  // source-file spelling (`file`), and the binding `path` within the module.
+  // The runtime authorizes a write on `moduleIdentity` plus the binding `path`
+  // and never consults `file`. Relocating the pattern to a new source file,
+  // with the handler and its binding path unchanged, re-spells `file` (and,
+  // because the hash covers the module's name, re-hashes `moduleIdentity`),
+  // while the backward-compatibility gate ignores both of those and holds the
+  // `path` and `uiContract` fixed. So the update carries the same authorization
+  // and is accepted, and the settled piece points at the relocated pattern.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let pieces: PiecesController;

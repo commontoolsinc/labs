@@ -30,17 +30,23 @@ export type ConsoleFlowKind =
 export interface ConsoleFlowCell {
   /** Stable identity — the address where known, the token otherwise. */
   id: string;
+
   token?: string;
   ref?: string;
   slug?: string;
+
   /** The step whose result minted it. */
   producedByStep?: number;
+
   /** The shape the pattern that made it declared, for the chip's card. */
   schema?: unknown;
+
   /** Confidentiality atoms the invocation context put where it was used. */
   confidentiality: readonly string[];
+
   /** The labels the space holds for the cell itself, where the run read them. */
   labels?: ConsoleCellLabels;
+
   /** The argument name it came in as, for a cell a call read. */
   as?: string;
 }
@@ -66,13 +72,19 @@ export interface ConsoleFlowNode {
 
   status: ConsoleStepStatus;
 
-  /** What CFC decided, and whether it refused the observation. */
+  /** What CFC decided about the observation. */
   policyDecision?: string;
+
+  /** Whether a policy event refused it. */
   policyDenied?: boolean;
+
+  /** What that refusal said, where it said more than the fact of it. */
   policyDetail?: string;
 
-  /** Cells this call read, and cells it produced. */
+  /** Cells this call read. */
   reads: readonly ConsoleFlowCell[];
+
+  /** Cells this call produced. */
   produces: readonly ConsoleFlowCell[];
 
   /**
@@ -85,9 +97,15 @@ export interface ConsoleFlowNode {
 
   /**
    * How far this call let across as a plain value, for a call whose result
-   * carried one. A long numeric run is the shape of a channel.
+   * carried one.
    */
   valueBytes?: number;
+
+  /**
+   * The longest run of numbers that value carries, for the same call. An array
+   * of integers is an array of values none of which is sealed, so a long one is
+   * a channel wide enough for arbitrary content.
+   */
   longestNumericRun?: number;
 
   /** The child run this call delegated to, drawn beneath it. */
@@ -101,8 +119,10 @@ export interface ConsoleFlowNode {
 export interface ConsoleFlowTurn {
   /** The step of the parent run that opened it. */
   step: number;
+
   /** What the person asked, elided. */
   text?: string;
+
   nodes: readonly ConsoleFlowNode[];
 }
 
@@ -130,10 +150,13 @@ export interface ConsoleFlow {
    * run whose space could not be read.
    */
   cellLabels?: ConsoleCellLabelsSummary;
+
   /** Calls that failed, across the whole family. */
   failures: number;
+
   /** Calls CFC refused, across the whole family. */
   denials: number;
+
   /** Patterns that read no cell — work built from literals. */
   unwiredPatterns: number;
 }

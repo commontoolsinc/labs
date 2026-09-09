@@ -15,17 +15,35 @@ when it does not have them yet.
 This is not a tidiness rule. The root test runner (`tasks/test.ts`) walks every
 workspace member and runs `deno task test` in each. A member with no `test`
 task falls through to the root workspace's task, which is the whole suite —
-so the suite re-enters itself once per such package, spawning processes
-exponentially until CI times out. The symptom is a hung job, not an error
-message naming the package.
+so the suite would re-enter itself once per such package, spawning processes
+exponentially. The runner reads every member's manifest before it runs any of
+their test tasks, and refuses to start when one has no `test` entry, naming it,
+so the symptom is that message rather than a hung job.
+
+What the entry has to do is resolve in the package's own directory, and two
+things follow. A `test` task defined by its `"dependencies"` alone satisfies
+the rule, so the check asks whether the manifest declares the task at all —
+a different question from the one `memberTestTask()` in
+`tasks/workspace-tests.ts` answers, which is what command line the task runs,
+and a dependencies-only task has none. And the manifest that has to carry the
+entry is the one Deno resolves: a `deno.json` beside a `deno.jsonc` is taken
+whole and the other file ignored, so a `test` task written in the ignored one
+counts for nothing.
 
 `packages/utils/deno.jsonc` is a correct minimal example.
 
-## A new package is two edits
+## A new package is three edits
 
 Adding the directory is not enough. The package path also goes into the
 `"workspace"` array in the root `deno.jsonc`, or nothing in the repository
 knows it exists.
+
+The third edit is a checked path in `tasks/typecheck.ts`, so `deno task check`
+opens the package at all. `tasks/typecheck.test.ts` walks the members that root
+manifest declares, so the workspace edit is also what puts the package under
+the type check's coverage claim: with no path naming it, and no
+`UNCHECKED_TREES` entry saying why it has none, that test fails and names the
+files. Most packages take a single directory entry.
 
 ## Declare dependencies at the narrowest scope
 

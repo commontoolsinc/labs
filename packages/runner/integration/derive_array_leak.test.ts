@@ -11,7 +11,10 @@
  */
 
 import { Identity, Session } from "@commonfabric/identity";
-import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import {
+  experimentalOptionsFromEnv,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
 import { PiecesController } from "@commonfabric/piece/ops";
 
@@ -104,10 +107,16 @@ async function runTest() {
   const runtime = new Runtime({
     apiUrl: new URL(API_URL),
     // The posture this client runs (server-execution v2, testing.md §2):
-    // declared from the environment so the CI ON lane's test process
-    // really runs the ON client arm (a bare construction resolved OFF and
-    // made the ON lane a MIXED posture — P7 review finding 7); unset = OFF.
-    experimental: experimentalOptionsFromEnv(Deno.env.get),
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager,
   });
 
@@ -117,7 +126,7 @@ async function runTest() {
 
   // Read the pattern file content
   const patternContent = await Deno.readTextFile(
-    "./integration/derive_array_leak.test.tsx",
+    "./integration/derive_array_leak.tsx",
   );
 
   const pattern = await compileAndSavePattern(
@@ -215,9 +224,9 @@ async function runTest() {
   console.log(`Counter reached ${finalValue} (expected ${expectedValue})`);
 }
 
+// The test runs without a per-test deadline. See
+// docs/development/waiting-in-tests.md.
 Deno.test({
-  // The test runs without a per-test deadline. See
-  // docs/development/waiting-in-tests.md.
   name: "derive array leak test",
   fn: runTest,
   sanitizeResources: false,

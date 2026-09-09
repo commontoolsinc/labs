@@ -42,11 +42,17 @@ import {
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { meetCfcObservationCeilings } from "../cfc/observation.ts";
+import {
+  cloneIfNecessary,
+  fabricFromNativeValue,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
+  isSqliteDbRef,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
   sqliteRowToWire,
@@ -153,10 +159,7 @@ function makeResultCell<T>(
 }
 
 function readDbRef(value: unknown): SqliteDbRef {
-  if (
-    value && typeof value === "object" &&
-    typeof (value as SqliteDbRef).id === "string"
-  ) {
+  if (isSqliteDbRef(value)) {
     const ref = value as SqliteDbRef;
     return {
       id: ref.id,
@@ -796,9 +799,23 @@ export function sqliteQuery(
   /** Hashes whose RPC this node instance currently has in flight — the
    * in-process half of the memo decision above. */
   const inFlightIssues = new Set<string>();
+
+  /**
+   * The query this node staged on its most recent run, if that run staged one.
+   * A token rather than the request's hash: two stagings of the same statement
+   * are still two queries, and the ending of the first must not be read as the
+   * ending of the second.
+   */
+  let currentStaging: symbol | undefined;
+
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    // Cleared for the whole run and set again only by the arm that stages a
+    // query, so every way this run can end without staging one — inputs it
+    // cannot read, a result already stored, a query already in flight — leaves
+    // the ending of an earlier query with nothing of this node's to write to.
+    currentStaging = undefined;
     const inputs = inputsCell.withTx(tx).get() as {
       db?: unknown;
       sql?: string;
@@ -855,7 +872,48 @@ export function sqliteQuery(
 
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
-    const db = readDbRef(inputs.db);
+    // A result read under the runtime's ceiling is this runtime's view of the
+    // rows, and a runtime is one session, so the result has to be one this
+    // session reads alone: a space- or user-scoped result is one cell every
+    // runtime on the space (or every session of the user) resolves, and the
+    // pattern's output link that names it is shared too, with its scope. A
+    // runtime cannot narrow that link for itself — the first writer's scope
+    // stands — so two runtimes of different ceilings sharing one result
+    // would either fight over it, each reading the other's request hash as
+    // new inputs, or read each other's rows between rounds. The scope has to
+    // come from the pattern, where every runtime reads the same declaration;
+    // a query that declares none is refused here, before it is staged: no
+    // claim and no rows, and the refusal reaches the runtime's error
+    // handlers rather than the result cell, which another runtime may be
+    // serving. After the inputs guard, so a scope the db handle carries is
+    // read from the handle rather than refused before the handle loads.
+    if (
+      runtime.cfcReadMaxConfidentiality !== undefined && scope !== "session"
+    ) {
+      throw new Error(
+        "sqlite: this runtime declares a read ceiling " +
+          "(`cfcReadMaxConfidentiality`), which applies only to a " +
+          `session-scoped query result; this result is ${scope}-scoped. ` +
+          "Declare the result per session — `PerSession<>` on the query's " +
+          'result type, the `scope: "session"` query option, ' +
+          '`.asScope("session")` on the query, or a session-scoped db — so ' +
+          "each session reads rows of its own",
+      );
+    }
+
+    // A `db` that does not read back as a handle reaches the result cell as
+    // this query's error, on the same terms as an unencodable parameter
+    // below. The guard above admits any truthy value, and an object read
+    // that resolved to nothing is `{}` — truthy, and not a handle — so the
+    // throw would otherwise leave the action dead and the query pending for
+    // good, with no later reactive pass to recover it once the handle reads.
+    let db: SqliteDbRef;
+    try {
+      db = readDbRef(inputs.db);
+    } catch (error) {
+      result.withTx(tx).set({ pending: false, error: errMsg(error) });
+      return;
+    }
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
     try {
@@ -917,6 +975,16 @@ export function sqliteQuery(
           ? { user: actingReader ?? null, session: clearanceSession }
           : (actingReader ?? null))
         : null,
+      // The runtime's own ceiling joins the request identity too: a settled
+      // result is only a hit for a runtime reading under the same ceiling.
+      // Absent for a runtime without one, so such a runtime's queries do not
+      // re-hash.
+      ...(runtime.cfcReadMaxConfidentiality !== undefined
+        ? {
+          runtimeReadCeiling: runtime.cfcReadMaxConfidentiality,
+          runtimeReadOnExceed: runtime.cfcReadOnExceed ?? null,
+        }
+        : {}),
     });
     // Dedup against COMMITTED state (and, stage G, against this node's
     // own in-flight RPC): the claim marker commits with the REQUESTING
@@ -924,8 +992,11 @@ export function sqliteQuery(
     // posture a dropped effect leaves it orphaned, and only re-issuing
     // heals that (sqliteQueryMemoDecision above; serving-loop.md §4,
     // §6 step 3).
+    // The claim as it stands before this request writes its own, for the
+    // abandonment ending below to compare against.
+    const storedBeforeClaim = result.withTx(tx).get();
     const decision = sqliteQueryMemoDecision({
-      stored: result.withTx(tx).get(),
+      stored: storedBeforeClaim,
       hash,
       inFlightHere: inFlightIssues.has(hash),
       servedRun,
@@ -938,6 +1009,8 @@ export function sqliteQuery(
       return;
     }
     if (decision === "dedupe") return;
+    const staging = Symbol(hash);
+    currentStaging = staging;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
@@ -954,7 +1027,7 @@ export function sqliteQuery(
       // the scheduler stops attempting the commit neither landed and no read
       // is coming, so a reader of the claim would wait on a query nobody is
       // running.
-      abandon: (rejection) => {
+      abandon: () => {
         runtime.trackAsyncWork(
           settleAbandonedRequest(
             runtime,
@@ -962,18 +1035,53 @@ export function sqliteQuery(
             effectKey,
             (settleTx) => {
               sendResult(settleTx, result);
-              // Read the stored claim at write time: a newer request commits
-              // its own hash, and from then on the result is that request's
-              // to write, exactly as `failQuery` decides it.
+              // Read the stored claim at write time. Another query holds
+              // this result in either of two ways, and the ending steps around
+              // both. One is running: the pending flag is up under a hash that
+              // is not this query's, and from then on the result is that
+              // query's to write, exactly as `failQuery` decides it. Or one
+              // has committed here since this query was staged, whatever state
+              // it left — a later query that already answered leaves its own
+              // hash with the flag down, and that answer is its own to keep.
+              //
+              // What is left over from before this query was staged is neither.
+              // A query that finished leaves its hash standing with the flag
+              // down, so every query after the first one finds a hash here that
+              // belongs to nobody, and reading that as a takeover would leave
+              // the pattern holding the finished query's rows under a statement
+              // it no longer runs.
               const stored = result.withTx(settleTx).get();
-              if (
-                stored?.requestHash !== undefined && stored.requestHash !== hash
-              ) {
+              // This node has moved on if its latest run staged something
+              // else, or staged nothing at all. The store can say nothing about
+              // that: a run whose statement returns to one already answered
+              // reads that answer and writes nothing, so the two durable tests
+              // below both see exactly what this query left behind.
+              if (currentStaging !== staging) return;
+              const running = stored?.pending === true &&
+                stored.requestHash !== undefined && stored.requestHash !== hash;
+              // Whole value, not one field of it: a query that answers
+              // records rows without moving the hash, and one that takes over
+              // moves the hash without recording rows.
+              // `valueEqual` rather than a structural walk: a decoded row can
+              // carry a `FabricValue` whose contents live in private fields
+              // that such a walk cannot see, and every distinct instance of one
+              // compares equal to every other.
+              const writtenSinceStaged = !valueEqual(
+                storedBeforeClaim as FabricValue,
+                stored as FabricValue,
+              );
+              if (running || writtenSinceStaged) {
                 return;
               }
+              // What the pattern reads is that the query was refused, and
+              // nothing more. The refusal names the document the rule matched
+              // on and the source of each caveat — the principal that
+              // introduced it — which is what the pattern-facing surface
+              // withholds. That detail reaches the operator through the
+              // scheduler's report of the dropped write.
               result.withTx(settleTx).set({
                 pending: false,
-                error: (rejection as { message?: string })?.message,
+                error: "sqliteQuery request was refused before it started",
                 requestHash: hash,
               });
             },
@@ -1079,17 +1187,39 @@ export function sqliteQuery(
               );
               return;
             }
-            let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
+            const placeholderContext = {
+              actingPrincipal: flushActingPrincipal,
+              owner: db.owner,
+            };
+            let ceiling: readonly CfcConfClause[] | undefined =
+              inputs.maxConfidentiality ?? rowSchemaCeiling;
             if (ceiling !== undefined) {
-              const resolved = resolveCeilingPlaceholders(ceiling, {
-                actingPrincipal: flushActingPrincipal,
-                owner: db.owner,
-              });
+              const resolved = resolveCeilingPlaceholders(
+                ceiling,
+                placeholderContext,
+              );
               if ("error" in resolved) {
                 await failQuery(resolved.error);
                 return;
               }
               ceiling = resolved.atoms;
+            }
+            // The runtime's ceiling meets the query's: a row survives only if
+            // it fits both, so the query can tighten the runtime's ceiling and
+            // never widen it. The meet rather than an atom intersection, which
+            // is sound but over-withholds an OR-labeled row both admit.
+            // Resolved against the same principal and owner as the query's,
+            // and refusing on the same terms when a placeholder cannot be.
+            if (runtime.cfcReadMaxConfidentiality !== undefined) {
+              const resolved = resolveCeilingPlaceholders(
+                runtime.cfcReadMaxConfidentiality,
+                placeholderContext,
+              );
+              if ("error" in resolved) {
+                await failQuery(resolved.error);
+                return;
+              }
+              ceiling = meetCfcObservationCeilings(ceiling, resolved.atoms);
             }
             const rowLabels = computeRowLabelRead({
               tables: db.tables,
@@ -1098,7 +1228,15 @@ export function sqliteQuery(
               owner: db.owner,
               staticConfidentiality: staticConfidentialityOf(labelSchema),
               ceiling,
-              onExceed: inputs.onExceed,
+              // The query's own mode stands, an invalid one included, so
+              // the validation below still refuses it; the runtime's
+              // supplies the default for a query that declared none, and
+              // the builtin's `fail` beneath that.
+              onExceed: inputs.onExceed === undefined
+                ? runtime.cfcReadOnExceed
+                : inputs.onExceed,
+              onExceedIsRuntimeDefault: inputs.onExceed === undefined &&
+                runtime.cfcReadOnExceed !== undefined,
               // Phase 3.b read-time clearance: the reader is the acting
               // principal of the REQUESTING run (same identity the ceiling
               // placeholders resolve against, and the USER half of the

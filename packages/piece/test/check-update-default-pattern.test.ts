@@ -25,6 +25,8 @@ import {
   readPieceSourceState,
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { getLogger } from "@commonfabric/utils/logger";
 
 // The routes those refs resolve to. A system pattern is still SERVED at, and
 // its modules still NAMED by, the route path; the `system:` ref is what a
@@ -375,7 +377,11 @@ describe("opening a space root", () => {
     const piece = await controller.ensureDefaultPattern();
     const identityFetchesBefore = stub.identityFetches();
     const { error } = await runtime.editWithRetry((tx) => {
-      piece.getCell().withTx(tx).setMetaRaw("patternIdentity", "missing");
+      piece.getCell().withTx(tx).setMetaRaw(
+        "patternIdentity",
+        "missing",
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const root = (await controller.getDefaultPattern(false))!;
@@ -476,7 +482,11 @@ describe("opening a space root", () => {
     expect(currentPattern.resultSchema).toEqual(root.getMetaRaw("schema"));
 
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
     const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
@@ -531,7 +541,11 @@ describe("opening a space root", () => {
       currentPattern,
     )!;
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
     const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
@@ -733,13 +747,17 @@ describe("opening a space root", () => {
     );
     await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", {
-        identity: staleIdentity,
-        // The obsolete runtime selected an export the current system source no
-        // longer has. Dead-root recovery must select the official entry's
-        // default export, rather than trying to preserve this broken symbol.
-        symbol: "removed-export",
-      });
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        {
+          identity: staleIdentity,
+          // The obsolete runtime selected an export the current system source no
+          // longer has. Dead-root recovery must select the official entry's
+          // default export, rather than trying to preserve this broken symbol.
+          symbol: "removed-export",
+        },
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const staleRoot = (await controller.getDefaultPattern(false))!;
@@ -776,8 +794,12 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: orphan,
         symbol: "default",
-      });
-      root.withTx(tx).setMetaRaw("patternSource", undefined);
+      }, rawMetaWriteAuthorization);
+      root.withTx(tx).setMetaRaw(
+        "patternSource",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
 
@@ -822,14 +844,15 @@ describe("opening a space root", () => {
     ).toBeUndefined();
   });
 
-  // The boot path (ensureDefaultPattern) reconciles an unloadable root before
-  // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
-  // cells all resolve the root through PiecesController.getDefaultPattern instead,
-  // which used to inherit NO heal: the load failure propagated and every
-  // listing died with the root (2026-07-29 vendor gate, the cf-cell-context
-  // type retirement). The controller choke point must run the same awaited
-  // updater check and retry once.
   it("heals an unloadable stale root on the REGISTRY path (not just boot)", async () => {
+    // The boot path (ensureDefaultPattern) reconciles an unloadable root before
+    // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
+    // cells all resolve the root through PiecesController.getDefaultPattern
+    // instead, which used to inherit NO heal: the load failure propagated and
+    // every listing died with the root (2026-07-29 vendor gate, the
+    // cf-cell-context type retirement). The controller choke point must run the
+    // same awaited updater check and retry once.
+
     await setup();
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
@@ -844,7 +867,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
@@ -860,6 +883,121 @@ describe("opening a space root", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
+  });
+
+  it("preserves both failures when passive and running registry opens fail", async () => {
+    await setup();
+    const passiveFailure = new Error("passive registry open failed");
+    const runningFailure = new Error("running registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern = ((open = true) =>
+      Promise.reject(
+        typeof open === "object" ? passiveFailure : runningFailure,
+      )) as typeof controller.getDefaultPattern;
+
+    let failure: unknown;
+    try {
+      await controller.getPieceRegistry();
+    } catch (error) {
+      failure = error;
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      passiveFailure,
+      runningFailure,
+    ]);
+  });
+
+  it("records a passive failure when the running registry fallback succeeds", async () => {
+    await setup();
+    await controller.ensureDefaultPattern();
+    const passiveFailure = new Error("passive registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern =
+      ((open = true) =>
+        typeof open === "object"
+          ? Promise.reject(passiveFailure)
+          : original(open)) as typeof controller.getDefaultPattern;
+    const logger = getLogger("piece.update");
+    const warningsBefore =
+      logger.countsByKey["passive-registry-open-failed"]?.warn ?? 0;
+
+    try {
+      expect(await controller.getPieceRegistry()).toBeDefined();
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(
+      logger.countsByKey["passive-registry-open-failed"]?.warn ?? 0,
+    ).toBe(warningsBefore + 1);
+  });
+
+  it("preserves a passive failure when the running fallback finds no root", async () => {
+    await setup();
+    const passiveFailure = new Error("passive registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern =
+      ((open = true) =>
+        typeof open === "object"
+          ? Promise.reject(passiveFailure)
+          : Promise.resolve(undefined)) as typeof controller.getDefaultPattern;
+
+    let failure: unknown;
+    try {
+      await controller.getPieceRegistry();
+    } catch (error) {
+      failure = error;
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(failure).toBe(passiveFailure);
+  });
+
+  it("heals a stale root whose registry export is already persisted", async () => {
+    await setup();
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+
+    // The registry path serves a persisted export without running the root.
+    // A root that has ALREADY exported one therefore takes that path — so
+    // the healing has to happen there too, not only on the arm that runs.
+    // `pieceListSchema` defaults an absent export to `[]`, so an export
+    // persisted as empty is exactly the case that reads as present.
+    const { error: seeded } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).asSchema({
+        type: "object",
+        properties: { pieceRegistry: { type: "array" } },
+      }).key("pieceRegistry").set([]);
+    });
+    expect(seeded).toBeUndefined();
+
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-root-with-persisted-registry"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+    });
+    expect(error).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+
+    const registry = await controller.getPieceRegistry();
+    await runtime.idle();
+
+    expect(registry).toBeDefined();
+    const healed = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(healed)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
   });
 
   it("returns the started replacement when the rescue's retry succeeds", async () => {
@@ -883,7 +1021,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
     stub.setSource(SOURCE_V2);
@@ -972,7 +1110,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
     stub.setSource(SOURCE_V2);
@@ -1297,17 +1435,21 @@ describe("opening a space root", () => {
     const identityFetchesBefore = stub.identityFetches();
     const externalSource = "https://patterns.example/root.tsx";
     const { error } = await runtime.editWithRetry((tx) => {
-      piece.getCell().withTx(tx).setMetaRaw("patternSource", externalSource);
+      piece.getCell().withTx(tx).setMetaRaw(
+        "patternSource",
+        externalSource,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const root = (await controller.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBe(externalSource);
 
     // The local route moves. The root does not follow it: its origin names
-    // another host. Following an external endpoint is specified and not
-    // built, so nothing is fetched on the root's behalf at all.
+    // another host, and an external endpoint is no origin at all, so nothing
+    // is fetched on the root's behalf.
     stub.setSource(SOURCE_V2);
-    expect(await reconcilePieceSource(runtime, root)).toBe("unsupported");
+    expect(await reconcilePieceSource(runtime, root)).toBe("unusable");
     expect(getPatternIdentityRef(root)).toEqual(before);
     expect(getPatternSource(root)).toBe(externalSource);
     expect(stub.identityFetches()).toBe(identityFetchesBefore);
@@ -1462,6 +1604,7 @@ describe("opening a space root", () => {
   it("rolls the home root forward when its source moves", async () => {
     // A home space (session space == the identity DID) follows its origin like
     // any other piece. Same in-place semantics: no new piece minted.
+
     await setupHome();
     const piece = await controller.ensureDefaultPattern();
     const rootLinkBefore = JSON.stringify(piece.getCell().getAsLink());
@@ -1575,6 +1718,7 @@ describe("opening a space root", () => {
     // { "$stream": true } markers for handler nodes the old program never
     // had. A handler-less roll target (every other test here) cannot see
     // this; home.tsx is handler-rich.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1618,6 +1762,7 @@ describe("opening a space root", () => {
     // TODO(hixie): migrate the root's data onto the candidate instead. As it
     // stands the root silently stops following its own origin, and nobody is
     // told.
+
     const SOURCE_INCOMPATIBLE = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ mustHave: string }>(({ mustHave }) => ({",
@@ -1646,9 +1791,10 @@ describe("opening a space root", () => {
     // fails to load), so there is no patternIdentity watcher when the swap
     // lands. ensureDefaultPattern reconciles BEFORE start
     // (startEnsuredDefaultPattern -> checkAndUpdateDefaultPattern), then
-    // cold-starts the piece — and Runner.startCore's initial instantiation
-    // does not run the setup phase, so the incoming pattern's
+    // cold-starts the piece — and `Runner.#startCore()`'s initial
+    // instantiation does not run the setup phase, so the incoming pattern's
     // { "$stream": true } markers were never materialized on the reused doc.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1696,6 +1842,7 @@ describe("opening a space root", () => {
     // entries or stream markers for that pattern. On the next boot the
     // identity compares current, so no further swap fires — the doc must be
     // healed at cold start itself.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1718,7 +1865,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: targetId,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
@@ -1743,6 +1890,7 @@ describe("opening a space root", () => {
     // orchestration test. The runnability backstop must roll the root forward
     // to the current official identity and materialize it, including a live
     // handler stream.
+
     await setupHome();
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
 
@@ -1771,7 +1919,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: oldRef.identity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(pinError).toBeUndefined();
     // The pinned OLD pattern really is loadable — "loadable but unrunnable" is
@@ -1905,7 +2053,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: oldRef.identity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(pinError).toBeUndefined();
 
@@ -2003,6 +2151,7 @@ describe("opening a space root", () => {
     // reflect ordering/policy/provenance faults, not "the pinned pattern is
     // wrong", so the backstop must NOT repoint the root. The bare-prefix
     // predicate this replaces would have wrongly rolled forward here.
+
     const { root, oldRef, officialId } = await pinOldRequiredHome();
     const restore = patchRunSynced((opts) =>
       opts?.expectedPatternIdentity?.identity === oldRef.identity
@@ -2040,6 +2189,7 @@ describe("opening a space root", () => {
     // named `/cfc-schema-migration-incompatible` — a bare `includes(token)`
     // would misclassify it as recoverable and repoint the root. It must stay
     // fail-closed.
+
     const { root, oldRef, officialId } = await pinOldRequiredHome();
     const restore = patchRunSynced((opts) =>
       opts?.expectedPatternIdentity?.identity === oldRef.identity
@@ -2080,6 +2230,7 @@ describe("opening a space root", () => {
     // root to a THIRD (loadable) identity, then reject with the migration
     // signal so the roll-forward proceeds to the swap — where the precondition
     // must see the changed identity and abort.
+
     const { root, oldRef, officialId } = await pinOldRequiredHome();
 
     // A distinct, loadable identity for the "concurrent heal" to install.
@@ -2104,7 +2255,7 @@ describe("opening a space root", () => {
             root.withTx(tx).setMetaRaw("patternIdentity", {
               identity: concurrentId,
               symbol: "default",
-            });
+            }, rawMetaWriteAuthorization);
           });
           throw new Error(MIGRATION_REJECTION);
         })();
@@ -2156,6 +2307,7 @@ describe("opening a space root", () => {
     // migrate the reused doc, the operator gets ONE error that names WHY —
     // the pinned pattern's migration failure and the official's — instead of
     // reverse-engineering scattered logs.
+
     const { oldRef, officialId } = await pinOldRequiredHome();
     const restore = patchRunSynced((opts) =>
       // Reject BOTH the same-identity repair AND the official materialize.
@@ -2192,7 +2344,7 @@ describe("opening a space root", () => {
     // clear "already the pinned entry" error instead of looping. The
     // symbol-differs sibling below proves the gate does NOT short-circuit when
     // only the identity matches.
-    // Disable the updater so startup reaches the cold-start repair path.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2217,7 +2369,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: officialRef.identity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     const restore = patchRunSynced((opts) =>
       opts?.expectedPatternIdentity?.identity === officialRef.identity
@@ -2245,6 +2397,7 @@ describe("opening a space root", () => {
     // migration; the heal MUST NOT short-circuit on the shared identity — it
     // must roll forward to the official `default` entry. A gate that compared
     // identity alone treated this as already-official and left it unhealable.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2285,7 +2438,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: legacyRef.identity,
         symbol: "legacyHome",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(pinError).toBeUndefined();
 
@@ -2320,6 +2473,7 @@ describe("opening a space root", () => {
     // The roll-forward's compile of the official source is a failure surface
     // too: if the toolshed serves un-compilable source, the operator gets one
     // clear "could not be compiled" error, not a raw compiler stack.
+
     const { oldRef } = await pinOldRequiredHome();
     stub.setSource("this is not valid typescript @@@ export default");
     const restore = patchRunSynced((opts) =>
@@ -2343,6 +2497,7 @@ describe("opening a space root", () => {
   it("surfaces a clear error when the official pattern yields no entry identity", async () => {
     // Defensive branch: compile succeeds but the artifact has no entry ref.
     // The heal must not proceed with an undefined identity — clear error.
+
     const { oldRef } = await pinOldRequiredHome();
     const pm = runtime.patternManager as unknown as {
       getArtifactEntryRef: (p: unknown) => unknown;
@@ -2372,6 +2527,7 @@ describe("opening a space root", () => {
     // Defensive branch: the swap transaction itself fails to commit (a storage
     // fault, not the precondition abort). The underlying error is chained and
     // the pinned identity is left untouched.
+
     const { oldRef } = await pinOldRequiredHome();
     const realEdit = runtime.editWithRetry.bind(runtime);
     (runtime as unknown as {
@@ -2416,6 +2572,7 @@ describe("opening a space root", () => {
     // just passes, since the stored argument satisfies both schemas. A
     // commit-layer failure is what reliably exercises the fail-closed path
     // without also asserting the argument contract.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2438,7 +2595,11 @@ describe("opening a space root", () => {
       currentPattern,
     )!;
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
 
@@ -2481,6 +2642,7 @@ describe("opening a space root", () => {
     // Cold start of a doc in the already-swapped state whose (current)
     // identity cannot be loaded: the repair's own load sees the same
     // outcome, and each guard must surface the ORIGINAL start error.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2500,7 +2662,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: targetId,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
@@ -2540,6 +2702,7 @@ describe("opening a space root", () => {
     // A root whose patternIdentity meta is present but malformed: start
     // fails, and the repair cannot even name a pattern to load — the
     // ref-undefined guard must surface the original start failure.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2550,7 +2713,11 @@ describe("opening a space root", () => {
     const root = (await controller.getDefaultPattern(false))!;
     await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", { malformed: true });
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        { malformed: true },
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
 
@@ -2569,6 +2736,7 @@ describe("opening a space root", () => {
     // that cannot load is a dead space regardless of kind. The displaced
     // ref is recorded for non-home too — it is the recovery pointer if
     // the replaced root was a custom program.
+
     await setup();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2613,6 +2781,7 @@ describe("opening a space root", () => {
     // A thrown probe is a failed CHECK, not evidence of a dead root — a
     // transient storage/backend failure must not authorize replacing an
     // ambiguous sourceless root. Fail closed, mutate nothing.
+
     await setupHome();
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2648,6 +2817,7 @@ describe("opening a space root", () => {
     // unsupported" rather than "artifact dead" and authorizes nothing. The
     // root that cannot start therefore surfaces its failure rather than being
     // replaced.
+
     await setupHome({ cfcEnforcementMode: "disabled" });
     await controller.recreateDefaultPattern({
       customProgram: {

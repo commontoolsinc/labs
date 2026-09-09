@@ -118,6 +118,7 @@ describe("sanitized locale methods under SES lockdown", () => {
     //   LC_ALL=de_DE.UTF-8 deno eval '...toLocaleString("xx")'
     // — so these tests pin the mechanism (the appended fallback) and the
     // resulting in-compartment behavior.
+
     it("appends the pinned default to every requested-locales shape", () => {
       expect(pinLocales(undefined)).toBe("en-US");
       expect(pinLocales([])).toEqual(["en-US"]);

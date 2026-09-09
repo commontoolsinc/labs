@@ -139,8 +139,10 @@ export class SpaceOutbox {
    * effect (fetch/llm callbacks return synchronously after starting
    * it), and outbox.completed counts only when it settles. */
   #capturing: Array<Promise<unknown>> | undefined;
-  // Per-space egress budgets (Phase 6, serving-loop.md §5).
+
+  /** Per-space egress budgets (`serving-loop.md` §5). */
   readonly #budget: OutboxBudgetPolicy | undefined;
+
   readonly #now: () => number;
 
   /** DISPATCHED-but-unsettled network effects (the outstanding cap's
@@ -153,6 +155,7 @@ export class SpaceOutbox {
 
   /** Token bucket for the egress rate (burst = one second's tokens). */
   #egressTokens = 0;
+
   #egressRefilledAt = 0;
   #closed = false;
 

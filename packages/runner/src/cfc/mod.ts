@@ -6,7 +6,6 @@ export type {
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
-  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
   stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
@@ -33,7 +32,9 @@ export {
   cfcLabelViewForCellWithStatus,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
+  cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromMetadata,
+  cfcLabelViewSymbol,
   cloneCfcLabelView,
   getCarriedCfcLabelView,
   mergeCfcLabelViews,
@@ -75,9 +76,16 @@ export type {
   OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
+  RuntimeWritePolicyAuthorization,
   TrustSnapshot,
   WritePolicyInput,
 } from "./types.ts";
+// `runtimeWritePolicyAuthorization` is deliberately NOT re-exported here.
+// `./cfc` is a public entry point of this package, and the value is what
+// mints a write-policy input the route-2 declaration acts on; publishing it
+// would let anything that can import the package name it. The type above
+// carries no such risk — it is erased, and names nothing at run time. The
+// runtime passes the value through an in-package import.
 export {
   cfcCanonicalClauseDigest,
   collectDeclaredMonotonicityViolations,
@@ -222,6 +230,7 @@ export {
 } from "./space-membership.ts";
 export {
   CFC_PREFIX_PROVENANCE_MAX_WRITES,
+  describeSinkReleaseRefusal,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
@@ -236,7 +245,7 @@ export type {
   CfcPrepareInstrumentation,
   StoredCfcEnvelope,
 } from "./prepare.ts";
-export { readStoredCfcMetadata } from "./metadata.ts";
+export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
 export {
@@ -252,16 +261,56 @@ export type {
 } from "./harness-write-policy.ts";
 export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts";
 export {
+  type CfcExternalFetchIngestMeta,
   type CfcExternalIngestMeta,
+  type CfcExternalIngestTarget,
   externalIngestStamp,
+  stampExternalFetchIngest,
   stampExternalIngest,
 } from "./external-ingest.ts";
+export {
+  CFC_DIAL_LADDERS,
+  cfcPostureReport,
+  inheritedCfcPostureReport,
+  projectedCfcPostureReport,
+  resolveCfcDials,
+  RUNTIME_CFC_DIAL_DEFAULTS,
+} from "./posture-report.ts";
+export type {
+  CfcDialOptions,
+  CfcDialReport,
+  CfcPostureDeviation,
+  CfcPostureOptions,
+  CfcPostureProvenance,
+  CfcPostureReport,
+  CfcPostureSource,
+  CfcSinkReport,
+  ResolvedCfcDials,
+} from "./posture-report.ts";
 export {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   INITIAL_SINK_INVENTORY,
   isInitialSinkInventoryName,
+  KNOWN_SINKS,
+  SINK_UNGATED_RATIONALES,
+  sinkCeilingsOf,
+  ungatedSink,
 } from "./sink-inventory.ts";
-export type { SinkMaxConfidentiality } from "./sink-inventory.ts";
+export type {
+  KnownSinkName,
+  SinkGovernance,
+  SinkGovernanceRegistry,
+  SinkMaxConfidentiality,
+  SinkUngatedRationale,
+  UngatedSinkName,
+} from "./sink-inventory.ts";
+export {
+  buildCfcReadCeiling,
+  type CfcReadCeiling,
+  type CfcReadCeilingLabels,
+  type CfcReadCeilingOptions,
+  type CfcReadOnExceed,
+} from "./read-ceiling.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
 export {
   cfcObjectSchemaIsClosed,
@@ -289,6 +338,7 @@ export {
   type CfcOpaqueLink,
   cfcOpaqueLinkForPath,
   joinCfcObservedConfidentiality,
+  meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {

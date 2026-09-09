@@ -54,10 +54,44 @@ const stableId = resolved.ref().id; // e.g., "of:fid1:abc123"
 **Important:** `CellHandle.id()` returns the FULL schemed URI (`of:fid1:...`) —
 the URI scheme is part of the identity (a `computed:` cell is not its `of:`
 sibling), so programmatic surfaces keep it. The bare, `of:`-stripped form is a
-ROUTING/EMBED convenience produced at the edges: `PageHandle.id()` for routing
+ROUTING/EMBED convenience produced at the edges: `PieceHandle.id()` for routing
 pieceIds, and `mentionIdFromCellId` (`src/v2/utils/mention-id.ts`) for wiki-link
 embeds — the latter throws on `computed:` ids, which the bare embed format
 cannot represent.
+
+For an index row, the resolution goes through `key("piece")` instead of the
+entry itself — the sub-cell names the row. See the next section.
+
+### Index rows: the `piece` indirection
+
+An entry may be a derived index ROW standing for its piece rather than the piece
+itself: `{ [NAME]: string, piece: <reference> }`. `piece` is a reserved key on
+the open `Mentionable` contract — the producer-facing rule is in
+[`docs/common/conventions/mentionable.md`](../../../docs/common/conventions/mentionable.md).
+The row's own strings serve display and matching; `piece` names the destination
+a mention stores.
+
+Two rules govern reaching it, and both come from the client boundary:
+
+- **Detect by KEY, never by value.** An `asCell` position crosses the
+  runtime-client boundary as an empty object, so `entry.piece` in a `.get()`
+  value is `{}` — it carries no handle and no data. The presence of the key is
+  what marks a row.
+- **Reach by ADDRESS, asynchronously.** `entry.key("piece").resolveAsCell()`
+  follows the stored link to the piece's own cell. There is no synchronous road
+  to a row's piece, so the completion surfaces WITHHOLD an unresolved row rather
+  than mint an id that names the row; resolution starts when the list binds, so
+  the window is the resolve round trips.
+
+Both consumers route destinations this way: `cf-code-editor`'s
+`_resolvePieceIds` (cached per index, generation-guarded against late passes)
+and `MentionController`'s `_destinationOf` (per encode and decode).
+
+A row may carry a `shortName` besides its display strings, and a destination
+piece may publish one of its own: the collection's name for the member, read at
+the two ends of one mention. What it is for is in
+[`../src/v2/components/cf-code-editor/docs/mention-refs.md`](../src/v2/components/cf-code-editor/docs/mention-refs.md),
+which owns the completion and the pill that read them.
 
 ## Link Formats
 

@@ -90,8 +90,8 @@ MINE=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
 for field in question users options votes adminName; do
-  deno task cf get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf set --piece "$MINE" -s "$SPACE" "$field" --input -q
+  deno task cf cell get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
+    | deno task cf cell set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
 
 # 3. Recompute so derived values (counts, ranking, nudges) refresh.
@@ -135,10 +135,10 @@ or seed the shared cells directly, write the input cells. **This mutates shared
 state — coordinate before running against the canonical piece.**
 
 ```bash
-echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" users     --input -q
-echo '""' | deno task cf set --piece "$PIECE" -s "$SPACE" adminName --input -q
-echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" options   --input -q
-echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" votes     --input -q
+echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" users     --input -q
+echo '""' | deno task cf cell set --piece "$PIECE" -s "$SPACE" adminName --input -q
+echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" options   --input -q
+echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" votes     --input -q
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
 

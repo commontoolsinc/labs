@@ -14,6 +14,7 @@ describe("resume a result cell by {identity, symbol}", () => {
   // symbol} pattern reference at setup; a fresh runtime resuming that result
   // cell from storage loads the pattern straight from the compiled cache BY
   // IDENTITY (no TS source pulled, no meta-cell roundtrip), and re-runs it.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const RESULT_CAUSE = "resume-by-identity result cell";

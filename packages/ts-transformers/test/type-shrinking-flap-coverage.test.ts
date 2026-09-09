@@ -164,6 +164,13 @@ function createContext(sourceFile: ts.SourceFile): {
   return { context, diagnostics };
 }
 
+//
+// The flapping branches, driven directly
+//
+// Each case constructs the smallest source that reaches its branch, so the
+// branch is covered whether or not a pattern happens to compile cold.
+//
+
 Deno.test("applyShrinkAndWrap drops a deep read into an unknown-typed property under type-driven shrinking", () => {
   // Type-driven shrink descending into an `unknown`/`any` property drops that
   // property rather than widening it (buildShrunkTypeNodeFromType

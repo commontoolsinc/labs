@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -52,7 +52,7 @@ jobs:
 
       - name: 🔑 Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           project_id: commontools-core
           workload_identity_provider: ${{ vars.TEST_RECORDS_BROKER_WIF_PROVIDER }}
@@ -77,7 +77,7 @@ jobs:
             --out sealed-delivery
 
       - name: 📤 Publish the sealed delivery
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-records-key-${{ steps.mint.outputs.fingerprint }}
           path: sealed-delivery/

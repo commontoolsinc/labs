@@ -5,7 +5,7 @@ import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { loadPieces } from "./piece.ts";
-import type { PieceConfig } from "./piece.ts";
+import type { PieceConfig, PieceResolutionDeps } from "./piece.ts";
 
 const logger = getLogger("piece-render", { level: "info", enabled: false });
 
@@ -119,8 +119,9 @@ export function renderVDomToHtml(
 export async function renderPiece(
   config: PieceConfig,
   options: RenderOptions = {},
+  deps: Pick<PieceResolutionDeps, "loadPieces"> = {},
 ): Promise<string | (() => void)> {
-  const pieces = await loadPieces(config);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const piece = await pieces.get(
     config.piece,
     options.start ?? true,

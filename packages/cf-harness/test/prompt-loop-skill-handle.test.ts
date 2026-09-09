@@ -6,7 +6,9 @@
  * the child never holds the handle, and selection is by table membership
  * rather than by registry name.
  */
+
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -15,7 +17,11 @@ import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { normalize } from "@std/path/posix";
 import { CfHarnessEngine } from "../src/engine.ts";
-import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import {
+  CfHarnessPromptLoop,
+  outstandingSkillCustody,
+} from "../src/prompt-loop.ts";
+import type { HarnessSubagentRunRef } from "../src/contracts/subagent.ts";
 import {
   createHarnessHandleTable,
   mintAddressHandle,
@@ -165,7 +171,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -183,7 +188,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       expect(result.finalAssistantText).toBe(
         "Parent received the child summary.",
@@ -225,7 +233,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -271,7 +278,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -290,7 +296,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The payload never crosses as itself: the parent's third request (the
       // one carrying the delegate tool output) holds the scrub marker, not
@@ -317,7 +326,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -342,7 +350,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const parentText = chatViewOfRequest(requestBodies[2]).messages
         .map((message) => message.content).join("\n");
@@ -365,7 +376,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -402,7 +412,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The decoded structured value is what the parent actually consumes.
       // A re-escaped payload sitting in a key, a value, or an array entry
@@ -476,7 +489,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(table);
@@ -495,7 +507,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const parentText = chatViewOfRequest(requestBodies[2]).messages
         .map((message) => message.content).join("\n");
@@ -516,7 +531,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     const requestBodies: unknown[] = [];
     const loop = new CfHarnessPromptLoop({
@@ -531,7 +545,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
       ], requestBodies),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the plan.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const toolMessage = result.transcript.find(
       (message) => message.role === "tool",
@@ -546,7 +563,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-skill-handle-bad-shape",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     const requestBodies: unknown[] = [];
     const loop = new CfHarnessPromptLoop({
@@ -561,7 +577,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
       ], requestBodies),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the plan.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const toolMessage = result.transcript.find(
       (message) => message.role === "tool",
@@ -584,7 +603,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -601,7 +619,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const toolMessage = result.transcript.find(
         (message) => message.role === "tool",
@@ -626,7 +647,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -644,7 +664,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const toolMessage = result.transcript.find(
         (message) => message.role === "tool",
@@ -665,7 +688,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -685,13 +707,86 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      await loop.runPrompt({ prompt: "Delegate the plan." });
+      await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const childText = chatViewOfRequest(requestBodies[1]).messages
         .map((message) => message.content).join("\n");
       expect(childText).toContain(
         `<skill_context source="handle:${minted.token}">`,
       );
+    });
+  });
+
+  describe("outstandingSkillCustody()", () => {
+    const runRef = (
+      skillHandle: string | undefined,
+      status: "running" | "completed" | "failed",
+      withoutSkillHandle = false,
+    ) =>
+      ({
+        type: "cf-harness.subagent-run-ref",
+        parentToolCallId: `call-${status}`,
+        childRunId: `child-${status}`,
+        manifest: {},
+        status,
+        ...(skillHandle !== undefined ? { skillHandle } : {}),
+        ...(withoutSkillHandle ? { withoutSkillHandle: true } : {}),
+      }) as unknown as HarnessSubagentRunRef;
+
+    it("holds a token whose latest delegation failed", () => {
+      expect(outstandingSkillCustody([runRef("cfh:a:aaaaa", "failed")]))
+        .toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("releases a token once a later delegation carrying it completed", () => {
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef("cfh:a:aaaaa", "completed"),
+      ])).toEqual([]);
+    });
+
+    it("holds a token again when a delegation after a completed one failed", () => {
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "completed"),
+        runRef("cfh:a:aaaaa", "failed"),
+      ])).toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("holds a token left in flight, which is all a crash leaves behind", () => {
+      // No terminal ref was ever recorded: the process died mid-delegation and
+      // the run resumed. The running ref is the only trace, and reading it as
+      // settled would drop custody exactly where it is least safe to.
+      expect(outstandingSkillCustody([runRef("cfh:a:aaaaa", "running")]))
+        .toEqual(["cfh:a:aaaaa"]);
+    });
+
+    it("discharges custody once a delegation declared it carries no skill", () => {
+      // The refusal exists to make the parent answer once. Having answered,
+      // the run is not asked again on every later delegation.
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef(undefined, "completed", true),
+      ])).toEqual([]);
+    });
+
+    it("holds a token a delegation after the declaration failed on", () => {
+      // The declaration answers what was outstanding when it was made, not
+      // custody a later delegation goes on to incur.
+      expect(outstandingSkillCustody([
+        runRef("cfh:a:aaaaa", "failed"),
+        runRef(undefined, "completed", true),
+        runRef("cfh:a:bbbbb", "failed"),
+      ])).toEqual(["cfh:a:bbbbb"]);
+    });
+
+    it("ignores delegations that carried no handle", () => {
+      expect(outstandingSkillCustody([
+        runRef(undefined, "failed"),
+        runRef(undefined, "running"),
+      ])).toEqual([]);
     });
   });
 });

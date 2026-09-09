@@ -8,6 +8,7 @@ import { join } from "@std/path";
 import { exec } from "../commands/exec.ts";
 import { test as testCommand } from "../commands/test-command.ts";
 import { cf, checkStderr, stripAnsi, withEnv } from "./utils.ts";
+import { COMMAND_SPELLING_END_DATE } from "../lib/deprecated-spelling.ts";
 
 class ExitError extends Error {
   constructor(readonly code: number) {
@@ -53,12 +54,30 @@ async function withCapturedErrors(
 }
 
 describe("main command", () => {
+  it("mounts the interactive shell at `sh`, and at no name spelling `shell`", async () => {
+    // Two claims, and the second is the reason for the first: `shell` names
+    // the web frontend, and the shuttle design commits to adding no second
+    // meaning to a word that already carries one
+    // (`docs/plans/shuttle/README.md`, decision 19).
+
+    const { main } = await import("../commands/main.ts?shell-mount-test");
+    const names = main.getCommands(true).map((command: { getName(): string }) =>
+      command.getName()
+    );
+    expect(names).toContain("sh");
+    expect(names).not.toContain("shell");
+  });
+
   it("keeps command usage aligned with accepted positional syntax", async () => {
     const { main } = await import(
       "../commands/main.ts?main-command-usage-test"
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
+    // Both mounts of `call`, which states its own usage because the callable
+    // section is not expressible as a Cliffy positional. Written out rather
+    // than derived: this set had held one name twice, so the exemption it was
+    // meant to carry had silently lapsed.
     const customUsageCommands = new Set(["cf piece call", "cf call"]);
 
     for (const command of commands) {
@@ -107,13 +126,13 @@ describe("main command", () => {
   });
 
   it("describes and parses piece call's accepted input forms", async () => {
-    const { piece } = await import(
+    const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-usage-test"
     );
-    const call = piece.getCommand("call")!;
+    const call = pieceDataCommand("call", { spelling: "piece call" });
     const expectedUsage =
       "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
-      "--piece <piece> [address] <callable> [input]";
+      "--cell <cell> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",
@@ -130,7 +149,7 @@ describe("main command", () => {
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
-      `The callable name separates piece-call options from the callable's arguments. Arguments after the callable use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Put schema-derived flags after --. Handlers interpret piped input when no input argument is present.`,
+      `The callable name opens the callable's section and "--" closes it: piece-call options come before the name, the callable's own arguments after it, and the read options (--select, --schema, --filter) past the marker. Arguments in the section use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Handlers interpret piped input when no input argument is present.`,
     );
     expect(code).toBe(0);
 
@@ -144,10 +163,11 @@ describe("main command", () => {
         literalArguments: this.getLiteralArgs(),
       });
     });
-    await piece.parse(["call", "search", '{"query":"tea"}']);
-    await piece.parse(["call", "search", "--help"]);
-    await piece.parse(["call", "search", "-"]);
-    await piece.parse(["call", "search", "--", "--json"]);
+    await call.parse(["search", '{"query":"tea"}']);
+    await call.parse(["search", "--help"]);
+    await call.parse(["search", "-"]);
+    await call.parse(["search", "--query", "milk"]);
+    await call.parse(["search", "--", "--select", "id"]);
     expect(parsedCalls).toEqual([
       {
         positionals: ["search", '{"query":"tea"}'],
@@ -155,31 +175,37 @@ describe("main command", () => {
       },
       { positionals: ["search", "--help"], literalArguments: [] },
       { positionals: ["search", "-"], literalArguments: [] },
-      { positionals: ["search"], literalArguments: ["--json"] },
+      // The verb opened the section, so its own flags are positionals of
+      // this command and the marker sets nothing aside.
+      {
+        positionals: ["search", "--query", "milk"],
+        literalArguments: [],
+      },
+      // And the marker is what hands the read step its words.
+      { positionals: ["search"], literalArguments: ["--select", "id"] },
     ]);
   });
 
   it("reads piece call's invocation session from `CF_INVOCATION_SESSION`, behind `--invocation-session`", async () => {
-    const { piece } = await import(
+    const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-session-test"
     );
-    const call = piece.getCommand("call")!;
+    const call = pieceDataCommand("call");
     const sessions: Array<string | undefined> = [];
-    call.action((options) => {
+    call.action((options: { invocationSession?: string }) => {
       sessions.push(options.invocationSession);
     });
 
     await withEnv("CF_INVOCATION_SESSION", "from-env", async () => {
-      await piece.parse([
-        "call",
+      await call.parse([
         "--invocation-session",
         "from-flag",
         "increment",
       ]);
-      await piece.parse(["call", "increment"]);
+      await call.parse(["increment"]);
     });
     await withEnv("CF_INVOCATION_SESSION", undefined, async () => {
-      await piece.parse(["call", "increment"]);
+      await call.parse(["increment"]);
     });
 
     // The environment is the standing default for a shell or an agent run,
@@ -196,67 +222,276 @@ describe("main command", () => {
     expect(sessions).toEqual(["from-flag", "from-env", undefined]);
   });
 
-  it("rejects multiple inline inputs to piece call", async () => {
+  it("refuses a projection before the verb on piece call", async () => {
+    // Refused on the argv alone, before a piece is resolved or a request
+    // sent: the api-url below is never reached. Two inline payloads are the
+    // other shape, and they are NOT refused here — they belong to the
+    // callable's section, so its own parser is what names them.
     const { main } = await import(
       "../commands/main.ts?piece-call-inline-validation-test"
     );
     await expect(
       main.parse([
-        "piece",
+        "call",
         "--identity",
         "./identity.key",
         "--api-url",
         "https://cf.dev",
         "--space",
         "common-knowledge",
-        "call",
         "--piece",
         "abcdefghijklmnopqrstuvwxyz",
+        "--select",
+        "id",
         "search",
         '{"query":"tea"}',
-        '{"limit":5}',
       ]),
-    ).rejects.toThrow(
-      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    ).rejects.toThrow(/--select shapes the result/);
+  });
+
+  it("mounts each data command under the noun it acts on", async () => {
+    // Both halves matter and only one is observable as a presence: the
+    // superseded spellings still resolve, so a test that only looked for the
+    // blessed ones would pass with the surface unchanged.
+    const { main } = await import(
+      "../commands/main.ts?piece-data-absence"
+    );
+    const named = (
+      // deno-lint-ignore no-explicit-any
+      command: any,
+      includeHidden: boolean,
+    ): string[] =>
+      command.getCommands(includeHidden).map((c: { getName(): string }) =>
+        c.getName()
+      );
+    const childOf = (name: string) =>
+      // deno-lint-ignore no-explicit-any
+      main.getCommands(true).find((c: any) => c.getName() === name);
+
+    const cell = childOf("cell");
+    expect(cell).toBeDefined();
+    expect(named(cell, false).sort()).toEqual(
+      ["get", "get-label", "help", "set", "set-label"],
+    );
+
+    const piece = childOf("piece");
+    expect(piece).toBeDefined();
+    expect(named(piece, false)).toContain("call");
+    // The lifecycle commands that merely start with the same word stay put.
+    expect(named(piece, false)).toContain("setsrc");
+    expect(named(piece, false)).toContain("getsrc");
+    // The label commands act on a cell and moved with `get` and `set`.
+    expect(named(piece, false)).not.toContain("get-label");
+    expect(named(piece, false)).not.toContain("set-label");
+
+    // The superseded top-level spellings resolve and are offered to nobody.
+    for (const superseded of ["get", "set", "call"]) {
+      expect(named(main, true)).toContain(superseded);
+      expect(named(main, false)).not.toContain(superseded);
+    }
+  });
+
+  it("carries the migration notice on a superseded spelling's help page", async () => {
+    // The page is where a caller learning a command looks, and a superseded
+    // mount's page teaches its own spelling in every example. `--help` exits
+    // before any action runs, so the notice cannot ride the action alone.
+    //
+    // Both halves are asserted together: the notice on the superseded page,
+    // and silence on the blessed one. A notice fired from the shared builder
+    // rather than from the mount would put it on both, and a test that only
+    // read the superseded page would call that a pass.
+    for (
+      const [superseded, blessed] of [
+        ["get", "cell get"],
+        ["set", "cell set"],
+        ["call", "piece call"],
+        ["piece get-label", "cell get-label"],
+        ["piece set-label", "cell set-label"],
+        ["piece recreate-root", "space recreate-root"],
+        ["piece set-home", "space set-home"],
+      ] as const
+    ) {
+      const old = await cf(`${superseded} --help`);
+      expect(old.code, superseded).toBe(0);
+      // One line, on stderr, naming both spellings and the date. Asserted on
+      // stderr because the page itself is stdout: a notice written there
+      // would corrupt the machine-readable output these commands reserve it
+      // for.
+      expect(old.stderr.join("\n"), superseded).toContain(
+        `'cf ${superseded}' is deprecated; spell it 'cf ${blessed}'.`,
+      );
+      expect(old.stderr.join("\n"), superseded).toContain(
+        COMMAND_SPELLING_END_DATE,
+      );
+      expect(old.stdout.join("\n"), superseded).not.toContain("is deprecated");
+
+      const current = await cf(`${blessed} --help`);
+      expect(current.code, blessed).toBe(0);
+      checkStderr(current.stderr);
+      expect(current.stderr.join("\n"), blessed).not.toContain(
+        "is deprecated",
+      );
+    }
+  });
+
+  it("says nothing on a line refused before the command is reached", async () => {
+    // The boundary of the claim the README makes, pinned because it is the
+    // one a reader can disprove. `--bogus` is refused in argument parsing, so
+    // neither the action nor a help page runs on a read that reserves stdout:
+    // its own error handler keeps the page off the stream it reserves.
+    //
+    // `set` reserves nothing, so the same refusal prints a page and the notice
+    // rides it. Both are asserted, because a test that read only the silent
+    // half would pass with the notice removed altogether.
+    const reserved = await cf("get --bogus");
+    expect(reserved.code).toBe(2);
+    expect(reserved.stderr.join("\n")).toContain('Unknown option "--bogus"');
+    expect(reserved.stderr.join("\n")).not.toContain("is deprecated");
+    expect(reserved.stdout).toEqual([]);
+
+    const unreserved = await cf("set --bogus");
+    expect(unreserved.code).toBe(2);
+    expect(unreserved.stderr.join("\n")).toContain(
+      "'cf set' is deprecated; spell it 'cf cell set'.",
     );
   });
 
   it("registers visible commands and reports configured environment defaults", async () => {
     await withEnv("CF_IDENTITY", "./identity.key", async () => {
       await withEnv("CF_API_URL", "http://127.0.0.1:8000", async () => {
-        const { main } = await import(
-          "../commands/main.ts?main-command-test"
-        );
+        await withEnv("CF_SPACE", "ambient", async () => {
+          const { main } = await import(
+            "../commands/main.ts?main-command-test"
+          );
 
-        const commandNames = main.getCommands().map((command) =>
-          command.getName()
-        );
-        expect(commandNames).toContain("view");
-        // A command that is not registered is invisible: `cf ingest` would
-        // simply not exist, with no error anywhere to say why.
-        expect(commandNames).toContain("ingest");
-        expect(commandNames).toContain("fuse-daemon");
-        expect(commandNames).toContain("fuse-supervisor");
-        expect(commandNames).not.toContain("dev");
-        expect(commandNames).not.toContain("deploy");
+          const commandNames = main.getCommands().map((command) =>
+            command.getName()
+          );
+          expect(commandNames).toContain("view");
+          // A command that is not registered is invisible: `cf ingest` would
+          // simply not exist, with no error anywhere to say why.
+          expect(commandNames).toContain("ingest");
+          expect(commandNames).toContain("fuse-daemon");
+          expect(commandNames).toContain("fuse-supervisor");
+          expect(commandNames).not.toContain("dev");
+          expect(commandNames).not.toContain("deploy");
 
-        const allCommandNames = main.getCommands(true).map((command) =>
-          command.getName()
-        );
-        expect(allCommandNames).not.toContain("dev");
-        expect(allCommandNames).not.toContain("deploy");
-        main.getHelp();
+          const allCommandNames = main.getCommands(true).map((command) =>
+            command.getName()
+          );
+          expect(allCommandNames).not.toContain("dev");
+          expect(allCommandNames).not.toContain("deploy");
+          main.getHelp();
 
-        const description = main.getDescription();
-        expect(description).toContain("ENVIRONMENT:");
-        expect(description).toContain(
-          "CF_IDENTITY = ./identity.key (set, no need to pass --identity)",
-        );
-        expect(description).toContain(
-          "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
-        );
+          const description = main.getDescription();
+          expect(description).toContain("ENVIRONMENT:");
+          expect(description).toContain(
+            "CF_IDENTITY = ./identity.key (set, no need to pass --identity)",
+          );
+          expect(description).toContain(
+            "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
+          );
+
+          // The CF_SPACE line promises "no need to pass --space" per
+          // command, so every name on it has to be one the variable actually
+          // reaches. Read back off the rendered line rather than restated
+          // here: a list restated in the test is a list that agrees with
+          // itself while disagreeing with the CLI.
+          //
+          // What a name has to earn differs by what it claims, so the check
+          // does too. A noun claims its whole subtree, and the most a noun
+          // can promise structurally is that every subcommand takes the
+          // option — so that is what is asked of it. A name written as one
+          // command is written that way because its noun could not be
+          // promised, so the structural answer is already known to be no and
+          // asking it again proves nothing: those are driven instead, and
+          // must refuse for want of a space when the variable is absent.
+          //
+          // Declaring the option is not reading it. `space set-home` takes
+          // `--space` through the shared target flags and acts on the
+          // identity's own home space regardless, so it satisfies every
+          // structural check and belongs on no list of what the variable
+          // serves. That is the failure this shape exists to catch.
+          const spaceLine = description.split("\n").find((text: string) =>
+            text.includes("CF_SPACE    = ambient")
+          );
+          expect(spaceLine).toBeDefined();
+          const named = spaceLine!
+            .replace(/^.*no need to pass --space on /, "")
+            .replace(/\)\s*$/, "")
+            .split(", ")
+            .map((entry) => entry.trim());
+          expect(named.length).toBeGreaterThan(0);
+
+          // deno-lint-ignore no-explicit-any
+          const declaresSpace = (command: any): boolean =>
+            // deno-lint-ignore no-explicit-any
+            command.getEnvVars(true).some((envVar: any) =>
+              envVar.names.includes("CF_SPACE")
+            );
+
+          for (const entry of named) {
+            if (entry.includes(" ")) continue;
+            const noun = main.getCommands(true).find((
+              child: { getName(): string },
+            ) => child.getName() === entry);
+            expect(noun, entry).toBeDefined();
+            if (declaresSpace(noun)) continue;
+            // deno-lint-ignore no-explicit-any
+            const children = (noun as any).getCommands(true).filter((
+              child: { getName(): string },
+            ) => child.getName() !== "help");
+            expect(children.length, entry).toBeGreaterThan(0);
+            for (const child of children) {
+              expect(declaresSpace(child), `${entry} ${child.getName()}`)
+                .toBe(true);
+            }
+          }
+
+          // The identity and api-url are supplied so the run reaches the
+          // space, and are deliberately not valid: what is read back is which
+          // option the refusal names, and nothing here should get far enough
+          // to open a key file.
+          const reachesSpace = {
+            CF_IDENTITY: "/nonexistent/identity.key",
+            CF_API_URL: "http://127.0.0.1:8000",
+          };
+          for (const entry of named) {
+            if (!entry.includes(" ")) continue;
+            const absent = await cf(entry, { env: reachesSpace });
+            expect(stripAnsi(absent.stderr.join("\n")), entry).toContain(
+              'Missing required option: "--space"',
+            );
+            const ambient = await cf(entry, {
+              env: { ...reachesSpace, CF_SPACE: "ambient" },
+            });
+            expect(stripAnsi(ambient.stderr.join("\n")), entry).not.toContain(
+              'Missing required option: "--space"',
+            );
+          }
+        });
       });
     });
+  });
+
+  it("refuses --list beside the target flag, under either of its names", async () => {
+    // The conflict names the option's Cliffy key, and both spellings share
+    // one. A stale key here is silent: the command runs, the list selector
+    // wins, and a repair --apply mutates a target the line does not name.
+    for (const flag of ["--cell", "--piece"]) {
+      for (const command of ["piece survey", "piece repair"]) {
+        const where = `${command} ${flag}`;
+        const { code, stderr } = await cf(
+          `${command} ${flag} holder --list member`,
+        );
+        // The whole command line is echoed to stderr, so a looser assertion
+        // here passes whether or not the conflict fires. Name the refusal.
+        expect(stripAnsi(stderr.join("\n")), where).toContain(
+          'Option "--list" conflicts with option "--cell".',
+        );
+        expect(code, where).toBe(2);
+      }
+    }
   });
 
   it("shows exec command help before trying to resolve a mounted file", async () => {

@@ -14,6 +14,7 @@ const outPrefix = Deno.args[2] ?? `/tmp/traverse-${fixtureName}`;
 
 /** Optional: forwarded to profile-target to replay a single invocation. */
 const onlyInvocation = Deno.args[3];
+
 const INSPECT_PORT = 9911;
 
 const target = new Deno.Command(Deno.execPath(), {

@@ -15,7 +15,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { shallowMutableClone } from "@/fabric-value.ts";
+import { shallowMutableClone } from "@/index.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";

@@ -24,7 +24,25 @@ import type {
 } from "../config.ts";
 import type { HarnessCredentialOwnerRef } from "./run-manifest.ts";
 
-export type HarnessToolPolicyDecision = "allowed" | "warned" | "denied";
+/**
+ * How policy answered one tool call. `invalid` is not one of policy's answers
+ * about authority: it records a call whose arguments the loop could not read,
+ * which never reached a policy question at all. It is kept in this union so
+ * every tool activity carries an outcome, and told apart from `denied` so a
+ * malformed call is not counted as a mediated refusal.
+ *
+ * `withheld` is a confidentiality boundary's answer about a call's own
+ * result: the call ran, it answered with the reference to the result, and
+ * only the values were held back. `denied` is reserved for a call that did
+ * not run.
+ */
+export type HarnessToolPolicyDecision =
+  | "allowed"
+  | "warned"
+  | "denied"
+  | "invalid"
+  | "withheld";
+
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
 export type HarnessRunTimelineKind =
   | "run_started"
@@ -46,6 +64,7 @@ export interface HarnessToolActivity {
 
   /** Absent when the call named a tool the run offers no descriptor for. */
   effectClass?: HarnessToolEffectClass;
+
   cfcEnforcementMode: CfcEnforcementMode;
   policyDecision: HarnessToolPolicyDecision;
   executionStatus: HarnessToolExecutionStatus;
@@ -107,6 +126,7 @@ export interface HarnessRunReport {
 
   /** Requested effort; provider clients reject routes that cannot apply it. */
   reasoningEffort?: string;
+
   promptCacheMode?: "implicit" | "explicit";
   cacheAffinity?: "run" | "custom";
   modelProvider?: HarnessModelProviderId;
@@ -120,11 +140,13 @@ export interface HarnessRunReport {
 
   /** Direct usage plus usage reported by completed descendant runs. */
   totalUsage?: HarnessModelUsage;
+
   modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
 
   /** The fabric session's resolved CFC posture, when the run had a session. */
   fabricSessionCfc?: HarnessFabricSessionCfcPosture;
+
   createdAt?: string;
   updatedAt?: string;
   endedAt?: string;

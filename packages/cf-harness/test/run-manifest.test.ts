@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import {
   bindLoomLocalRunManifest,
@@ -305,4 +306,79 @@ Deno.test("bindLoomLocalRunManifest rejects every conflicting caller binding", (
   assertEquals(bound.credentialOwner, binding.credentialOwner);
   owner.ownerKey = "mutated-after-bind";
   assertEquals(bound.credentialOwner?.ownerKey, "local");
+});
+
+const manifestWithCfc = (cfc: unknown): string =>
+  JSON.stringify({
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    wishId: "W-2201",
+    cfc,
+  });
+
+Deno.test("parseLoomRunManifestJson carries a read ceiling through normalization", () => {
+  const ceiling: CfcConfClause[] = [
+    "did:key:zOwner",
+    { type: "Facet", owner: "did:key:zOwner", id: "work" },
+    { anyOf: ["did:key:zOwner", "did:key:zOther"] },
+  ];
+  const manifest = parseLoomRunManifestJson(
+    manifestWithCfc({
+      enforcementMode: "enforce-strict",
+      maxConfidentiality: ceiling,
+      onExceed: "skip",
+    }),
+  );
+  assertEquals(manifest.cfc, {
+    enforcementMode: "enforce-strict",
+    maxConfidentiality: ceiling,
+    onExceed: "skip",
+  });
+});
+
+Deno.test("parseLoomRunManifestJson still drops a cfc key it does not know", () => {
+  const manifest = parseLoomRunManifestJson(
+    manifestWithCfc({ enforcementMode: "observe", ceiling: ["did:key:zX"] }),
+  );
+  assertEquals(manifest.cfc, { enforcementMode: "observe" });
+});
+
+Deno.test("parseLoomRunManifestJson refuses a malformed read ceiling rather than dropping it", () => {
+  const cases: { cfc: unknown; message: string }[] = [
+    {
+      cfc: { maxConfidentiality: [] },
+      message: "run manifest cfc.maxConfidentiality: an empty ceiling admits",
+    },
+    {
+      cfc: { maxConfidentiality: "did:key:zOwner" },
+      message:
+        "run manifest cfc.maxConfidentiality: expected an array of clauses",
+    },
+    {
+      cfc: { maxConfidentiality: ["did:key:zOwner", 7] },
+      message: "run manifest cfc.maxConfidentiality[1]: expected an atom",
+    },
+    {
+      cfc: { maxConfidentiality: [{ anyOf: [] }] },
+      message:
+        "run manifest cfc.maxConfidentiality[0]: an `anyOf` with no alternatives",
+    },
+    {
+      cfc: { maxConfidentiality: ["did:key:zOwner"], onExceed: "drop" },
+      message: 'run manifest cfc.onExceed: expected "fail" or "skip"',
+    },
+    {
+      cfc: { onExceed: "skip" },
+      message:
+        "run manifest cfc.onExceed: qualifies `run manifest cfc.maxConfidentiality`",
+    },
+  ];
+  for (const testCase of cases) {
+    assertThrows(
+      () => parseLoomRunManifestJson(manifestWithCfc(testCase.cfc)),
+      Error,
+      testCase.message,
+    );
+  }
 });

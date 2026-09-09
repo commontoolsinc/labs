@@ -29,6 +29,7 @@ import {
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
@@ -856,7 +857,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "cell-cache-test",
         actingPrincipal: signer.did(),
@@ -1618,32 +1618,19 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(runtime.patternManager.getArtifactEntryRef(keyed)).toEqual(ref);
     expect(runtime.patternManager.getArtifactEntryRef(keyless)).toBeUndefined();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
-    const originalReplicateClosures = manager.replicateClosures;
-    let replicationCalls = 0;
-    manager.replicateClosures = () => {
-      replicationCalls++;
-      return Promise.resolve();
-    };
-    try {
-      runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
-      runtime.patternManager.replicatePatternToSpace(
-        keyless,
-        "did:key:z6MkCellCacheKeylessReplicationTarget",
-        spaceA,
-      );
-
-      await runtime.patternManager.flushCompileCacheWrites();
-      expect(replicationCalls).toBe(0);
-    } finally {
-      manager.replicateClosures = originalReplicateClosures;
-    }
+    // An issued replication registers in the manager's write set at once,
+    // so the set's size says whether either call issued one.
+    const writes =
+      runtime.patternManager.accessForTestingOnly.compileCacheWrites;
+    const before = writes.size;
+    runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
+    runtime.patternManager.replicatePatternToSpace(
+      keyless,
+      "did:key:z6MkCellCacheKeylessReplicationTarget",
+      spaceA,
+    );
+    expect(writes.size).toBe(before);
+    await runtime.patternManager.flushCompileCacheWrites();
   });
 
   it("replicates fabric dependencies without importing authority", async () => {
@@ -1701,13 +1688,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     wtx.prepareCfc();
     await wtx.commit();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     await manager.replicateClosures(importerIdentity, spaceA, spaceB);
 
     const rtx = runtime.edit();
@@ -1851,14 +1832,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   it("rejects replication from an incomplete origin closure", async () => {
     const targetSpace = "did:key:z6MkCellCacheIncompleteReplicationTarget";
     const { modules, entryIdentity } = toModules(PROGRAM);
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-        visited?: Set<string>,
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     const visitKey = `${spaceA}\0${targetSpace}\0${entryIdentity}`;
     await expect(
@@ -1895,7 +1869,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const coverageRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: coverageStorageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "cell-cache-coverage-replication-test",
         actingPrincipal: signer.did(),
@@ -1926,13 +1899,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       writeTx.prepareCfc();
       expect((await writeTx.commit()).error).toBeUndefined();
 
-      const manager = coverageRuntime.patternManager as unknown as {
-        replicateClosures(
-          entryIdentity: string,
-          fromSpace: string,
-          toSpace: string,
-        ): Promise<void>;
-      };
+      const manager = coverageRuntime.patternManager.accessForTestingOnly;
       await expect(
         manager.replicateClosures(entryIdentity, spaceA, targetSpace),
       ).rejects.toThrow("coverage spans unavailable in origin space");
@@ -1948,15 +1915,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const requiredDelegations = new Map([
       [entryIdentity, new Set(["required-predecessor"])],
     ]);
-    const manager = runtime.patternManager as unknown as {
-      hasStoredCompileCacheClosure(
-        space: string,
-        modules: readonly CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-        moduleDelegations: ReadonlyMap<string, ReadonlySet<string>>,
-      ): Promise<boolean>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     const initialWrite = runtime.edit();
     writeSourceDocs(
@@ -2096,14 +2055,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     });
     expect(second.entryIdentity).toBe(first.entryIdentity);
 
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     await manager.persistCompileCacheTracked(
       targetSpace,
       first.modules,
@@ -2174,22 +2126,8 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         { name: "/second.ts", contents: "export const second = 2;" },
       ],
     });
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      writeBackCompileCache(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      pendingCacheWriteBacks: Set<Promise<unknown>>;
-    };
-    const originalWriteBack = manager.writeBackCompileCache;
+    const manager = runtime.patternManager.accessForTestingOnly;
+    const writeBacks = observeCacheWriteBacks(runtime);
     const firstStarted = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const secondStarted = Promise.withResolvers<void>();
@@ -2197,7 +2135,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     let writeCount = 0;
     let firstWrite: Promise<void> | undefined;
     let secondWrite: Promise<void> | undefined;
-    manager.writeBackCompileCache = async () => {
+    manager.compileCacheWriter = async () => {
       writeCount++;
       if (writeCount === 1) {
         firstStarted.resolve();
@@ -2223,7 +2161,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         { runtimeVersion },
       );
 
-      expect(manager.pendingCacheWriteBacks.size).toBe(2);
+      expect(writeBacks.inFlight()).toBe(2);
       releaseFirst.resolve();
       await secondStarted.promise;
       releaseSecond.resolve();
@@ -2237,29 +2175,15 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
           (write): write is Promise<void> => write !== undefined,
         ),
       );
-      manager.writeBackCompileCache = originalWriteBack;
+      writeBacks.restore();
+      manager.compileCacheWriter = undefined;
     }
   });
 
   it("retains persistence entries for the runner session", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      writeBackCompileCache(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      persistedCompileCacheClosures: Map<string, string>;
-    };
-    const originalWriteBack = manager.writeBackCompileCache;
-    manager.writeBackCompileCache = () => Promise.resolve();
+    const manager = runtime.patternManager.accessForTestingOnly;
+    manager.compileCacheWriter = () => Promise.resolve();
     try {
       for (let index = 0; index <= 1000; index++) {
         await manager.persistCompileCacheTracked(
@@ -2270,7 +2194,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         );
       }
     } finally {
-      manager.writeBackCompileCache = originalWriteBack;
+      manager.compileCacheWriter = undefined;
     }
 
     expect(manager.persistedCompileCacheClosures.size).toBe(1001);
@@ -2285,15 +2209,16 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     ).toBe(true);
   });
 
-  // Regression: before bd98e01a4, compiled docs were stamped with a per-user
-  // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of the
-  // SAME content into the same space was rejected by the CFC label merge
-  // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
-  // atom was already present and could not be merged with a different user's
-  // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
-  // the cache shared: a re-write of the same content by any user merges
-  // cleanly because both sides carry the identical atom.
   it("second user's writeback of the same content commits cleanly (per-user DID collision regression)", async () => {
+    // Regression: before bd98e01a4, compiled docs were stamped with a per-user
+    // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of
+    // the SAME content into the same space was rejected by the CFC label merge
+    // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
+    // atom was already present and could not be merged with a different user's
+    // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
+    // the cache shared: a re-write of the same content by any user merges
+    // cleanly because both sides carry the identical atom.
+
     const { modules, entryIdentity } = toModules(PROGRAM);
 
     // First writer (the deployer) populates the cache.
@@ -2384,7 +2309,6 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smA,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "e2e-user-a",
         actingPrincipal: e2eSignerA.did(),
@@ -2393,7 +2317,6 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     rtB = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smB,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "e2e-user-b",
         actingPrincipal: e2eSignerB.did(),

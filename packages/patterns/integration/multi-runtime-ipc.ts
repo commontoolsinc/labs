@@ -8,8 +8,8 @@
  * nothing outside a worker may import a value from there.
  */
 
+import type { FabricValue } from "@commonfabric/data-model";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 
 /**

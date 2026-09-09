@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/runner";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
+import { cfcPostureReport } from "@commonfabric/runner/cfc";
 import { publishCfcPosture } from "@/lib/cfc-posture.ts";
 import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
 import router from "@/routes/meta/meta.index.ts";
@@ -64,18 +65,30 @@ Deno.test("meta routes", async (t) => {
       });
       try {
         const json = await (await app.request("/api/meta")).json();
-        assertEquals(json.cfc, {
-          enforcementMode: "enforce-explicit",
-          flowLabels: "persist",
-          writeFloor: "enforce",
-          triggerReadGating: true,
-          decomposedEnvelopes: false,
-          policyEvaluation: "enforce",
-          labelMetadataProtection: "enforce",
-          declaredMonotonicity: "enforce",
-          policyDigest: "digest-1",
-          sinkCeilings: ["fetchJson", "fetchText"],
-        });
+        // The shared record, whole: the route serves what the runner built,
+        // so the expectation is that record rather than a second statement of
+        // its fields (`packages/runner/test/cfc-posture-report.test.ts` is
+        // where the record's own shape is pinned).
+        assertEquals(
+          json.cfc,
+          JSON.parse(JSON.stringify(cfcPostureReport({
+            cfcEnforcementMode: "enforce-explicit",
+            cfcFlowLabels: "persist",
+            cfcWriteFloor: "enforce",
+            cfcTriggerReadGating: true,
+            cfcDecomposedEnvelopes: false,
+            cfcPolicyEvaluation: "enforce",
+            cfcLabelMetadataProtection: "enforce",
+            cfcDeclaredMonotonicity: "enforce",
+            cfcPolicySnapshot: { records: [], digest: "digest-1" },
+            cfcSinkMaxConfidentiality: { fetchText: [], fetchJson: [] },
+          }))),
+        );
+        // The two properties the route exists to carry, stated here because a
+        // reader of this file should not have to derive them: an ungated sink
+        // is named rather than absent, and it is published as a deviation.
+        assertEquals(json.cfc.sinks.length, 10);
+        assertEquals(json.cfc.deviations.length, 4);
       } finally {
         publishCfcPosture(null);
       }

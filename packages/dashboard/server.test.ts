@@ -324,7 +324,7 @@ Deno.test("a tile stays wide through failures and keeps its last good view", asy
   const firstFailure = tileHtml("recent-runs");
   assert(firstFailure.startsWith(`unknown wide" data-tile-id="recent-runs">`));
   assertStringIncludes(firstFailure, `<p class="big unknown">—</p>`);
-  assertStringIncludes(firstFailure, `<p class="sub">not found</p>`);
+  assertStringIncludes(firstFailure, `<p class="sub" title="not found">not found</p>`);
 
   const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs" };
   await tick([fake("recent-runs", () => good)]);
@@ -335,8 +335,14 @@ Deno.test("a tile stays wide through failures and keeps its last good view", asy
   })]);
   const html = tileHtml("recent main runs");
   assert(html.startsWith(`unknown wide" data-tile-id="recent-runs">`));
-  assertStringIncludes(html, `<p class="big unknown">passing</p>`);
-  assertStringIncludes(html, `<p class="sub">source unreachable</p>`);
+  assertStringIncludes(
+    html,
+    `<p class="big unknown">passing</p>`,
+  );
+  assertStringIncludes(
+    html,
+    `<p class="sub" title="source unreachable">source unreachable</p>`,
+  );
 });
 
 Deno.test("the ticker leaves a tile alone until its interval has elapsed", async () => {

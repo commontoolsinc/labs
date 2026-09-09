@@ -17,6 +17,7 @@ import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
 } from "@/api.ts";
+import { constructorOfObject } from "@commonfabric/utils/objects";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -36,8 +37,27 @@ import {
 } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import type { FabricPlainObject, FabricValue } from "@/interface.ts";
-import { errorClassFromType } from "@/native-conversion.ts";
+import type {
+  FabricPlainObject,
+  FabricValue,
+  FromNativeErrorOptions,
+} from "@/interface.ts";
+import {
+  errorClassFromType,
+  fabricFromNativeValue,
+} from "@/native-conversion.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
+
+/**
+ * Helper for `FabricError.fromNativeError()`, which converts a nested value
+ * the way its default does: a valid `FabricValue` is held as it stands, and
+ * anything else goes through `fabricFromNativeValue()` without freezing.
+ */
+function convertNestedNativeValue(value: unknown): FabricValue {
+  return isValidFabricValue(value)
+    ? value
+    : fabricFromNativeValue(value, false);
+}
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
@@ -136,10 +156,8 @@ export class FabricError extends FabricNativeWrapper<Error>
 
   /**
    * Constructs an instance from a `FabricErrorState` record. All state values
-   * must already be in `FabricValue` form -- the conversion layer is
-   * responsible for ensuring this when constructing from a native `Error`. Use
-   * `FabricError.fromNativeError()` for shallow conversion from a native
-   * `Error`.
+   * must already be in `FabricValue` form. Use `FabricError.fromNativeError()`
+   * to construct from a native `Error`.
    */
   constructor(state: FabricErrorState) {
     super();
@@ -503,14 +521,54 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   /**
-   * Shallow conversion from a native `Error`. Used by the shallow conversion
-   * layer (`shallowFabricFromNativeValueModern`). The error's `.cause` and
-   * custom properties are stored as-is (cast to `FabricValue`); the deep
-   * conversion path is responsible for converting them when needed.
+   * Converts a native `Error` into an instance. The fixed slots are read off
+   * the error, and `cause` and every custom enumerable property go through
+   * `options.convert`. By default a nested value that is already a valid
+   * `FabricValue` is held as it stands, and anything else is converted the
+   * way `fabricFromNativeValue()` converts it, without freezing, so that the
+   * result is a valid `FabricValue` throughout. The instance itself is not
+   * frozen.
+   *
+   * @throws If `convert` throws, which by default it does for a nested value
+   * that cannot be converted and for a cycle through `cause`.
    */
-  static fromNativeError(error: Error): FabricError {
-    const type = error.constructor.name;
-    const name = error.name === type ? null : error.name;
+  static fromNativeError(
+    error: Error,
+    options?: FromNativeErrorOptions,
+  ): FabricError {
+    const convert = options?.convert ?? convertNestedNativeValue;
+
+    // The class is read from the prototype, not from the value. An own
+    // `constructor` property is ordinary data, and this name is stored and
+    // used to rebuild the error on the way back, so reading it off the value
+    // would let a value choose the class it comes back as. A severed prototype
+    // names no class, and `Error` is what such a value still is.
+    let className: unknown;
+    try {
+      className = (constructorOfObject(error) as { name?: unknown } | undefined)
+        ?.name;
+    } catch {
+      // A `constructor` accessor on the prototype that throws. Reading it is
+      // this conversion's business and failing it is not: the value is an
+      // error, and the conversion owes a result rather than the accessor's
+      // exception.
+      className = undefined;
+    }
+    const type = (typeof className === "string") && (className !== "")
+      ? className
+      : "Error";
+    const {
+      name: rawName,
+      message: rawMessage,
+      stack,
+      cause: rawCause,
+    } = error;
+    const name = (rawName === type) ? null : rawName;
+    // `message` is normally inherited from `Error.prototype`, so a severed
+    // prototype leaves a message-less error without one at all. `FabricError`
+    // declares a `string`, and the empty string is what such an error means.
+    const message = (typeof rawMessage === "string") ? rawMessage : "";
+    const cause = (rawCause === undefined) ? undefined : convert(rawCause);
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
       if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
@@ -518,17 +576,10 @@ export class FabricError extends FabricNativeWrapper<Error>
       }
       extras.push([
         key,
-        (error as unknown as Record<string, FabricValue>)[key],
+        convert((error as unknown as Record<string, unknown>)[key]),
       ]);
     }
-    return new FabricError({
-      type,
-      name,
-      message: error.message,
-      stack: error.stack,
-      cause: error.cause as FabricValue | undefined,
-      extras,
-    });
+    return new FabricError({ type, name, message, stack, cause, extras });
   }
 }
 

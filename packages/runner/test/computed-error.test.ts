@@ -48,8 +48,7 @@ Deno.test("computed throws error", async () => {
 
   let errorCaught = false;
 
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((_err: Error, _action: unknown) => {
+  runtime.scheduler.onError((_err: Error) => {
     errorCaught = true;
   });
 

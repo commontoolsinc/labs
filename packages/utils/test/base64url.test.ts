@@ -35,10 +35,6 @@ function arrayString(arr: readonly number[]): string {
   return result.join("");
 }
 
-//
-// `toUnpaddedBase64url()` and polyfill
-//
-
 for (const toBase64 of [toUnpaddedBase64url, toBase64Polyfill]) {
   describe(`${toBase64.name}()`, () => {
     for (const { arr, b64 } of TEST_PAIRS) {
@@ -49,10 +45,6 @@ for (const toBase64 of [toUnpaddedBase64url, toBase64Polyfill]) {
     }
   });
 }
-
-//
-// `fromBase64url()` and polyfill
-//
 
 for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
   describe(`${fromBase64.name}()`, () => {
@@ -71,10 +63,6 @@ for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
     }
   });
 }
-
-//
-// `toUnpaddedBase64urlFromText()`
-//
 
 describe("toUnpaddedBase64urlFromText()", () => {
   const textEncoder = new TextEncoder();
@@ -111,10 +99,6 @@ describe("toUnpaddedBase64urlFromText()", () => {
     expect(long).toBe(toUnpaddedBase64url(textEncoder.encode("z".repeat(400))));
   });
 });
-
-//
-// Base64url round-trip
-//
 
 describe("base64url round-trip", () => {
   it("round-trips various byte arrays", () => {

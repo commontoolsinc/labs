@@ -299,6 +299,7 @@ export interface TypeScriptCompilerOptions {
    * directive.
    */
   storedSource?: boolean;
+
   // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
@@ -309,6 +310,7 @@ export interface TypeScriptCompilerOptions {
    * cannot resolve. The target must be a file in the program.
    */
   specifierAliases?: ReadonlyMap<string, string>;
+
   // Transformations to run before JS transforms.
   // Can return either an array of transformer factories (simple case)
   // or a TransformerPipelineResult with factories and getDiagnostics.

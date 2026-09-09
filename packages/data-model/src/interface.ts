@@ -13,6 +13,8 @@
  */
 
 import type {
+  CompactDebugStringOptions,
+  DebugValueOptions,
   FabricArray,
   FabricContainerValue,
   FabricInstance as ApiFabricInstance,
@@ -20,6 +22,7 @@ import type {
   FabricPrimitive as ApiFabricPrimitive,
   FabricSpecialObject as ApiFabricSpecialObject,
   FabricValue,
+  FromNativeErrorOptions,
   NonNullableFabricValue,
 } from "./api.ts";
 
@@ -140,17 +143,21 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
 //
 
 /**
- * The pattern-visible fabric value types, declared in `api.ts` and re-exported
- * here so that this module carries the whole `FabricValue` vocabulary. `api.ts`
- * is where they have to be declared: it reaches patterns by being inlined into
- * the type module the pattern compiler serves, and so may name no import,
- * which makes it the leaf of this pair.
+ * The pattern-visible fabric value types, and the option types of the debug
+ * renderers over them, declared in `api.ts` and re-exported here so that this
+ * module carries the whole `FabricValue` vocabulary. `api.ts` is where they
+ * have to be declared: it reaches patterns by being inlined into the type
+ * module the pattern compiler serves, and so must not import anything, which
+ * makes it the leaf of this pair.
  */
 export type {
+  CompactDebugStringOptions,
+  DebugValueOptions,
   FabricArray,
   FabricContainerValue,
   FabricPlainObject,
   FabricValue,
+  FromNativeErrorOptions,
   NonNullableFabricValue,
 };
 

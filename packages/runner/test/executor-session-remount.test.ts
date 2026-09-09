@@ -8,7 +8,7 @@
 // authorizes that pre-genesis session BY DESIGN — the service principal
 // holds no READ under the landed ACL, and there is no `"*"` grant.
 //
-// Nothing then re-established it. `SpaceReplica.sessionHandle()`
+// Nothing then re-established it. `SpaceReplica.#memoizedSessionHandle()`
 // memoizes the mount and drops it only in close(), so every later
 // cross-space read into that space reused the dead session and failed
 // `ConnectionError: memory session revoked: unauthorized`, forever. In
@@ -65,6 +65,7 @@ import type { MemorySpace, URI } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { ACLManager } from "../src/index.ts";
 import { TEST_SESSION_OPEN_AUDIENCE } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const serviceSigner = await Identity.fromPassphrase("session remount service");
 const homeSigner = await Identity.fromPassphrase("session remount home");
@@ -74,20 +75,6 @@ const strangerSigner = await Identity.fromPassphrase(
 );
 const servingSigner = await Identity.fromPassphrase("session remount serving");
 const servingSpace = servingSigner.did() as MemorySpace;
-
-const waitUntil = async (
-  predicate: () => boolean | Promise<boolean>,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /**
  * The optional IStorageManager hook the fix adds. Read through a
@@ -104,6 +91,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
   let server: MemoryV2Server.Server;
   let cleanups: Array<() => Promise<void>>;
   let storeSeq = 0;
+
   /** `session.open` attempts by the SERVING identity — the observable for
    * "did this remount actually mint a new session?". Scoped to the service
    * principal because the ACL-setting client runtimes open sessions of
@@ -275,6 +263,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
    * issued, and a revoked session refuses it exactly as it refuses any
    * other. */
   let probeCounter = 0;
+
   const mintProbeId = (runtime: Runtime, space: MemorySpace): URI => {
     probeCounter += 1;
     return runtime.getCell<string>(
@@ -452,8 +441,8 @@ describe("the session remount (profile-starvation fifth face)", () => {
   it("a doc watched on the DEAD session is refetched after the remount, not answered stale from the watch tracker", async () => {
     // Cubic P1 (three violations, one property). A pull whose selector the
     // watch tracker already covers returns WITHOUT reaching
-    // `sessionHandle()` — so for such a doc the remount's latch is never
-    // consumed, and worse, the read is answered from a replica whose
+    // `#memoizedSessionHandle()` — so for such a doc the remount's latch is
+    // never consumed, and worse, the read is answered from a replica whose
     // watch died with the revoked session. My first pass flagged this as
     // a residual and claimed "each address re-installs on its next pull";
     // that claim was FALSE for exactly the tracker-covered case, which is

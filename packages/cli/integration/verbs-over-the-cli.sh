@@ -52,6 +52,21 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+
+# The host's server-execution posture (same probe as integration.sh): a few
+# steps assert arm-specific mechanics — the OFF arm's receipt-precondition
+# `deduplicated` key, the client-env plainResultReceipts authority, and what
+# a same-id retry of a THROWN handling does — and each says which truth it
+# is asserting. Deadlines as in integration.sh: an accepted-then-silent
+# server must not hold the walkthrough with no output.
+server_execution_on() {
+  case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
+}
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
@@ -103,19 +118,19 @@ check "false" "$(echo "$VERBS" | jq -r '.verbs[] |
 # where the listing answers for the whole piece. It names where the value
 # arrives — the Invocation JSON's result — because that is what a handler's
 # caller collects rather than stdout.
-HELP=$($CF call --piece "$BOARD" $ARGS createNote --help 2>/dev/null)
+HELP=$($CF piece call --piece "$BOARD" $ARGS createNote --help 2>/dev/null)
 check "1" "$(printf '%s\n' "$HELP" | grep -c '^Output:')" \
   "createNote's help page carries an Output section"
 check "1" "$(printf '%s\n' "$HELP" | grep -c '^    note ')" \
   "createNote's help page enumerates the result field it declared"
 # And a value-less verb's page carries no Output section at all, the same
 # distinction the listing draws.
-VOID_HELP=$($CF call --piece "$BOARD" $ARGS touch --help 2>/dev/null)
+VOID_HELP=$($CF piece call --piece "$BOARD" $ARGS touch --help 2>/dev/null)
 check "0" "$(printf '%s\n' "$VOID_HELP" | grep -c '^Output:')" \
   "a value-less verb's help page carries no Output section"
 
 step "3. A create hands back the piece it created"
-R=$($CF call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
+R=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
   createNote '{"title":"First note","body":"written at create"}' 2>/dev/null)
 check "settled" "$(echo "$R" | jq -r '.status')" "createNote settled"
 check "First note" "$(echo "$R" | jq -r '.result.note["$NAME"] // empty')" \
@@ -124,7 +139,7 @@ check "written at create" "$(echo "$R" | jq -r '.result.note.body // empty')" \
   "the returned piece carries the body it was created with"
 
 step "4. A verb returns what it wrote, including what only it could compute"
-L=$($CF call --quiet --piece "$BOARD" $ARGS --invocation label-1 \
+L=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation label-1 \
   setLabel '{"label":"  Field notes  "}' 2>/dev/null)
 check "Field notes" "$(echo "$L" | jq -r '.result.label // empty')" \
   "setLabel returns the label AS PERSISTED, trimmed by the pattern"
@@ -134,7 +149,7 @@ check "1" "$(echo "$L" | jq -r '.result.revision // empty')" \
 step "5. Address the piece you were handed, and call it"
 # --show-links annotates the Invocation JSON with the document behind each
 # path, which is what turns a returned piece from a value into an address.
-LINKED=$($CF call --quiet --show-links --piece "$BOARD" $ARGS \
+LINKED=$($CF piece call --quiet --show-links --piece "$BOARD" $ARGS \
   --invocation create-linked \
   createNote '{"title":"Addressable note","body":"first line"}' 2>/dev/null)
 # The entry is one canonical reference string and is used verbatim, of: scheme
@@ -144,7 +159,7 @@ NOTE_ID=$(echo "$LINKED" | jq -r '.links["/note"] // empty')
 if [ -n "$NOTE_ID" ]; then ok "the result names the note's document: $NOTE_ID"; else
   bad "no link for /note in the annotated result"
 fi
-A=$($CF call --quiet --piece "$NOTE_ID" $ARGS --invocation append-1 \
+A=$($CF piece call --quiet --piece "$NOTE_ID" $ARGS --invocation append-1 \
   append '{"text":"second line"}' 2>/dev/null)
 check "first line
 second line" "$(echo "$A" | jq -r '.result.body // empty')" \
@@ -154,7 +169,7 @@ step "6. Read an address instead of what is behind it"
 # A read follows a link onward unless the selection says where to stop, so a
 # created note arrives as a copy of its contents with no address in it. A
 # "$link" marker at a position asks for that position's address instead.
-ADDR=$($CF get --quiet --piece "$BOARD" $ARGS notes \
+ADDR=$($CF cell get --quiet --piece "$BOARD" $ARGS notes \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null)
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link")] | all')" \
   "every element carries an address"
@@ -164,7 +179,7 @@ check "true" "$(echo "$ADDR" | jq -c \
   '[.[] | .["$link"] | type == "string" and startswith("/of:")] | all')" \
   "the address is one canonical reference string — no inlined schema"
 # A marker beside a projection asks for both, because both were asked for.
-BOTH=$($CF get --quiet --piece "$BOARD" $ARGS notes --schema \
+BOTH=$($CF cell get --quiet --piece "$BOARD" $ARGS notes --schema \
   '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "true" "$(echo "$BOTH" | jq -c \
@@ -176,7 +191,7 @@ FIRST=$(echo "$BOTH" | jq -r \
 if [ -n "$FIRST" ]; then ok "the read names the first note: $FIRST"; else
   bad "no address for the first note in the projected read"
 fi
-B=$($CF call --quiet --piece "$FIRST" $ARGS --invocation append-read \
+B=$($CF piece call --quiet --piece "$FIRST" $ARGS --invocation append-read \
   append '{"text":"appended through the read"}' 2>/dev/null)
 check "written at create
 appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
@@ -185,7 +200,7 @@ appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
 # an address at one position and projects at another. The list is element-wise
 # across an array, so the marked collection answers with one address per note.
 # noteCount is computed, so --step brings it up to date the way step 7 does.
-AT=$($CF get --quiet --piece "$BOARD" $ARGS --step \
+AT=$($CF cell get --quiet --piece "$BOARD" $ARGS --step \
   --select 'notes@,noteCount' 2>/dev/null)
 check "true" "$(echo "$AT" | jq -c \
   '(.notes | length > 0) and ([.notes[] | has("$link")] | all)')" \
@@ -193,28 +208,39 @@ check "true" "$(echo "$AT" | jq -c \
 check "true" "$(echo "$AT" | jq -c '.noteCount >= 1')" \
   "and a sibling path projects beside it in the one result"
 # The bare suffix names the position the read is already at.
-ROOT=$($CF get --quiet --piece "$BOARD" $ARGS --select '@' 2>/dev/null)
+ROOT=$($CF cell get --quiet --piece "$BOARD" $ARGS --select '@' 2>/dev/null)
 check "true" "$(echo "$ROOT" | jq -c 'has("$link")')" \
   "a bare @ returns the read source's own address"
 
 step "7. A replayed invocation id returns the ORIGINAL result — in its session"
 # Captured rather than hard-coded: the property is that the replay changes
 # nothing, which stays true however many notes earlier steps created.
-BEFORE=$($CF get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)
-D=$($CF call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
+BEFORE=$($CF cell get --quiet --piece "$BOARD" $ARGS noteCount --step \
+  2>/dev/null)
+D=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
   createNote '{"title":"IMPOSTER"}' 2>/dev/null)
 check "First note" "$(echo "$D" | jq -r '.result.note["$NAME"] // empty')" \
   "the replay returns the first result, not the imposter's"
-check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
-  "the call reports itself deduplicated"
-check "$BEFORE" "$($CF get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
+if server_execution_on; then
+  # ON: no receipt precondition exists (events.md §4 subsumption) — the
+  # replay is skipped at the dedupe horizon and reads the ORIGINAL result
+  # back from the serving-side receipt (the ruled result carriage,
+  # 2026-08-29); the two checks around this one are the witness. The
+  # OFF-arm mechanism key must NOT be fabricated.
+  check "false" "$(echo "$D" | jq -r '.deduplicated // false')" \
+    "the replay does not claim receipt-level dedup under server execution"
+else
+  check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
+    "the call reports itself deduplicated"
+fi
+check "$BEFORE" "$($CF cell get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
   "the replay created no note (count unchanged at $BEFORE)"
 
 # The same word, from another caller. `create-1` is this session's name for
 # its first create, and nothing stops a second agent picking it: that agent is
 # calling for itself, and must get its own call rather than a report that
 # someone else's had settled.
-OTHER=$(CF_INVOCATION_SESSION=$($CF invocation-session new) $CF call \
+OTHER=$(CF_INVOCATION_SESSION=$($CF invocation-session new) $CF piece call \
   --quiet --piece "$BOARD" \
   $ARGS --invocation create-1 \
   createNote '{"title":"Another agent"}' 2>/dev/null)
@@ -223,51 +249,86 @@ check "Another agent" "$(echo "$OTHER" | jq -r '.result.note["$NAME"] // empty')
 check "false" "$(echo "$OTHER" | jq -r '.deduplicated // false')" \
   "and does not report itself deduplicated"
 check "$((BEFORE + 1))" \
-  "$($CF get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
+  "$($CF cell get --quiet --piece "$BOARD" $ARGS noteCount --step \
+    2>/dev/null)" \
   "and created its note, so the write really happened"
 
 step "8. A piece result survives the option being off; a plain record does not"
-P=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF call --quiet \
+P=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF piece call --quiet \
   --piece "$BOARD" $ARGS --invocation create-flagoff \
   createNote '{"title":"Flag-off note"}' 2>/dev/null)
 check "Flag-off note" "$(echo "$P" | jq -r '.result.note["$NAME"] // empty')" \
   "the piece result arrives with plainResultReceipts OFF"
-Q=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF call --quiet \
+Q=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF piece call --quiet \
   --piece "$BOARD" $ARGS --invocation label-flagoff \
   setLabel '{"label":"Written anyway"}' 2>/dev/null)
-check "null" "$(echo "$Q" | jq -r '.result // "null"')" \
-  "the plain record is absent with the option OFF"
+if server_execution_on; then
+  # ON: the deployed client ADOPTS the server's plainResultReceipts
+  # (runtime-presets.ts, authority "server" — "a client on the other value
+  # reads back a receipt shaped by a rule it does not share"), and the
+  # SERVING side wrote the receipt under the server's posture — so the
+  # client env cannot turn the plain record off; it arrives regardless.
+  check "Written anyway" "$(echo "$Q" | jq -r '.result.label // "null"')" \
+    "the plain record arrives despite the client env: the posture authority is the server's"
+else
+  check "null" "$(echo "$Q" | jq -r '.result // "null"')" \
+    "the plain record is absent with the option OFF"
+fi
 check "Written anyway" \
-  "$($CF get --quiet --piece "$BOARD" $ARGS label --input 2>/dev/null | jq -r '.')" \
+  "$($CF cell get --quiet --piece "$BOARD" $ARGS label --input 2>/dev/null | jq -r '.')" \
   "but the write landed regardless — an absent result is not a failed mutation"
 
 step "9. A value-less verb settles with no result"
-V=$($CF call --quiet --piece "$BOARD" $ARGS --invocation touch-1 \
+V=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation touch-1 \
   touch '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "the value-less verb settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. A refused call does not spend its invocation id"
-$CF call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
+step "10. A thrown call and its invocation id"
+$CF piece call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
   createNote '{"title":""}' >/dev/null 2>&1
 rc=$?
 check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "an empty title exits nonzero"
-C=$($CF call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
+COUNT_AFTER_THROW=$($CF cell get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)
+C=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
   createNote '{"title":"Corrected"}' 2>/dev/null)
-check "Corrected" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
-  "the SAME id then executes, because the refusal never consumed it"
+if server_execution_on; then
+  # ON: the throw happened SERVER-side and "the error IS the consequence"
+  # (events.md §5) — the errored handling durably CONSUMED the id, so a
+  # same-id retry never re-executes. Its mechanical shape is a race the
+  # spec allows either way: admission refuses the duplicate while the
+  # errored entry is still above the horizon, or admits it and the
+  # processing skip passes it (settled, no result — no receipt exists
+  # for an errored handling). Both agree on the semantic asserted here:
+  # nothing runs, nothing is created. The caller's correct move after an
+  # error is a FRESH id — asserted below. This is a real OFF→ON contract
+  # delta, recorded in the flip register (verification-coverage.md FLIP
+  # block).
+  check "" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
+    "the same-id retry does not execute: the errored handling consumed the id"
+  check "$COUNT_AFTER_THROW" \
+    "$($CF cell get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
+    "no note was created by the same-id retry"
+  FRESH=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation reuse-1-fresh \
+    createNote '{"title":"Corrected"}' 2>/dev/null)
+  check "Corrected" "$(echo "$FRESH" | jq -r '.result.note["$NAME"] // empty')" \
+    "a FRESH id executes the corrected call"
+else
+  check "Corrected" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
+    "the SAME id then executes, because the refusal never consumed it"
+fi
 
-step "11. Reading a verb redirects to cf call"
-OUT=$($CF get --piece "$BOARD" $ARGS createNote 2>&1)
+step "11. Reading a verb redirects to cf piece call"
+OUT=$($CF cell get --piece "$BOARD" $ARGS createNote 2>&1)
 rc=$?
 check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "a verb read exits nonzero"
-echo "$OUT" | grep -qi "cf call" &&
-  ok "the refusal names cf call" ||
+echo "$OUT" | grep -qi "cf piece call" &&
+  ok "the refusal names cf piece call" ||
   bad "the refusal does not name the right command"
 
 step "12. --verbose times the phases on stderr; stdout stays JSON"
 ERR=$(mktemp)
-OUT=$($CF call --quiet --verbose --piece "$BOARD" $ARGS \
+OUT=$($CF piece call --quiet --verbose --piece "$BOARD" $ARGS \
   --invocation timed-1 createNote '{"title":"Timed note"}' 2>"$ERR")
 echo "$OUT" | jq -e '.status' >/dev/null 2>&1 &&
   ok "stdout is still Invocation JSON" || bad "stdout was polluted"
@@ -279,7 +340,7 @@ step "13. An invocation id without a session is refused"
 # The id is the replay handle, and a session minted for this one request
 # would put that id on a different outcome next time — so the call cannot be
 # honored as it was asked, and the refusal says how to ask again.
-NO_SESSION=$(env -u CF_INVOCATION_SESSION $CF call --quiet \
+NO_SESSION=$(env -u CF_INVOCATION_SESSION $CF piece call --quiet \
   --piece "$BOARD" $ARGS \
   --invocation lonely-1 createNote '{"title":"No session"}' 2>&1)
 rc=$?
@@ -298,7 +359,7 @@ step "14. A detached call returns an address that reads back the outcome"
 # later is an ordinary read of that address, verbatim: the envelope publishes
 # it as one canonical reference string, of: prefix included, and the verb's
 # body does not run a second time.
-NW=$($CF call --quiet --piece "$BOARD" $ARGS --invocation detached-1 \
+NW=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation detached-1 \
   --no-wait setLabel '{"label":"Detached label"}' 2>/dev/null)
 check "committed" "$(echo "$NW" | jq -r '.status')" \
   "--no-wait returns at committed"
@@ -306,7 +367,7 @@ RECEIPT_ID=$(echo "$NW" | jq -r '.receipt // empty')
 check "/of:" "${RECEIPT_ID:0:4}" \
   "the envelope names the receipt, scheme included"
 if [ -n "$RECEIPT_ID" ]; then
-  COLLECTED=$($CF get --quiet --piece "$RECEIPT_ID" $ARGS 2>/dev/null)
+  COLLECTED=$($CF cell get --quiet --piece "$RECEIPT_ID" $ARGS 2>/dev/null)
   check "Detached label" "$(echo "$COLLECTED" | jq -r '.label // empty')" \
     "the address reads back the outcome the detached call filed"
 else
@@ -314,11 +375,11 @@ else
 fi
 # And in settled mode the same address reads back exactly what the call
 # reported: the receipt names the result, not a copy that can drift from it.
-S=$($CF call --quiet --piece "$BOARD" $ARGS --invocation settled-rcpt-1 \
+S=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation settled-rcpt-1 \
   setLabel '{"label":"Settled label"}' 2>/dev/null)
 S_ID=$(echo "$S" | jq -r '.receipt // empty')
 if [ -n "$S_ID" ]; then
-  S_READ=$($CF get --quiet --piece "$S_ID" $ARGS 2>/dev/null)
+  S_READ=$($CF cell get --quiet --piece "$S_ID" $ARGS 2>/dev/null)
   check "$(echo "$S" | jq -cS '.result')" "$(echo "$S_READ" | jq -cS '.')" \
     "a settled call's receipt reads back exactly its result"
 else

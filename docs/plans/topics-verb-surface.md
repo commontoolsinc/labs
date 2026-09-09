@@ -74,27 +74,24 @@ a default is the only one of them a board can grant itself.
 
 | stage | carries | state |
 | --- | --- | --- |
-| A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed in source |
+| A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed and deployed |
 | B | one rehearsed break, four items batched | landed and deployed |
-| C | items gated on platform work | designed for, not started |
+| C | retraction and edit, plus items waiting on a review or on usage | one item built, the rest not started |
 
 ### Stage A
 
-Landed. Every item passed the update gate as an ordinary deploy. `setTitle`
-went onto the topic's own output rather than the shared projection, which is
-the pattern every new verb follows until Stage B lands.
-
-Stage A is not yet deployed to the team board: no deployed topic carries a
-`setTitle` stream.
+Landed and deployed. Every item passed the update gate as an ordinary deploy.
+`setTitle` went onto the topic's own output rather than the shared projection,
+which is the pattern every new verb follows.
 
 ### Stage B
 
 Four items, batched into a single rehearsed migration rather than paying the
 rehearsal four times:
 
-All four landed together in #6143 and are deployed: the Estuary board and
-every one of its 125 topics run these patterns. They merged together or not at
-all, which is what batching a single rehearsed migration means.
+All four landed together in #6143 and are deployed: the Estuary board and every
+Topic on it run these patterns. They merged together or not at all, which is
+what batching a single rehearsed migration means.
 
 The migration itself is recorded in
 [`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
@@ -106,9 +103,10 @@ side's demand moved rather than of this board.
 
 1. **Narrow the board's `topics` demand and the topic's `mentionable`
    demand** to the fields above.
-2. **Require `agentName` on every verb**, retiring the unsigned legacy path and
-   with it the misattribution where an unsigned body edit leaves the previous
-   author's name on content they did not write.
+2. **Require `agentName` on every authored-content verb**, eliminating the
+   unsigned path and with it the misattribution where an unsigned body edit
+   leaves the previous author's name on content they did not write. The
+   reference-only `mention` and `unmention` calls carry no content attribution.
 3. **Retire `myName`, `setMyName`, `createdByName`, `authorName`** and their
    mirrors in results.
 4. **Open the `kind` value domains** on links and authors, which are closed
@@ -138,20 +136,77 @@ Item 1 additionally needed, before it could land, and each is in the PR:
 
 ### Stage C
 
-Each item waits on platform work rather than on this plan:
+One item is built. What remains waits on a review this plan does not own, or on
+usage:
 
-- **`removeLink`, and comment edit and removal.** References-as-arguments has
-  landed, so these are buildable. They go on the topic's own interface and need
-  no migration; the no-synthetic-ids rule is what prepared for them.
+- **`removeLink`, and comment edit and removal — built.** A retraction stamps
+  `removedAt` and `removedBy` and leaves the record in place; `editComment`
+  stamps `editedAt` and leaves `author` and `sentAt` alone. The verbs name
+  their target by reference, which is what the no-synthetic-ids rule prepared
+  for, and `removeLink` additionally takes `url` because a link record carries
+  no fid a CLI caller could name.
+
+  They sit on `TopicOutput` rather than on the `TopicPiece` projection boards
+  store, which is what makes them need no migration. That placement is the
+  interim rule below doing the work it was kept for, and it is now measured
+  rather than predicted: only `topic.tsx` needed a new baseline, because
+  `main.tsx`'s contract never moved.
+
+  The reader retracts a comment or a link from the row it is rendered in.
+  Those rows come from a filtered, sorted `computed()`, and an element of one
+  keeps the identity of the record it was derived from, so a control bound to
+  it writes the stored record rather than a copy of it. That is measured
+  rather than assumed, across three files: `view-identity.test.tsx` pins the
+  property, `topics-rejections.test.tsx` holds the negative half — a
+  structural copy of a real stored record is refused, which is the case that
+  separates identity from content — and
+  `integration/topic-retraction-controls.test.ts` proves the shipped controls
+  through a real click, including the step that tells a control bound to the
+  view apart from one bound to the underlying array position.
+
+  Each control proves membership before it writes. That check is not redundant
+  with the property above; it is what decides how a regression in it would
+  present, refusing rather than stamping a record no reader shows.
+
+  A revised comment says so: the row carries an `edited` marker wherever
+  `editedAt` is set, so a comment whose body is no longer what its author sent
+  cannot read as one never touched. `sentAt` is deliberately left showing when
+  the thread reached that point rather than when the revision happened.
+
+  A control for `editComment` is not built, and revising therefore stays a
+  verb call. It needs per-row session state that a retraction does not — which
+  comment is open, and its draft.
+
+  Two other gaps are open against this item. An agent can add a comment and
+  cannot retract one, because these verbs name their target by reference and a
+  comment carries no fid an inline JSON event could name — [#6713], where the
+  candidate keys are set out. And the rule that a retracted link stops
+  resolving into `mentions` is carried by reading rather than by a test: it
+  needs a link whose URL names a real piece, and `cellFromUrl` answers with no
+  cell for any URL a pattern test can build, so a retracted link and a plain
+  web link are indistinguishable to the suite.
+
 - **`AgentActor` execution provenance** replacing per-event `agentName`, when
-  the retention-and-provenance track clears its review. Required-now relaxes to
-  optional-then-deprecated, which is the compatible direction and the reason
-  item 2 above tightens rather than waits.
-- **`Demand<T>` markers** replacing the interim rule that new verbs go on the
-  topic's own output only.
+  the retention-and-provenance track clears its review. That review has not
+  happened and nothing in that plan has started, so this item cannot begin
+  here. Required-now relaxes to optional-then-deprecated, which is the
+  compatible direction and the reason Stage B tightened rather than waited.
+
+- **`Demand<T>` markers — decided against, for now.** The interim rule they
+  would have replaced therefore stands: a new verb goes on the topic's own
+  output, never into the board's demand. Item 1 is the worked example.
+
+  What the repository gives up by not having them is legibility rather than
+  capability. A holder's demand stays indistinguishable from its own state, so
+  nothing can count what a change would hit before it is attempted, and a
+  deliberate break is still acknowledged by turning the whole gate off for a
+  pattern rather than by naming the demand it breaks. The next board break
+  therefore costs what the Stage B one cost.
+
 - **Statuses, labels, assignees, and whatever else usage asks for**: optional
   fields and new verbs, compatible on the topic's own schema and invisible to
-  the board until the board widens its demand with an optional field.
+  the board until the board widens its demand with an optional field. Nothing
+  to build until a use asks for one.
 
 ## Testing the board through a narrowed demand
 
@@ -205,10 +260,61 @@ Two preconditions belong to the board rather than to the code:
 - A result narrowing happens in place rather than under a new verb name;
   breaking source-level consumers is accepted and updating them is part of the
   work.
-- `removeLink` waits for references-as-arguments rather than taking a
-  URL-keyed interim form.
+- `removeLink` takes a reference, the form `unmention` established. It carries
+  a URL spelling as well, which is not the interim form this plan once weighed
+  against waiting: it is an addition on top of the reference form, and it earns
+  its inconsistency by being the only way an agent can retract a link, since a
+  link record has no fid to name from the CLI. Where a URL appears more than
+  once the spelling stamps the newest un-tombstoned record, so removing twice
+  removes two.
+- **A removal is stamped, not performed.** `removeLink` and comment removal
+  write `removedAt` onto the record and leave it in place; the reader does not
+  render it by default. Three consequences, and the first is the reason:
+  `lastActivityAt` is a max over the array, so a real removal would move a
+  topic's activity *backwards* and visibly reorder the board, while a stamped
+  one cannot. `lastActivityOf` therefore keeps counting stamped records, and
+  changing it to skip them reintroduces that silently. `commentCount` is the
+  other side: it counts the array's length today, so it has to exclude stamped
+  records or a card reads more comments than the topic shows. Both are
+  computations rather than schema, so neither needs a migration.
+- Every field a stamped removal adds is optional, for the reason recorded on
+  `TopicComment`: a stored record type has to accept what is already stored,
+  and the deployed board holds records written before these fields existed.
+- **Anyone may remove or edit anyone's comment or link**, matching the
+  References card, which already lets anyone retract any mention. Narrowing
+  this to the author is expected to come later.
+- An edited comment carries `editedAt` beside its original `sentAt`, and the
+  edit does not rewrite the author.
+- **`Demand<T>` markers are not adopted.** The interim rule they would have
+  replaced becomes the standing one: a new verb goes on the topic's own output,
+  never into the board's demand. This is a decision about legibility, not about
+  what can be built — every Stage C item remains reachable without them. What
+  it accepts is that a change's blast radius cannot be counted before the
+  change is attempted, and that a deliberate break is acknowledged for a whole
+  pattern rather than for the demand it actually breaks.
+- **A new verb goes on `TopicOutput`, not on `TopicPiece`.** The board stores
+  that projection, so it is a demand on every topic already held, and a
+  required verb added to it refuses every piece deployed before the verb
+  existed. No pattern in the tree writes a verb with a default, so in practice
+  a newly demanded verb has nothing to rescue it — but that is a fact about
+  what patterns emit, not a rule the gate enforces: a stream node carrying a
+  `default` is ACCEPTED, which is [#6673]. Optionality would also work; the
+  placement is what `setTitle` established and what keeps the board's contract
+  still. The tell that it worked is a baseline recorded for `topic.tsx` and
+  none for `main.tsx`.
+- **`unmention` keeps removing rather than stamping**, and the pattern carries
+  two removal semantics until [#6573] closes it. Not because an edge matters
+  less than content, but because a mention is a bare reference with no record
+  to stamp: giving it one means changing what the array's elements are, and
+  `mentions` is in the board's demand and is a union of three sources, only one
+  of which `unmention` reaches. The gap underneath is that a mention is the
+  only authored act here with no attribution at all.
 - Stage B keeps the existing verb names. The rehearsed break is the *one*
   deliberate break in this plan: anything break-shaped discovered along the way
   rides it, and every other change stays gate-clean.
 - The board's demand names the eight members above, and losing the excluded
   fields from the board's published projection is accepted.
+
+[#6573]: https://github.com/commontoolsinc/labs/issues/6573
+[#6673]: https://github.com/commontoolsinc/labs/issues/6673
+[#6713]: https://github.com/commontoolsinc/labs/issues/6713

@@ -282,7 +282,7 @@ const sourcePathByValue = new WeakMap<object, string>();
  * answer that is useful (it is the file a reader must edit, and the only one
  * whose default export is this artifact), and it comes LAST because the evaluate
  * loop walks `graph.specifierByPath` importer-first. First-write-wins would name
- * the barrel. `Engine.recordModuleProvenance` solves the same re-export
+ * the barrel. `Engine.#recordModuleProvenance` solves the same re-export
  * ambiguity explicitly; here the traversal order supplies it, so a change to
  * that order has to preserve this.
  *

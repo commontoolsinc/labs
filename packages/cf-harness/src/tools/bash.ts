@@ -19,9 +19,9 @@ import type { HarnessToolDefinition } from "./types.ts";
 // outside the sandbox, or its command overran the time budget. Like the
 // curl-denied branch below, bash surfaces each as an ordinary failed
 // BashToolOutput the model reacts to on its next turn — it does NOT throw.
-// A throw here would propagate into `CfHarnessEngine.invokeBuiltinTool`, which
-// terminalizes the whole run as `failed`/`tool_error` and persists that state
-// (engine.ts) — killing an agent for a mistake it could simply correct. This
+// A throw here would propagate through `CfHarnessEngine.invokeBuiltinTool`,
+// which records it as a failure, to the prompt loop, which fails the whole
+// run on it — killing an agent for a mistake it could simply correct. This
 // was defect D9 in the loom fuse-fabric-access arc and the topics-board topic
 // "cf-harness: tool-call failures are run-fatal (path escape, 20s timeout)".
 // Only host-safe, self-authored detail is echoed: the model's own `cwd` string

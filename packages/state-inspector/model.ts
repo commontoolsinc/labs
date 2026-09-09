@@ -165,6 +165,7 @@ export interface EntityModel {
 
   /** Top-level paths present in the document (the control plane, sorted). */
   paths: string[];
+
   valueShape: ValueShape;
   lineage: Lineage;
   revisions?: number;
@@ -722,6 +723,7 @@ function patternIdentityOf(
 export interface EntityListing {
   /** The entities modeled, at most `extent.limit` of them. */
   entities: EntityModel[];
+
   extent: ScanExtent;
 }
 
@@ -933,6 +935,7 @@ export interface PieceCellRef {
 
   /** Classified kind of the owned cell (stream / schema / owned-cell / …). */
   kind: EntityKind;
+
   label: string;
   summary: string;
 }

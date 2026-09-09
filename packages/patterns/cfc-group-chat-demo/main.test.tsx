@@ -129,6 +129,9 @@ export default pattern(() => {
   const action_set_room_ops_again = action(() => {
     chat.setRoomDraft.send("Ops 2");
   });
+  const action_set_room_bob_again = action(() => {
+    bobChat.setRoomDraft.send("Bob room 2");
+  });
   const action_set_message_alice = action(() => {
     chat.setMessageDraft.send("Hello from Alice");
   });
@@ -276,6 +279,26 @@ export default pattern(() => {
       roomList[2]?.name === "Ops 2" &&
       roomDraft.get() === "";
   });
+  // The second write to the floored `admins` path: the revoke reads back the
+  // explicit list the grant wrote and stores a shorter one. A floor over two
+  // atoms cannot satisfy that shape, because the read carries one atom and the
+  // floor demands the other. The room add below turns a dropped revoke into a
+  // failure, since a Bob who is still an admin can still create a room.
+  const assert_bob_admin_revoked = assert(() =>
+    bobChat.currentUserIsAdmin !== true &&
+    chatAdminRolesValue(adminRegistry).length === 1 &&
+    // The explicit `admins` list, which is the floored path. The length above
+    // reads through `chatAdminRolesValue`, which falls back to the bootstrap
+    // role when `admins` is absent, so it alone does not say the list landed.
+    (adminRegistry.get() as { admins?: { displayName: string }[] }).admins
+        ?.length === 1 &&
+    (adminRegistry.get() as { admins?: { displayName: string }[] })
+        .admins?.[0]?.displayName === "Alice"
+  );
+  const assert_bob_cannot_add_room_after_revoke = assert(() =>
+    roomsValue(rooms).length === 3 &&
+    roomsValue(rooms)[2]?.name === "Ops 2"
+  );
   const assert_message_sent_and_draft_cleared = assert(() =>
     messages.get().length === 1 &&
     messages.get()[0]?.origin === "sent" &&
@@ -357,43 +380,43 @@ export default pattern(() => {
       { assertion: assert_everyone_disabled_seeds_alice },
       { assertion: assert_admin_view_explicit_alice },
       { assertion: assert_admin_view_lists_bob_after_lockdown },
-      // Skipped under single-runtime wiring (see the grant-Bob block below):
-      // the self-match (`equals(role.subject, targetProfile)`) that classifies
-      // this as a blocked removal misses when registry and profiles share one
-      // doc, so the handler attempts an admins write that CFC rejects. The
-      // piece-shaped removal flow is covered by the integration suites.
+      // Removing the last admin is refused by the handler, so the roster keeps
+      // Alice.
       {
         action: chat.toggleParticipantAdmin,
         event: { name: "Alice" },
         trustedUi: adminGesture,
-        skip: true,
       },
       { assertion: assert_last_admin_removal_blocked },
       { action: action_set_room_bob },
       { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
       { assertion: assert_bob_cannot_add_room_after_lockdown },
-      // Granting Bob admin writes the RequiresIntegrity admins list. The CFC
-      // requiredIntegrity over-rejection that used to block this (audit S7 —
-      // the grant's provenance-only participant-row reads quantified into the
-      // gate) is now FIXED (see cfc-required-integrity-provenance.test.ts), so
-      // the grant transaction commits. The steps stay skipped only for the same
-      // single-doc subject-matching limitation as the removal block above (the
-      // self-match misses when registry and profiles share one doc, so the
-      // post-grant admin lookups don't reflect the grant); the piece-shaped
-      // wiring is covered under enforcement by
-      // integration/cfc-group-chat-demo-multi-runtime.test.ts.
+      // The roster and the room list are both floored on `group-chat-admin`,
+      // and both mint it at the path their floor sits on. The steps from here
+      // change each of them more than once, which is what tells that shape
+      // apart from a floor naming an atom the path's own reads do not carry.
+      // Such a floor admits the first change to an empty path and silently
+      // drops every one after it, so a single change proves nothing.
       {
         action: chat.toggleParticipantAdmin,
         event: { name: "Bob" },
         trustedUi: adminGesture,
-        skip: true,
       },
-      { assertion: assert_bob_admin_enabled, skip: true },
-      { action: bobChat.addTrustedRoom, trustedUi: roomGesture, skip: true },
-      { assertion: assert_bob_can_add_room, skip: true },
-      { action: action_set_room_ops_again, skip: true },
-      { action: chat.addTrustedRoom, trustedUi: roomGesture, skip: true },
-      { assertion: assert_alice_can_still_add_room, skip: true },
+      { assertion: assert_bob_admin_enabled },
+      { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
+      { assertion: assert_bob_can_add_room },
+      { action: action_set_room_ops_again },
+      { action: chat.addTrustedRoom, trustedUi: roomGesture },
+      { assertion: assert_alice_can_still_add_room },
+      {
+        action: chat.toggleParticipantAdmin,
+        event: { name: "Bob" },
+        trustedUi: adminGesture,
+      },
+      { assertion: assert_bob_admin_revoked },
+      { action: action_set_room_bob_again },
+      { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
+      { assertion: assert_bob_cannot_add_room_after_revoke },
       { action: action_set_message_alice },
       { action: chat.sendTrustedMessage, trustedUi: sendGesture },
       { assertion: assert_message_sent_and_draft_cleared },

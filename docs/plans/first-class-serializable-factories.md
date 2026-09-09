@@ -174,8 +174,8 @@ Tests to port or extend:
 - [ ] Export only the minimum protocol surface needed by the runner and codec;
   do not expose `.curry` or state mutation to pattern authors.
 - [ ] Re-export the runner-facing protocol through
-  `packages/data-model/src/fabric-value.ts` without creating a dependency from
-  the data model back into the runner.
+  `packages/data-model/src/index.ts` without creating a dependency from the
+  data model back into the runner.
 
 Expected implementation files:
 
@@ -221,8 +221,8 @@ Expected implementation and test files:
 - [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
   factories are recognized through `tryFactoryState()`, and unbranded functions
   remain invalid. Codec dispatch remains the serialization layer's job.
-- [ ] Update `packages/data-model/src/type-check.ts` and compatibility guards so
-  `FabricFactory` is the only valid function-shaped `FabricValue`.
+- [ ] Update `packages/data-model/src/validity-check.ts` and compatibility
+  guards so `FabricFactory` is the only valid function-shaped `FabricValue`.
 - [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
   state and then freeze the callable. Factory handling must precede the current
   shortcut that treats functions as already frozen.
@@ -243,7 +243,7 @@ Expected implementation and test files:
 Focused tests:
 
 - `packages/data-model/test/native-conversion.test.ts`
-- `packages/data-model/test/type-check.test.ts`
+- `packages/data-model/test/validity-check.test.ts`
 - `packages/data-model/test/deep-freeze.test.ts`
 - `packages/data-model/test/cloneIfNecessary.test.ts`
 - `packages/data-model/test/cloneForMutation.test.ts`
@@ -749,7 +749,7 @@ Expected runtime seams/tests:
   `packages/runner/src/builtins/list-op-argument-usage.ts` only on the named
   legacy adaptation path; new `Factory@1` nodes go through generic
   materialization.
-- [ ] Isolate the legacy branch in `Runner.substituteOpPatternRefs()` so it
+- [ ] Isolate the legacy branch in `Runner.#substituteOpPatternRefs()` so it
   cannot remain an accidental writer dependency.
 - [ ] Update closure-capture diagnostics to recommend inline patterns, not
   manual sibling params.

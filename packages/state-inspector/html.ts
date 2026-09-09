@@ -38,11 +38,13 @@ export interface InspectorBundle {
 
   /** Base origin of the live shell, for deep links (`<base>/<space>/<id>`). */
   liveBase: string;
+
   summary: SpaceSummary;
   details: EntityDetail[];
 
   /** How far the entity scan behind `details` and `graph` reached. */
   extent: ScanExtent;
+
   graph: SpaceGraph;
   timeline: SpaceTimelineEntry[];
 

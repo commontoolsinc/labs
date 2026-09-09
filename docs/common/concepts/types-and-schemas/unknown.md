@@ -101,8 +101,7 @@ declarations are independent of each other. A pattern that takes another
 pattern's result as an argument and only renders it declares that position
 `unknown`, which is what keeps it a reference to the sub-piece's own screen
 rather than a copy, so the controls in it stay bound to the piece that owns
-them. `packages/patterns/record.tsx` reads the settings screen its sub-pieces
-export this way. An argument declaration also has to keep accepting every value
+them. An argument declaration also has to keep accepting every value
 it accepted before, which a narrower one does not, so a consumer view of a
 result type holds `unknown` even where the producing type names `VNode`;
 `BackwardsCompatibleProfile` in `packages/patterns/system/profile-home.tsx` is

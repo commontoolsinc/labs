@@ -6,6 +6,14 @@ share an authoring identity. The
 [ingest channels and journal sink plan](../plans/ingest-channels-journal-sink.md)
 builds on this seam.
 
+`ExternalIngest` is one provenance family with two type-level variants. The
+vouched-channel variant described here carries the channel and the audience
+the grant vouches for. The weaker `kind: "fetch"` variant carries only a
+`pinnedSource` URL and commit SHA: the trusted host attests to the immutable
+source it read, and nobody vouches for a presenter or audience. The fetch
+variant therefore has no `audience` field for a later policy to
+equality-consume as though it were a grant claim.
+
 The obvious construction — push the mark into the builtin-authored flow join,
 the way `TransformedBy` is minted inline — is both unsafe and incorrect. The
 two sections below say why, and each gives the construction the runtime uses
@@ -25,18 +33,18 @@ interpose on host `IExtendedStorageTransaction` methods —
 `ses-runtime.ts` / `query-result-proxy.ts`). So a method like
 `setCfcExternalIngest` on the public interface, feeding an **unconditional**
 `ExternalIngest` push into the builtin-authored flow join, would let *any*
-handler stamp a trusted "this arrived via verified channel X" mark on its own
-outputs — and because the push is builtin-authored by construction, the gate is a
-no-op for it. That is strictly worse than the existing atoms, which are all
-screened on write identity.
+handler stamp a trusted "this arrived via external source X" mark on its own
+outputs — and because the push is builtin-authored by construction, the gate
+is a no-op for it. That is strictly worse than the existing atoms, which are
+all screened on write identity.
 
 **Resolution:** the ingest stamp lives **off** `IExtendedStorageTransaction`,
 in a runner module-private `WeakMap<tx, meta>` (mirroring the posture of
 `setCfcSinkMaxConfidentiality`, which is deliberately not on the public
 interface). It is set only by trusted host code (the toolshed `custodyIngest`
-helper, which runs in the operator runtime), via a runner-internal helper that
-pattern code cannot import or reach. The mint reads the stamp from the same
-module. No public surface ⇒ no forge oracle.
+helper for vouched channels, or a pinned-fetch helper), via a runner-internal
+helper that pattern code cannot import or reach. The mint reads the stamp from
+the same module. No public surface ⇒ no forge oracle.
 
 ## Piggybacking the flow join is broken for appends
 
@@ -94,7 +102,8 @@ early-return moves.
   accepted from the payload (preserves "touches zero attacker bytes").
 - `valueDigest` is computed from the payload the helper actually writes.
 - `audience` is **recorded, not enforced** (federation PR5 dependency); no
-  downstream policy may read it as a verified binding yet.
+  downstream policy may read it as a verified binding yet. It exists only on
+  the vouched-channel variant.
 
 ## What the seam shares with the ordinary atoms
 

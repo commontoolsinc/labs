@@ -38,7 +38,6 @@ describe("llmDialog message document scope", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
   });
 

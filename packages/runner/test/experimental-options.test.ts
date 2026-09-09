@@ -352,14 +352,12 @@ describe("serverExecution ambient-flag ownership", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The readerSchemaPrecedence ambient-flag family: plain last-write-wins
-// module state like the other flags' ambient configs. Successive runtimes
-// in one test process may run different flag states; a real server
-// constructs one posture and never changes it mid-flight.
-// ---------------------------------------------------------------------------
-
 describe("readerSchemaPrecedence ambient flag", () => {
+  // The readerSchemaPrecedence ambient-flag family: plain last-write-wins
+  // module state like the other flags' ambient configs. Successive runtimes
+  // in one test process may run different flag states; a real server
+  // constructs one posture and never changes it mid-flight.
+
   afterEach(() => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();

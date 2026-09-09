@@ -28,42 +28,43 @@ export class Navigation {
   constructor(app: ShellApp) {
     this.#app = app;
 
-    globalThis.addEventListener(NAVIGATE_EVENT, this.onNavigate);
+    globalThis.addEventListener(NAVIGATE_EVENT, this.#onNavigate);
     globalThis.addEventListener(
       REPLACE_NAVIGATION_EVENT,
-      this.onReplaceNavigate,
+      this.#onReplaceNavigate,
     );
     globalThis.addEventListener(
       UPDATE_PAGE_TITLE_EVENT,
-      this.onUpdatePageTitle,
+      this.#onUpdatePageTitle,
     );
-    globalThis.addEventListener("popstate", this.onPopState);
+    globalThis.addEventListener("popstate", this.#onPopState);
 
     const thisUrl = new URL(globalThis.location.href);
     const init = urlToAppView(thisUrl);
     // Initial state is `null` -- reflect the state given
     // from the current URL.
-    this.replace(init);
-    this.apply(init);
+    this.#replace(init);
+    this.#apply(init);
   }
 
-  // Stop listening. The shell's own `Navigation` lives as long as the page, so
-  // nothing in the application calls this; a caller that builds one around a
-  // fixture needs the four global listeners back.
+  /**
+   * Stops listening, removing the four global listeners the constructor
+   * added.
+   */
   dispose() {
-    globalThis.removeEventListener(NAVIGATE_EVENT, this.onNavigate);
+    globalThis.removeEventListener(NAVIGATE_EVENT, this.#onNavigate);
     globalThis.removeEventListener(
       REPLACE_NAVIGATION_EVENT,
-      this.onReplaceNavigate,
+      this.#onReplaceNavigate,
     );
     globalThis.removeEventListener(
       UPDATE_PAGE_TITLE_EVENT,
-      this.onUpdatePageTitle,
+      this.#onUpdatePageTitle,
     );
-    globalThis.removeEventListener("popstate", this.onPopState);
+    globalThis.removeEventListener("popstate", this.#onPopState);
   }
 
-  private onUpdatePageTitle = (e: Event) => {
+  #onUpdatePageTitle = (e: Event) => {
     const title = (e as CustomEvent<string>).detail;
     logger.log("SetTitle", title);
     // Thought this needed to interact with the history.
@@ -71,40 +72,58 @@ export class Navigation {
     document.title = title;
   };
 
-  private onPopState = (e: Event) => {
+  #onPopState = (e: Event) => {
     const state = (e as PopStateEvent).state as NavigationCommand | null;
     logger.log("Pop", state);
     if (!state) {
       console.warn("No state from history!");
       return;
     }
-    this.apply(state);
+    this.#apply(state);
   };
 
-  private onNavigate = (e: Event) => {
+  #onNavigate = (e: Event) => {
     let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("Navigate", command);
     command = mapNavigationView(this.#app, command);
-    this.push(command);
-    this.apply(command);
+    // A navigation to the address the page is already at rewrites the entry it
+    // is standing on rather than adding one. Two entries for one address make
+    // the first press of Back return to the page it was already on.
+    //
+    // The address is settled after the mapping, which writes a DID naming the
+    // running space as that space's name and carries embed mode into a command
+    // that omits it. It goes through `URL` to reach the percent-encoded form
+    // `location.pathname` holds, a space name being free to hold a character a
+    // path reserves. A view's `openPath` reaches no address, so an entry
+    // rewritten from one that held it holds it no longer.
+    const address = new URL(
+      appViewToUrlPath(command),
+      globalThis.location.href,
+    );
+    if (address.pathname === globalThis.location.pathname) {
+      this.#replace(command);
+    } else {
+      this.#push(command);
+    }
+    this.#apply(command);
   };
 
-  private onReplaceNavigate = (e: Event) => {
+  #onReplaceNavigate = (e: Event) => {
     let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("ReplaceNavigate", command);
     command = mapNavigationView(this.#app, command);
-    this.replace(command);
-    this.apply(command);
+    this.#replace(command);
+    this.#apply(command);
   };
 
-  // Push a new command state to the browser's history.
-  private push(command: NavigationCommand) {
+  /** Pushes a new command state to the browser's history. */
+  #push(command: NavigationCommand) {
     logger.log("Push", command);
     globalThis.history.pushState(command, "", appViewToUrlPath(command));
   }
 
-  // Updates the current browser history state and page with a new title.
-  private replace(command: NavigationCommand, title?: string) {
+  /** Updates the current browser history state and page with a new title. */
+  #replace(command: NavigationCommand, title?: string) {
     logger.log("Replace", command, title);
     globalThis.history.replaceState(
       command,
@@ -113,8 +132,8 @@ export class Navigation {
     );
   }
 
-  // Propagates the command state into the App.
-  private apply(command: NavigationCommand) {
+  /** Propagates the command state into the app. */
+  #apply(command: NavigationCommand) {
     logger.log("Apply", command);
     this.#app.setView(command);
   }
@@ -137,12 +156,11 @@ function mapNavigationView(
     "spaceDid" in view && view.spaceDid && currentSpaceName &&
     view.spaceDid === currentSpaceDID
   ) {
-    view = {
-      ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
-      ...("pieceSlug" in view ? { pieceSlug: view.pieceSlug } : undefined),
-      ...("mode" in view ? { mode: view.mode } : undefined),
-      spaceName: currentSpaceName,
-    };
+    // Only the space key is exchanged. Everything else the view holds is
+    // carried by spreading what is left, so a field added to a view later
+    // survives without this having to be taught about it.
+    const { spaceDid: _replaced, ...rest } = view;
+    view = { ...rest, spaceName: currentSpaceName };
   }
   return preserveAppViewMode(currentView, view);
 }

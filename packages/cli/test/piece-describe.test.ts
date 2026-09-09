@@ -421,6 +421,49 @@ describe("piece-describe", () => {
       space: "home",
     };
 
+    it("loads the addressed piece without starting it or the space root", async () => {
+      // Discovery reads the addressed piece and nothing else: the space
+      // root's bootstrap and the target's start are dispatch concerns, not a
+      // description's.
+      const fixture = pieceDouble();
+      const resultRoot = await fixture.result.getCell();
+      const inputRoot = await fixture.input.getCell();
+      const pieceRoot = {
+        ...fixture.getCell(),
+        entityId: { "/": config.piece },
+      };
+      const getPieceCellCalls: unknown[][] = [];
+      let ensureCalls = 0;
+      const manager = {
+        ensureDefaultPattern: () => {
+          ensureCalls++;
+          return Promise.resolve();
+        },
+        getPieceCell: (...args: unknown[]) => {
+          getPieceCellCalls.push(args);
+          return Promise.resolve(pieceRoot);
+        },
+        getResult: () => resultRoot,
+        getArgument: () => inputRoot,
+        getSpace: () => "home",
+      };
+
+      const description = await describePiece(config, {
+        loadPieces: () => Promise.resolve(manager as never),
+      });
+
+      expect(ensureCalls).toBe(0);
+      expect(getPieceCellCalls).toEqual([
+        [
+          config.piece,
+          { reconcile: true, start: false },
+          undefined,
+          undefined,
+        ],
+      ]);
+      expect(description.verbs.map((verb) => verb.name)).toEqual(["addItem"]);
+    });
+
     it("assembles name, purpose, fields, and verbs from one piece", async () => {
       const description = await describePiece(config, {
         loadPieces: () => Promise.resolve({} as never),
@@ -441,6 +484,32 @@ describe("piece-describe", () => {
       expect(description.verbs[0].description).toBe(
         "File a new root item on the board.",
       );
+    });
+
+    it("reads a controller's already-loaded name without pulling its cell", async () => {
+      const base = pieceDouble();
+      const baseCell = base.getCell();
+      const piece = pieceDouble({
+        name: () => "Local name",
+        getCell: () => ({
+          ...baseCell,
+          key: (key: unknown) =>
+            key === NAME
+              ? {
+                pull: () => {
+                  throw new Error("pulled the already-loaded name");
+                },
+              }
+              : baseCell.key(key),
+        }),
+      });
+
+      const description = await describePiece(config, {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      });
+
+      expect(description.name).toBe("Local name");
     });
 
     it("describes an unnamed piece without a name key", async () => {
@@ -483,7 +552,7 @@ describe("piece-describe", () => {
       apiUrl: "http://localhost:8000",
       identity: "/tmp/test-identity.pem",
       space: "home",
-      piece: "board",
+      cell: "board",
       quiet: true,
     };
 
@@ -514,6 +583,28 @@ describe("piece-describe", () => {
       expect(out).toContain("NAME    Work tracker");
       expect(out).toContain("  A work tracker.");
       expect(out).toContain("  addItem");
+    });
+
+    it("writes the page and its next steps to the sinks the caller supplies", async () => {
+      // Without the sinks the page reaches stdout and the tip reaches
+      // stderr, which is right for a one-shot verb and wrong for a caller
+      // that has somewhere else to put them. A supplied sink is handed the
+      // message whatever `--quiet` says, suppressing it being the caller's
+      // decision from there on rather than this command's.
+
+      const rendered: unknown[] = [];
+      const hinted: string[] = [];
+      await describePieceFromCommand(OPTIONS, {
+        describePiece: () => Promise.resolve(DESCRIPTION),
+        render: (value) => {
+          rendered.push(value);
+        },
+        hint: (message) => {
+          hinted.push(message);
+        },
+      });
+      expect(rendered).toContain("NAME    Work tracker");
+      expect(hinted[0]).toContain("cf piece verbs --cell board");
     });
 
     it("is the action the piece command registers for describe", () => {

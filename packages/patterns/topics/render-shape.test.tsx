@@ -108,6 +108,23 @@ export default pattern(() => {
     detail.startEditBody.send();
   });
 
+  // A comment, then the same comment revised. `editComment` is reached on the
+  // instance rather than through the board, for the reason the board's own
+  // demand gives: it carries no verbs.
+  const action_comment_on_detail = action(() => {
+    detail.addComment.send({ body: "as first written", agentName: "Fable" });
+  });
+  const action_revise_that_comment = action(() => {
+    const comment = detail.comments[0];
+    if (comment) {
+      detail.editComment.send({
+        comment,
+        body: "as revised",
+        agentName: "Fable",
+      });
+    }
+  });
+
   // The board's card list renders through whatever the board demands of a
   // stored topic. If that projection stops carrying a field a card reads, the
   // card goes blank while every model-level assertion stays green.
@@ -131,6 +148,20 @@ export default pattern(() => {
     });
   });
 
+  // An edit is only honest if a reader can see one happened, and `editedAt`
+  // is written by the verb rather than shown by anything that reads it. These
+  // two assertions are a pair on purpose: the first says the marker is absent
+  // when nothing was revised, so the second cannot pass on a marker that is
+  // simply always there.
+  const assert_no_edited_marker_before = assert(() => {
+    const text = renderedText(detail[UI]).join(" ");
+    return text.includes("as first written") && !text.includes("edited");
+  });
+  const assert_edited_marker_after = assert(() => {
+    const text = renderedText(detail[UI]).join(" ");
+    return text.includes("as revised") && text.includes("edited");
+  });
+
   return {
     [UI]: board[UI],
     [TESTS]: [
@@ -140,6 +171,12 @@ export default pattern(() => {
       { action: action_open_the_editor },
       { render: detail[UI] },
       { assertion: assert_editor_receives_mentionables },
+      { action: action_comment_on_detail },
+      { render: detail[UI] },
+      { assertion: assert_no_edited_marker_before },
+      { action: action_revise_that_comment },
+      { render: detail[UI] },
+      { assertion: assert_edited_marker_after },
     ],
   };
 });

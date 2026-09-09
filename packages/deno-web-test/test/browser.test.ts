@@ -1,6 +1,10 @@
 import { assertEquals, assertRejects } from "@std/assert";
 
-import type { Browser as AstralBrowser, LaunchOptions } from "@astral/astral";
+import type { LaunchOptions } from "@astral/astral";
+import {
+  BOOT_FAILURE_MESSAGE,
+  type BrowserProcess,
+} from "@commonfabric/integration/browser-process";
 
 import { isRetryableAstralLaunchError, launchWithRetry } from "../browser.ts";
 
@@ -12,16 +16,12 @@ Deno.test("isRetryableAstralLaunchError matches transient browser-launch failure
     true,
   );
   assertEquals(
-    isRetryableAstralLaunchError(
-      new Error("Your binary refused to boot"),
-    ),
+    isRetryableAstralLaunchError(new Error(BOOT_FAILURE_MESSAGE)),
     true,
   );
   assertEquals(
     isRetryableAstralLaunchError(
-      new Error(
-        "Your binary refused to boot due to missing system dependencies",
-      ),
+      new Error(`${BOOT_FAILURE_MESSAGE} due to missing system dependencies`),
     ),
     false,
   );
@@ -34,7 +34,7 @@ Deno.test("isRetryableAstralLaunchError matches transient browser-launch failure
 Deno.test("launchWithRetry retries retryable ETXTBSY launch failures", async () => {
   const launchCalls: LaunchOptions[] = [];
   const sleepCalls: number[] = [];
-  const browser = { close: async () => {} } as AstralBrowser;
+  const browser = {} as BrowserProcess;
   let attempts = 0;
 
   const launched = await launchWithRetry(

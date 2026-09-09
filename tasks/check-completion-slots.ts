@@ -64,11 +64,12 @@ export const NO_CANDIDATES = new Map<string, string>([
   // Words the caller is coining or composing.
   ["acl set:capability", "a capability string, composed rather than chosen"],
   ["piece search:query", "a search query"],
-  // Words that belong to a callable rather than to the CLI. Item 4 of
-  // docs/plans/cli-completion-coverage.md builds the candidates; which slot
-  // receives them waits on step 10 of docs/plans/cli-surface-shape.md.
-  ["call:tail", "the callable's own vocabulary"],
-  ["piece call:tail", "the same"],
+  // Words that belong to a callable rather than to the CLI: the verb opens the
+  // callable's section, so its own vocabulary fills this positional. Item 4 of
+  // docs/plans/cli-completion-coverage.md builds the candidates and is what
+  // will route them here.
+  ["piece call:tail", "the callable's own vocabulary"],
+  ["call:tail", "the same, under the superseded spelling"],
   ["exec:tail", "the same"],
 ]);
 
@@ -167,13 +168,13 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["inspect timeline:scope", "the same"],
   ["inspect value-at:scope", "the same"],
   // A projection into a VERB's result rather than into the value at a target,
-  // so its vocabulary is the verb's `outputSchema`. Item 6 of
-  // docs/plans/cli-completion-coverage.md builds it, and waits on step 10 of
-  // docs/plans/cli-surface-shape.md for the verb to precede the cursor.
-  ["call:select", "the verb's own result shape"],
-  ["call:schema", "the same"],
-  ["piece call:select", "the same"],
+  // so its vocabulary is the verb's `outputSchema`. Written past the `--` that
+  // closes the callable's section, so the verb already precedes the cursor.
+  // Item 6 of docs/plans/cli-completion-coverage.md is what builds it.
+  ["piece call:select", "the verb's own result shape"],
   ["piece call:schema", "the same"],
+  ["call:select", "the same, under the superseded spelling"],
+  ["call:schema", "the same"],
   ["exec:select", "the same"],
   ["exec:schema", "the same"],
   // `wish` projects what its query resolved to, and resolving a wish commits a
@@ -222,6 +223,7 @@ export function reportSlots(
      * where it answers on every command declaring the option.
      */
     readonly providerOptions: ReadonlyMap<string, readonly string[] | null>;
+
     readonly providerArguments: ReadonlySet<string>;
     readonly enumerated: ReadonlySet<string>;
     readonly allowedOptions: ReadonlySet<string>;

@@ -11,7 +11,8 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, assert, pattern, TESTS } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
+import { findNode, hasExactText } from "../test/vnode-helpers.ts";
 import CozyPoll from "./main.tsx";
 
 export default pattern(() => {
@@ -144,6 +145,31 @@ export default pattern(() => {
     poll.adminName === "Alex" && poll.isAdmin === true
   );
 
+  // The empty state is the whole board before anyone adds an option, and its
+  // job is to say who can do something about that. It reads differently to a
+  // viewer with no host to wait for than to the host themselves, so both are
+  // checked; the remaining branch names somebody else and needs the second
+  // identity multi-user.test.tsx has.
+  const assert_empty_state_awaits_a_host = assert(() =>
+    poll.optionCount === 0 &&
+    findNode(poll[UI], (node) => hasExactText(node, "No options yet")) !==
+      undefined &&
+    findNode(
+        poll[UI],
+        (node) => hasExactText(node, "Waiting for a host to join."),
+      ) !== undefined
+  );
+
+  const assert_empty_state_prompts_the_host = assert(() =>
+    poll.optionCount === 0 &&
+    findNode(poll[UI], (node) => hasExactText(node, "No options yet")) !==
+      undefined &&
+    findNode(
+        poll[UI],
+        (node) => hasExactText(node, "Add the first one above."),
+      ) !== undefined
+  );
+
   return {
     [TESTS]: [
       // Admin-gated handlers are no-ops before anyone joins (myName empty).
@@ -155,6 +181,8 @@ export default pattern(() => {
       { action: action_try_add_before_join },
       { action: action_try_remove_before_join },
       { action: action_try_reset_before_join },
+      // Nobody has joined, so the board has no host to name.
+      { assertion: assert_empty_state_awaits_a_host },
 
       // First join → claims admin
       { action: action_join_as_alex },
@@ -167,6 +195,9 @@ export default pattern(() => {
       // claimHost is a harmless no-op when the caller is already host.
       { action: action_claim_host },
       { assertion: assert_still_alex_host },
+
+      // Alex hosts now, so the same empty board asks him for the first option.
+      { assertion: assert_empty_state_prompts_the_host },
 
       // Admin adds options
       { action: action_add_chipotle },

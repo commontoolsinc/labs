@@ -4,8 +4,8 @@
 // the client (runner) before/after these calls.
 
 import { type BindValue, Database } from "@db/sqlite";
+import { fabricFromNativeValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 import type { SqliteNativeRow } from "../../v2.ts";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";

@@ -14,10 +14,12 @@
  */
 
 import type { SchemaPathSelector } from "@commonfabric/api";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  deepFreeze,
+  type FabricValue,
+  hashStringOf,
+} from "@commonfabric/data-model";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
 import type {
@@ -105,10 +107,16 @@ export type ReplayLatencySample = {
   selector: number;
   docId: string;
 
-  /** Counter deltas for this single invocation. */
+  /** Schema-call delta for this single invocation. */
   schemaCalls: number;
+
+  /** `anyOf`-branch delta over the same invocation. */
   anyOfBranches: number;
+
+  /** DAG-call delta over the same invocation. */
   dagCalls: number;
+
+  /** Pointer-call delta over the same invocation. */
   pointerCalls: number;
 };
 
@@ -155,9 +163,13 @@ function buildLatencyReport(
  * the corpus, exactly as live storage does.
  */
 export class FixtureObjectManager implements ObjectStorageManager {
-  private attestations = new Map<string, IAttestation>();
+  #attestations = new Map<string, IAttestation>();
 
-  constructor(private docs: Record<string, FabricValue>) {}
+  #docs: Record<string, FabricValue>;
+
+  constructor(docs: Record<string, FabricValue>) {
+    this.#docs = docs;
+  }
 
   load(address: BaseMemoryAddress): IAttestation | null {
     if (hasDataUriScheme(address.id)) {
@@ -169,9 +181,9 @@ export class FixtureObjectManager implements ObjectStorageManager {
     const key = fixtureDocKey(
       address as BaseMemoryAddress & { space: string },
     );
-    const cached = this.attestations.get(key);
+    const cached = this.#attestations.get(key);
     if (cached !== undefined) return cached;
-    const value = this.docs[key];
+    const value = this.#docs[key];
     if (value === undefined) return null;
     const attestation: IAttestation = {
       address: { ...address, path: [] },
@@ -181,7 +193,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // can never engage during replay even though they do in production.
       value: deepFreeze(value),
     };
-    this.attestations.set(key, attestation);
+    this.#attestations.set(key, attestation);
     return attestation;
   }
 }

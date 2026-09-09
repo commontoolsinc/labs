@@ -185,7 +185,7 @@ brings it to 51:
 
 ```bash
 # not in the demo — the byte measurement's own illustration
-cf get <item-address> children --select 'title,status'
+cf cell get <item-address> children --select 'title,status'
 ```
 
 That is not a workaround; it is the read model working. A schema is a query,
@@ -306,14 +306,15 @@ sections claiming the pattern declares nothing.
 ## 3. Ask what a verb wants
 
 ```bash
-cf call --piece board addItem -- --help
+cf piece call --piece board addItem --help
 ```
 
 ```text
 Usage:
-  cf call --piece board addItem -- --help
-  cf call --piece board addItem <json>
-  cf call --piece board addItem -- --title <string>
+  cf piece call ... addItem --help
+  cf piece call ... addItem <json>
+  cf piece call ... addItem [invoke] --title <string>
+  cf piece call ... addItem ... -- --select <fields>
 
 File a new root item on the board.
 
@@ -321,7 +322,7 @@ JSON input:
   Pass inline JSON as one positional argument or after `--json`.
   { title: string }
 
-Flags after `--`:
+Flags:
   --title <string>    Required. One line naming the work.
 
 Output:
@@ -395,7 +396,7 @@ write it, since it sits beside the type it describes.
 
 ```bash
 # not in the demo — completion needs a terminal
-cf call --piece board <TAB>
+cf piece call --piece board <TAB>
 addItem
 ```
 
@@ -425,12 +426,12 @@ uses, and escaping a literal `@` — is in
 [verbs over the CLI](over-the-cli.md#asking-a-read-for-an-address).
 
 ```bash
-EPIC=$(cf call --piece board --select 'item@' addItem -- \
-       --title "Login rewrite" | jq -r '.result.item."$link"')
+EPIC=$(cf piece call --piece board addItem --title "Login rewrite" \
+       -- --select 'item@' | jq -r '.result.item."$link"')
 
-cf call "$EPIC" addChild -- --title "Session cookies"
-cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
-cf get "$EPIC/status"
+cf piece call "$EPIC" addChild --title "Session cookies"
+cf piece call "$EPIC" recordNote --body "blocked on the cookie spec"
+cf cell get "$EPIC/status"
 ```
 
 The `jq` hop above is how an address gets from a response into a variable, and
@@ -495,8 +496,8 @@ the address may carry the path, as the `get` above shows. The slug stays on
 `--piece`, where no path competes for the position; naming the target both
 ways at once is refused. Identity survives the round trip instead of being
 flattened into a copy of the item's contents. Read options (`--select`,
-`--schema`, `--filter`) come before the address on a `call`, because the first
-positional starts the callable's own command line.
+`--schema`, `--filter`) come after the `--` on a `call`, because the verb opens
+the callable's section and the marker closes it.
 
 `--show-links` is a second spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
@@ -545,9 +546,9 @@ shows the full exchange.
 ## 6. Read the tree back, bounded
 
 ```bash
-cf get --piece board items --select 'title,status,children@'
+cf cell get --piece board items --select 'title,status,children@'
 
-cf get "$EPIC" children --select title --filter '.status == "open"'
+cf cell get "$EPIC" children --select title --filter '.status == "open"'
 ```
 
 Between step 5's reads and these, the session ran the verbs step 5 listed but
@@ -591,9 +592,10 @@ containers holding it rather than being read past.
 
 The same options work on a call's result, on a wish, on a verb reached through
 a filesystem mount, and on a direct read: one read layer, four arrivals.
-`cf exec` writes them before the mounted file, since everything after it
-belongs to the callable's own interface; the other three take them wherever
-their own options go.
+`cf exec` writes them past a `--`, since the mounted file opens the callable's
+section and the marker closes it — the same boundary `cf piece call` draws at its
+verb; `cf cell get` and `cf wish` name no callable, so they take them wherever their
+own options go.
 
 **A read may be asked twice; a call may not.** A projection is a question, and
 asking it changes nothing — that is the invariant, and it is what makes every
@@ -610,7 +612,7 @@ Every settled envelope names a `receipt` — the cell this handling wrote its
 outcome to — and reading it is an ordinary read:
 
 ```bash
-cf get "$RECEIPT" --select note,noteCount
+cf cell get "$RECEIPT" --select note,noteCount
 ```
 
 ```text
@@ -639,9 +641,9 @@ instead. Name a call with `--invocation`, and replaying that id hands back
 the original outcome:
 
 ```bash
-cf call --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+cf piece call --invocation note-retry "$EPIC" recordNote --body "first attempt"
 
-cf call --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+cf piece call --invocation note-retry "$EPIC" recordNote --body "a different body entirely"
 ```
 
 ```text
@@ -665,7 +667,7 @@ read like this whether or not a second note actually landed. The board is
 what settles it:
 
 ```bash
-cf get "$EPIC" notes --select body
+cf cell get "$EPIC" notes --select body
 ```
 
 ```text
@@ -704,9 +706,9 @@ other half of a surface that knows its own vocabulary, and the demo's act 11
 asks for two things that are not there — one on a call, one on a read:
 
 ```bash
-cf call --piece board addItem '{"title":"Ship it","titel":"typo"}'
+cf piece call --piece board addItem '{"title":"Ship it","titel":"typo"}'
 
-cf get "$EPIC" children --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
+cf cell get "$EPIC" children --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
 ```
 
 ```text
@@ -740,9 +742,9 @@ and they answer in this same shape.
 ## 8. Relate two items
 
 ```bash
-cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
+cf piece call "$KID" blockOn --on "$CSRF" -- --select blocked@,on@,blockedOnCount
 
-cf get "$EPIC" children --select @,title,blockedOn@
+cf cell get "$EPIC" children --select @,title,blockedOn@
 ```
 
 ```text
@@ -776,15 +778,18 @@ alike, and nothing in the output could tell one item from two.
 
 That spelling — the address exactly as a read printed it — dispatches where
 the verb declares a reference, and the edge that lands is the target rather
-than a copy. The dispatch gate reads the DECLARED contract
+than a copy. So does the `{"$link": …}` object a marked read renders the
+address in, alone or beside contents the same read projected: the address
+inside is what the position takes, and those contents, the target's own
+fields, are not sent. The dispatch gate reads the DECLARED contract
 ([verb input contract](../../history/plans/verb-input-contract.md)) to know
 which positions declare references, and the same contract refuses the two
 payloads that could only ever be mistakes at one:
 
 ```bash
-cf call "$KID" blockOn -- --on "not-an-address"
+cf piece call "$KID" blockOn --on "not-an-address"
 
-cf call "$KID" blockOn '{"on":{"title":"a copy"}}'
+cf piece call "$KID" blockOn '{"on":{"title":"a copy"}}'
 ```
 
 A string that is no address is refused naming the position and the `/of:…`

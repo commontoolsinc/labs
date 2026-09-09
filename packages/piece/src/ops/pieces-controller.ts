@@ -1,11 +1,9 @@
 import type { CellScope } from "@commonfabric/api";
-import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   type EntityRef,
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model-schema";
 import { homeSchema } from "@commonfabric/home-schemas";
 import {
   createSession,
@@ -46,6 +44,8 @@ import {
   type Pattern,
   type PatternCoverageCollector,
   PatternManager,
+  type PatternSetupCommitReceipt,
+  PatternSetupPostCommitError,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -58,8 +58,11 @@ import {
 } from "@commonfabric/runner";
 import type { CfcPosture } from "@commonfabric/runner";
 import type {
+  CfcConfClause,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcReadOnExceed,
+  CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
@@ -85,9 +88,14 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
-import { PieceController } from "./piece-controller.ts";
+import {
+  assertSuppliedLinkSchemasCompatible,
+  assertWritablePiecePath,
+  PieceController,
+} from "./piece-controller.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
@@ -99,12 +107,22 @@ ensureNotRenderThread();
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
-const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
-  type: "array",
-  items: { type: "unknown", asCell: ["cell"] },
-  default: [],
-  ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
-});
+/**
+ * What opening a piece does beyond resolving its cell.
+ *
+ * `reconcile` rolls a stored source forward to the origin it follows, keeping
+ * a followed root current. `start` runs the pattern, which materializes
+ * everything its result reaches.
+ *
+ * They are separable because they are wanted separately: a caller that
+ * RENDERS a piece needs both, while a caller that reads what a piece
+ * exported needs the value it reads to be current without paying to run it.
+ * A boolean asks for both or neither.
+ */
+export type PieceOpen = { reconcile: boolean; start: boolean };
+
+const normalizePieceOpen = (open: boolean | PieceOpen): PieceOpen =>
+  typeof open === "boolean" ? { reconcile: open, start: open } : open;
 
 // Timing stats record even while the logger is disabled, so every phase is
 // visible in the load summaries (browser worker included, where the
@@ -145,38 +163,41 @@ function filterOutCell(
 }
 
 /**
- * A cold-start setup repair failed specifically because the CFC SCHEMA
- * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
- * preserved input or unclassified document data onto a now-required field that
- * carries no default. Generated result fields are not in this class: pattern
- * setup materializes them. This is ONE of the two repair-failure classes the
- * runnability backstop (`PiecesController.#healDefaultRootByRollForward`)
- * acts on — the other is a refused stored argument
- * ({@link isStoredArgumentSchemaRefusal}); every other failure stays
- * fail-closed.
+ * The migration token in its FRAMED reason position — `: <token>: ` — the
+ * exact shape the CFC prepare catch emits (`${token}: ${message}` recorded as
+ * a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
+ * `includes(token)` would also match the token appearing incidentally inside
+ * an UNRELATED, user-influenced error — e.g. an ordinary incompatible-type
+ * merge failure at a property path literally named
+ * `/cfc-schema-migration-incompatible` — and wrongly authorize a root
+ * replacement for a non-additive incompatibility. The `: … : ` framing cannot
+ * be produced by a path or value that merely contains the token string.
+ */
+const FRAMED_MIGRATION_REASON =
+  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
+
+/**
+ * Reports whether a cold-start setup repair failed specifically because the
+ * CFC SCHEMA MIGRATION rejected the commit — the pinned pattern loads but
+ * cannot migrate preserved input or unclassified document data onto a
+ * now-required field that carries no default. Generated result fields are not
+ * in this class: pattern setup materializes them. This is ONE of the two
+ * repair-failure classes the runnability backstop
+ * (`PiecesController.#healDefaultRootByRollForward`) acts on — the other is a
+ * refused stored argument ({@link isStoredArgumentSchemaRefusal}); every other
+ * failure stays fail-closed.
  *
  * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
  * runner emits it for prepared-digest races, unprepared transactions, and
  * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
- * which are repaired by repointing the root's pattern identity. So we require
- * the machine-stable migration token the CFC prepare tags onto this class
- * (`migration-reason.ts`). Matching a token in the message — not the error
- * class — is what survives the plain-`Error` re-wrap the runner applies at its
- * setup-commit boundary (`runner.ts`), keeping producer and consumer in
+ * which are repaired by repointing the root's pattern identity. So the check
+ * requires the machine-stable migration token the CFC prepare tags onto this
+ * class (`migration-reason.ts`), and only in its framed position
+ * ({@link FRAMED_MIGRATION_REASON}). Matching a token in the message — not the
+ * error class — is what survives the plain-`Error` re-wrap the runner applies
+ * at its setup-commit boundary (`runner.ts`), keeping producer and consumer in
  * lockstep across that boundary and across packages.
- *
- * Crucially we match the token only in its FRAMED reason position — `: <token>:
- * ` — the exact shape the prepare catch emits (`${token}: ${message}` recorded
- * as a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
- * `includes(token)` would also match the token appearing incidentally inside an
- * UNRELATED, user-influenced error — e.g. an ordinary incompatible-type merge
- * failure at a property path literally named `/cfc-schema-migration-incompatible`
- * — and wrongly authorize a root replacement for a non-additive incompatibility.
- * The `: … : ` framing cannot be produced by a path or value that merely
- * contains the token string.
  */
-const FRAMED_MIGRATION_REASON =
-  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
 const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("CFC enforcement rejected commit") &&
@@ -266,6 +287,9 @@ export class PiecesController<T = unknown> {
       cfcEnforcementMode,
       cfcFlowLabels,
       cfcPosture,
+      cfcWriteFloor,
+      cfcReadMaxConfidentiality,
+      cfcReadOnExceed,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -277,8 +301,14 @@ export class PiecesController<T = unknown> {
        * Open the space's session without syncing the space cell's contents. A
        * caller that reaches pieces by id, and never reads the space record,
        * does not need those contents.
+       *
+       * Defaults to `false` here: `initialize` syncs the space cell before it
+       * returns. The CLI's `loadPieces` defaults the same option to `true`,
+       * so a caller moving between the two surfaces should pass it
+       * explicitly rather than carry one default across to the other.
        */
       deferSpaceCellSync?: boolean;
+
       // Optional compiled-module-byte cache to share across controllers. Supplied
       // only by test code (see the integration suite's compile-byte-cache helper);
       // unset in production, so no cache is installed.
@@ -309,9 +339,16 @@ export class PiecesController<T = unknown> {
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
       // Named CFC posture bundle for this controller's runtime (the
-      // remoteClient preset's `cfcPosture` opt-in); the two dials above still
-      // apply over it.
+      // remoteClient preset's `cfcPosture` opt-in); the dials above and below
+      // still apply over it.
       cfcPosture?: CfcPosture;
+      cfcWriteFloor?: CfcWriteFloorMode;
+      // The runtime-wide read ceiling for this controller's session (the
+      // remoteClient preset's host-controlled pair): every `db.query` the
+      // session issues reads under it, and a query's own ceiling only
+      // tightens it.
+      cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+      cfcReadOnExceed?: CfcReadOnExceed;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
@@ -333,26 +370,38 @@ export class PiecesController<T = unknown> {
     // EXPERIMENTAL_* still winning per flag — a controller opened by a cf
     // binary or a fuse mount is not built alongside the server it talks to
     // (docs/development/EXPERIMENTAL_OPTIONS.md).
-    const runtime = new Runtime(runtimePresets.remoteClient({
-      apiUrl: api,
-      storageManager,
-      experimental: await experimentalOptionsForDeployedClient({
-        apiUrl: api,
-        env: readEnv,
-      }),
-      moduleByteCache,
-      patternCoverage,
-      ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
-      ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
-      ...(cfcPosture !== undefined ? { cfcPosture } : {}),
-      ...(navigateCallback !== undefined ? { navigateCallback } : {}),
-      ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
-      trustSnapshotProvider: () => ({
-        id: `principal:${session.as.did()}`,
-        actingPrincipal: session.as.did(),
-      }),
-    }));
+    // Constructed inside the cleanup scope: a runtime the constructor
+    // refuses (a read ceiling on a client under server execution, say)
+    // still leaves the storage manager open, and the enabler state the
+    // constructor claimed, unless the same teardown runs for it.
+    let runtime: Runtime | undefined;
     try {
+      runtime = new Runtime(runtimePresets.remoteClient({
+        apiUrl: api,
+        storageManager,
+        experimental: await experimentalOptionsForDeployedClient({
+          apiUrl: api,
+          env: readEnv,
+        }),
+        moduleByteCache,
+        patternCoverage,
+        ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
+        ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
+        ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+        ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
+        ...(cfcReadMaxConfidentiality !== undefined
+          ? { cfcReadMaxConfidentiality }
+          : {}),
+        ...(cfcReadOnExceed !== undefined ? { cfcReadOnExceed } : {}),
+        ...(navigateCallback !== undefined ? { navigateCallback } : {}),
+        ...(onPatternInstantiated !== undefined
+          ? { onPatternInstantiated }
+          : {}),
+        trustSnapshotProvider: () => ({
+          id: `principal:${session.as.did()}`,
+          actingPrincipal: session.as.did(),
+        }),
+      }));
       if (!await runtime.healthCheck()) {
         throw new Error(`Could not connect to "${api.toString()}".`);
       }
@@ -374,7 +423,7 @@ export class PiecesController<T = unknown> {
       // failed, and `dispose()` takes the rest of the runtime with it. The
       // error that started the teardown is the one that leaves.
       await storageManager.closeNow().catch(() => {});
-      await runtime.dispose().catch(() => {});
+      await runtime?.dispose().catch(() => {});
       throw error;
     }
   }
@@ -472,8 +521,9 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern cell, or undefined if not set
    */
   async getDefaultPattern(
-    runIt: boolean = true,
+    open: boolean | PieceOpen = true,
   ): Promise<Cell<NameSchema> | undefined> {
+    const { reconcile, start } = normalizePieceOpen(open);
     const cell = await timePiecePhase(
       "getDefaultPattern.spaceCell.sync",
       () => this.#spaceCell.key("defaultPattern").sync(),
@@ -495,11 +545,11 @@ export class PiecesController<T = unknown> {
     }
     try {
       return await timePiecePhase(
-        `getDefaultPattern.get(runIt=${runIt})`,
+        `getDefaultPattern.get(reconcile=${reconcile},start=${start})`,
         () =>
           this.getPieceCell(
             defaultPattern,
-            runIt,
+            { reconcile, start },
             nameSchema,
           ),
       );
@@ -512,7 +562,7 @@ export class PiecesController<T = unknown> {
       // this runtime cannot load. Roll that one forward to the space's
       // official system root and retry the start ONCE. Every other failure
       // rethrows untouched.
-      if (!runIt) throw error;
+      if (!start) throw error;
       let healed: Cell<NameSchema>;
       try {
         const root = await this.getPieceCell(defaultPattern, false, nameSchema);
@@ -544,7 +594,7 @@ export class PiecesController<T = unknown> {
         await this.runtime.idle();
         return await timePiecePhase(
           "getDefaultPattern.get(retry-after-heal)",
-          () => this.getPieceCell(healed, runIt, nameSchema),
+          () => this.getPieceCell(healed, { reconcile, start }, nameSchema),
         );
       } catch (retryError) {
         pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
@@ -580,14 +630,81 @@ export class PiecesController<T = unknown> {
       origin === deriveSystemPatternSource(this.#space, this.runtime);
   }
 
+  /** The root's `pieceRegistry` export, addressed but not yet synced. */
+  #pieceRegistryExport(root: Cell<NameSchema>): Cell<Cell<unknown>[]> {
+    const cell = root.asSchema({
+      type: "object",
+      properties: {
+        pieceRegistry: pieceListSchema,
+      },
+    });
+    return cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+  }
+
   /**
    * Get the cell containing the registered pieces in this space.
    * This is the discovery root, not a list of every stored piece root. Reads
    * the default pattern's pieceRegistry export.
+   *
+   * A listing is a read, and a read does not need the root running. Every
+   * writer of this export — {@link add}, {@link remove}, the root's own
+   * remove handler, and patterns that reach it through `wish()` — persists
+   * what it writes, so the stored value is current at every quiescent
+   * moment, and a listing can be served from it.
+   *
+   * The root is reconciled before the registry is read, so a listing heals a
+   * stale root without calling `runtime.start()`, the dominant phase of
+   * opening a space whose root reaches a large piece.
+   * Running is kept for the cases that cannot be served from what is stored:
+   * a root that has never exported a registry here, one whose passive open
+   * fails, and `add()`.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
-    const defaultPattern = await this.getDefaultPattern(true);
+    // Reconcile without starting so the registry is read from current stored
+    // exports without materializing the root's result graph.
+    let passiveError: unknown;
+    let passiveRoot: Cell<NameSchema> | undefined;
+    try {
+      passiveRoot = await this.getDefaultPattern({
+        reconcile: true,
+        start: false,
+      });
+    } catch (error) {
+      passiveError = error;
+      pieceUpdateLogger.warn("passive-registry-open-failed", () => [
+        "getPieceRegistry: passive default-root open failed; retrying with start",
+        error,
+      ]);
+    }
+    if (passiveRoot) {
+      const exported = this.#pieceRegistryExport(passiveRoot);
+      await this.syncPieces(exported);
+      // `pieceListSchema` carries `default: []`, so a root that never
+      // exported a registry and a root whose registry is empty read the same
+      // way through the schema. The raw value is what separates them, and
+      // only the first needs the root run.
+      if (exported.getRaw() !== undefined) {
+        return exported;
+      }
+    }
+
+    // The running path supplies a registry when no stored export is available.
+    // If both opens fail, retain both causes so the passive failure is not
+    // hidden by the fallback.
+    let defaultPattern: Cell<NameSchema> | undefined;
+    try {
+      defaultPattern = await this.getDefaultPattern(true);
+    } catch (error) {
+      if (passiveError !== undefined) {
+        throw new AggregateError(
+          [passiveError, error],
+          `Could not open the piece registry for space ${this.#space}`,
+        );
+      }
+      throw error;
+    }
     if (!defaultPattern) {
+      if (passiveError !== undefined) throw passiveError;
       // Return empty array cell if no default pattern. Loud on purpose: any
       // subscription made against this placeholder never fires again, so a
       // cold-cache miss here silently freezes piece listings (e.g. FUSE).
@@ -598,13 +715,7 @@ export class PiecesController<T = unknown> {
       return this.runtime.getCell(this.#space, "empty-pieces", pieceListSchema);
     }
 
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        pieceRegistry: pieceListSchema,
-      },
-    });
-    const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    const pieceRegistry = this.#pieceRegistryExport(defaultPattern);
     await this.syncPieces(pieceRegistry);
     return pieceRegistry;
   }
@@ -675,12 +786,16 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("add.synced", () => this.synced());
   }
 
+  /**
+   * Syncs the piece list held in `cell`. `pieceListSchema` gives its items no
+   * shape — they are `unknown` — so neither the value the caller receives nor
+   * the query behind it has anywhere to descend inside a piece, and no field a
+   * piece labels is ever selected. `asCell` alone would not be enough for
+   * that: it bounds the runtime's own walk, while the memory query walks
+   * through it.
+   */
   syncPieces(cell: Cell<Cell<unknown>[]>) {
-    // TODO(@ubik2) We use elevated permissions here temporarily.
-    // Our request for the piece list will walk the schema tree, and that will
-    // take us into confidential data of pieces. If that happens, we still want
-    // this bit to work, so we elevate this request.
-    return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).pull();
+    return cell.asSchema(pieceListSchema).pull();
   }
 
   /**
@@ -688,22 +803,23 @@ export class PiecesController<T = unknown> {
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
-    runIt: boolean,
+    open: boolean | PieceOpen,
     asSchema: S,
     scope?: CellScope,
   ): Promise<Cell<Schema<S>>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt?: boolean,
+    open?: boolean | PieceOpen,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt: boolean = false,
+    open: boolean | PieceOpen = false,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>> {
+    const { reconcile, start } = normalizePieceOpen(open);
     // Get the piece cell
     const addressed: Cell<unknown> = isCell(id)
       ? id
@@ -734,7 +850,7 @@ export class PiecesController<T = unknown> {
     // further sync. Idempotent for a normal top-level piece.
     let piece = addressed.resolveAsCell();
 
-    if (runIt) {
+    if (reconcile) {
       const outcome = await timePiecePhase(
         "get.reconcileSource",
         () => reconcilePieceSource(this.runtime, piece),
@@ -742,10 +858,12 @@ export class PiecesController<T = unknown> {
       if (outcome === "updated") {
         // The transition committed through a transaction view, and the caller
         // may have handed us a cell bound to a read transaction older than it.
-        // Detach and resync, or the start below loads the identity the origin
+        // Detach and resync, or a start below loads the identity the origin
         // just replaced — and reads through the returned cell describe it.
         piece = await piece.withTx().sync();
       }
+    }
+    if (start) {
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
@@ -1149,7 +1267,9 @@ export class PiecesController<T = unknown> {
     return cell;
   }
 
-  // Return Cell with argument content, loading the pattern if needed.
+  /**
+   * Returns the `Cell` with argument content, loading the pattern if needed.
+   */
   getArgument<T = unknown>(
     piece: Cell<unknown | T>,
   ): Cell<T> {
@@ -1177,10 +1297,24 @@ export class PiecesController<T = unknown> {
    * commit, so the registry and the link cannot land in a split state. A
    * removal that cannot commit throws instead, so `false` never stands in for
    * a storage failure.
+   *
+   * `scope` completes an id into a document address and defaults to the
+   * space, as it does for {@link getPieceCell}. A `Cell` argument already
+   * carries one, and is taken as it stands.
    */
-  async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
+  async remove(
+    pieceOrId: string | Cell<unknown>,
+    scope?: CellScope,
+  ): Promise<boolean> {
     const piece = typeof pieceOrId === "string"
-      ? this.runtime.getCellFromEntityId(this.#space, entityIdFrom(pieceOrId))
+      ? this.runtime.getCellFromEntityId(
+        this.#space,
+        entityIdFrom(pieceOrId),
+        [],
+        undefined,
+        undefined,
+        scope,
+      )
       : pieceOrId;
     const piecesCell = await this.getPieceRegistry();
     await this.syncPieces(piecesCell);
@@ -1265,10 +1399,18 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
-  // Consistently return the `Cell<Piece>` of piece with
-  // id `pieceId`, applies the provided `pattern` (which may be
-  // its current pattern -- useful when we are only updating inputs),
-  // and optionally applies `inputs` if provided.
+  /**
+   * Consistently returns the `Cell<Piece>` of the piece with id `pieceId`,
+   * applying the provided `pattern` (which may be its current pattern — useful
+   * when we are only updating inputs), and optionally applying `inputs` if
+   * provided.
+   *
+   * Reports a failure as itself, whether it happened before or after the setup
+   * transaction committed. `runPatternUpdate()` below runs the same post-commit
+   * work and differs precisely here: it issues a receipt, so it reports a
+   * post-commit failure as a `PatternSetupPostCommitError` carrying that
+   * receipt. Callers classifying failures by message want this one.
+   */
   async runWithPattern(
     pattern: Pattern | Module,
     pieceId: string,
@@ -1294,6 +1436,12 @@ export class PiecesController<T = unknown> {
     await piece.sync();
     const start = options?.start ?? true;
     let currentPiece = piece;
+    // The pattern `syncPattern` may be told about, which is only the one this
+    // call is certain the piece ended up running. `runSynced` carries no such
+    // certainty: a concurrent source update can supersede this caller between
+    // its setup commit and here, and `runSynced` then hands back a piece
+    // running the winner rather than this candidate.
+    let installedPattern: Pattern | Module | undefined;
     if (start) {
       currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
         expectedPatternIdentity: options?.expectedPatternIdentity,
@@ -1309,13 +1457,70 @@ export class PiecesController<T = unknown> {
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
         patternRepository: options?.repository,
       });
+      installedPattern = pattern;
     }
-    await this.syncPattern(currentPiece);
+    await this.syncPattern(currentPiece, installedPattern);
     if (start) {
       await this.getResult(currentPiece).pull();
     }
 
     return currentPiece;
+  }
+
+  /**
+   * Applies a pattern through an owned transaction and returns its receipt.
+   *
+   * A later failure to synchronize dependencies, start the piece, load its
+   * schema, or pull its result throws `PatternSetupPostCommitError`, whose
+   * `.commit` remains the accepted transaction's result.
+   */
+  async runPatternUpdate(
+    pattern: Pattern | Module,
+    pieceId: string,
+    inputs: object | undefined,
+    options: {
+      expectedPatternIdentity: { identity: string; symbol: string };
+      /** Invariant over the argument stored before setup changes it. */
+      validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+      /** Invariant over links retained by the candidate argument schema. */
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+      /** Repository locator written atomically with pattern setup. */
+      repository?: string;
+      /** Fresh source lifecycle revision written atomically with setup. */
+      sourceTransition: PieceSourceTransition;
+    },
+  ): Promise<{
+    /** Cell view reconciled to the pattern current after post-commit work. */
+    cell: Cell<unknown>;
+    /** Receipt issued from the accepted setup transaction. */
+    commit: PatternSetupCommitReceipt;
+  }> {
+    const piece = this.runtime.getCellFromEntityId(
+      this.#space,
+      entityIdFrom(pieceId),
+    );
+    const result = await this.runtime.runSyncedWithCommit(
+      piece,
+      pattern,
+      inputs,
+      {
+        expectedPatternIdentity: options.expectedPatternIdentity,
+        patternRepository: options.repository,
+        pieceSourceTransition: options.sourceTransition,
+        validateCurrentArgument: options.validateCurrentArgument,
+        validateArgumentLinks: options.validateArgumentLinks,
+      },
+    );
+    try {
+      await this.syncPattern(result.cell);
+      await this.getResult(result.cell).pull();
+      return result;
+    } catch (error) {
+      throw new PatternSetupPostCommitError(result.commit, error);
+    }
   }
 
   /**
@@ -1337,9 +1542,9 @@ export class PiecesController<T = unknown> {
       cause ?? { space: this.#space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    // Fast path: the pattern's content-addressed entry ref, if it carries one
-    // (every space-compiled pattern does). Lets us load by identity without
-    // waiting for the piece's `patternIdentity` meta to settle.
+    // Setup verifies the source closure of a pattern that carries a
+    // content-addressed entry ref, and verifies it synchronously. Load the
+    // parser it needs first, since setup cannot await one.
     const knownEntryRef = this.runtime.patternManager.getArtifactEntryRef(
       pattern,
     );
@@ -1360,10 +1565,7 @@ export class PiecesController<T = unknown> {
     );
     await timePiecePhase(
       "setupPersistent.syncPattern",
-      () =>
-        knownEntryRef
-          ? this.syncPatternByIdentity(knownEntryRef)
-          : this.syncPattern(piece),
+      () => this.syncPattern(piece, pattern),
     );
 
     return piece;
@@ -1401,14 +1603,19 @@ export class PiecesController<T = unknown> {
     );
   }
 
-  /** Start scheduling and running a prepared piece. */
+  /**
+   * Start scheduling and running a prepared piece. `scope` completes an id
+   * into a document address and defaults to the space, as it does for
+   * {@link getPieceCell}; a `Cell` argument already carries one.
+   */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
+    scope?: CellScope,
   ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
         "startPiece.get",
-        () => this.getPieceCell<T>(pieceOrId),
+        () => this.getPieceCell<T>(pieceOrId, false, undefined, scope),
       )
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
@@ -1423,18 +1630,54 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("startPiece.synced", () => this.synced());
   }
 
-  /** Stop a running piece (no-op if not running). */
-  async stopPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+  /**
+   * Stop a running piece (no-op if not running). `scope` completes an id into
+   * a document address and defaults to the space, as it does for
+   * {@link getPieceCell}; a `Cell` argument already carries one.
+   */
+  async stopPiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    scope?: CellScope,
+  ): Promise<void> {
     const piece = typeof pieceOrId === "string"
-      ? await this.getPieceCell<T>(pieceOrId)
+      ? await this.getPieceCell<T>(pieceOrId, false, undefined, scope)
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
     this.runtime.runner.stop(piece);
     await this.runtime.idle();
   }
 
-  // FIXME(JA): this really really really needs to be revisited
-  async syncPattern(piece: Cell<unknown>) {
+  /**
+   * Load the pattern a piece runs, so a later cold runtime can resolve it from
+   * the space by identity.
+   *
+   * Pass `pattern` only when the caller drove `setup` itself and so knows
+   * which pattern the piece ended up running. Setup stamps an entry ref onto
+   * every pattern it installs, keyed by content for a compiled one, so the
+   * identity is then a lookup in memory and the piece is never read. A caller
+   * that went through `runSynced` has no such knowledge and must pass nothing.
+   *
+   * Without a pattern the identity comes from the `patternIdentity` metadata
+   * on the piece, which names whichever pattern the piece actually runs. That
+   * metadata becomes readable once the write carrying it commits, so this
+   * settles the pending writes and then reads. The settle costs a wait on the
+   * storage manager's whole queue, which is the price of reading an answer
+   * that does not depend on when the read happened to land.
+   */
+  async syncPattern(piece: Cell<unknown>, pattern?: Pattern | Module) {
+    const ref =
+      (pattern !== undefined
+        ? this.runtime.patternManager.getArtifactEntryRef(pattern)
+        : undefined) ?? await this.#readPatternIdentity(piece);
+
+    return await timePiecePhase(
+      "syncPattern.loadPattern",
+      () => this.syncPatternByIdentity(ref),
+    );
+  }
+
+  async #readPatternIdentity(piece: Cell<unknown>) {
+    await timePiecePhase("syncPattern.synced", () => this.synced());
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
     // When we subscribe to a doc, our subscription includes the doc's pattern
@@ -1448,31 +1691,13 @@ export class PiecesController<T = unknown> {
     // except the session that minted it, never this one — so it must not
     // shadow the live session pointer; it stays the last resort so a fresh
     // session's orphan keeps its designed no-pattern outcome.
-    const resolvePatternRef = () => {
-      const durable = getPatternIdentityRef(piece);
-      if (
-        durable !== undefined &&
-        !PatternManager.isKeylessPatternIdentity(durable.identity)
-      ) {
-        return durable;
-      }
-      return this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
-    };
-    let ref = resolvePatternRef();
-    if (!ref) {
-      // Under remote sync, metadata can transiently lag the result value even
-      // though setup just wrote both. Wait for storage to settle and retry once
-      // before treating the pattern metadata as missing.
-      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
-      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      ref = resolvePatternRef();
-    }
+    const durable = getPatternIdentityRef(piece);
+    const ref = (durable !== undefined &&
+        !PatternManager.isKeylessPatternIdentity(durable.identity))
+      ? durable
+      : this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
     if (!ref) throw new Error("piece missing pattern identity");
-
-    return await timePiecePhase(
-      "syncPattern.loadPattern",
-      () => this.syncPatternByIdentity(ref),
-    );
+    return ref;
   }
 
   async syncPatternByIdentity(ref: { identity: string; symbol: string }) {
@@ -1489,8 +1714,10 @@ export class PiecesController<T = unknown> {
     await entity.sync();
   }
 
-  // Returns the piece from our active piece list if it is present,
-  // or undefined if it is not
+  /**
+   * Returns the piece from our active piece list if it is present, or
+   * `undefined` if it is not.
+   */
   async getActivePiece(pieceCell: Cell<unknown>) {
     const piecesCell = await this.getPieceRegistry();
     const resolved = pieceCell.resolveAsCell();
@@ -1502,6 +1729,11 @@ export class PiecesController<T = unknown> {
   /**
    * Set the target cell's argument cell at target path to be a link to the
    * link cell's content at linkPath.
+   *
+   * Piece inputs validate the binding against durable producer metadata in
+   * the write transaction. Sources without that metadata remain dynamic
+   * bindings without a static producer-contract proof. Binding a Stream
+   * stores its handle; it does not send an event.
    *
    * @param linkPieceId
    * @param linkPath
@@ -1521,7 +1753,7 @@ export class PiecesController<T = unknown> {
     },
   ): Promise<void> {
     const start = options?.start ?? true;
-    let linkCell = this.runtime.getCellFromEntityId(
+    const linkCell = this.runtime.getCellFromEntityId(
       this.#space,
       entityIdFrom(linkPieceId),
       [],
@@ -1530,8 +1762,6 @@ export class PiecesController<T = unknown> {
       options?.sourceScope,
     );
     await linkCell.sync();
-    linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
-    linkCell = linkCell.key(...linkPath);
     // Keep Piece result links anchored at the public result projection. Its
     // durable, monotonically narrowing result schema is the producer contract;
     // resolving through an alias here would discard that contract and point at
@@ -1543,10 +1773,13 @@ export class PiecesController<T = unknown> {
         this,
         targetPieceId,
         "Target",
-        options,
+        { ...options, start: false },
       );
 
     const result = await this.runtime.editWithRetry((tx) => {
+      // Recover the producer view in the transaction that commits the binding,
+      // so a concurrent contract change invalidates the transaction's reads.
+      const source = linkCell.withTx(tx).asSchemaFromLinks().key(...linkPath);
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
         // For pieces, target fields are in the result cell's argument
@@ -1566,19 +1799,42 @@ export class PiecesController<T = unknown> {
           undefined,
           tx,
         );
+        const targetSchema = targetArgumentLink.schema ?? true;
+        assertWritablePiecePath(
+          targetSchema,
+          targetPath,
+          true,
+          false,
+          targetInputCell,
+        );
+        assertSuppliedLinkSchemasCompatible(
+          [{ path: targetPath, value: source }],
+          targetSchema,
+          targetInputCell,
+          this,
+          { allowUnprovenSource: true },
+        );
       }
 
       targetInputCell.key(...targetPath).setRawUntyped(
-        linkCell.getAsLink({
+        source.getAsLink({
           base: targetInputCell,
           includeSchema: true,
           keepAsCell: KeepAsCell.OnlyStream,
         }),
       );
     });
-    if (result.error) throw result.error;
+    if (result.error) {
+      throw new Error(
+        `Cannot link ${linkPieceId}/${linkPath.join("/")} to ${targetPieceId}/${
+          targetPath.join("/")
+        }: ${result.error.message}`,
+        { cause: result.error },
+      );
+    }
 
     if (targetIsPiece && start) {
+      await this.runtime.start(targetCell);
       await this.getResult(targetCell).pull();
     }
     await this.synced();
@@ -2109,7 +2365,7 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
+   * Runnability backstop for `#startEnsuredDefaultPattern`'s cold-start
    * repair. Reached only when the pinned pattern's OWN setup repair failed in a
    * way that re-running it cannot fix — a root that loads but cannot run.
    * Exactly two signals qualify: the CFC migration rejected the commit (gated
@@ -2305,9 +2561,13 @@ export class PiecesController<T = unknown> {
           identity: pinnedRef.identity,
           symbol: pinnedRef.symbol,
           displacedAt: sourceTransition.timestamp,
-        });
+        }, rawMetaWriteAuthorization);
       }
-      rootTx.setMetaRaw("patternIdentity", officialRef);
+      rootTx.setMetaRaw(
+        "patternIdentity",
+        officialRef,
+        rawMetaWriteAuthorization,
+      );
       return true;
     });
     if (swapResult.error) {

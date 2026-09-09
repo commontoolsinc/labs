@@ -15,6 +15,11 @@
  * propagation gap itself is too small to observe in a fixture this size — the
  * barrier's discriminating coverage is the pattern-test corpus, where removing
  * it fails seven assertions across `topics`, `lobby`, and `cfc-group-chat-demo`.
+ *
+ * Also here: the CFC enforcement mode a run names reaches every participant.
+ * Each participant builds its own runtime in its own worker, so a mode the
+ * orchestrator holds and does not forward leaves every one of them on the
+ * preset's rung while the run reads as though it named one.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -22,8 +27,12 @@ import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
-import { runTests } from "../lib/test-runner.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
+import { runTestPattern, runTests } from "../lib/test-runner.ts";
+import { assertParticipantRung } from "../lib/multi-user-test-runner.ts";
 import type {
+  ParticipantInitResult,
   WorkerRequest,
   WorkerResponse,
 } from "../lib/multi-user-test-worker.ts";
@@ -213,6 +222,123 @@ describe(
       } finally {
         for (const client of workers.values()) await client.close();
         await server.close().catch(() => {});
+      }
+    });
+
+    /** One participant's `init`, driven directly so its answer is readable. */
+    async function initParticipant(
+      server: StandaloneMemoryServer,
+      args: Record<string, unknown>,
+    ): Promise<ParticipantInitResult> {
+      const client = new ParticipantWorkerClient("alice");
+      try {
+        const identity = await Identity.fromPassphrase("test-runner alice", {
+          implementation: "noble",
+        });
+        return await client.call("init", {
+          identity: realmValueFromKeyPair(identity.keyPair),
+          spaceName: crypto.randomUUID(),
+          apiUrl: server.url.href,
+          testPath: fixture("marker-barrier.test.tsx"),
+          root: FIXTURES,
+          participant: "alice",
+          participants: ["alice"],
+          seedDefaults: true,
+          ...args,
+        }) as ParticipantInitResult;
+      } finally {
+        await client.close();
+      }
+    }
+
+    it("runs every participant at the mode the run names", async () => {
+      // The rung is checked against what each participant's own runtime
+      // answers with, so a mode that reached the orchestrator alone — or
+      // reached one worker and not the next — is named rather than run past.
+
+      const { failed, results } = await runTests(
+        fixture("marker-barrier.test.tsx"),
+        { root: FIXTURES, cfcEnforcementMode: "observe" },
+      );
+      expect(results[0].error).toBeUndefined();
+      expect(failed).toBe(0);
+    });
+
+    it("names the participant that came up on another rung", () => {
+      // The check's own report. A worker cannot be made to disagree with the
+      // orchestrator from out here, so the message is read from the check
+      // rather than from a run that provoked it.
+
+      expect(() =>
+        assertParticipantRung("alice", "observe", "enforce-explicit")
+      ).toThrow(
+        'participant "alice" came up at CFC enforce-explicit, not the ' +
+          "observe this run names",
+      );
+      expect(() => assertParticipantRung("alice", "observe", "observe"))
+        .not.toThrow();
+      expect(() => assertParticipantRung("alice", undefined, "enforce-strict"))
+        .not.toThrow();
+    });
+
+    it("builds a participant's runtime at each rung init names", async () => {
+      // Every rung, not just a relaxed one: a worker that answered `disabled`
+      // whatever it was asked would satisfy a single-rung reading, and
+      // `disabled` is the rung that turns CFC off altogether.
+
+      const server = StandaloneMemoryServer.start();
+      try {
+        for (const rung of CFC_ENFORCEMENT_MODES) {
+          const init = await initParticipant(server, {
+            cfcEnforcementMode: rung,
+          });
+          expect(init.cfcEnforcementMode).toBe(rung);
+        }
+        // Naming none leaves the preset to decide, which is what makes the
+        // readings above statements about the request. The rung named here is
+        // `runtimePresets.patternTest`'s pin, so a move there lands as a
+        // failure in this test rather than as a quietly different harness.
+        expect((await initParticipant(server, {})).cfcEnforcementMode)
+          .toBe("enforce-explicit");
+      } finally {
+        await server.close().catch(() => {});
+      }
+    });
+
+    it("reports a mode that is not on the ladder, naming it", async () => {
+      // The name is read before anything else `init` is given, so this needs
+      // no space, no server and no test file.
+
+      const client = new ParticipantWorkerClient("alice");
+      try {
+        await expect(
+          client.call("init", { cfcEnforcementMode: "enforce-ish" }),
+        ).rejects.toThrow(
+          "`cfcEnforcementMode` is enforce-ish, not one of ",
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("reports a caller-supplied store on a multi-user test", async () => {
+      // The participants instantiate and write in workers of their own, so
+      // the caller's store and observer come back empty while their
+      // assertions pass. Saying so is what keeps the vintage capture from
+      // reading the same run as a pattern that instantiated nothing.
+
+      const identity = await Identity.fromPassphrase("multi-user storage host");
+      const storageManager = StorageManager.emulate({ as: identity });
+      try {
+        const result = await runTestPattern(
+          fixture("marker-barrier.test.tsx"),
+          { root: FIXTURES, storageHost: { identity, storageManager } },
+        );
+        expect(result.error).toContain("is a multi-user test");
+        expect(result.error).toContain("`storageHost`");
+        expect(result.results).toEqual([]);
+      } finally {
+        await storageManager.close();
       }
     });
 

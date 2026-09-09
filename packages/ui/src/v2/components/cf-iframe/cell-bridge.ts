@@ -9,7 +9,7 @@ import {
   createFabricBridge,
   type FabricBridge,
 } from "@commonfabric/iframe-sandbox";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   CellHandle,
   type ClientCellValue,

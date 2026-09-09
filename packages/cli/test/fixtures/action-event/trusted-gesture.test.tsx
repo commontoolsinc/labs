@@ -3,6 +3,7 @@
  * carries `type: "click"`; a payload adds to that gesture rather than
  * replacing it, so the handler sees both.
  */
+
 import { assert, handler, pattern, TESTS, type Writable } from "commonfabric";
 
 const record = handler<

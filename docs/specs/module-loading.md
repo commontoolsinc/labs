@@ -182,7 +182,7 @@ lazy `compartment.importNow` inside `execute`.
 
 ### Identity flow into action identity
 
-- [`Engine.recordModuleProvenance`][c1] records each emitted module's identity
+- [`Engine.#recordModuleProvenance`][c1] records each emitted module's identity
   and the module-scope symbols it exports or hoists, and joins each symbol to
   the authored position the compiler recorded for it in that module's
   builder-source-site sidecar.

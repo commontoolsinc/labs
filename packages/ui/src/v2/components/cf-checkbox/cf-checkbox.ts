@@ -194,7 +194,10 @@ export class CFCheckbox extends BaseElement {
       },
     });
 
-    // Form field controller handles buffering when in cf-form context
+    /**
+     * Form field controller, which handles buffering when in a `cf-form`
+     * context.
+     */
     private _formField = createFormFieldController<boolean>(this, {
       cellController: this._checkedCellController,
       validate: () => {

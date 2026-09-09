@@ -132,7 +132,6 @@ Deno.test("cf-message-beads unit paths render a named list and refine control", 
   beads.pending = false;
   beads.label = "History";
   beads.messages = [
-    { role: "system", content: "Instructions" },
     { role: "tool", content: "Tool output" },
     { role: "user", content: "Hello from the thread" },
     { role: "assistant", content: "A direct answer" },

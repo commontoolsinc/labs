@@ -1,4 +1,5 @@
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
+import type { FabricPrimitive } from "@commonfabric/data-model";
 import {
   FabricBytes,
   FabricEpochDay,
@@ -7,7 +8,6 @@ import {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
 /**

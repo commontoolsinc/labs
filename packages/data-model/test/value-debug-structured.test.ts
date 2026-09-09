@@ -6,8 +6,10 @@
  * already wrong, so the two properties that matter most are pinned throughout:
  * the result is always a valid `FabricValue`, and a subvalue that cannot be
  * converted costs only itself rather than the whole result. The cases here are
- * arranged by what the input is, and then by the two knobs -- `maxDepth` and
- * `replacer` -- that change what comes back.
+ * arranged by what the input is, and then by the limit options, whose
+ * defaults and caps are pinned here while the conversions under other limits
+ * are recorded as case files under `value-debug-cases/`, each file's
+ * `/options` binding naming the limits its cases convert under.
  *
  * The marker vocabulary (`/circle`, `/...`, `/function`, `/uniqueSymbol`,
  * `/unconvertible`, and the leading-slash key escape) is deliberately not
@@ -18,8 +20,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { DebugValueOptions } from "@/interface.ts";
 import { toStructuredDebugValue } from "@/value-debug.ts";
-import { isValidFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
@@ -54,6 +57,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns `-0` as `-0` and not as `0`", () => {
       // `toBe` is `Object.is`, which is the only matcher that can tell the two
       // apart; `toEqual` would pass either way.
+
       expect(toStructuredDebugValue(-0)).toBe(-0);
     });
 
@@ -93,6 +97,7 @@ describe("toStructuredDebugValue()", () => {
 
     it("returns `<anonymous>(...)` for a function with no name", () => {
       // A bare arrow assigned to nothing has an empty `name`.
+
       expect(toStructuredDebugValue((() => () => {})()))
         .toEqual({ "/function": "<anonymous>(...)" });
     });
@@ -106,6 +111,7 @@ describe("toStructuredDebugValue()", () => {
       // The failure is reported within the wrapper rather than in place of
       // it, so the result still says a function was here, and the sibling
       // properties are unaffected.
+
       const value = new Proxy(function real() {}, {
         get(target, key, receiver) {
           if (key === "name") throw new Error("name trap");
@@ -121,10 +127,11 @@ describe("toStructuredDebugValue()", () => {
     });
   });
 
-  // Every case here holds at least one value that does not survive conversion
-  // unchanged, so that a walk which returned its input untouched would be
-  // caught. A container of scalars alone cannot tell the two apart.
   describe("containers", () => {
+    // Every case here holds at least one value that does not survive conversion
+    // unchanged, so that a walk which returned its input untouched would be
+    // caught. A container of scalars alone cannot tell the two apart.
+
     it("returns a plain object with its values converted", () => {
       expect(
         toStructuredDebugValue({ a: 1, fn: function foo() {}, m: new Map() }),
@@ -144,6 +151,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns nested containers converted all the way down", () => {
       // The converting value sits at the bottom of an object-array-object
       // chain, so reaching it at all is the assertion.
+
       expect(toStructuredDebugValue({ a: [{ b: Symbol("deep") }] }))
         .toEqual({ a: [{ b: { "/uniqueSymbol": "deep" } }] });
     });
@@ -168,6 +176,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns a sparse array without visiting the indices it has no element at", () => {
       // A very sparse array has to cost its element count and not its
       // `length`, which is what visiting only the keys it has buys.
+
       const probed: string[] = [];
       const target: unknown[] = [];
       target.length = 1000;
@@ -180,7 +189,10 @@ describe("toStructuredDebugValue()", () => {
         },
       });
 
-      const result = toStructuredDebugValue(counted) as unknown[];
+      const result = toStructuredDebugValue(
+        counted,
+        { maxArrayLength: 1000 },
+      ) as unknown[];
       expect(result.length).toBe(1000);
       expect(Object.keys(result)).toEqual(["0", "999"]);
       expect(result[999]).toEqual({ "/Map": "/..." });
@@ -198,6 +210,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns a null-prototype object as an ordinary plain object", () => {
       // Were it treated as a general instance instead, the result would carry
       // a class-name tag rather than the object's own keys.
+
       const value = Object.assign(Object.create(null), { m: new Map() });
       expect(toStructuredDebugValue(value)).toEqual({ m: { "/Map": "/..." } });
     });
@@ -207,6 +220,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns a `/`-prefixed key with one more `/` prepended", () => {
       // Without the escape, a key of `/circle` would be indistinguishable
       // from the cycle marker this module writes.
+
       expect(toStructuredDebugValue({ "/circle": 3 }))
         .toEqual({ "//circle": 3 });
     });
@@ -250,6 +264,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns each `FabricInstance` under the tag of its own class", () => {
       // The tag comes from the value's codec, so a second class must not
       // arrive under the first one's tag.
+
       const value = new FabricLink({
         id: "of:fid1:abc",
         path: ["x"],
@@ -296,6 +311,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns `/...` rather than `{}` when there is nothing to show", () => {
       // Claiming an empty object about a `Map` would be a lie; `/...` says
       // "contents not represented", which is true.
+
       expect(toStructuredDebugValue(new Map([["a", 1]])))
         .toEqual({ "/Map": "/..." });
       expect(toStructuredDebugValue(new Set([1, 2])))
@@ -325,6 +341,7 @@ describe("toStructuredDebugValue()", () => {
       // Only ancestors count as a cycle. A value reached twice by different
       // paths is shown at both, since identical siblings are an ordinary
       // shape and calling the second one circular would misdescribe it.
+
       const shared = { s: 1 };
       expect(toStructuredDebugValue({ x: shared, y: shared }))
         .toEqual({ x: { s: 1 }, y: { s: 1 } });
@@ -332,103 +349,140 @@ describe("toStructuredDebugValue()", () => {
   });
 
   describe("with `maxDepth`", () => {
-    it("returns `/...` and the elided value's kind at the limit", () => {
-      expect(toStructuredDebugValue({ a: { b: 1 } }, 2))
-        .toEqual({ a: { "/...": "object" } });
-      expect(toStructuredDebugValue({ a: [1, 2] }, 2))
-        .toEqual({ a: { "/...": "array" } });
-    });
-
-    it("returns the elision at the top level given a `maxDepth` of `1`", () => {
-      expect(toStructuredDebugValue({ a: 1 }, 1))
-        .toEqual({ "/...": "object" });
-    });
-
-    it("returns content within the limit unelided", () => {
-      // The converting leaf makes this say that conversion reached the
-      // bottom, not merely that nothing was elided on the way.
-      expect(toStructuredDebugValue({ a: { b: Symbol("leaf") } }, 3))
-        .toEqual({ a: { b: { "/uniqueSymbol": "leaf" } } });
-    });
-
-    it("returns a `FabricPrimitive` at the limit rather than eliding it", () => {
-      // A primitive is atomic, so including it adds no nesting to the result.
-      const value = new FabricEpochNsec(123n);
-      expect((toStructuredDebugValue({ t: value }, 2) as { t: unknown }).t)
-        .toBe(value);
-    });
-
-    it("returns a bounded result for a structure deeper than the default", () => {
+    it("returns a result as deep as the conversion allows given `Infinity`", () => {
       let value: unknown = 1;
       for (let i = 0; i < 300; i++) value = { o: value };
 
-      let at = toStructuredDebugValue(value) as Record<string, unknown>;
+      let at = toStructuredDebugValue(value, { maxDepth: Infinity }) as Record<
+        string,
+        unknown
+      >;
       let levels = 0;
       while (at && (typeof at === "object") && ("o" in at)) {
         at = at.o as Record<string, unknown>;
         levels++;
       }
       expect(levels).toBe(99);
-      expect(at).toEqual({ "/...": "object" });
     });
 
     it("throws given a `maxDepth` that is not a positive integer", () => {
-      for (const bad of [0, -1, 1.5, Infinity, NaN]) {
-        expect(() => toStructuredDebugValue({}, bad))
-          .toThrow("`maxDepth` must be a positive integer or `undefined`");
+      for (const bad of [0, -1, 1.5, -Infinity, NaN]) {
+        expect(() => toStructuredDebugValue({}, { maxDepth: bad }))
+          .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
       }
     });
 
     it("throws given a `maxDepth` that is not a number", () => {
       for (const bad of ["3", null, {}]) {
-        expect(() => toStructuredDebugValue({}, bad as unknown as number))
-          .toThrow("`maxDepth` must be a positive integer or `undefined`");
+        const options = { maxDepth: bad as unknown as number };
+        expect(() => toStructuredDebugValue({}, options))
+          .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
       }
     });
   });
 
-  describe("with a `replacer`", () => {
-    it("returns the replacement in place of the original value", () => {
-      const result = toStructuredDebugValue(
-        { a: 1, b: 2 },
-        undefined,
-        (value) => (value === 1 ? "one" : value),
-      );
-      expect(result).toEqual({ a: "one", b: 2 });
+  describe("with `maxArrayLength`", () => {
+    it("returns no more than 10000 elements given a larger limit", () => {
+      const value = Array.from({ length: 20000 }, (_, i) => i);
+      for (const limit of [50000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxArrayLength: limit },
+        ) as unknown[];
+        expect(result.length).toBe(10001);
+        expect(result[9999]).toBe(9999);
+        expect(result[10000]).toEqual({ "/...": { length: 20000 } });
+      }
     });
 
-    it("returns a replacement offered for the top-level value", () => {
-      const result = toStructuredDebugValue(
-        { a: 1 },
-        undefined,
-        (value) => (typeof value === "object" ? "replaced" : value),
+    it("throws given a `maxArrayLength` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxArrayLength: bad as unknown as number };
+        expect(() => toStructuredDebugValue([], options)).toThrow(
+          "`maxArrayLength` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
+  describe("with `maxProperties`", () => {
+    it("returns no more than 10000 properties given a larger limit", () => {
+      const value = Object.fromEntries(
+        Array.from({ length: 10500 }, (_, i) => [`k${i}`, i]),
       );
-      expect(result).toBe("replaced");
+      for (const limit of [20000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxProperties: limit },
+        ) as Record<string, unknown>;
+        expect(Object.keys(result).length).toBe(10001);
+        expect(result["/..."]).toEqual({ count: 10500 });
+      }
     });
 
-    it("returns the converted replacement, not the replacement verbatim", () => {
-      // The replacement re-enters conversion, so a value the replacer hands
-      // back still gets escaped, tagged, and depth-limited like any other.
-      const result = toStructuredDebugValue(
-        { a: 1 },
-        undefined,
-        (value) => (value === 1 ? new Map() : value),
-      );
-      expect(result).toEqual({ a: { "/Map": "/..." } });
+    it("throws given a `maxProperties` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxProperties: bad as unknown as number };
+        expect(() => toStructuredDebugValue({}, options)).toThrow(
+          "`maxProperties` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
+  describe("with `maxStringLength`", () => {
+    it("returns no more than 100000 characters given a larger limit", () => {
+      const value = "x".repeat(150000);
+      for (const limit of [200000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxStringLength: limit },
+        ) as { "/partialString": { length: number; excerpt: string } };
+        expect(result["/partialString"].length).toBe(150000);
+        expect(result["/partialString"].excerpt.length).toBe(100000);
+      }
     });
 
-    it("returns the original value when the `replacer` throws", () => {
-      // A failed replacement reads as a refusal to replace rather than as a
-      // conversion error, so the rest of the result is unaffected.
-      const result = toStructuredDebugValue(
-        { a: 1, m: new Map() },
-        undefined,
-        (value) => {
-          if (value === 1) throw new Error("no thanks");
-          return value;
-        },
-      );
-      expect(result).toEqual({ a: 1, m: { "/Map": "/..." } });
+    it("throws given a `maxStringLength` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxStringLength: bad as unknown as number };
+        expect(() => toStructuredDebugValue("", options)).toThrow(
+          "`maxStringLength` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
+  describe("with `maxStringLines`", () => {
+    it("returns no more than 1000 lines given a larger limit", () => {
+      const value = "x\n".repeat(1500) + "x";
+      for (const limit of [2000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxStringLines: limit },
+        ) as { "/partialString": { length: number; excerpt: string } };
+        expect(result["/partialString"].length).toBe(3001);
+        expect(result["/partialString"].excerpt).toBe("x\n".repeat(1000));
+      }
+    });
+
+    it("throws given a `maxStringLines` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxStringLines: bad as unknown as number };
+        expect(() => toStructuredDebugValue("", options)).toThrow(
+          "`maxStringLines` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
+  describe("with `options` that are not a plain object", () => {
+    it("throws, naming the offending value", () => {
+      for (const bad of [100, "3", null, [], new Map()]) {
+        expect(() =>
+          toStructuredDebugValue({}, bad as unknown as DebugValueOptions)
+        ).toThrow("`options` must be a plain object or `undefined`; got `");
+      }
     });
   });
 
@@ -463,6 +517,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns the failure at the property whose read threw", () => {
       // The read of a property is part of converting it, so a getter that
       // throws costs its own property and no other.
+
       const value = {
         before: "kept",
         get boom(): number {
@@ -495,6 +550,7 @@ describe("toStructuredDebugValue()", () => {
     it("returns the failure in place for a throwing proxy trap", () => {
       // These traps are reached before any single property is, so each costs
       // the whole proxy. The `get` trap, reached per-property, is below.
+
       const traps: ProxyHandler<object>[] = [
         {
           getPrototypeOf() {
@@ -544,9 +600,10 @@ describe("toStructuredDebugValue()", () => {
       expect(result.z).toBe(2);
     });
 
-    // What lands in the `/unconvertible` payload depends on what was thrown,
-    // and anything at all can be thrown.
     describe("the `/unconvertible` message", () => {
+      // What lands in the `/unconvertible` payload depends on what was thrown,
+      // and anything at all can be thrown.
+
       /** Converts a value whose sole property throws `thrown` when read. */
       function messageFor(thrown: unknown): unknown {
         const value = {
@@ -575,6 +632,7 @@ describe("toStructuredDebugValue()", () => {
       it("returns the stringification when a message is not a string", () => {
         // An `Error` may carry a non-string `message`, in which case the
         // whole value is stringified rather than the message read out.
+
         const error = new Error("ignored");
         (error as unknown as Record<string, unknown>).message = 5;
         expect(messageFor(error)).toBe("Error: 5");
@@ -583,6 +641,7 @@ describe("toStructuredDebugValue()", () => {
       it("returns a fixed token when the thrown value resists stringifying", () => {
         // A null-prototype object has no `toString` to reach, so `String()`
         // throws on it; the message derivation must not throw in turn.
+
         expect(messageFor(Object.create(null))).toBe("/unconvertibleError");
       });
 
@@ -590,6 +649,7 @@ describe("toStructuredDebugValue()", () => {
         // Nothing is lost by not falling back to stringifying this one:
         // `Error.prototype.toString()` reads `message` too, so `String()`
         // throws on it just the same.
+
         const error = new Error("ignored");
         Object.defineProperty(error, "message", {
           get() {
@@ -602,6 +662,7 @@ describe("toStructuredDebugValue()", () => {
 
       it("returns a fixed token when the `instanceof` check itself throws", () => {
         // A thrown value can refuse even to be asked what it is.
+
         const thrown = new Proxy({}, {
           getPrototypeOf() {
             throw new Error("proto trap");
@@ -617,6 +678,7 @@ describe("toStructuredDebugValue()", () => {
       // The contract is what the two shipped bugs broke: a unique symbol's
       // payload and a reserved key each produced a result the membership
       // check refuses.
+
       const cyclic: Record<string, unknown> = { name: "root" };
       cyclic.self = cyclic;
 
@@ -631,6 +693,8 @@ describe("toStructuredDebugValue()", () => {
         Symbol.for("interned"),
         () => {},
         [1, , 3],
+        Array.from({ length: 101 }, (_, i) => i),
+        "x".repeat(201),
         withOwnProto(),
         { "/circle": 1 },
         cyclic,

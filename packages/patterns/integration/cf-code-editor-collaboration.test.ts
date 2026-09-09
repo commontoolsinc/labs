@@ -121,6 +121,38 @@ const reconciliationReached = (probe: ProbeApi): boolean => {
     globals.__collaborationReconciliationError !== undefined;
 };
 
+const epochReleaseObserved = (
+  probe: ProbeApi,
+  canonical: string,
+): boolean => {
+  const editor = probe.collect("cf-code-editor")[0] as EditorHost | undefined;
+  return editor?._collaboration?.active === false ||
+    editor?._editorView?.state.doc.toString() === canonical;
+};
+
+async function reconciliationReachedNow(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    const globals = globalThis as typeof globalThis & {
+      __collaborationReconciliation?: unknown;
+      __collaborationReconciliationError?: unknown;
+    };
+    return editor?._editorView?.state.readOnly === true &&
+      globals.__collaborationReconciliation !== undefined &&
+      globals.__collaborationReconciliationError !== undefined;
+  });
+}
+
 async function editorContent(page: Page): Promise<string> {
   return await page.evaluate(() => {
     const collect = (root: Document | ShadowRoot): Element[] => {
@@ -160,6 +192,26 @@ async function dispatchEdit(
     if (!view) throw new Error("collaborative editor is not ready");
     view.dispatch({ changes: { from, to, insert } });
   }, { args: [from, to, insert] });
+}
+
+async function appendEdit(page: Page, insert: string): Promise<void> {
+  await page.evaluate((insert) => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    const view = editor?._editorView;
+    if (!view) throw new Error("collaborative editor is not ready");
+    const end = view.state.doc.length;
+    view.dispatch({ changes: { from: end, to: end, insert } });
+  }, { args: [insert] });
 }
 
 async function enablePresence(
@@ -759,6 +811,18 @@ describe("cf-code-editor collaboration", () => {
         input: { content: "presence" },
         start: true,
       }),
+      burst: await cc.create(source, {
+        input: { content: "burst" },
+        start: true,
+      }),
+      burstBoth: await cc.create(source, {
+        input: { content: "both" },
+        start: true,
+      }),
+      burstEpoch: await cc.create(source, {
+        input: { content: "epoch" },
+        start: true,
+      }),
     };
 
     await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
@@ -1112,6 +1176,152 @@ describe("cf-code-editor collaboration", () => {
     assertEquals(detail.canonicalCursor, null);
     assertEquals(await editorContent(alicePage), "reset!LOCAL");
     assertEquals(latestContent.get("reconcile"), "reset!");
+
+    await cancelApplyGate(alicePage);
+    await awaitApplyCompleted(alicePage);
+    assertEquals(await reconciliationError(alicePage), {
+      message: "CodeMirror operation state changed with local edits pending",
+      name: "CodeMirrorReconciliationError",
+    });
+    assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("submits every edit of a burst typed during one round trip and keeps them across a reload", async () => {
+    // The apply gate holds the first edit's round trip open while six more
+    // edits land, the way keystrokes do when typing outruns the network.
+
+    await navigateBoth(pieces.burst);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+
+    await installNextApplyGate(alicePage);
+    await dispatchEdit(alicePage, 5, 5, "1");
+    await awaitApplyCaptured(alicePage);
+    for (const character of "234567") {
+      await appendEdit(alicePage, character);
+    }
+    await releaseApplyGate(alicePage);
+    await awaitApplyCompleted(alicePage);
+
+    await Promise.all([
+      waitForCondition(alicePage, editorContainsTokens, {
+        args: [["burst1234567"]],
+      }),
+      waitForCondition(bobPage, editorContainsTokens, {
+        args: [["burst1234567"]],
+      }),
+      awaitMaterialized("burst", (value) => value === "burst1234567"),
+    ]);
+    assertEquals(await editorContent(bobPage), "burst1234567");
+
+    await alicePage.reload({ waitUntil: "load" });
+    await alicePage.applyConsoleFormatter();
+    await aliceShell.login(alice);
+    await waitForCondition(alicePage, collaborationReady);
+    await listenForCollaborationErrors(alicePage);
+    assertEquals(await editorContent(alicePage), "burst1234567");
+    assertEquals(await collaborationErrors(alicePage), []);
+    assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("converges bursts typed concurrently in both browsers during one round trip", async () => {
+    await navigateBoth(pieces.burstBoth);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+    const aliceTokens = ["A1", "A2", "A3"];
+    const bobTokens = ["B1", "B2", "B3"];
+    const tokens = [...aliceTokens, ...bobTokens];
+
+    await Promise.all([
+      installNextApplyGate(alicePage),
+      installNextApplyGate(bobPage),
+    ]);
+    await Promise.all([
+      dispatchEdit(alicePage, 4, 4, aliceTokens[0]),
+      dispatchEdit(bobPage, 4, 4, bobTokens[0]),
+    ]);
+    await Promise.all([
+      awaitApplyCaptured(alicePage),
+      awaitApplyCaptured(bobPage),
+    ]);
+    for (const index of [1, 2]) {
+      await Promise.all([
+        appendEdit(alicePage, aliceTokens[index]),
+        appendEdit(bobPage, bobTokens[index]),
+      ]);
+    }
+    await Promise.all([
+      releaseApplyGate(alicePage),
+      releaseApplyGate(bobPage),
+    ]);
+    await Promise.all([
+      awaitApplyCompleted(alicePage),
+      awaitApplyCompleted(bobPage),
+    ]);
+
+    await Promise.all([
+      waitForCondition(alicePage, editorContainsTokens, { args: [tokens] }),
+      waitForCondition(bobPage, editorContainsTokens, { args: [tokens] }),
+    ]);
+    // Holding every token says each browser has integrated the other's
+    // operations, not that its own are confirmed; confirming them is the
+    // convergence barrier.
+    await Promise.all([
+      confirmPendingCollaborationEdits(alicePage),
+      confirmPendingCollaborationEdits(bobPage),
+    ]);
+    const [aliceContent, bobContent] = await Promise.all([
+      editorContent(alicePage),
+      editorContent(bobPage),
+    ]);
+    assertEquals(aliceContent, bobContent);
+    assertEquals(aliceContent.length, "both".length + 12);
+    assertEquals(
+      await awaitMaterialized("burstBoth", (value) => value === aliceContent),
+      aliceContent,
+    );
+    assertEquals(await collaborationErrors(alicePage), []);
+    assertEquals(await collaborationErrors(bobPage), []);
+  });
+
+  it("reports every edit of a burst when another browser releases the epoch during its round trip", async () => {
+    await navigateBoth(pieces.burstEpoch);
+    const alicePage = aliceShell.page();
+    const bobPage = bobShell.page();
+
+    await dispatchEdit(alicePage, 5, 5, "!");
+    await Promise.all([
+      waitForCondition(alicePage, editorContainsTokens, { args: [["!"]] }),
+      waitForCondition(bobPage, editorContainsTokens, { args: [["!"]] }),
+      awaitMaterialized("burstEpoch", (value) => value === "epoch!"),
+    ]);
+    await confirmPendingCollaborationEdits(alicePage);
+
+    await listenForReconciliation(alicePage);
+    await installNextApplyGate(alicePage);
+    await dispatchEdit(alicePage, 6, 6, "L1");
+    await awaitApplyCaptured(alicePage);
+    await appendEdit(alicePage, "L2");
+    await appendEdit(alicePage, "L3");
+
+    await releaseCollaboration(bobPage);
+    // Alice observes the release by failing closed or by adopting the
+    // canonical value; only the first is acceptable, and the wait admits
+    // both so that the second fails the assertion rather than the wait.
+    await waitForCondition(alicePage, epochReleaseObserved, {
+      args: ["epoch!"],
+    });
+    assert(
+      await reconciliationReachedNow(alicePage),
+      "release with pending edits did not reach reconciliation",
+    );
+    const detail = await reconciliationDetail(alicePage);
+    assertEquals(detail.localValue, "epoch!L1L2L3");
+    assertEquals(detail.canonicalValue, "epoch!");
+    assert(detail.localCursor !== null);
+    assertEquals(detail.canonicalCursor, null);
+    assertEquals(await editorContent(alicePage), "epoch!L1L2L3");
+    assertEquals(latestContent.get("burstEpoch"), "epoch!");
 
     await cancelApplyGate(alicePage);
     await awaitApplyCompleted(alicePage);

@@ -311,6 +311,7 @@ export interface ReplayReport {
    * cell's cause-stability (the moved-`.for()` class) gated.
    */
   capturesSuperseded: string[];
+
   failures: ReplayFailure[];
 }
 
@@ -360,6 +361,7 @@ export async function replayVintage(
         .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
         .filter((key): key is string => key !== undefined),
     );
+
   // Stated once, because every "this fixture is not usable" message needs it and
   // the obvious remedy is WRONG: `--update` skips a key that already has a
   // pinned vintage and the capture refuses to overwrite one, so "recapture it"
@@ -992,6 +994,7 @@ export async function replayAll(
      * it — a superseded stored argument, or a hoist no longer emitted.
      */
     capturesSuperseded: string[];
+
     failures: ReplayFailure[];
   }
 > {
@@ -1152,15 +1155,23 @@ export async function captureVintage(
         },
       },
     });
+    // A run that did not complete reached no state to pin, and its cause is
+    // its own — a file the runner refused to run this way says so, and reading
+    // that as a test failure would blame the pattern for it.
+    if (result.error !== undefined) {
+      throw new Error(
+        `cannot capture ${testKey}: the run did not complete, so it reached ` +
+          `no state to record: ${result.error}`,
+      );
+    }
     // A failed test run would record a state the pattern never legitimately
     // reaches, so refuse rather than pin it.
     const failed = result.results.filter((r) => !r.passed && !r.skipped);
-    if (result.error !== undefined || failed.length > 0) {
+    if (failed.length > 0) {
       throw new Error(
         `cannot capture ${testKey}: its own tests did not pass, so the ` +
           `fixture would record a state the pattern never reaches: ${
-            result.error ??
-              failed.map((r) => `${r.name}: ${r.error}`).join("; ")
+            failed.map((r) => `${r.name}: ${r.error}`).join("; ")
           }`,
       );
     }

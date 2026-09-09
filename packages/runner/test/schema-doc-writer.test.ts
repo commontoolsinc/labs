@@ -274,6 +274,154 @@ describe("schema-doc-writer", () => {
     }
   });
 
+  it("re-stages a schema document that is visible only through speculation", async () => {
+    // A speculative computed commit is process-memory only — the server's
+    // own execution is expected to reproduce it, so it is never pushed —
+    // yet its writes are visible through the overlay. A schema document
+    // created by such a commit is therefore visible without being
+    // server-confirmed, and an authored commit referencing it must
+    // re-stage it: eliding on overlay visibility ships a reference the
+    // space cannot resolve, and the commit boundary rejects the whole
+    // authored write.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { speculativeVisibleField: { type: "string" } },
+    };
+    const sigil = sigilFor(schema);
+    const rootRef = (payloadSchema(sigil) as JSONSchemaObj).$ref!;
+    const rootHash = parseExternalSchemaRef(rootRef)!.taggedHash;
+    const closure = new Set<string>([rootHash]);
+    for (const hash of closure) {
+      for (
+        const dep of collectExternalSchemaRefHashes(lookupSchemaDocument(hash))
+      ) {
+        closure.add(dep);
+      }
+    }
+
+    // The whole closure arrives as ONE client speculation overlay entry —
+    // the shape a speculative handler run seals, its schema-doc staging
+    // riding the same layer. Nothing here reaches the wire.
+    const replica = writerStorage.open(space).replica;
+    replica.sealNative!(
+      {
+        operations: [...closure].map((hash) => ({
+          op: "set" as const,
+          id: `cid:${hash}` as URI,
+          type: "application/json" as const,
+          value: { value: lookupSchemaDocument(hash) },
+        })),
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:speculative-root" as URI, scope: "space", path: [] },
+      { person: sigil },
+    );
+    const staged = [...tx.getWriteDetails?.(space) ?? []].map((detail) =>
+      detail.address.id
+    );
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    expect(staged.some((id) => id.startsWith("cid:"))).toBe(true);
+
+    // The server accepted and persists the closure: a fresh replica pulls
+    // the documents from storage, where only this authored commit can
+    // have put them.
+    const provider = readerStorage.open(space);
+    for (const hash of closure) {
+      const synced = await provider.sync(`cid:${hash}` as URI, {
+        path: [],
+        schema: false,
+      });
+      expect(synced.error).toBeUndefined();
+      const stored = (provider as unknown as {
+        get: (uri: URI) => { value?: unknown } | undefined;
+      }).get(`cid:${hash}` as URI);
+      expect(
+        internSchemaAsTaggedHashString(stored?.value as JSONSchemaObj),
+      ).toBe(hash);
+    }
+  });
+
+  it("re-stages a schema document batched as two equal writes", async () => {
+    // The batch write path has its own no-op elisions, and a run of two
+    // equal writes to one document is what routes a write through them
+    // (a single write falls back to the unified single-write entry).
+    // The referenced document is deliberately absent from the realm
+    // registry, so the carrier's staging warns and skips: the batched
+    // writes are the commit's ONLY delivery vehicle. With the document
+    // visible only through speculation, both elisions must yield the
+    // same delivery the single-write path grants, or the carrier's
+    // reference ships unbacked and the commit is rejected.
+    const document: JSONSchemaObj = {
+      type: "object",
+      properties: { batchedVisibleField: { type: "string" } },
+      title: "batched-delivery-only",
+    };
+    const rootHash = internSchemaAsTaggedHashString(document);
+    const handCrafted = {
+      "/": {
+        "link@1": {
+          id: "of:batched-target",
+          path: [],
+          schema: { $ref: `cid:${rootHash}` },
+        },
+      },
+    };
+
+    const replica = writerStorage.open(space).replica;
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set" as const,
+          id: `cid:${rootHash}` as URI,
+          type: "application/json" as const,
+          value: { value: document },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:batched-root" as URI, scope: "space", path: [] },
+      { crafted: handCrafted },
+    );
+    const schemaDocAddress = {
+      id: `cid:${rootHash}` as URI,
+      space,
+      path: [],
+      type: "application/json",
+    } as never;
+    tx.writeValuesOrThrow!([
+      { address: schemaDocAddress, value: document as never },
+      { address: schemaDocAddress, value: document as never },
+    ]);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const provider = readerStorage.open(space);
+    const synced = await provider.sync(`cid:${rootHash}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(synced.error).toBeUndefined();
+    const stored = (provider as unknown as {
+      get: (uri: URI) => { value?: unknown } | undefined;
+    }).get(`cid:${rootHash}` as URI);
+    expect(
+      internSchemaAsTaggedHashString(stored?.value as JSONSchemaObj),
+    ).toBe(rootHash);
+  });
+
   it("externalizes a schema whose only external refs are embedded", () => {
     const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
     const schema: JSONSchemaObj = {

@@ -26,6 +26,7 @@ export interface RewriteParams {
    * Effective reactive context at the rewrite site.
    */
   readonly reactiveContextKind?: ReactiveContextKind;
+
   readonly containerKind?: ExpressionContainerKind;
 
   /**

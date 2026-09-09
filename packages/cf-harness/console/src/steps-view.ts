@@ -69,6 +69,169 @@ const truncate = (text: string, limit: number): string =>
 const stepLabel = (step: ConsoleStep): string =>
   step.kind === "tool" ? step.toolName ?? "tool" : step.kind;
 
+/** The expandable omission block's label for one tool result. */
+export const withheldSummary = (step: ConsoleStep): string =>
+  step.withheld.status === "unrecorded"
+    ? "withheld from the model · no record"
+    : step.withheld.status === "record-unreadable"
+    ? "withheld from the model · record unreadable"
+    : step.withheld.status === "record-entry-missing"
+    ? "withheld from the model · entry missing"
+    : `withheld from the model · ${step.withheld.locations.length}`;
+
+/** What the full tool artifact records beside the model-facing result. */
+export const withheldView = (step: ConsoleStep): TemplateResult => {
+  if (step.withheld.status === "unrecorded") {
+    return html`
+      <details class="pane withheld-pane">
+        <summary>${withheldSummary(step)}</summary>
+        <p class="empty">
+          No omission record exists for this tool result. Legacy runs cannot be
+          reconstructed honestly from the model-facing transcript alone.
+        </p>
+      </details>
+    `;
+  }
+  if (step.withheld.status === "record-unreadable") {
+    return html`
+      <details class="pane withheld-pane">
+        <summary>${withheldSummary(step)}</summary>
+        <p class="empty">
+          The omission record exists but is unreadable or does not match the
+          current contract. This result cannot be reconstructed honestly.
+        </p>
+      </details>
+    `;
+  }
+  if (step.withheld.status === "record-entry-missing") {
+    return html`
+      <details class="pane withheld-pane">
+        <summary>${withheldSummary(step)}</summary>
+        <p class="empty">
+          The omission record exists but has no entry for this tool result.
+          Which omission rules applied cannot be determined.
+        </p>
+      </details>
+    `;
+  }
+  if (step.withheld.locations.length === 0) {
+    return html`
+      <details class="pane withheld-pane">
+        <summary>${withheldSummary(step)}</summary>
+        <p class="empty">No omission rule applied to this result.</p>
+      </details>
+    `;
+  }
+  return html`
+    <details class="pane withheld-pane">
+      <summary>${withheldSummary(step)}</summary>
+      ${step.withheld.locations.map((location) =>
+        html`
+          <div class="withheld-location">
+            <div class="withheld-rule">${location.rule}</div>
+            <div class="withheld-pointer">
+              ${location.artifactPath}${location.jsonPointer}
+            </div>
+            ${location.available
+              ? html`
+                <pre class="raw">${location.redaction ??
+                  json(location.value)}</pre>
+              `
+              : html`
+                <p class="empty">The recorded artifact position is unavailable.</p>
+              `}
+          </div>
+        `
+      )}
+    </details>
+  `;
+};
+
+/**
+ * What CFC decided about one call, and any event it raised. A withheld
+ * release carries the retrospective's count of the positions it held back,
+ * which is what says the call itself succeeded.
+ */
+export const stepPolicyView = (
+  step: ConsoleStep,
+): TemplateResult | typeof nothing => {
+  const labelEntries = step.invocation?.cfcInputLabels?.entries ?? [];
+  if (
+    step.policy === undefined && step.policyEvents.length === 0 &&
+    labelEntries.length === 0
+  ) {
+    return nothing;
+  }
+  return html`
+    <div class="pane">
+      <div class="pane-head">cfc</div>
+      ${step.policy === undefined ? nothing : html`
+        <div class="cfc-line">
+          <span
+            class="badge ${step.policy.decision === "denied"
+              ? "denied"
+              : step.policy.decision === "invalid" ||
+                  step.policy.decision === "withheld"
+              ? "warn"
+              : "ok"}"
+          >${step.policy.decision}</span>
+          ${step.policy.effectClass === undefined ? nothing : html`
+            <span class="cfc-effect">${step.policy.effectClass}</span>
+          `}
+          <span class="cfc-reasons">
+            ${step.policy.reasonCodes.join(", ")}
+          </span>
+          ${step.policy.decision === "withheld"
+            ? html`
+              <span class="cfc-withheld">${withheldSummary(step)}</span>
+            `
+            : nothing}
+        </div>
+      `} ${step.policyEvents.map((event) =>
+        html`
+          <div class="cfc-line">
+            <span
+              class="badge ${event.severity === "denied" ? "denied" : "warn"}"
+            >${event.severity}</span>
+            <span class="cfc-reasons">${event.detail ?? ""}</span>
+          </div>
+        `
+      )} ${labelEntries.length === 0 ? nothing : html`
+        <table class="labels">
+          <tbody>
+            ${labelEntries.map((entry) =>
+              html`
+                <tr>
+                  <td class="label-path">
+                    ${entry.path.length === 0
+                      ? "(whole input)"
+                      : entry.path.join(".")}
+                  </td>
+                  <td class="label-atoms">
+                    ${atomNames(entry.label?.confidentiality).length === 0
+                      ? html`
+                        <span class="muted">no confidentiality atom</span>
+                      `
+                      : atomNames(entry.label?.confidentiality).map((name) =>
+                        html`
+                          <span class="atom conf">${name}</span>
+                        `
+                      )} ${atomNames(entry.label?.integrity).map((name) =>
+                        html`
+                          <span class="atom integ">${name}</span>
+                        `
+                      )}
+                  </td>
+                </tr>
+              `
+            )}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+};
+
 export class ConsoleSteps extends LitElement {
   static override properties = {
     steps: { attribute: false },
@@ -170,8 +333,7 @@ export class ConsoleSteps extends LitElement {
                 <span class="step-mint">
                   +${step.handlesIntroduced.length}
                 </span>
-              `}
-              ${step.disclosure === undefined ||
+              `} ${step.disclosure === undefined ||
                   step.disclosure.longestNumericRun < WIDE_NUMERIC_RUN
                 ? nothing
                 : html`
@@ -210,7 +372,7 @@ export class ConsoleSteps extends LitElement {
                     : ""}"
                 >
                   <td>
-                    <console-cell .cell=${handle}></console-cell>
+                    <console-cell .cell="${handle}"></console-cell>
                   </td>
                   <td class="handle-ref">${handle.ref ?? "—"}</td>
                   <td class="handle-at">
@@ -245,8 +407,9 @@ export class ConsoleSteps extends LitElement {
         <div class="pane-head">
           arguments
           <span class="badge ${references.length === 0 ? "none" : "ok"}">
-            ${references.length}
-            ${references.length === 1 ? "reference" : "references"}
+            ${references.length} ${references.length === 1
+              ? "reference"
+              : "references"}
           </span>
         </div>
         <div class="args">
@@ -259,7 +422,9 @@ export class ConsoleSteps extends LitElement {
                 </span>
                 <span class="arg-note">value</span>
                 ${argument.confidentiality.map((name) =>
-                  html`<span class="atom conf">${name}</span>`
+                  html`
+                    <span class="atom conf">${name}</span>
+                  `
                 )}
               </div>
             `
@@ -274,87 +439,21 @@ export class ConsoleSteps extends LitElement {
     return html`
       <div class="arg reference">
         <span class="arg-key">${argument.key}</span>
-        <console-cell .cell=${argument}></console-cell>
+        <console-cell .cell="${argument}"></console-cell>
         ${origin === undefined
-          ? html`<span class="arg-note">from an earlier turn</span>`
+          ? html`
+            <span class="arg-note">from an earlier turn</span>
+          `
           : html`
             <button
               class="arg-origin"
               type="button"
               title="go to the step that produced this"
-              @click=${() => this.#select(origin)}
+              @click="${() => this.#select(origin)}"
             >
               ← step ${origin}
             </button>
           `}
-      </div>
-    `;
-  }
-
-  /** What CFC decided about this call, and any event it raised. */
-  #policy(step: ConsoleStep): TemplateResult | typeof nothing {
-    const labelEntries = step.invocation?.cfcInputLabels?.entries ?? [];
-    if (
-      step.policy === undefined && step.policyEvents.length === 0 &&
-      labelEntries.length === 0
-    ) {
-      return nothing;
-    }
-    return html`
-      <div class="pane">
-        <div class="pane-head">cfc</div>
-        ${step.policy === undefined ? nothing : html`
-          <div class="cfc-line">
-            <span
-              class="badge ${step.policy.decision === "denied"
-                ? "denied"
-                : "ok"}"
-            >${step.policy.decision}</span>
-            ${step.policy.effectClass === undefined ? nothing : html`
-              <span class="cfc-effect">${step.policy.effectClass}</span>
-            `}
-            <span class="cfc-reasons">
-              ${step.policy.reasonCodes.join(", ")}
-            </span>
-          </div>
-        `}
-        ${step.policyEvents.map((event) =>
-          html`
-            <div class="cfc-line">
-              <span
-                class="badge ${event.severity === "denied" ? "denied" : "warn"}"
-              >${event.severity}</span>
-              <span class="cfc-reasons">${event.detail ?? ""}</span>
-            </div>
-          `
-        )}
-        ${labelEntries.length === 0 ? nothing : html`
-          <table class="labels">
-            <tbody>
-              ${labelEntries.map((entry) =>
-                html`
-                  <tr>
-                    <td class="label-path">
-                      ${entry.path.length === 0
-                        ? "(whole input)"
-                        : entry.path.join(".")}
-                    </td>
-                    <td class="label-atoms">
-                      ${atomNames(entry.label?.confidentiality).length === 0
-                        ? html`<span class="muted">no confidentiality atom</span>`
-                        : atomNames(entry.label?.confidentiality).map((name) =>
-                          html`<span class="atom conf">${name}</span>`
-                        )}
-                      ${atomNames(entry.label?.integrity).map((name) =>
-                        html`<span class="atom integ">${name}</span>`
-                      )}
-                    </td>
-                  </tr>
-                `
-              )}
-            </tbody>
-          </table>
-        `}
       </div>
     `;
   }
@@ -390,9 +489,9 @@ export class ConsoleSteps extends LitElement {
         ${wide
           ? html`
             <div class="body code bad-body">
-              A run of ${disclosure.longestNumericRun} numbers crossed as value.
-              Numbers are never sealed, so an array of them carries whatever its
-              author chose to encode.
+              A run of ${disclosure
+                .longestNumericRun} numbers crossed as value. Numbers are never sealed, so an
+              array of them carries whatever its author chose to encode.
             </div>
           `
           : nothing}
@@ -417,8 +516,9 @@ export class ConsoleSteps extends LitElement {
           <span class="badge ${step.status}">${step.status}</span>
         </div>
       </div>
-      ${this.#handles(step)} ${this.#arguments(step)} ${this.#policy(step)}
-      ${this.#disclosure(step)}
+      ${this.#handles(step)} ${this.#arguments(step)} ${stepPolicyView(
+        step,
+      )} ${this.#disclosure(step)}
       <div class="pane">
         <div class="pane-head">
           <span class="tool">${step.toolName}</span> input
@@ -426,34 +526,43 @@ export class ConsoleSteps extends LitElement {
         <pre class="raw">${step.input !== undefined
           ? json(step.input)
           : step.inputText ?? "—"}</pre>
-      </div>
-      <div class="pane">
-        <div class="pane-head">
-          <span class="tool">${step
-            .toolName}</span> output ${step.resultRef?.outputId === undefined
-            ? nothing
-            : html`
-              <span class="pane-note">${step.resultRef.outputId}</span>
-            `}
-        </div>
-        <pre class="raw">${step.output !== undefined
-          ? json(step.output)
-          : step.outputText ?? "—"}</pre>
-        ${step.childRunId === undefined ? nothing : html`
-          <button
-            class="secondary"
-            type="button"
-            @click="${() =>
-              this.dispatchEvent(
-                new CustomEvent("open-run", {
-                  detail: step.childRunId,
-                  bubbles: true,
-                }),
-              )}"
-          >
-            Open subagent run
-          </button>
+        ${step.sourceReplacedByLaterAttempt !== true ? nothing : html`
+          <p class="pane-note">
+            Source replaced by a later attempt; see the run-pattern-source sidecar named
+            by the marker.
+          </p>
         `}
+      </div>
+      <div class="result-pair">
+        <div class="pane">
+          <div class="pane-head">
+            <span class="tool">${step
+              .toolName}</span> output ${step.resultRef?.outputId === undefined
+              ? nothing
+              : html`
+                <span class="pane-note">${step.resultRef.outputId}</span>
+              `}
+          </div>
+          <pre class="raw">${step.output !== undefined
+            ? json(step.output)
+            : step.outputText ?? "—"}</pre>
+          ${step.childRunId === undefined ? nothing : html`
+            <button
+              class="secondary"
+              type="button"
+              @click="${() =>
+                this.dispatchEvent(
+                  new CustomEvent("open-run", {
+                    detail: step.childRunId,
+                    bubbles: true,
+                  }),
+                )}"
+            >
+              Open subagent run
+            </button>
+          `}
+        </div>
+        ${withheldView(step)}
       </div>
     `;
   }

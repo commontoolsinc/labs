@@ -45,8 +45,9 @@ runs:
         if [ -n "$SHIP_SHARD" ]; then
           args+=(--shard "$SHIP_SHARD")
         fi
-        if [ -n "$SHIP_VARIANT" ]; then
-          args+=(--variant "$SHIP_VARIANT")
+        RESOLVED_VARIANT="${SHIP_VARIANT:-${CF_TEST_RECORDS_VARIANT:-}}"
+        if [ -n "$RESOLVED_VARIANT" ]; then
+          args+=(--variant "$RESOLVED_VARIANT")
         fi
         while IFS= read -r spec; do
           if [ -n "$spec" ]; then
@@ -62,7 +63,7 @@ runs:
     # produced each artifact to keep re-ships idempotent without dropping
     # a re-run job's new records.
     - name: 📤 Upload test records
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: test-records-${{ inputs.artifact }}-a${{ github.run_attempt }}
         path: test-records-artifact/

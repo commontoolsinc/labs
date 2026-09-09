@@ -86,11 +86,10 @@ export function endDrag(): void {
   notifyListeners(null);
 }
 
-/**
- * Callbacks for when drag is ending (before cleanup).
- * Used by drop zones to emit drop events.
- */
+/** A callback run when a drag is ending, before cleanup. */
 type DragEndListener = (state: DragState) => void;
+
+/** The registered such callbacks; drop zones use them to emit drop events. */
 const endListeners: Set<DragEndListener> = new Set();
 
 /**

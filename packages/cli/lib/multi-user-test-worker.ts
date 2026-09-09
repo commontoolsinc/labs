@@ -29,6 +29,11 @@
 
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import {
+  CFC_ENFORCEMENT_MODES,
+  type CfcEnforcementMode,
+  isCfcEnforcementMode,
+} from "@commonfabric/runner/cfc";
+import {
   createSession,
   Identity,
   keyPairFromRealmValue,
@@ -86,6 +91,7 @@ export interface StepMeta {
 
   /** Marker name for label/await steps. */
   marker?: string;
+
   skip?: boolean;
 }
 
@@ -95,6 +101,13 @@ export interface ParticipantInitResult {
   expectNonIdempotent: boolean;
   allowConsoleErrors: boolean;
   allowConsoleWarnings: boolean;
+
+  /**
+   * The CFC enforcement mode this participant's runtime resolved to, read off
+   * the runtime itself. The orchestrator checks it against the mode the run
+   * named, so a participant that came up on another rung says so.
+   */
+  cfcEnforcementMode: CfcEnforcementMode;
 }
 
 const SETUP_CAUSE = "multi-user-test-setup";
@@ -125,6 +138,7 @@ let engine: Engine | undefined;
 
 /** Every participant's marker document, keyed by participant name. */
 const markersCells = new Map<string, Cell<Record<string, boolean>>>();
+
 let selfParticipant: string | undefined;
 let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
@@ -132,9 +146,12 @@ let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
 const runtimeErrors: string[] = [];
 
-/** Channel 1: console.error/warn captured via the harness console event. */
+/** Channel 1: console.error calls captured via the harness console event. */
 const consoleErrors: string[] = [];
+
+/** Channel 1: console.warn calls, captured the same way. */
 const consoleWarnings: string[] = [];
+
 const continuousUiErrors: Error[] = [];
 let continuousUiCancel: (() => void) | undefined;
 // Run-phase gate for channel 1 (mirrors test-runner.ts): flips true at the
@@ -265,6 +282,27 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
   );
 }
 
+/**
+ * The CFC enforcement mode an `init` request names, if it names one.
+ *
+ * The request crosses a worker boundary as plain data, so the name arrives
+ * untyped. A name off the ladder is reported here rather than installed: the
+ * ladder is a closed set, and a runtime holding a mode outside it is on no
+ * rung.
+ */
+function requestedEnforcementMode(
+  input: unknown,
+): CfcEnforcementMode | undefined {
+  if (input === undefined) return undefined;
+  if (!isCfcEnforcementMode(input)) {
+    throw new Error(
+      `Initialization \`cfcEnforcementMode\` is ${String(input)}, not one ` +
+        `of ${CFC_ENFORCEMENT_MODES.join(", ")}`,
+    );
+  }
+  return input;
+}
+
 const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
@@ -274,6 +312,7 @@ const handlers: Record<
    * participant pattern, and return the classified step list.
    */
   async init(args) {
+    const requestedMode = requestedEnforcementMode(args.cfcEnforcementMode);
     const identity = await Identity.fromKeyPair(
       keyPairFromRealmValue(
         args.identity as RealmEncodedValue,
@@ -309,6 +348,9 @@ const handlers: Record<
       experimental: experimentalOptionsFromEnv(Deno.env.get),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
       moduleByteCache: getDefaultModuleByteCache(),
+      ...(requestedMode !== undefined
+        ? { cfcEnforcementMode: requestedMode }
+        : {}),
     }));
     runtime.enableIdempotencyCheck();
     // Channel 1: capture pattern-code console.error / console.warn calls.
@@ -482,6 +524,7 @@ const handlers: Record<
       allowConsoleWarnings:
         await (resultCell.key("allowConsoleWarnings") as Cell<unknown>)
           .pull() === true,
+      cfcEnforcementMode: rt().cfcEnforcementMode,
     };
     return result;
   },

@@ -1206,6 +1206,7 @@ interface Desc {
 
   /** Char offset of the declared identifier, when the node names one. */
   nameOffset?: number;
+
   recurseInto: readonly ts.Node[];
   meta?: NodeMeta;
 }
@@ -2101,6 +2102,7 @@ interface SchemaProps {
 
   /** True when the literal spells `items: false` (a closed tuple). */
   itemsFalse?: boolean;
+
   prefixItems?: ts.ArrayLiteralExpression;
 }
 

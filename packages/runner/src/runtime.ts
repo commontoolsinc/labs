@@ -1,10 +1,10 @@
+import { fabricFromNativeValue } from "@commonfabric/data-model";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
@@ -20,7 +20,6 @@ import {
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
-import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
@@ -38,7 +37,10 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
+import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
+import { sameAcl } from "@commonfabric/memory/acl";
 import type {
+  ACL,
   ChangeGroup,
   CommitError,
   DID,
@@ -92,7 +94,9 @@ import {
 import { addressKey } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
+  buildCfcReadCeiling,
   buildCfcTrustConfig,
+  type CfcConfClause,
   type CfcDeclaredMonotonicityMode,
   type CfcDecomposedEnvelopes,
   type CfcEnforcementMode,
@@ -102,6 +106,7 @@ import {
   type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
   type CfcPrefixProvenanceSummary,
+  type CfcReadOnExceed,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTrustConfigInput,
@@ -112,6 +117,7 @@ import {
   gatedSinkRequestExists,
   linkCfcLabelView,
   type PolicySnapshot,
+  resolveCfcDials,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -129,7 +135,13 @@ import { PatternManager } from "./pattern-manager.ts";
 import { SourceReconciler } from "./source-reconciler.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import { type PieceSourceTransition, Runner } from "./runner.ts";
+import {
+  type PieceSourceTransition,
+  Runner,
+  type RunSyncedCommitResult,
+  type RunSyncedOptions,
+  type RunSyncedWithCommitOptions,
+} from "./runner.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -149,7 +161,15 @@ import {
   type WriteStackTraceEntry,
   type WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
-import type { NonIdempotentReport } from "./telemetry.ts";
+import {
+  runtimeOwnedStoreOwnerKey,
+  RuntimeOwnedStores,
+} from "./cfc/runtime-owned-stores.ts";
+import {
+  type RuntimeWritePolicyAuthorization,
+  runtimeWritePolicyAuthorized,
+} from "./cfc/types.ts";
+import { type NonIdempotentReport, RuntimeTelemetry } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
@@ -496,6 +516,7 @@ export interface RuntimeOptions {
    * one. Fixed for the runtime's lifetime.
    */
   spaceHostMap?: Record<string, string>;
+
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
@@ -633,6 +654,61 @@ export interface RuntimeOptions {
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
 
   /**
+   * Runtime-wide read ceiling: the confidentiality every `db.query` this
+   * runtime issues reads under. A query declaring no ceiling of its own reads
+   * under this one; a query declaring one (the `maxConfidentiality` option or
+   * the Row schema's `MaxConfidentiality`) reads under the meet of the two,
+   * so a query tightens this ceiling and never widens it. Placeholder atoms
+   * (`{ __ctDbOwner: true }`, `{ __ctCurrentPrincipal: true }`) resolve per
+   * query, as they do in a query's own ceiling. Defaults to none: the owner
+   * view, every row returned.
+   *
+   * Per runtime rather than per pattern because the only carrier a pattern
+   * can read is a cell in the space, shared by every runtime on it; a lens
+   * that differs per device or per run has to ride the runtime. For the same
+   * reason the ceiling applies only to a query whose result is
+   * session-scoped by the pattern's own declaration (`PerSession<>`,
+   * `.asScope("session")`, or a session-scoped db): a space- or user-shared
+   * result is one cell every runtime on the space resolves, and a runtime
+   * cannot narrow it for itself. A query with a broader result is refused
+   * through the runtime's error handlers, and nothing shared is written.
+   *
+   * The refusal bounds what THIS runtime queries; it does not reach a
+   * shared cell another runtime already filled. A pattern whose output is
+   * space-scoped and that an unbounded runtime ran first leaves its result
+   * in a cell this runtime resolves like any other shared value, refusal or
+   * not — so a bounded runtime must run its patterns with session-scoped
+   * outputs, and what protects a shared cell is the cell's own label under
+   * the commit-boundary gates, not this option. Carrying the ceiling into
+   * the cell read path (a labeled cell that does not fit reads as withheld)
+   * is the follow-up that closes that seam.
+   *
+   * Governs the runtime that performs the query — a client runtime executing
+   * its own patterns, or a serving runtime for every run it serves — and the
+   * sqlite read surface only: every `db.query`, aggregates included. Cell
+   * reads are governed by the commit-boundary gates, and a host's direct
+   * sqlite bridge refuses labeled tables outright. Validated and deep-frozen
+   * at construction; an empty list, which admits nothing, is refused (omit
+   * the option for no ceiling), and so is a ceiling on a client under
+   * server execution, whose queries the space server's runtime serves
+   * outside this ceiling's reach.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /**
+   * What a read under the runtime's ceiling does with a row the ceiling does
+   * not admit when the query declares no `onExceed` of its own: `fail`
+   * refuses the whole query, `skip` drops the row (a declared existence
+   * release). On an aggregate/expression projection, where a query's own
+   * `skip` is refused because a withheld row already contributed, this
+   * default falls back to `fail` rather than refusing a query that declared
+   * nothing. A query's own `onExceed` stands over this. Defaults to `fail`.
+   * Qualifies
+   * `cfcReadMaxConfidentiality` and is refused without it.
+   */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
+  /**
    * Deployment policy records for the exchange-rule evaluator (Epic B2a,
    * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
    * at construction — malformed records throw at boot (fail-closed config,
@@ -707,6 +783,7 @@ export interface CfcRuntimeStats {
    * (`flowLabelWorkExists`) vs answered from the transaction's memoized
    * negative verdict. Measurement only. */
   flowLabelProbesComputed: number;
+
   flowLabelProbeMemoHits: number;
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
@@ -773,7 +850,7 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
  * will fetch the objects and consider them valid, but will not walk into
  * their properties on the server traversal, so we don't need to return every
  * reachable object from these pieces.
- * @see SchemaObjectTraverser.traverseObjectWithSchema for more detail.
+ * @see SchemaObjectTraverser.#traverseObjectWithSchema for more detail.
  */
 export const spaceCellSchema = internSchema(
   {
@@ -863,6 +940,9 @@ function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
  * ```
  */
 export class Runtime {
+  #tearingDownWrites = false;
+  readonly #writeTeardown = new AbortController();
+
   readonly id: string;
   readonly scheduler: Scheduler;
   readonly patternManager: PatternManager;
@@ -876,6 +956,7 @@ export class Runtime {
 
   /** See `RuntimeOptions.onPatternInstantiated`. */
   readonly onPatternInstantiated?: PatternInstantiationObserver;
+
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
@@ -886,11 +967,18 @@ export class Runtime {
   readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
 
+  /** See `RuntimeOptions.cfcReadMaxConfidentiality`; frozen, or `undefined`. */
+  readonly cfcReadMaxConfidentiality: readonly CfcConfClause[] | undefined;
+
+  /** See `RuntimeOptions.cfcReadOnExceed`; `undefined` leaves `fail` in force. */
+  readonly cfcReadOnExceed: CfcReadOnExceed | undefined;
+
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
 
   /** Frozen deployment trust config; undefined = no trust configured. */
   readonly cfcTrustConfig: CfcTrustConfig | undefined;
+
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
 
@@ -899,13 +987,18 @@ export class Runtime {
 
   /** Optional pattern statement-coverage collector; see RuntimeOptions. */
   readonly patternCoverage?: PatternCoverageCollector;
+
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
-  // The runtime's trust revision — `<runtime id>` with the trust-config
-  // digest folded in when one is configured. The ONE composition site for
-  // every snapshot this runtime mints (the default provider and
-  // trustSnapshotForPrincipal), so a trust-config change invalidates
-  // per-run served snapshots exactly as it does ambient client ones.
+
+  /**
+   * The runtime's trust revision — `<runtime id>` with the trust-config digest
+   * folded in when one is configured. The _one_ composition site for every
+   * snapshot this runtime mints (the default provider and
+   * `trustSnapshotForPrincipal()`), so a trust-config change invalidates
+   * per-run served snapshots exactly as it does ambient client ones.
+   */
   readonly #trustRevision: string;
+
   readonly telemetry: RuntimeTelemetry;
 
   /** Resolved experimental flags (all properties present with built-in defaults). */
@@ -913,6 +1006,7 @@ export class Runtime {
 
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
+
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
 
@@ -925,32 +1019,52 @@ export class Runtime {
 
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
-  // The transaction seal destination (server-execution v2, serving-loop.md
-  // §3d): installed only on a serving runtime under
-  // EXPERIMENTAL_SERVER_EXECUTION, by the wave machinery around each wave.
-  // While installed, every transaction edit() creates closes by sealing
-  // into it instead of committing to the store. Never installed on a
-  // client or in the OFF arm — installSealDestination throws off the flag.
+
+  /**
+   * The transaction seal destination (`serving-loop.md` §3d): installed only on
+   * a serving runtime under `EXPERIMENTAL_SERVER_EXECUTION`, by the wave
+   * machinery around each wave. While installed, every transaction `edit()`
+   * creates closes by sealing into it instead of committing to the store. Never
+   * installed on a client or in the OFF arm — `installSealDestination()` throws
+   * off the flag.
+   */
   #transactionSealDestination: TransactionSealDestination | undefined;
-  // The serving loop's run stamper (installed WITH the destination): the
-  // scheduler hands it each run's durable action id + kind, and it
-  // attaches the wave run context before the tx seals.
+
+  /**
+   * The stores this runtime owns: the documents it materializes to hold a
+   * piece's machinery. Every transaction `edit()` creates gets the same object,
+   * which is what lets a write outside the transaction that minted a store
+   * still find it. See `cfc/runtime-owned-stores.ts`.
+   */
+  readonly #runtimeOwnedStores = new RuntimeOwnedStores();
+
+  /**
+   * The serving loop's run stamper (installed _with_ the destination): the
+   * scheduler hands it each run's durable action id and kind, and it attaches
+   * the wave run context before the tx seals.
+   */
   #serverRunStamper:
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
     | undefined;
-  // The per-(action × instance) run-supply resolver (installed WITH the
-  // destination, stage P2-F): an action's demand roots (its piece root
-  // plus the ancestor roots that instantiated it — Phase 7) → the
-  // demanded instances the SpaceServer's registry holds for any of them.
+
+  /**
+   * The per-(action × instance) run-supply resolver (installed _with_ the
+   * destination): an action's demand roots (its piece root plus the ancestor
+   * roots that instantiated it) → the demanded instances the `SpaceServer`'s
+   * registry holds for any of them.
+   */
   #serverRunDemanderResolver:
     | ServerRunDemanderResolver
     | undefined;
-  // The client speculation overlay (server-execution v2 Phase 2,
-  // speculation.md): the DEFAULT seal destination of every runtime under
-  // the flag that has no wave destination installed. Created lazily on
-  // the first edit(); derivation-kind runs redirect their writes into
-  // the replica's pending overlay through it — the structural removal of
-  // the client derivation-commit path. Never created in the OFF arm.
+
+  /**
+   * The client speculation overlay (`speculation.md`): the _default_ seal
+   * destination of every runtime under the flag that has no wave destination
+   * installed. Created lazily on the first `edit()`; derivation-kind runs
+   * redirect their writes into the replica's pending overlay through it — the
+   * structural removal of the client derivation-commit path. Never created in
+   * the OFF arm.
+   */
   #speculationOverlay: SpeculationOverlayDestination | undefined;
 
   /** The client-effect channel (server-execution v2 Phase 4,
@@ -964,23 +1078,29 @@ export class Runtime {
    * NOTE-a: R1.dispose after R2's construction must not drop R2's
    * subscriptions). */
   #installedSpaceOpenObserver: ((space: MemorySpace) => void) | undefined;
-  // Whether THIS runtime explicitly set the serverExecution flag at
-  // construction (the only case its dispose participates in the
-  // process-global ambient lifecycle — see the constructor's propagation
-  // note).
+
+  /**
+   * Whether _this_ runtime explicitly set the `serverExecution` flag at
+   * construction (the only case its dispose participates in the process-global
+   * ambient lifecycle — see the constructor's propagation note).
+   */
   #explicitServerExecution: boolean | undefined;
-  // The enabler release for an explicitly-ENABLED runtime. The count
-  // itself lives with the flag (memory/v2.ts, shared with the
-  // ExecutorHost): dispose releases and the flag resets only when the
-  // LAST live enabler goes — a parked space's dispose must not un-claim
-  // `derived` for every other owner's in-flight wave commit (the
-  // admission plane reads the ambient value).
+
+  /**
+   * The enabler release for an explicitly-_enabled_ runtime. The count itself
+   * lives with the flag (`memory/v2.ts`, shared with the `ExecutorHost`):
+   * dispose releases and the flag resets only when the _last_ live enabler goes
+   * — a parked space's dispose must not un-claim `derived` for every other
+   * owner's in-flight wave commit (the admission plane reads the ambient
+   * value).
+   */
   #serverExecutionRelease: (() => void) | undefined;
 
   /** Serving posture (RuntimeOptions.servingPosture): true only for the
    * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
    * default (a serving runtime never speculates). */
   readonly servingPosture: boolean;
+
   readonly userIdentityDID: DID;
 
   /**
@@ -997,20 +1117,31 @@ export class Runtime {
   }
 
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
-  private readonly spaceNameToDid = new Map<string, MemorySpace>();
-  private defaultFrame?: Frame;
-  private queues = new Map<string, AsyncSemaphoreQueue>();
-  private writeDebugContext = new WriteDebugContextStorage<string>();
-  private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #spaceNameToDid = new Map<string, MemorySpace>();
+  /** The genesisAcl each name was first resolved with, so an identical
+   * re-resolution is a retry and a different one is refused. */
+  readonly #spaceNameGenesisAcls = new Map<string, ACL>();
+  /** Resolutions in flight, by name: a second caller joins the first
+   * rather than racing it to registration, so two documents for one name
+   * cannot both register before either is cached. */
+  readonly #spaceNameResolutions = new Map<string, Promise<MemorySpace>>();
+
+  #defaultFrame?: Frame;
+  #queues = new Map<string, AsyncSemaphoreQueue>();
+  #writeDebugContext = new WriteDebugContextStorage<string>();
+  #cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
-  // Attesting space -> successor module identity -> direct predecessor
-  // identities whose writer authority it inherits. Entries come only from
-  // verified source closures or integrity-valid compiled closures in that same
-  // space. Transactions receive a transitive, immutable snapshot at creation
-  // so an in-flight authorization decision cannot change when another module
-  // loads, and authorization in one space can never borrow another space's
-  // delegation metadata.
+
+  /**
+   * Attesting space → successor module identity → direct predecessor identities
+   * whose writer authority it inherits. Entries come only from verified source
+   * closures or integrity-valid compiled closures in that same space.
+   * Transactions receive a transitive, immutable snapshot at creation so an
+   * in-flight authorization decision cannot change when another module loads,
+   * and authorization in one space can never borrow another space's delegation
+   * metadata.
+   */
   readonly #moduleDelegations = new Map<
     MemorySpace,
     Map<string, Set<string>>
@@ -1040,7 +1171,7 @@ export class Runtime {
     }
   }
 
-  private moduleDelegationSnapshot(): Map<
+  #moduleDelegationSnapshot(): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>
   > {
@@ -1459,16 +1590,18 @@ export class Runtime {
       this.sourceReconciler = new SourceReconciler(this);
       this.runner = new Runner(this);
       this.onPatternInstantiated = options.onPatternInstantiated;
-      this.cfcEnforcementMode = options.cfcEnforcementMode ??
-        "enforce-explicit";
-      this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
-      this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
-      this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
-      this.cfcDecomposedEnvelopes = options.cfcDecomposedEnvelopes ?? false;
-      this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
-      this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
-        "off";
-      this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
+      // Resolved through the shared dial table (`cfc/posture-report.ts`), so
+      // a host that publishes the posture of a runtime it has not built yet
+      // reads the same defaults these fields do.
+      const dials = resolveCfcDials(options);
+      this.cfcEnforcementMode = dials.cfcEnforcementMode;
+      this.cfcFlowLabels = dials.cfcFlowLabels;
+      this.cfcWriteFloor = dials.cfcWriteFloor;
+      this.cfcTriggerReadGating = dials.cfcTriggerReadGating;
+      this.cfcDecomposedEnvelopes = dials.cfcDecomposedEnvelopes;
+      this.cfcPolicyEvaluation = dials.cfcPolicyEvaluation;
+      this.cfcLabelMetadataProtection = dials.cfcLabelMetadataProtection;
+      this.cfcDeclaredMonotonicity = dials.cfcDeclaredMonotonicity;
       this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
       // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
       // be able to mutate it (per-sink array or the map) after construction to
@@ -1481,6 +1614,27 @@ export class Runtime {
           ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
         ),
       );
+      // Same posture as the sink ceilings: validated and frozen here, so a
+      // malformed or empty read ceiling refuses to boot rather than admitting
+      // nothing at every query.
+      const readCeiling = buildCfcReadCeiling(options);
+      // A client under server execution stages its queries for the space
+      // server's runtime to serve, and the ceiling reaches only the runtime
+      // it is configured on. Accepting it there would read as a bounded
+      // session whose reads nothing bounds, so it is refused until a run
+      // carries its ceiling to the runtime that serves it.
+      if (
+        readCeiling.maxConfidentiality !== undefined &&
+        this.experimental.serverExecution === true && !this.servingPosture
+      ) {
+        throw new Error(
+          "cfcReadMaxConfidentiality does not bound a client under server " +
+            "execution: its queries are served by the space server's " +
+            "runtime, which this ceiling does not reach",
+        );
+      }
+      this.cfcReadMaxConfidentiality = readCeiling.maxConfidentiality;
+      this.cfcReadOnExceed = readCeiling.onExceed;
       // Validates + digests + deep-freezes; throws on malformed records so a
       // config error surfaces at boot, not as a silently inert rule (same
       // eager-validation posture as the spaceHostMap URLs above).
@@ -1548,7 +1702,7 @@ export class Runtime {
       }
 
       // Push a default frame with this runtime so builder functions can access it
-      this.defaultFrame = pushFrame({ runtime: this });
+      this.#defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
       throw error;
@@ -1565,18 +1719,22 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work async builtins (fetchJson,
-  // fetchProgram, llm/llmDialog, reactive sqlite queries, and navigation)
-  // perform AFTER their handler returns, from a post-commit outbox flush: a
-  // network / LLM / navigation call or a sqlite RPC, plus any result writeback.
-  // `idle()` deliberately does NOT wait for these; `settled()` does.
-  //
-  // Each entry carries the pattern run it belongs to, as the address key of the
-  // run's result cell — the `parentCell` every raw builtin is handed. Entries
-  // with no owner belong to no single run: the scheduler's commit promises,
-  // which are the barrier that a fire-and-forget builtin's outbox flush has
-  // registered its own work. `settledFor` waits for those as well as the run's
-  // own, because that handoff is how the run's work first becomes visible.
+  /**
+   * In-flight async builtin operations — the work async builtins (`fetchJson`,
+   * `fetchProgram`, `llm`/`llmDialog`, reactive sqlite queries, and navigation)
+   * perform _after_ their handler returns, from a post-commit outbox flush: a
+   * network, LLM, or navigation call or a sqlite RPC, plus any result
+   * writeback. `idle()` deliberately does _not_ wait for these; `settled()`
+   * does.
+   *
+   * Each entry carries the pattern run it belongs to, as the address key of the
+   * run's result cell — the `parentCell` every raw builtin is handed. Entries
+   * with no owner belong to no single run: the scheduler's commit promises,
+   * which are the barrier that a fire-and-forget builtin's outbox flush has
+   * registered its own work. `settledFor()` waits for those as well as the
+   * run's own, because that handoff is how the run's work first becomes
+   * visible.
+   */
   #pendingAsyncWork = new Map<Promise<unknown>, string | undefined>();
 
   /**
@@ -1780,10 +1938,10 @@ export class Runtime {
     name: string,
     config?: QueueConfig,
   ): AsyncSemaphoreQueue {
-    let q = this.queues.get(name);
+    let q = this.#queues.get(name);
     if (!q) {
       q = new AsyncSemaphoreQueue(config ?? { maxConcurrency: 2 });
-      this.queues.set(name, q);
+      this.#queues.set(name, q);
     }
     return q;
   }
@@ -1877,12 +2035,17 @@ export class Runtime {
       // it cannot spin: every round awaits real promises, so a runtime that keeps
       // working keeps the barrier open rather than busy-looping.
       if (!closeStorage) await this.settled(Infinity);
+      // Kept-storage disposal first drains tracked writebacks above. From this
+      // point onward, no delayed reconciliation or retry may mint new work
+      // behind the teardown barriers below.
+      this.#tearingDownWrites = true;
+      this.#writeTeardown.abort();
       // Abort any pending (not-yet-started) queued jobs so they don't start
       // after storage is torn down.
-      for (const queue of this.queues.values()) {
+      for (const queue of this.#queues.values()) {
         queue.abortPending();
       }
-      this.queues.clear();
+      this.#queues.clear();
       // Stop all running docs
       this.runner.stopAll();
 
@@ -1933,6 +2096,8 @@ export class Runtime {
       // Wait for any pending operations
       await this.scheduler.idle();
     } finally {
+      this.#tearingDownWrites = true;
+      this.#writeTeardown.abort();
       // Released whatever happened above. `storageManager.close()` can reject
       // — through a provider's `replica.close()` — and it is the one await
       // here that can. Every statement below is synchronous field-clearing
@@ -1948,9 +2113,9 @@ export class Runtime {
       this.runner.dispose();
 
       // Pop the default frame
-      if (this.defaultFrame) {
-        popFrame(this.defaultFrame);
-        this.defaultFrame = undefined;
+      if (this.#defaultFrame) {
+        popFrame(this.#defaultFrame);
+        this.#defaultFrame = undefined;
       }
 
       // Dispose the Engine (clears compiler/runtime state and the console
@@ -2024,17 +2189,17 @@ export class Runtime {
       installPolicyManifest: (space, reference, tx) =>
         this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
-        this.cfcStats.cfcRelevantTx += 1;
+        this.#cfcStats.cfcRelevantTx += 1;
       },
       onFlowLabelProbe: (outcome) => {
-        if (outcome === "memo") this.cfcStats.flowLabelProbeMemoHits += 1;
-        else this.cfcStats.flowLabelProbesComputed += 1;
+        if (outcome === "memo") this.#cfcStats.flowLabelProbeMemoHits += 1;
+        else this.#cfcStats.flowLabelProbesComputed += 1;
       },
       onPreparedTx: () => {
-        this.cfcStats.cfcPreparedTx += 1;
+        this.#cfcStats.cfcPreparedTx += 1;
       },
       onPrepareReject: (refusal) => {
-        this.cfcStats.cfcPrepareRejects += 1;
+        this.#cfcStats.cfcPrepareRejects += 1;
         // Every refusal is reported here, terminal or not. The scheduler's
         // error channel carries only the terminal ones (a refusal a fresh
         // attempt may resolve is retried rather than surfaced), so without
@@ -2049,34 +2214,34 @@ export class Runtime {
         });
       },
       onDigestInvalidation: () => {
-        this.cfcStats.cfcDigestInvalidations += 1;
+        this.#cfcStats.cfcDigestInvalidations += 1;
       },
       onOutboxFlush: () => {
-        this.cfcStats.cfcOutboxFlushes += 1;
+        this.#cfcStats.cfcOutboxFlushes += 1;
       },
       onSinkDedupHit: () => {
-        this.cfcStats.sinkDedupHits += 1;
+        this.#cfcStats.sinkDedupHits += 1;
       },
       onSinkReleaseReject: () => {
-        this.cfcStats.sinkReleaseRejects += 1;
+        this.#cfcStats.sinkReleaseRejects += 1;
       },
       // Stage-0 D4 precision counters: installed only when the deployment
       // opted in, so the default prepare path skips all measurement.
       ...(this.cfcPrefixProvenanceStats
         ? {
           onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
-            this.cfcStats.prefixProvenanceSummaries += 1;
-            this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
-            this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
-            this.cfcStats.prefixTxGlobalGatedReads +=
+            this.#cfcStats.prefixProvenanceSummaries += 1;
+            this.#cfcStats.prefixProtectedWrites += summary.protectedWrites;
+            this.#cfcStats.prefixGatedReads += summary.prefixGatedReads;
+            this.#cfcStats.prefixTxGlobalGatedReads +=
               summary.txGlobalGatedReads;
-            this.cfcStats.prefixBoundReal += summary.boundSources.real;
-            this.cfcStats.prefixBoundInfinityFallback +=
+            this.#cfcStats.prefixBoundReal += summary.boundSources.real;
+            this.#cfcStats.prefixBoundInfinityFallback +=
               summary.boundSources.infinityFallback;
-            this.cfcStats.prefixBoundClockLess +=
+            this.#cfcStats.prefixBoundClockLess +=
               summary.boundSources.clockLess;
-            this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
-            this.cfcStats.prefixClockLessReads += summary.clockLessReads;
+            this.#cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
+            this.#cfcStats.prefixClockLessReads += summary.clockLessReads;
           },
         }
         : {}),
@@ -2092,12 +2257,34 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
-    wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
+    wrapped.setCfcModuleDelegations(this.#moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
     );
+    wrapped.configureRuntimeOwnedStores(this.#runtimeOwnedStores);
     return wrapped;
+  }
+
+  /**
+   * Forget the stores enrolled for the piece at `owner` — its own documents
+   * and the state documents its builtins minted. Called when a piece stops,
+   * which is what keeps the enrollment bounded by the pieces running rather
+   * than by every piece the process has ever run. A store another piece — a
+   * second scope instance of this one, say — still holds stays.
+   *
+   * Takes the runtime's write-policy authorization, like the enrollment it
+   * undoes: pattern-authored code reaches this object through a cell, and a
+   * release it made would refuse another piece's writes.
+   */
+  releaseRuntimeOwnedStores(
+    owner: NormalizedFullLink,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void {
+    if (!runtimeWritePolicyAuthorized(authorization)) return;
+    // The owner stands as its own store here, so the key's space test holds.
+    const key = runtimeOwnedStoreOwnerKey(owner, owner, this.scopeKeyIdentity)!;
+    this.#runtimeOwnedStores.releaseOwner(key);
   }
 
   /**
@@ -2293,12 +2480,14 @@ export class Runtime {
     }
   }
 
-  // (space, scope, id) triples for which a missing-link-target load has been
-  // kicked this session. The kicked sync establishes a live per-doc
-  // subscription, so a later creation of the doc still arrives — one kick per
-  // doc suffices. Scope is part of the key: scoped instances (user/session)
-  // are distinct docs, and a kick for one scope must not suppress another's.
-  private missingDocLoadKicks = new Set<string>();
+  /**
+   * (space, scope, id) triples for which a missing-link-target load has been
+   * kicked this session. The kicked sync establishes a live per-doc
+   * subscription, so a later creation of the doc still arrives — one kick per
+   * doc suffices. Scope is part of the key: scoped instances (user/session) are
+   * distinct docs, and a kick for one scope must not suppress another's.
+   */
+  #missingDocLoadKicks = new Set<string>();
 
   /**
    * Asynchronously load a link target that a read found absent from the
@@ -2336,7 +2525,7 @@ export class Runtime {
     const key = `${space}\0${
       resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
     }\0${id}`;
-    if (this.missingDocLoadKicks.has(key)) return;
+    if (this.#missingDocLoadKicks.has(key)) return;
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
@@ -2344,7 +2533,7 @@ export class Runtime {
     const reserved = sameSpace &&
       mgr.shouldPullDoc?.(space, id, scope, identity) === true;
     if (sameSpace && !reserved) return;
-    this.missingDocLoadKicks.add(key);
+    this.#missingDocLoadKicks.add(key);
     const load = identity === undefined
       ? this.getCellFromLink(link).sync()
       // The instance-named load: the storage manager names the run's
@@ -2359,22 +2548,22 @@ export class Runtime {
         // dedup set, and hand back the storage manager's reservation when
         // THIS kick took it — a cross-space kick never reserved, and must
         // not clear a reservation a concurrent same-space read holds.
-        this.missingDocLoadKicks.delete(key);
+        this.#missingDocLoadKicks.delete(key);
         if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
       }),
     );
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {
-    return { ...this.cfcStats };
+    return { ...this.#cfcStats };
   }
 
   resetCfcStats(): void {
-    this.cfcStats = initialCfcRuntimeStats();
+    this.#cfcStats = initialCfcRuntimeStats();
   }
 
   getWriteDebugContext(): string | undefined {
-    return this.writeDebugContext.getStore() ?? this.scheduler.currentActionId;
+    return this.#writeDebugContext.getStore() ?? this.scheduler.currentActionId;
   }
 
   createUnsafeHostTrust(
@@ -2409,7 +2598,7 @@ export class Runtime {
     if (!label) {
       return fn();
     }
-    return this.writeDebugContext.run(label, fn);
+    return this.#writeDebugContext.run(label, fn);
   }
 
   setWriteStackTraceMatchers(
@@ -2444,6 +2633,11 @@ export class Runtime {
    * the FIRST attempt, because re-running cannot change the outcome and each
    * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
+   * Every retry invokes `fn` again with a fresh transaction. Aborting an
+   * attempt discards only the operations staged in that transaction; an effect
+   * `fn` commits through another channel survives and repeats on retry unless
+   * the caller gives it a stable identity or otherwise makes it idempotent.
+   *
    * A caller that decides inside the transaction whether to write at all — one
    * re-reading a precondition against the fresh state each retry sees — says so
    * through the value `fn` returns, which comes back as `ok`. An `ok` of
@@ -2466,6 +2660,17 @@ export class Runtime {
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
+    const teardownResult = (): {
+      ok?: undefined;
+      error: CommitError;
+    } => ({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "editWithRetry stopped because the runtime is disposing",
+        reason: new Error("runtime disposing"),
+      },
+    });
+    if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit();
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
@@ -2485,26 +2690,115 @@ export class Runtime {
         },
       });
     }
-    this.prepareTxForCommit(tx);
-    return tx.commit().then(async ({ error }) => {
-      if (error) {
-        if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-          await this.awaitCommitRetryReadiness(error);
-          return this.editWithRetry<T>(fn, maxRetries - 1);
-        } else {
-          return { error };
-        }
+    const commitPrepared = (): Promise<
+      { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+    > => {
+      if (this.#tearingDownWrites) {
+        tx.abort("editWithRetry stopped because the runtime is disposing");
+        return Promise.resolve(teardownResult());
       }
-      return { ok: result };
-    }).catch((error) => {
-      return {
-        error: {
-          name: "StorageTransactionAborted" as const,
-          message: `editWithRetry commit rejected: ${error}`,
-          reason: error,
-        },
-      };
+      this.prepareTxForCommit(tx);
+      return tx.commit().then(async ({ error }) => {
+        if (error) {
+          if (maxRetries > 0 && isRetryableCommitRejection(error)) {
+            await this.awaitCommitRetryReadiness(
+              error,
+              this.#writeTeardown.signal,
+            );
+            if (this.#tearingDownWrites) return teardownResult();
+            return this.editWithRetry<T>(fn, maxRetries - 1);
+          } else {
+            return { error };
+          }
+        }
+        return { ok: result };
+      }).catch((error) => {
+        return {
+          error: {
+            name: "StorageTransactionAborted" as const,
+            message: `editWithRetry commit rejected: ${error}`,
+            reason: error,
+          },
+        };
+      });
+    };
+
+    // Absence reconciliation, before the read set is exported: a read of a
+    // document this client never synced resolves as absent and would commit
+    // as a `seq: 0` confirmed read — the claim that no such document exists.
+    // Where one does exist, the engine's rejection of that claim is correct
+    // and `fn` re-runs here anyway, after a server round trip, the
+    // conflict's catch-up gate, and a rebuilt commit — once per LAYER of
+    // cold documents, since each re-run can follow the arrived layer's links
+    // into the next. Loading the whole cohort up front and re-running
+    // locally is the same convergence, minus the wire: each round consumes a
+    // retry from the same budget a rejection would.
+    //
+    // Two gates on the load. Budget: loading the documents without re-running
+    // would let the commit export their REAL seqs under a traversal that read
+    // them as absent — an accepted commit derived from an absence that was
+    // never there — so with no budget to re-run, the honest move is the
+    // unexamined claim itself, judged by the server as before. Synchrony: a
+    // transaction with nothing to examine commits on the same synchronous
+    // path as ever, which the commit-gated runner start depends on.
+    const reconciliation = maxRetries > 0
+      ? this.#loadUnexaminedAbsences(tx)
+      : 0;
+    if (typeof reconciliation === "number") return commitPrepared();
+    return reconciliation.then((present) => {
+      if (this.#tearingDownWrites) {
+        tx.abort("editWithRetry stopped because the runtime is disposing");
+        return teardownResult();
+      }
+      if (present > 0) {
+        tx.abort(
+          `editWithRetry re-run: ${present} document(s) read as absent ` +
+            "are present; the action re-runs against them",
+        );
+        return this.editWithRetry<T>(fn, maxRetries - 1);
+      }
+      return commitPrepared();
     });
+  }
+
+  /**
+   * Load every document `tx` read as absent that no involved replica has
+   * examined, resolving with how many exist after all — the signal that the
+   * transaction's reads ran against documents it did not hold. One call per
+   * space the transaction read from, each answered by that space's provider
+   * ({@link IStorageProvider.loadUnexaminedAbsences}); a provider without
+   * the capability contributes zero and keeps the server-judged path.
+   */
+  #loadUnexaminedAbsences(
+    tx: IExtendedStorageTransaction,
+  ): number | Promise<number> {
+    const reads = getDirectTransactionReadActivities(tx.tx);
+    if (!reads) return 0;
+    const spaces = new Set<MemorySpace>();
+    for (const read of reads) spaces.add(read.space);
+    // A synchronous answer is always zero — anything unexamined needs a
+    // pull — so a round with no cold reads never leaves the synchronous
+    // path, and only the spaces that owe a pull contribute a promise.
+    const pending: Promise<number>[] = [];
+    for (const space of spaces) {
+      const provider = this.storageManager.open(space);
+      if (provider.loadUnexaminedAbsences === undefined) continue;
+      try {
+        const answer = provider.loadUnexaminedAbsences(tx.tx);
+        if (typeof answer !== "number") {
+          // Reconciliation only front-runs the authoritative commit verdict.
+          // A provider that cannot perform the best-effort load leaves the
+          // transaction's original absence claim for the server to judge.
+          pending.push(answer.catch(() => 0));
+        }
+      } catch {
+        // Same fallback for providers that fail before returning a promise.
+      }
+    }
+    if (pending.length === 0) return 0;
+    return Promise.all(pending).then((counts) =>
+      counts.reduce((total, count) => total + count, 0)
+    );
   }
 
   /**
@@ -2534,16 +2828,40 @@ export class Runtime {
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
    */
-  async awaitCommitRetryReadiness(error: unknown): Promise<void> {
+  async awaitCommitRetryReadiness(
+    error: unknown,
+    teardownSignal?: AbortSignal,
+  ): Promise<void> {
+    const waitUnlessTeardown = async (
+      operation: PromiseLike<unknown>,
+    ): Promise<boolean> => {
+      if (teardownSignal === undefined) {
+        await operation;
+        return true;
+      }
+      if (teardownSignal.aborted) return false;
+      const aborted = Promise.withResolvers<boolean>();
+      const onAbort = () => aborted.resolve(false);
+      teardownSignal.addEventListener("abort", onAbort, { once: true });
+      try {
+        return await Promise.race([
+          Promise.resolve(operation).then(() => true),
+          aborted.promise,
+        ]);
+      } finally {
+        teardownSignal.removeEventListener("abort", onAbort);
+      }
+    };
     const readyToRetry = (error as { readyToRetry?: () => unknown })
       ?.readyToRetry;
     if (typeof readyToRetry === "function") {
       try {
-        await readyToRetry();
+        if (!await waitUnlessTeardown(Promise.resolve(readyToRetry()))) return;
       } catch {
         // Readiness aborted — the retry's commit decides.
       }
     }
+    if (teardownSignal?.aborted) return;
     const conflict = (error as {
       conflict?: { space?: MemorySpace; of?: string };
     })?.conflict;
@@ -2553,9 +2871,11 @@ export class Runtime {
       conflict.of !== "of:unknown"
     ) {
       try {
-        await this.storageManager.open(conflict.space).sync(
-          conflict.of as unknown as URI,
-          { path: [], schema: false },
+        await waitUnlessTeardown(
+          this.storageManager.open(conflict.space).sync(
+            conflict.of as unknown as URI,
+            { path: [], schema: false },
+          ),
         );
       } catch {
         // Pull failed — the retry's commit decides.
@@ -2779,10 +3099,10 @@ export class Runtime {
     if (tx?.status().status === "ready") {
       return tx;
     }
-    return this.createReadTx();
+    return this.#createReadTx();
   }
 
-  private createReadTx(): IExtendedStorageTransaction {
+  #createReadTx(): IExtendedStorageTransaction {
     const tx = this.edit();
     tx.setReadOnly?.("runtime.readTx()");
     return tx;
@@ -3123,7 +3443,7 @@ export class Runtime {
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
     if (isMemorySpaceDID(name)) return name as MemorySpace;
-    return this.spaceNameToDid.get(name);
+    return this.#spaceNameToDid.get(name);
   }
 
   /**
@@ -3144,13 +3464,95 @@ export class Runtime {
    * mint a service-owned space (builtins.md §5; protocol.md §2b). On a
    * client the owner is omitted and the genesis names the manager's own
    * signer — the active user, byte-identical to before.
+   *
+   * `options.genesisAcl` is the exact ACL document the space is born with
+   * when this resolution creates it (its first and only commit — no
+   * world-writable default is ever written), validated by the memory
+   * server's genesis admission; on a space that already exists the open
+   * proceeds only if it is owned exactly as the document says, else
+   * refuses. It is
+   * refused together with `owner` (two descriptions of one document), for
+   * a bare DID (no key to register against), and for a name already
+   * resolved — by anything, including a pattern's `inSpace(name)` — unless
+   * with the identical document; see `IStorageManager.registerSpaceIdentity`.
+   * The name is cached at resolution, before the server can refuse the
+   * document, so a refusal surfaced later (on the first sync) has no
+   * correction path through this method: register a corrected document
+   * with the storage manager directly, or use a fresh runtime. A SERVING
+   * runtime refuses it outright: served provisioning names the run's
+   * acting user OWNER through the OW31 owner path, and a document that
+   * bypassed that path could name any principal — including the service —
+   * on a space the acting user asked for. A creator that wants a sealed
+   * space mints it from its own (client) runtime.
    */
   async resolveSpaceName(
     name: string,
-    options?: { owner?: DID },
+    options?: { owner?: DID; genesisAcl?: ACL },
   ): Promise<MemorySpace> {
+    if (options?.owner !== undefined && options?.genesisAcl !== undefined) {
+      // Two descriptions of one document: refused before anything else,
+      // cached path included, mirroring registerSpaceIdentity.
+      throw new Error(
+        `space-name resolution for "${name}": supply either owner or ` +
+          "genesisAcl, not both — genesisAcl is the whole genesis document, " +
+          "and owner only names the OWNER of the default one",
+      );
+    }
+    if (
+      options?.genesisAcl !== undefined &&
+      this.storageManager.registerSpaceIdentity === undefined
+    ) {
+      // No seam to hand the document to; the optional call below would
+      // drop it and the space would be born with the default.
+      throw new Error(
+        `space-name resolution for "${name}" cannot register a genesisAcl: ` +
+          "this storage manager has no registerSpaceIdentity seam, so " +
+          "nothing would write the document",
+      );
+    }
+    const inFlight = this.#spaceNameResolutions.get(name);
+    if (inFlight !== undefined) {
+      // Join the resolution already under way — its rejection is this
+      // caller's too — then take the cached path: an identical document is
+      // a retry, a different one is refused.
+      await inFlight;
+      return await this.resolveSpaceName(name, options);
+    }
     const cached = this.resolveSpaceNameSync(name);
+    if (options?.genesisAcl !== undefined) {
+      // A document the resolution cannot honor is refused, never dropped:
+      // the caller asked for a space born closed.
+      if (isMemorySpaceDID(name)) {
+        throw new Error(
+          `space-name resolution for the DID ${name} cannot register a ` +
+            "genesisAcl: the runtime derives no space key for a bare DID, " +
+            "so nothing would write the document (register the identity " +
+            "with the storage manager directly)",
+        );
+      }
+      if (cached !== undefined) {
+        const recorded = this.#spaceNameGenesisAcls.get(name);
+        if (recorded === undefined || !sameAcl(recorded, options.genesisAcl)) {
+          throw new Error(
+            `space-name "${name}" was already resolved` +
+              (recorded === undefined
+                ? " without a genesisAcl"
+                : " with a different genesisAcl") +
+              "; the supplied document cannot be the space's genesis",
+          );
+        }
+        return cached;
+      }
+    }
     if (cached !== undefined) return cached;
+    if (this.servingPosture && options?.genesisAcl !== undefined) {
+      throw new Error(
+        `space-name resolution for "${name}" on a serving runtime does not ` +
+          "accept genesisAcl: served provisioning names the run's acting " +
+          "identity OWNER through the owner path (OW31, RULED 2026-08-18), " +
+          "and a caller-supplied document would bypass it",
+      );
+    }
     if (this.servingPosture && options?.owner === undefined) {
       throw new Error(
         `space-name resolution for "${name}" on a serving runtime requires ` +
@@ -3160,23 +3562,47 @@ export class Runtime {
           "genesis would name the SERVICE as owner",
       );
     }
-    const session = await createSession({
-      identity: this.storageManager.as as unknown as Identity,
-      spaceName: name,
-    });
-    // Register the derived identity only as fresh-space ACL bootstrap
-    // authority. Storage continues to authenticate ordinary reads and writes
-    // as the active user (`storageManager.as`), so resolving a name does not
-    // grant an existing space's key to the caller.
-    if (session.spaceIdentity) {
-      this.storageManager.registerSpaceIdentity?.(
-        session.spaceIdentity,
-        options?.owner !== undefined ? { owner: options.owner } : undefined,
-      );
+    const resolution = (async (): Promise<MemorySpace> => {
+      const session = await createSession({
+        identity: this.storageManager.as as unknown as Identity,
+        spaceName: name,
+      });
+      if (options?.genesisAcl !== undefined && !session.spaceIdentity) {
+        throw new Error(
+          `space-name resolution for "${name}" derived no space identity, ` +
+            "so the supplied genesisAcl could not be registered",
+        );
+      }
+      // Register the derived identity only as fresh-space ACL bootstrap
+      // authority. Storage continues to authenticate ordinary reads and
+      // writes as the active user (`storageManager.as`), so resolving a name
+      // does not grant an existing space's key to the caller.
+      if (session.spaceIdentity) {
+        this.storageManager.registerSpaceIdentity?.(
+          session.spaceIdentity,
+          options?.owner !== undefined || options?.genesisAcl !== undefined
+            ? {
+              ...(options.owner !== undefined ? { owner: options.owner } : {}),
+              ...(options.genesisAcl !== undefined
+                ? { genesisAcl: options.genesisAcl }
+                : {}),
+            }
+            : undefined,
+        );
+      }
+      const did = session.space as MemorySpace;
+      this.#spaceNameToDid.set(name, did);
+      if (options?.genesisAcl !== undefined) {
+        this.#spaceNameGenesisAcls.set(name, { ...options.genesisAcl });
+      }
+      return did;
+    })();
+    this.#spaceNameResolutions.set(name, resolution);
+    try {
+      return await resolution;
+    } finally {
+      this.#spaceNameResolutions.delete(name);
     }
-    const did = session.space as MemorySpace;
-    this.spaceNameToDid.set(name, did);
-    return did;
   }
 
   // Convenience methods that delegate to the runner
@@ -3236,24 +3662,29 @@ export class Runtime {
     return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
   }
 
+  /** Runs a pattern after synchronizing its stored dependencies. */
   runSynced(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
-    options?: {
-      expectedPatternIdentity?: { identity: string; symbol: string };
-      validateCurrentArgument?: (
-        argumentCell: Cell<unknown>,
-      ) => void;
-      validateArgumentLinks?: (
-        argumentCell: Cell<unknown>,
-        argumentSchema: JSONSchema,
-      ) => void;
-      patternRepository?: string;
-      pieceSourceTransition?: PieceSourceTransition;
-    },
-  ) {
+    options?: RunSyncedOptions,
+  ): Promise<Cell<any>> {
     return this.runner.runSynced(resultCell, pattern, inputs, options);
+  }
+
+  /** Runs a pattern and returns its accepted setup transaction receipt. */
+  runSyncedWithCommit(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+    inputs: any,
+    options: RunSyncedWithCommitOptions,
+  ): Promise<RunSyncedCommitResult<any>> {
+    return this.runner.runSyncedWithCommit(
+      resultCell,
+      pattern,
+      inputs,
+      options,
+    );
   }
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {
@@ -3318,6 +3749,7 @@ export class Runtime {
   get serverGitSha(): string | null {
     return this.#serverGitSha;
   }
+
   #serverGitSha: string | null = null;
   #healthCheckGeneration = 0;
 

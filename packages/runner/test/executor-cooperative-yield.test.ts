@@ -42,6 +42,7 @@ import type {
 import { ExecutorHost } from "../src/executor/host.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { CooperativeYield } from "../src/scheduler/cooperative-yield.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const newSharedServer = () =>
   new MemoryV2Server.Server({
@@ -62,21 +63,6 @@ const serviceSigner = await Identity.fromPassphrase(
 );
 const aliceSigner = await Identity.fromPassphrase("cooperative yield alice");
 
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-  pollMs = 5,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-};
-
 /** Synchronous CPU work — a stand-in for one demand-walk instance run. */
 const burn = (ms: number): void => {
   const until = performance.now() + ms;
@@ -88,9 +74,13 @@ const burn = (ms: number): void => {
 const WALK_STEPS = 30;
 const STEP_MS = 40;
 
+/** Reads the expiry as a millisecond timestamp through SQLite's REAL accessor. */
 const leaseExpiry = (engine: Engine.Engine): number =>
   (engine.database.prepare(
-    `SELECT expires_at FROM execution_lease WHERE space = :space`,
+    // The engine's INTEGER accessor truncates to 32 bits; millisecond
+    // timestamps are exactly representable as REAL values.
+    `SELECT CAST(expires_at AS REAL) AS expires_at
+     FROM execution_lease WHERE space = :space`,
   ).get({ space }) as { expires_at: number } | undefined)?.expires_at ?? 0;
 
 describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
@@ -274,7 +264,7 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     const engine = await activate();
     const spaceServer = host.spaceServer(space)!;
     const expiryAtStart = leaseExpiry(engine);
-    expect(expiryAtStart).toBeGreaterThan(0);
+    expect(expiryAtStart).toBeGreaterThan(Date.now());
     const seqBefore = Engine.serverSeq(engine);
     const derivedBefore = host.stats().derivedCommits;
 

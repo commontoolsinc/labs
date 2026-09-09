@@ -27,7 +27,7 @@ export class KeyStore {
     this.#db = db;
   }
 
-  // Get the `name` keypair.
+  /** Gets the `name` keypair. */
   async get(name: string): Promise<Identity | void> {
     const result = await this.#db.get(name);
     if (result) {
@@ -36,12 +36,12 @@ export class KeyStore {
     return result;
   }
 
-  // Set the `name` keypair with `value`.
+  /** Sets the `name` keypair to `value`. */
   async set(name: string, value: Identity): Promise<undefined> {
     await this.#db.set(name, storedFromKeyPair(value.keyPair));
   }
 
-  // Clear the key store's table.
+  /** Clears the key store's table. */
   clear(): Promise<void> {
     return this.#db.clear();
   }
@@ -51,8 +51,10 @@ export class KeyStore {
     return DEFAULT_DB_NAME;
   }
 
-  // Opens a new instance of `KeyStore`.
-  // If no `name` provided, `KeyStore.DEFAULT_DB_NAME` is used.
+  /**
+   * Opens a new instance of `KeyStore`. If no `name` is provided,
+   * `KeyStore.DEFAULT_DB_NAME` is used.
+   */
   static async open(name = KeyStore.DEFAULT_DB_NAME): Promise<KeyStore> {
     const db = await DB.open(name, DB_VERSION, (event: Event) => {
       const e = event as IDBVersionChangeEvent;

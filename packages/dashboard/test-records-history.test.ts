@@ -96,12 +96,10 @@ Deno.test("collectDay separates variant records from default history", async () 
   }]);
 });
 
-//
-// A body holding two reports, the second fork-authored: its records must
-// not reach the decision-feeding aggregates.
-//
-
 Deno.test("collectDay excludes fork-authored reports", async () => {
+  // A body holding two reports, the second fork-authored: its records must not
+  // reach the decision-feeding aggregates.
+
   const forkContext = JSON.stringify({
     schema: 1,
     line: "context",

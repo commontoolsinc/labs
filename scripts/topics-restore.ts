@@ -19,7 +19,7 @@
  * The restore is whole-topic by construction: `cf piece apply` REPLACES the
  * piece's input document (measured, not assumed — a partial apply zeroes
  * every field it omits), and no narrower CLI write path exists today, since
- * both sides of `cf set` validate the untouched remainder of the document
+ * both sides of `cf cell set` validate the untouched remainder of the document
  * and refuse it — the input side judges the stored `mentionable` link
  * against its declared array type unresolved, and the result side demands
  * session-scoped fields no other session can see. So the script applies the
@@ -30,10 +30,11 @@
  * `cf piece link` against the board recorded in the export.
  *
  * Those wiring links are `STRUCTURAL_LINK_SOURCES`, which maps each one to
- * the board path it points at: `mentionable` to the board's `topics`, and
- * `boardCrossrefs` to its `crossrefs`. A link-valued field absent from that
- * map stops the restore rather than being guessed at, so a wiring input
- * added to the topic pattern announces itself here.
+ * the board path it points at: `mentionable` to the board's `mentionable` index,
+ * `boardCrossrefs` to its `crossrefs`, and `boardNames` to its `namesTable`.
+ * A link-valued field absent from that map stops the restore rather than
+ * being guessed at, so a wiring input added to the topic pattern announces
+ * itself here.
  *
  * Four honest costs. Comment and link elements are re-written as plain
  * values, so their element entities are minted fresh: content, order,
@@ -148,7 +149,14 @@ async function liveValue(field: string): Promise<unknown> {
   // field, so a read that never landed must stop the run rather than be
   // forgiven as one.
   try {
-    return await cfJson<unknown>(["get", "-q", ...addr, "--input", field]);
+    return await cfJson<unknown>([
+      "cell",
+      "get",
+      "-q",
+      ...addr,
+      "--input",
+      field,
+    ]);
   } catch (error) {
     if (isAbsentPathError(error)) return undefined;
     throw error;
@@ -170,6 +178,7 @@ const boardFid = export_.board?.fid;
 const missingLinks: string[] = [];
 for (const field of structural) {
   const live = await cfJson<unknown>([
+    "cell",
     "get",
     "-q",
     ...addr,
@@ -244,6 +253,7 @@ for (const field of Object.keys(restoreDoc)) {
 }
 for (const field of structural) {
   const after = await cfJson<unknown>([
+    "cell",
     "get",
     "-q",
     ...addr,

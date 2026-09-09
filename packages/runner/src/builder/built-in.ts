@@ -10,6 +10,7 @@ import type {
   BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
+  CellFromUrlFunction,
   ConfLabelQuery,
   FetchBinaryResult,
   FetchOptions,
@@ -176,12 +177,7 @@ export const fetchJson = createNodeFactory({
 export const cellFromUrl = createNodeFactory({
   type: "ref",
   implementation: "cellFromUrl",
-}) as (
-  params: FactoryInput<{
-    url: string;
-    hosts?: string[];
-  }>,
-) => Reactive<{ pending: boolean; cell?: unknown }>;
+}) as CellFromUrlFunction;
 
 export const fetchJsonUnchecked = createNodeFactory({
   type: "ref",

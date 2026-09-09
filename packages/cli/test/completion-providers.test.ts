@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
 import { Database } from "@db/sqlite";
 import {
   type CompletionLine,
@@ -12,10 +12,10 @@ import {
   completionProviderKeys,
   descendProjection,
   entityListingView,
-  keysOf,
-  linkEndpointPrefix,
   liveCandidates,
+  pieceWithPathPrefix,
   projectionKeys,
+  resolvePieceContext,
   resolveSpaceContext,
   shapeEntityCandidates,
   shapePieceCandidates,
@@ -26,6 +26,7 @@ import {
   splitSelectPrefix,
   wishTargetCandidates,
 } from "../lib/completion/providers.ts";
+import { listCellKeys } from "../lib/cell-listing.ts";
 import {
   parseSelectionProjection,
   parseSelectProjection,
@@ -153,7 +154,7 @@ Deno.test("space context: an embedded space supplies one the line did not name",
   // line can name a space with and never write `--space`.
   await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
     const config = resolveSpaceContext(
-      lineFor("cf get --piece /@did:key:zEmbedded/of:fid1:abc "),
+      lineFor("cf cell get --piece /@did:key:zEmbedded/of:fid1:abc "),
       "did:key:zEmbedded",
     );
     assert(config);
@@ -167,12 +168,79 @@ Deno.test("space context: the line's own --space wins over an embedded one", asy
   await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
     assertEquals(
       resolveSpaceContext(
-        lineFor("cf get -s team --piece /@did:key:zEmbedded/of:fid1:abc "),
+        lineFor("cf cell get -s team --piece /@did:key:zEmbedded/of:fid1:abc "),
         "did:key:zEmbedded",
       )?.space,
       "team",
     );
   });
+});
+
+Deno.test("piece context: #argument reads the same on both spellings of a target", async () => {
+  // Completion reads the target through the grammar the command's own intake
+  // reads it with, so a suffix the command honors is a suffix the keys
+  // offered behind it come from the arguments cell for.
+  await withEnv({ identity: "/env.key", apiUrl: "http://env:9999" }, () => {
+    const rooted = resolvePieceContext(
+      lineFor("cf cell get -s demo --piece /thermostat#argument "),
+    );
+    const bare = resolvePieceContext(
+      lineFor("cf cell get -s demo --piece thermostat#argument "),
+    );
+    assert(rooted);
+    assert(bare);
+    // The whole context, not just the suffix: "read the same" is the claim,
+    // and a spelling that agreed on `pieceInput` while disagreeing on the
+    // space or the piece would satisfy a narrower one.
+    assertEquals(bare, rooted);
+    assertEquals(bare.piece, "thermostat");
+    assertEquals(bare.pieceInput, true);
+    // A scope written in front of the suffix survives it.
+    assertEquals(
+      resolvePieceContext(
+        lineFor("cf cell get -s demo --piece thermostat@session#argument "),
+      )?.pieceScope,
+      "session",
+    );
+    // Nothing but the suffix selects that cell, and a plain slug still
+    // resolves — a context of `null` there is a slot offering nothing.
+    const plain = resolvePieceContext(
+      lineFor("cf cell get -s demo --piece thermostat "),
+    );
+    assert(plain);
+    assertFalse(plain.pieceInput);
+    // A fragment the grammar refuses is a half-typed word, not a throw.
+    assertEquals(
+      resolvePieceContext(
+        lineFor("cf cell get -s demo --piece thermostat#res "),
+      ),
+      null,
+    );
+  });
+});
+
+Deno.test("live candidates: a listing that raises completes to nothing", async () => {
+  // The two halves of one split. `listCellKeys` raises, because `cf`'s
+  // callers have to tell a leaf from a read that never happened; the provider
+  // dispatch turns that into an empty answer, because a stack trace pasted
+  // between two keystrokes is the wrong answer at any prompt.
+  //
+  // The line carries its whole connection, so the identity that cannot be
+  // read is the failure under test rather than whatever the surrounding
+  // environment holds.
+
+  const text = "cf cell get --identity /nonexistent/missing.key " +
+    "--api-url http://127.0.0.1:1 --space test --piece fid1:abc items/";
+  const line = lineFor(text);
+  const config = resolveSpaceContext(line);
+  assert(config, "the line names a connection");
+  await assertRejects(() =>
+    listCellKeys({ ...config, piece: "fid1:abc" }, "items")
+  );
+
+  const result = await liveCandidates(line);
+  assertEquals(result.candidates, []);
+  assertEquals(result.directives, []);
 });
 
 Deno.test("live candidates: unmapped slots ask for nothing", async () => {
@@ -203,6 +271,7 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf piece new --root ", "dirs", undefined],
   ["cf piece setsrc --root ", "dirs", undefined],
   ["cf piece survey --root ", "dirs", undefined],
+  ["cf space set-home --root ", "dirs", undefined],
   ["cf piece set-home --root ", "dirs", undefined],
   ["cf check --root ", "dirs", undefined],
   ["cf test --root ", "dirs", undefined],
@@ -221,6 +290,7 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf inspect spaces --dir ", "dirs", undefined],
   ["cf inspect html x --out ", "files", undefined],
   ["cf check --output ", "files", undefined],
+  ["cf space set-home ", "files", "*.tsx"],
   ["cf piece set-home ", "files", "*.tsx"],
   ["cf piece getsrc ", "files", undefined],
   ["cf deps update ", "files", undefined],
@@ -349,17 +419,24 @@ Deno.test("provider keys report which commands each option provider answers on",
   // answers on those and is silent everywhere else, which is the difference
   // between a slot that was decided about and one that only looks decided.
   const { options, arguments: positionals } = completionProviderKeys();
-  assertEquals(options.get("piece"), null);
+  assertEquals(options.get("cell"), null);
   assertEquals(options.get("from"), ["space clone"]);
   assertEquals(options.get("to"), ["space clone"]);
   assertEquals(options.get("scope"), ["wish"]);
   assertEquals(options.get("list"), ["piece survey", "piece repair"]);
   assertEquals(options.get("diff"), ["piece survey"]);
-  assertEquals(options.get("select"), ["piece get", "get"]);
+  // Both projection flags answer on `get` alone. On `call` and `exec` they
+  // name positions in a verb's result, and the piece's root is a different
+  // value — so offering its fields there would offer plausible names for
+  // something else, which is worse than offering none.
+  // Both mounts: the superseded spelling still completes its own projection.
+  assertEquals(options.get("select"), ["cell get", "get"]);
+  assertEquals(options.get("schema"), ["cell get", "get"]);
   assertEquals(options.get("root"), [
     "check",
     "piece new",
     "piece set-home",
+    "space set-home",
     "piece setsrc",
     "piece survey",
     "test",
@@ -373,7 +450,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertFalse(options.has("accept-unretained"));
   // A positional entry is keyed by command path already, so it carries no
   // command list of its own.
-  assert(positionals.has("piece call:callable"));
+  assert(positionals.has("call:callable"));
   assertFalse(positionals.has("callable"));
 });
 
@@ -686,16 +763,20 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
     for (
       const text of [
         // The projection guards, which answer before any fabric is reached: a
-        // call's projection is a verb's result rather than the piece's root,
+        // call's projection names positions in a VERB's result rather than in
+        // the piece's root, so the provider declines on those two commands,
         // and a `--schema` word opening with `@` or `{` is a file or a schema.
-        "cf call --piece x --select ",
-        "cf exec /tmp/x --select ",
-        "cf get --piece x --schema @",
-        "cf get --piece x --schema {",
-        "cf piece call --piece x ",
-        "cf piece get --piece x ",
-        "cf piece get-label --piece x ",
-        "cf piece set-label --piece x ",
+        // Each of these stands the cursor on the option's own value slot,
+        // which is the only place a provider is looked up — past the `--` the
+        // slot belongs to the read step, and nothing is consulted at all.
+        // Which commands the provider answers on is pinned by the
+        // provider-key test above.
+        "cf piece call --piece x --select ",
+        "cf exec --select ",
+        "cf cell get --piece x --schema @",
+        "cf cell get --piece x --schema {",
+        "cf cell get-label --piece x ",
+        "cf cell set-label --piece x ",
         "cf piece link ",
         "cf piece ls --piece ",
       ]
@@ -1146,18 +1227,6 @@ Deno.test("every wish target offered is one the command's help enumerates", () =
   }
 });
 
-Deno.test("shaping: containers yield keys, leaves yield nothing", () => {
-  // A leaf yielding nothing is the correct signal that the path already names
-  // a value; offering anything there would invent paths that do not exist.
-  assertEquals(keysOf({ title: 1, done: 2 }), ["title", "done"]);
-  assertEquals(keysOf(["a", "b", "c"]), ["0", "1", "2"]);
-  assertEquals(keysOf([]), []);
-  assertEquals(keysOf({}), []);
-  for (const leaf of ["text", 42, true, null, undefined]) {
-    assertEquals(keysOf(leaf), [], String(leaf));
-  }
-});
-
 Deno.test("shaping: a typed path splits into parent and replacement prefix", () => {
   // The prefix is what stops a completed deep path collapsing to its last
   // segment — the shell replaces the whole word.
@@ -1172,9 +1241,9 @@ Deno.test("shaping: a typed path splits into parent and replacement prefix", () 
   });
 });
 
-Deno.test("shaping: a link endpoint prefix never doubles the separator", () => {
+Deno.test("shaping: a piece-and-path prefix never doubles the separator", () => {
   // `id//key` would be a different, invalid reference.
-  assertEquals(linkEndpointPrefix("fid1:a", ""), "fid1:a/");
-  assertEquals(linkEndpointPrefix("fid1:a", "items"), "fid1:a/items/");
-  assertEquals(linkEndpointPrefix("fid1:a", "items/0"), "fid1:a/items/0/");
+  assertEquals(pieceWithPathPrefix("fid1:a", ""), "fid1:a/");
+  assertEquals(pieceWithPathPrefix("fid1:a", "items"), "fid1:a/items/");
+  assertEquals(pieceWithPathPrefix("fid1:a", "items/0"), "fid1:a/items/0/");
 });

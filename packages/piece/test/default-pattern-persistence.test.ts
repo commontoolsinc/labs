@@ -170,10 +170,29 @@ describe("PiecesController default pattern persistence", () => {
     await pieces.add([persistedPiece]);
     await pieces.stopPiece(defaultPatternPiece);
 
-    const piecesCell = await pieces.getPieceRegistry();
-    const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(Boolean);
+    // What this test is named for, pinned rather than assumed. `start()` is
+    // idempotent and a restarted root serves the same listing, so a restart
+    // is invisible in the rows and has to be observed at the call.
+    type Startable = { start: (piece: Cell<unknown>) => unknown };
+    const startable = runtime as unknown as Startable;
+    const realStart = startable.start.bind(runtime);
+    const started: Cell<unknown>[] = [];
+    startable.start = (piece: Cell<unknown>) => {
+      started.push(piece);
+      return realStart(piece);
+    };
 
-    expect(ids).toContain(pieceId(persistedPiece));
+    try {
+      const piecesCell = await pieces.getPieceRegistry();
+      const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
+        Boolean,
+      );
+
+      expect(ids).toContain(pieceId(persistedPiece));
+      expect(started).toEqual([]);
+    } finally {
+      startable.start = realStart;
+    }
   });
 
   it("adds a persisted piece from a fresh runtime", async () => {

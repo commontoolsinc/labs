@@ -38,6 +38,25 @@ export function testIdentityKey(test: TestIdentity): string {
   );
 }
 
+/** The identity a stable key names. Undefined for anything that is not one. */
+export function testIdentityOfKey(key: string): TestIdentity | undefined {
+  let parts: unknown;
+  try {
+    parts = JSON.parse(key);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parts) || parts.length < 3 || parts.length > 4) {
+    return undefined;
+  }
+  const [k, s, n, v] = parts as unknown[];
+  if (!isNonEmptyString(k) || !isNonEmptyString(s) || !isNonEmptyString(n)) {
+    return undefined;
+  }
+  if (v !== undefined && !isNonEmptyString(v)) return undefined;
+  return v === undefined ? { k, s, n } : { k, s, n, v };
+}
+
 /** One line stating that one test executed once in one run. */
 export interface TestRecord {
   line: "record";
@@ -54,6 +73,7 @@ export interface TestRecord {
 export interface CiContext {
   /** GitHub workflow run id; spans every job of the workflow run. */
   workflowRunId: string;
+
   runAttempt: number;
   workflow: string;
 
@@ -94,6 +114,7 @@ export interface RunContext {
 
   /** True when the working tree had uncommitted changes. */
   dirty: boolean;
+
   branch?: string;
   env: "ci" | "local";
   ci?: CiContext;
@@ -103,6 +124,7 @@ export interface RunContext {
    * harness a run was started under when that variable is unset.
    */
   agent?: string;
+
   os: string;
   arch: string;
   denoVersion: string;
@@ -304,6 +326,12 @@ export function localObjectName(context: RunContext): string {
  * and re-running the relay is idempotent: a later attempt's relay
  * re-ships an earlier attempt's artifacts into a collision and ships the
  * re-run jobs' new artifacts as new objects.
+ *
+ * That collision needs both attempts to land in one partition, and the
+ * partition comes from `runStartedAt`, which GitHub reports per attempt.
+ * Two attempts separated by a UTC midnight therefore compute different
+ * partitions, and the earlier attempt's artifacts are stored a second
+ * time under the later day rather than colliding.
  */
 export function ciObjectName(options: {
   runStartedAt: string;

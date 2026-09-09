@@ -2,6 +2,14 @@
  * Factory function to create builder functions with runtime dependency injection
  */
 
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  toCompactDebugString,
+  toIndentedDebugString,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import {
   FabricError,
@@ -15,16 +23,6 @@ import {
   FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
 import {
   all as rowLabelAll,
   any as rowLabelAny,
@@ -109,6 +107,13 @@ import {
   UI,
   WebhookConfigSchema,
 } from "./types.ts";
+import {
+  CFC_CANONICAL_ALIAS_NAMES,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  isFabricPrimitiveSchemaType,
+  MERGEABLE_OP_METHODS,
+} from "@commonfabric/api";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -182,7 +187,12 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     }
   };
 
-  const commonfabric = {
+  // Annotated rather than cast, so the object literal is checked against the
+  // declarations a pattern compiles against: a missing binding, a binding whose
+  // type has drifted from its declaration, and a binding nothing declares are
+  // each an error here. `__cfHelpers` is the one member that cannot be written
+  // in the literal, because its value is the literal.
+  const surface: Omit<BuilderFunctionsAndConstants, "__cfHelpers"> = {
     // Pattern creation
     pattern: trustedPattern,
     patternTool: trustedPatternTool,
@@ -304,6 +314,16 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     AuthSchema,
     WebhookConfigSchema,
 
+    // The names `@commonfabric/api` both declares and implements, passed
+    // through so a pattern that imports one reads the value rather than
+    // `undefined`: the sandbox resolves `commonfabric` to this object, not to
+    // that module.
+    FABRIC_PRIMITIVE_SCHEMA_TYPES,
+    isFabricPrimitiveSchemaType,
+    FABRIC_SPECIAL_OBJECT_BRAND,
+    MERGEABLE_OP_METHODS,
+    CFC_CANONICAL_ALIAS_NAMES,
+
     // Render utils
     h,
     UiAction,
@@ -333,10 +353,13 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Value comparison helper exposed for pattern code
     valueEqual,
-  } as BuilderFunctionsAndConstants & {
-    __cfHelpers?: BuilderFunctionsAndConstants;
   };
-  commonfabric.__cfHelpers = commonfabric;
+
+  // The helpers object the transformer's output reaches for is this same
+  // surface, so it can only be attached once the surface exists.
+  const commonfabric: BuilderFunctionsAndConstants = Object.assign(surface, {
+    __cfHelpers: surface,
+  });
 
   return {
     commonfabric,

@@ -5,6 +5,7 @@ import {
 import { defer } from "@commonfabric/utils/defer";
 import { isDeno } from "@commonfabric/utils/env";
 import {
+  ClientTransportNotificationType,
   ErrorNotification,
   IPCClientMessage,
   IPCClientNotification,
@@ -50,8 +51,18 @@ export class WebWorkerRuntimeTransport
         name: "runtime-worker",
       },
     );
-    this.#worker.addEventListener("message", this._handleMessage);
-    this.#worker.addEventListener("error", this._handleError);
+    this.#worker.addEventListener("message", this.#handleMessage);
+    this.#worker.addEventListener("error", this.#handleError);
+  }
+
+  /**
+   * The worker message handler, which a test drives directly to deliver a
+   * message by hand.
+   */
+  get accessForTestingOnly(): {
+    readonly handleMessage: (event: MessageEvent) => void;
+  } {
+    return { handleMessage: this.#handleMessage };
   }
 
   /** @inheritDoc */
@@ -67,8 +78,31 @@ export class WebWorkerRuntimeTransport
     // back-link before a prop arrives, and `CellHandle.serialize()` rebuilds a
     // record rather than aliasing it. What is exposed is a value handed to the
     // connection without passing through one of those, of which
-    // `PageCreateRequest.argument` is the field to know about.
+    // `PieceCreateRequest.argument` is the field to know about.
     this.#worker.postMessage(realmFromFabricValue(data));
+  }
+
+  /**
+   * Hands the worker a duplex for a further document to reach the runtime
+   * over, and gives up this page's end of it.
+   *
+   * Only the page holding this transport can do so: it spawned the worker, and
+   * who else may speak to the runtime is its decision. What the far end of
+   * `port` does next is send an `Attach` asserting the security context it
+   * believes the runtime runs under, which the runtime refuses if it is not
+   * its own.
+   *
+   * The port travels the transfer list rather than the message beside it -- a
+   * port is no `FabricValue` and has no encoding -- and is neutered here by
+   * the transfer, so this page cannot go on speaking over it.
+   */
+  attachClientPort(port: MessagePort): void {
+    this.#worker.postMessage(
+      realmFromFabricValue({
+        type: ClientTransportNotificationType.AttachPort,
+      }),
+      [port],
+    );
   }
 
   /** @inheritDoc */
@@ -116,12 +150,8 @@ export class WebWorkerRuntimeTransport
    * Handles one message from the worker. What a decode returns is deep-frozen,
    * so a consumer of a response or a notification reads it rather than
    * reshaping it in place.
-   *
-   * TypeScript-private rather than a `#` name, and keeping the `_` the rest of
-   * this sweep drops, because `test/client/transport-web-worker.test.ts`
-   * reaches it under exactly that name to deliver a message by hand.
    */
-  private _handleMessage = (event: MessageEvent): void => {
+  #handleMessage = (event: MessageEvent): void => {
     let data: IPCRemotePost;
 
     try {
@@ -139,7 +169,7 @@ export class WebWorkerRuntimeTransport
       // protect and no one listening for the report: what a failure costs
       // there is `ready()` never settling, and a caller waiting on a promise
       // that will not resolve has no way back. So the failure lands where
-      // `_handleError()` puts a pre-ready one, on the promise itself.
+      // `#handleError()` puts a pre-ready one, on the promise itself.
       if (!this.#ready) {
         this.#readyPromise.reject(
           new Error(
@@ -179,11 +209,10 @@ export class WebWorkerRuntimeTransport
   };
 
   /**
-   * TypeScript-private rather than a `#` name, and keeping the `_` the rest
-   * of this sweep drops, because `test/client/transport-web-worker.test.ts`
-   * reaches it under exactly that name to deliver a message by hand.
+   * Handles a worker error: before the worker is ready it fails the ready
+   * promise, and after that it is emitted as an error notification.
    */
-  private _handleError = (event: ErrorEvent): void => {
+  #handleError = (event: ErrorEvent): void => {
     event.preventDefault();
 
     const error = new Error(

@@ -7,7 +7,7 @@ import {
 } from "@std/assert";
 import { fromFileUrl } from "@std/path/from-file-url";
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import type { PatchOp } from "@commonfabric/memory/v2";

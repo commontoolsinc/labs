@@ -170,10 +170,12 @@ interface StubOptions {
 
   /** One page of runs per listing call; the last repeats. */
   runPages?: Record<string, unknown>[][];
+
   runsStatus?: number;
 
   /** GitHub's clock, as the runs listing reports it. */
   listDate?: string;
+
   artifacts?: { id: number; name: string; expired?: boolean }[];
   artifactStatus?: number;
   zip?: Uint8Array;

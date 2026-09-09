@@ -43,7 +43,7 @@ describe("theme", () => {
       );
     });
 
-    it("defines every status color, text color, and sparkline color in both themes", () => {
+    it("defines every status and text color in both themes", () => {
       for (const status of ["good", "warn", "bad", "unknown"] as const) {
         expect(
           DASHBOARD_THEME_STYLES.match(
@@ -61,11 +61,6 @@ describe("theme", () => {
         expect(
           DASHBOARD_THEME_STYLES.match(
             new RegExp(`--status-${status}-text:`, "g"),
-          )?.length,
-        ).toBe(3);
-        expect(
-          DASHBOARD_THEME_STYLES.match(
-            new RegExp(`--spark-fade-${status}:`, "g"),
           )?.length,
         ).toBe(3);
       }

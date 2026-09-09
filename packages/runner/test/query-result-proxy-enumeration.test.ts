@@ -277,15 +277,16 @@ describe("CT-1240: query result proxy enumeration", () => {
     expect(keysAfter).toContain("b");
   });
 
-  // A trap that answers about OWN properties must not consult the prototype
-  // chain. It used to use `in`, so every member of `Object.prototype` came back
-  // as an own property of the proxy while `ownKeys` listed none of them -- two
-  // traps describing the same value, disagreeing. Downstream that made a
-  // read-back record unwritable: `unsafeObjectKeyIn()` refuses a `FabricValue`
-  // with own `__proto__`/`constructor` and asks with `Object.hasOwn()`, so
-  // writing a record back to a cell was rejected over keys it never had
-  // (loom CT-1949).
   it("getOwnPropertyDescriptor does not report inherited names as own", () => {
+    // A trap that answers about OWN properties must not consult the prototype
+    // chain. It used to use `in`, so every member of `Object.prototype` came
+    // back as an own property of the proxy while `ownKeys` listed none of them
+    // -- two traps describing the same value, disagreeing. Downstream that made
+    // a read-back record unwritable: `unsafeObjectKeyIn()` refuses a
+    // `FabricValue` with own `__proto__`/`constructor` and asks with
+    // `Object.hasOwn()`, so writing a record back to a cell was rejected over
+    // keys it never had (loom CT-1949).
+
     const cell = runtime.getCell<{ a: number }>(
       space,
       "test-own-descriptor-not-inherited",
@@ -331,9 +332,10 @@ describe("CT-1240: query result proxy enumeration", () => {
     }
   });
 
-  // `in` IS the `has` trap's own operator, so inherited names SHOULD be true
-  // there. Pinned so a future cleanup does not "fix" both traps alike.
   it("the `in` operator still sees inherited names", () => {
+    // `in` IS the `has` trap's own operator, so inherited names SHOULD be true
+    // there. Pinned so a future cleanup does not "fix" both traps alike.
+
     const cell = runtime.getCell<{ a: number }>(
       space,
       "test-in-operator-still-inherits",

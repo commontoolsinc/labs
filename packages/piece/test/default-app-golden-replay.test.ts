@@ -19,6 +19,7 @@ import {
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
 import { reconcilePieceSource } from "../src/ops/piece-origin.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 // The route that ref expands to — what the toolshed serves, and what the
 // worker names the module by when it compiles the pattern over HTTP.
@@ -367,7 +368,11 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       currentPattern,
     )!;
     const { error } = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
@@ -461,7 +466,11 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     // Reproduce the updater that advanced only patternIdentity. The persisted
     // root still carries V1's stored schema and projection.
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
     const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;

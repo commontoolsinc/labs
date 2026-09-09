@@ -45,13 +45,14 @@ describe("own-write echo (live)", () => {
     await server?.close();
   });
 
-  // Pure echo: the only write in the batch is this session's own append, so
-  // the dirty-origin survives and the covering frame carries the patch head
-  // as a full post-apply document. The echoed base swap and the parked
-  // promotion run in the same frame application; the list must come out
-  // exactly once-appended, and the sink must not fire again for a frame that
-  // confirms what the overlay already showed.
   it("applies its own patch echo exactly once and does not re-notify", async () => {
+    // Pure echo: the only write in the batch is this session's own append, so
+    // the dirty-origin survives and the covering frame carries the patch head
+    // as a full post-apply document. The echoed base swap and the parked
+    // promotion run in the same frame application; the list must come out
+    // exactly once-appended, and the sink must not fire again for a frame that
+    // confirms what the overlay already showed.
+
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -107,11 +108,12 @@ describe("own-write echo (live)", () => {
     }
   });
 
-  // Merged truth through frames: session 2 appends over a base that lacks
-  // session 1's concurrent append. Both writes share the held batch, and the
-  // delivered document is the server's merged head — session 2's own view
-  // must converge to it, with its own layer applied exactly once.
   it("converges the writer to the merged list including elements it never observed", async () => {
+    // Merged truth through frames: session 2 appends over a base that lacks
+    // session 1's concurrent append. Both writes share the held batch, and the
+    // delivered document is the server's merged head — session 2's own view
+    // must converge to it, with its own layer applied exactly once.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,

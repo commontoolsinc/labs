@@ -1,7 +1,9 @@
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { type DID, type Identity, KeyStore } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import {
   AppView,
+  isAppViewEqual,
   isViewingDefaultPatternView,
   navigate,
 } from "@commonfabric/navigation";
@@ -151,29 +153,33 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor _resolvingAttention = new Map<string, symbol>();
 
-  private _eventAttentionMutation = 0;
-  private _eventAttentionMutationVersions = new Map<
+  #eventAttentionMutation = 0;
+  #eventAttentionMutationVersions = new Map<
     DID,
     Map<string, number>
   >();
-  private _eventAttentionRefreshOwners = new Map<DID, symbol>();
+  #eventAttentionRefreshOwners = new Map<DID, symbol>();
 
-  // Invalidates callbacks from replaced workers. A coded compiler-load error
-  // can arrive through either a request reply or an asynchronous runtime error;
-  // only the currently-owned worker may trigger one replacement.
-  private _runtimeGeneration = 0;
-  private _preserveRuntimeErrorsForNextViewChange = false;
+  /**
+   * Generation counter which invalidates callbacks from replaced workers. A
+   * coded compiler-load error can arrive through either a request reply or an
+   * asynchronous runtime error; only the currently-owned worker may trigger
+   * one replacement.
+   */
+  #runtimeGeneration = 0;
+
+  #preserveRuntimeErrorsForNextViewChange = false;
 
   readonly preserveRuntimeErrorsForNextViewChange = (): void => {
-    this._preserveRuntimeErrorsForNextViewChange = true;
+    this.#preserveRuntimeErrorsForNextViewChange = true;
   };
 
   readonly _handleRuntimeError = (
     event: ErrorNotification,
-    generation = this._runtimeGeneration,
+    generation = this.#runtimeGeneration,
   ): void => {
     console.error("[RuntimeClient Error]", event);
-    if (generation !== this._runtimeGeneration) {
+    if (generation !== this.#runtimeGeneration) {
       return;
     }
 
@@ -197,8 +203,8 @@ export class XRootView extends BaseView implements ShellApp {
     // before terminating it; the replacement gets a fresh module map and can
     // retry the compiler chunk when the user retries the operation.
     this._runtimeLoadErrors = [];
-    this._runtimeGeneration++;
-    this._rt.run([this.app]);
+    this.#runtimeGeneration++;
+    this.#rt.run([this.app]);
   };
 
   @property()
@@ -216,13 +222,15 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor presenceUrl: string | undefined = PRESENCE_URL?.href;
 
-  // The runtime task runs when AppState changes, and determines if a
-  // new RuntimeInternals must be created — only when identity or host
-  // (apiUrl) change; one runtime serves every space. This is manually
-  // run in `updated()` because we want to compare to previous values,
-  // leaving this function responsible for cleaning up previous
-  // runtimes, and creating a new one.
-  private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
+  /**
+   * The runtime task, which runs when `AppState` changes and determines if a
+   * new `RuntimeInternals` must be created — only when identity or host
+   * (`apiUrl`) change; one runtime serves every space. This is run manually,
+   * from `updated()` and after a worker replacement, because we want to
+   * compare to previous values, leaving this task responsible for cleaning up
+   * previous runtimes, and creating a new one.
+   */
+  #rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
       // Do not define `args` -- this is run in "manual mode",
@@ -231,9 +239,9 @@ export class XRootView extends BaseView implements ShellApp {
       // whereas in a task we don't have access to necessary info
       // like previous app state.
       task: async ([app]: [AppState | undefined], { signal }) => {
-        const generation = ++this._runtimeGeneration;
+        const generation = ++this.#runtimeGeneration;
         this._runtimeLoadErrors = [];
-        const previous = this._rt.value;
+        const previous = this.#rt.value;
         if (previous) {
           this.runtime?.off(
             "eventneedsattention",
@@ -242,8 +250,8 @@ export class XRootView extends BaseView implements ShellApp {
           previous.dispose().catch(console.error);
         }
         this._eventAttention = [];
-        this._eventAttentionMutationVersions.clear();
-        this._eventAttentionRefreshOwners.clear();
+        this.#eventAttentionMutationVersions.clear();
+        this.#eventAttentionRefreshOwners.clear();
 
         if (!app || !app.identity) {
           // Clear the runtime when no app state. The space belongs to the
@@ -329,6 +337,31 @@ export class XRootView extends BaseView implements ShellApp {
     },
   );
 
+  /**
+   * The runtime task, its generation counter, and the unload handler, which
+   * a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    readonly onBeforeUnload: (event: BeforeUnloadEvent) => void;
+    rt: Task<[AppState | undefined], RuntimeInternals | undefined>;
+    readonly runtimeGeneration: number;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      onBeforeUnload: this.#onBeforeUnload,
+      get rt() {
+        return outerThis.#rt;
+      },
+      set rt(value) {
+        outerThis.#rt = value;
+      },
+      get runtimeGeneration() {
+        return outerThis.#runtimeGeneration;
+      },
+    };
+  }
+
   override connectedCallback(): void {
     super.connectedCallback();
     // A Lit element can be detached and reattached without rebuilding its
@@ -339,9 +372,9 @@ export class XRootView extends BaseView implements ShellApp {
     this.addEventListener(SHELL_COMMAND, this.onCommand);
     document.addEventListener(
       "theme-preference-changed",
-      this._onThemeChanged,
+      this.#onThemeChanged,
     );
-    globalThis.addEventListener("beforeunload", this._onBeforeUnload);
+    globalThis.addEventListener("beforeunload", this.#onBeforeUnload);
   }
 
   override disconnectedCallback(): void {
@@ -349,37 +382,42 @@ export class XRootView extends BaseView implements ShellApp {
     this.removeEventListener(SHELL_COMMAND, this.onCommand);
     document.removeEventListener(
       "theme-preference-changed",
-      this._onThemeChanged,
+      this.#onThemeChanged,
     );
-    globalThis.removeEventListener("beforeunload", this._onBeforeUnload);
+    globalThis.removeEventListener("beforeunload", this.#onBeforeUnload);
     super.disconnectedCallback();
   }
 
-  // A page teardown (reload, tab close, external navigation) terminates the
-  // runtime worker, dropping any commit the server has not yet confirmed. The
-  // worker mirrors its pending-commit state to `RuntimeClient.hasPendingWrites`
-  // on every transition, so this synchronous check is current; while writes are
-  // unconfirmed, ask the browser to confirm leaving instead of silently losing
-  // them. Commits confirm quickly (typically well under a second), so the
-  // prompt only appears in the narrow window a reload would actually lose data.
-  private _onBeforeUnload = (event: BeforeUnloadEvent): void => {
+  /**
+   * Handler for `beforeunload`. A page teardown (reload, tab close, external
+   * navigation) terminates the runtime worker, dropping any commit the server
+   * has not yet confirmed. The worker mirrors its pending-commit state to
+   * `RuntimeClient.hasPendingWrites` on every transition, so this synchronous
+   * check is current; while writes are unconfirmed, this asks the browser to
+   * confirm leaving instead of silently losing them. Commits confirm quickly
+   * (typically well under a second), so the prompt only appears in the narrow
+   * window a reload would actually lose data.
+   */
+  #onBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (this.runtime?.hasPendingWrites()) {
       event.preventDefault();
     }
   };
 
-  // Point `space` at the space the new view addresses. This runs before
-  // render, not in updated(), so no render ever pairs a view with the space
-  // of the view it replaced. AppView reads the view and the space together
-  // and treats a space name that disagrees with a space DID as an error.
+  /**
+   * Points `space` at the space the new view addresses. This runs before
+   * render, not in `updated()`, so no render ever pairs a view with the space
+   * of the view it replaced. `XAppView` reads the view and the space together
+   * and treats a space name that disagrees with a space DID as an error.
+   */
   protected override willUpdate(changedProperties: PropertyValues<this>): void {
     if (changedProperties.has("app")) {
-      const previous = changedProperties.get("app");
-      if (JSON.stringify(previous?.view) !== JSON.stringify(this.app?.view)) {
-        if (!this._preserveRuntimeErrorsForNextViewChange) {
+      const previousView = changedProperties.get("app")?.view;
+      if (!previousView || !isAppViewEqual(previousView, this.app.view)) {
+        if (!this.#preserveRuntimeErrorsForNextViewChange) {
           this._runtimeLoadErrors = [];
         }
-        this._preserveRuntimeErrorsForNextViewChange = false;
+        this.#preserveRuntimeErrorsForNextViewChange = false;
       }
       this.#syncViewSpace(this.app);
     }
@@ -400,33 +438,44 @@ export class XRootView extends BaseView implements ShellApp {
       shouldRecreateRuntime(previous, current);
 
     if (flipState || stateChanged) {
-      this._rt.run([current]);
+      this.#rt.run([current]);
     }
   }
 
-  // The active browser telemetry sink (undefined when telemetry is disabled
-  // or no runtime); kept only so space.did attribution can track navigation.
+  /**
+   * The active browser telemetry sink (`undefined` when telemetry is disabled
+   * or there is no runtime); kept only so `space.did` attribution can track
+   * navigation.
+   */
   #telemetry: BrowserTelemetry | undefined;
 
-  // The name the current lookup was started for, while the view addresses its
-  // space by name. Navigating within that name keeps the space already
-  // resolved, and keeps a lookup still in flight running. A lookup that fails
-  // clears this, so a later navigation to the same name tries again.
+  /**
+   * The name the current lookup was started for, while the view addresses its
+   * space by name. Navigating within that name keeps the space already
+   * resolved, and keeps a lookup still in flight running. A lookup that fails
+   * clears this, so a later navigation to the same name tries again.
+   */
   #resolvedSpaceName: string | undefined;
-  // Invalidates a resolution that a newer navigation has superseded.
+
+  /** Token which invalidates a resolution a newer navigation has superseded. */
   #resolveSpaceToken = 0;
+
   #spaceResolution: Promise<void> | undefined;
 
-  // Resolves once the space the current view addresses is known. A view that
-  // names its space resolves that name asynchronously, and addresses no space
-  // until the name lands.
+  /**
+   * Returns a promise which resolves once the space the current view
+   * addresses is known. A view that names its space resolves that name
+   * asynchronously, and addresses no space until the name lands.
+   */
   spaceResolved(): Promise<void> {
     return this.#spaceResolution ?? Promise.resolve();
   }
 
-  // Derive the view's space DID — view state, independent of the runtime's
-  // lifecycle. Every path assigns synchronously except a space named by the
-  // view, which has to be looked up.
+  /**
+   * Derives the view's space DID — view state, independent of the runtime's
+   * lifecycle. Every path assigns synchronously except a space named by the
+   * view, which has to be looked up.
+   */
   #syncViewSpace(app: AppState | undefined): void {
     const identity = app?.identity;
     const view = app?.view;
@@ -480,14 +529,14 @@ export class XRootView extends BaseView implements ShellApp {
     this.space = space;
     this._eventAttention = [];
     if (previousSpace !== undefined) {
-      this._eventAttentionMutationVersions.delete(previousSpace);
-      this._eventAttentionRefreshOwners.delete(previousSpace);
+      this.#eventAttentionMutationVersions.delete(previousSpace);
+      this.#eventAttentionRefreshOwners.delete(previousSpace);
     }
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.
     this.#telemetry?.setSpace(space);
     if (space !== undefined) {
-      void this.#refreshEventAttention(space, this._runtimeGeneration);
+      void this.#refreshEventAttention(space, this.#runtimeGeneration);
     }
   }
 
@@ -506,24 +555,24 @@ export class XRootView extends BaseView implements ShellApp {
   };
 
   #noteEventAttentionMutation(space: DID, key: string): void {
-    const versions = this._eventAttentionMutationVersions.get(space) ??
+    const versions = this.#eventAttentionMutationVersions.get(space) ??
       new Map<string, number>();
-    versions.set(key, ++this._eventAttentionMutation);
-    this._eventAttentionMutationVersions.set(space, versions);
+    versions.set(key, ++this.#eventAttentionMutation);
+    this.#eventAttentionMutationVersions.set(space, versions);
   }
 
   async #refreshEventAttention(space: DID, generation: number): Promise<void> {
     const runtime = this.runtime;
     if (runtime === undefined) return;
     const owner = Symbol(space);
-    const startedAt = this._eventAttentionMutation;
-    this._eventAttentionRefreshOwners.set(space, owner);
+    const startedAt = this.#eventAttentionMutation;
+    this.#eventAttentionRefreshOwners.set(space, owner);
     try {
       const notices = await runtime.listEventAttention(space);
       if (
-        generation !== this._runtimeGeneration || runtime !== this.runtime ||
+        generation !== this.#runtimeGeneration || runtime !== this.runtime ||
         space !== this.space ||
-        this._eventAttentionRefreshOwners.get(space) !== owner
+        this.#eventAttentionRefreshOwners.get(space) !== owner
       ) return;
       const currentByKey = new Map(
         this._eventAttention.filter((notice) => notice.space === space).map(
@@ -537,7 +586,7 @@ export class XRootView extends BaseView implements ShellApp {
       );
       for (
         const [key, version]
-          of this._eventAttentionMutationVersions.get(space) ?? []
+          of this.#eventAttentionMutationVersions.get(space) ?? []
       ) {
         if (version <= startedAt) continue;
         const current = currentByKey.get(key);
@@ -550,16 +599,16 @@ export class XRootView extends BaseView implements ShellApp {
       ];
     } catch (error) {
       if (
-        generation === this._runtimeGeneration && runtime === this.runtime &&
+        generation === this.#runtimeGeneration && runtime === this.runtime &&
         space === this.space &&
-        this._eventAttentionRefreshOwners.get(space) === owner
+        this.#eventAttentionRefreshOwners.get(space) === owner
       ) {
         console.error("[RootView] Failed to load event attention:", error);
       }
     } finally {
-      if (this._eventAttentionRefreshOwners.get(space) === owner) {
-        this._eventAttentionRefreshOwners.delete(space);
-        this._eventAttentionMutationVersions.delete(space);
+      if (this.#eventAttentionRefreshOwners.get(space) === owner) {
+        this.#eventAttentionRefreshOwners.delete(space);
+        this.#eventAttentionMutationVersions.delete(space);
       }
     }
   }
@@ -594,12 +643,15 @@ export class XRootView extends BaseView implements ShellApp {
     }
   };
 
-  private _onThemeChanged = (e: Event) => {
+  #onThemeChanged = (e: Event) => {
     this._themePreference = (e as CustomEvent).detail;
   };
 
-  // An event handler cannot await, so a command that fails after its first
-  // suspension point reports as an unhandled rejection.
+  /**
+   * Handler for command events. An event handler cannot await, so a command
+   * that fails after its first suspension point reports as an unhandled
+   * rejection.
+   */
   onCommand = (e: Event) => {
     void this.#runCommand((e as CustomEvent<Command>).detail);
   };
@@ -613,15 +665,21 @@ export class XRootView extends BaseView implements ShellApp {
       case "set-config":
         return this.setConfig(command.key, command.value);
     }
-    throw new Error(`Received a non-command: ${JSON.stringify(command)}`);
+    throw new Error(
+      `Received a non-command: ${
+        toCompactDebugString(command, { maxLength: 200, backtickQuote: true })
+      }`,
+    );
   }
 
   state(): AppState {
     return clone(this.app);
   }
 
-  // The application state in the JSON-shaped form that survives the page
-  // boundary the integration harness reads across.
+  /**
+   * Returns the application state in the JSON-shaped form that survives the
+   * page boundary the integration harness reads across.
+   */
   serialize(): AppStateSerialized {
     return serialize(this.state());
   }
@@ -656,8 +714,10 @@ export class XRootView extends BaseView implements ShellApp {
     return this.#commit(next, `set-config ${key}=${value}`);
   }
 
-  // Adopts the next application state and resolves once the render it triggers
-  // has landed.
+  /**
+   * Adopts the next application state and resolves once the render it triggers
+   * has landed.
+   */
   #commit(next: AppState, description: string): Promise<void> {
     this.app = next;
     if (ENVIRONMENT !== "production") {
@@ -673,15 +733,15 @@ export class XRootView extends BaseView implements ShellApp {
 
   override render() {
     const loadError: LoadError | undefined = this._spaceResolutionError ??
-      (this._rt.status === TaskStatus.ERROR
-        ? { kind: "space", error: this._rt.error }
+      (this.#rt.status === TaskStatus.ERROR
+        ? { kind: "space", error: this.#rt.error }
         : undefined);
     return html`
       <cf-theme .theme="${{ colorScheme: this._themePreference }}">
         <x-app-view
           .app="${this.app}"
           .keyStore="${this.keyStore}"
-          .rt="${this._rt.value}"
+          .rt="${this.#rt.value}"
           .space="${this.space}"
           .spaceLoadError="${loadError}"
           .runtimeLoadErrors="${this._runtimeLoadErrors}"

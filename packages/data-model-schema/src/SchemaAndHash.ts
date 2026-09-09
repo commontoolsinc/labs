@@ -1,6 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 /**

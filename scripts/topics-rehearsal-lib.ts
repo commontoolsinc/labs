@@ -18,6 +18,7 @@
  * shebang a lie. That half lives in `topics-snapshot-lib.ts`, which only the
  * export imports, and the test file holds a check that it stayed there.
  */
+
 export const repoRoot = new URL("..", import.meta.url).pathname;
 
 /** Run `cf` from the repository root and return stdout; throw on failure. */
@@ -244,15 +245,17 @@ export interface TopicsExport {
   manifest: { fid: string; patternIdentity: string; resultKeys: string[] }[];
 }
 
-/** The known link-valued argument fields a restore handles specially:
- * `mentionable` is re-established with `cf piece link` after the write, and
- * the deprecated `myName` stays retired. */
-
 /**
  * The link-valued argument fields a restore re-establishes with
  * `cf piece link` rather than writing as data, mapped to the board path each
  * one points at. A document write cannot carry a `$link`, so these are routed
  * aside and re-linked after the apply.
+ *
+ * Three today: `mentionable` (the board's derived mention index),
+ * `boardCrossrefs` (its reference pivot), and `boardNames` (its names table,
+ * which a topic reads its own member name out of). The mention index publishes
+ * display rows with stable strings and unread member references, matching
+ * the wiring the board supplies when it creates a topic.
  *
  * Adding a wiring input to the topic pattern means adding it here. Leaving it
  * out is not silent: `buildRestoreDocument` throws on any link-valued field it
@@ -262,10 +265,17 @@ export interface TopicsExport {
  * throw into a failing check rather than a surprise mid-incident.
  */
 export const STRUCTURAL_LINK_SOURCES: Record<string, string> = {
-  mentionable: "topics",
+  mentionable: "mentionable",
   boardCrossrefs: "crossrefs",
+  boardNames: "namesTable",
 };
+
 export const STRUCTURAL_LINK_FIELDS = Object.keys(STRUCTURAL_LINK_SOURCES);
+
+/**
+ * Retired link-valued fields, recognized so that a restore sets one aside by
+ * name rather than reaching the unknown-link throw below.
+ */
 export const LEGACY_LINK_FIELDS = ["myName"] as const;
 
 export interface RestoreDocument {

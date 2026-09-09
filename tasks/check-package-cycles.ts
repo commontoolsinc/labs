@@ -392,6 +392,7 @@ export interface ScanResult {
 
   /** Allowlist entries that no longer describe a cycle in the tree. */
   readonly resolved: AllowedCycle[];
+
   readonly edges: readonly Edge[];
 }
 

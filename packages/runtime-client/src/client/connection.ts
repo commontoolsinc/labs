@@ -1,3 +1,4 @@
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
@@ -30,15 +31,24 @@ import {
   OperationUpdateNotification,
   PendingWritesNotification,
   RequestType,
+  type RuntimeSecurityContext,
   SerializedDomEvent,
   TelemetryNotification,
   VDomBatchNotification,
   VDomMountResponse,
 } from "@/protocol/mod.ts";
+import { assertNoKeyMaterial } from "@/shared/key-material.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "@/cell-handle.ts";
 import { cellRefToKey } from "@/shared/utils.ts";
+
+/**
+ * Longest rendering of an unknown notification a warning carries. What
+ * arrives is bounded only by the transport, and a warning names it rather
+ * than carrying it.
+ */
+const MAX_UNKNOWN_NOTIFICATION_RENDER = 512;
 
 const ipcLogger = getLogger("runtime-client");
 
@@ -134,6 +144,7 @@ export interface InitializedRuntimeConnection extends RuntimeConnection {}
 export interface VDomConnection {
   /** The connection's lifetime signal; aborts on disposal. */
   readonly signal: AbortSignal;
+
   mount(
     mountId: number,
     cellRef: CellRef,
@@ -158,11 +169,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #nextMsgId = 0;
   #timeoutMs = DEFAULT_TIMEOUT_MS;
   #initialized = false;
-  // The connection's lifetime. dispose() aborts it; every consumer registers
-  // its teardown against this signal and every in-flight request settles
-  // through it, so there is no disposed state to special-case beyond
-  // `signal.aborted`.
+
+  /**
+   * The connection's lifetime. `dispose()` aborts it; every consumer registers
+   * its teardown against this signal and every in-flight request settles
+   * through it, so there is no disposed state to special-case beyond
+   * `signal.aborted`.
+   */
   #lifetime = new AbortController();
+
   #transport: RuntimeTransport;
   #subscribed = new Map<string, Set<CellHandle>>();
   #subscriptionDiagnostics = new Map<string, SubscriptionCounterTotals>();
@@ -236,12 +251,42 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     return this as InitializedRuntimeConnection;
   }
 
+  /**
+   * Joins the runtime already running behind this transport, asserting the
+   * security context it is believed to run under.
+   *
+   * @throws If the context holds key material, if the runtime refuses the
+   *   assertion, or if no runtime is running behind the transport to join.
+   */
+  async attach(
+    context: RuntimeSecurityContext,
+  ): Promise<InitializedRuntimeConnection> {
+    // The last thing before the frame reaches a transport, which is why the
+    // invariant is enforced here and not only in `RuntimeClient.attach`: this
+    // class is exported, so a caller can hold one directly, and a context
+    // read through getters between that check and this send is not the one
+    // that was checked. `key-material.ts` states what is being kept out and
+    // why the platform is not left to decide it.
+    assertNoKeyMaterial(context);
+    await this.request<RequestType.Attach>({
+      type: RequestType.Attach,
+      data: context,
+    });
+    this.#initialized = true;
+    return this as InitializedRuntimeConnection;
+  }
+
   request<
     T extends keyof Commands,
   >(
     data: CommandRequest<T>,
   ): Promise<CommandResponse<T>> {
-    if (!this.#initialized && data.type !== RequestType.Initialize) {
+    // Initialize and Attach are the two requests that make a connection
+    // usable, so each is the one thing an unusable connection may send.
+    if (
+      !this.#initialized && data.type !== RequestType.Initialize &&
+      data.type !== RequestType.Attach
+    ) {
       throw new Error("RuntimeConnection is uninitialized.");
     }
     const signal = this.#lifetime.signal;
@@ -344,8 +389,11 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     return deferred.promise;
   }
 
-  // Remove a pending request's bookkeeping: clear its timeout and detach its
-  // abort listener. Returns the entry so the caller can settle its deferred.
+  /**
+   * Removes a pending request's bookkeeping: clears its timeout and detaches
+   * its abort listener. Returns the entry so the caller can settle its
+   * deferred.
+   */
   #settle(msgId: number): PendingRequest | undefined {
     const pending = this.#pendingRequests.get(msgId);
     if (!pending) return undefined;
@@ -553,7 +601,13 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       } else if (isEventNeedsAttentionNotification(message)) {
         this.emit("eventneedsattention", message);
       } else {
-        console.warn(`Unknown notification: ${JSON.stringify(message)}`);
+        console.warn(
+          `Unknown notification: ${
+            toCompactDebugString(message, {
+              maxLength: MAX_UNKNOWN_NOTIFICATION_RENDER,
+            })
+          }`,
+        );
       }
       return;
     }

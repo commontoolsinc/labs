@@ -11,6 +11,7 @@ import {
   NotificationType,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
+import { templateMarkup } from "./lit-template-markup.ts";
 
 // XRootView is a Lit element; load and exercise it under a minimal browser
 // shim, mirroring login-view.test.ts. Constructing it runs its field
@@ -28,8 +29,11 @@ function installBrowserGlobals(): () => void {
     });
   }
   class TestHTMLElement extends EventTarget {
-    // Minimal render root so Lit's connectedCallback (createRenderRoot ->
-    // attachShadow -> adoptStyles) runs without a real DOM.
+    /**
+     * Returns a minimal render root, so Lit's `connectedCallback`
+     * (`createRenderRoot`, then `attachShadow`, then `adoptStyles`) runs
+     * without a real DOM.
+     */
     attachShadow() {
       return {
         adoptedStyleSheets: [],
@@ -84,21 +88,21 @@ function templateStrings(value: unknown): string {
   return (result?.strings ?? []).join("");
 }
 
-function templateMarkup(value: unknown): string {
-  if (Array.isArray(value)) return value.map(templateMarkup).join("");
-  if (value === null || value === undefined) return "";
-  if (typeof value !== "object") return String(value);
-  const template = value as {
-    strings?: readonly string[];
-    values?: readonly unknown[];
-  };
-  if (template.strings === undefined) return "";
-  return template.strings.map((part, index) =>
-    part + templateMarkup(template.values?.[index])
-  ).join("");
-}
-
 describe("XRootView", () => {
+  it("throws naming the value, given a command event carrying a non-command", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const event = new CustomEvent("command", { detail: { type: "bogus" } });
+      expect(() => view.onCommand(event)).toThrow(
+        'Received a non-command: `{type:"bogus"}`',
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("constructs with default app state and renders the app view", async () => {
     const restore = installBrowserGlobals();
     try {
@@ -132,12 +136,10 @@ describe("XRootView", () => {
       const { XRootView } = await import("../src/views/RootView.ts");
       const view = new XRootView();
       const runs: unknown[] = [];
-      const internals = view as unknown as {
-        _rt: { run(args: unknown): void };
-        _runtimeGeneration: number;
-      };
-      internals._rt = { run: (args) => runs.push(args) };
-      const failedGeneration = internals._runtimeGeneration;
+      view.accessForTestingOnly.rt = {
+        run: (args: unknown) => runs.push(args),
+      } as never;
+      const failedGeneration = view.accessForTestingOnly.runtimeGeneration;
       const event: ErrorNotification = {
         type: NotificationType.ErrorReport,
         message: "Failed to load the compiler stack",
@@ -196,12 +198,7 @@ describe("XRootView", () => {
           "root-view-runtime-error-callback-test",
         ),
       };
-      const task = (view as unknown as {
-        _rt: {
-          run(args: [typeof view.app]): void;
-          taskComplete: Promise<unknown>;
-        };
-      })._rt;
+      const task = view.accessForTestingOnly.rt;
 
       task.run([view.app]);
       await task.taskComplete;
@@ -283,6 +280,46 @@ describe("XRootView", () => {
       // The home view addresses the identity's own space.
       setView({ builtin: "home" });
       expect(view.getRuntimeSpaceDID()).toBe(identity.did());
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps runtime load errors across a view rebuilt in another key order", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const root = new XRootView();
+      const internals = root as unknown as {
+        _runtimeLoadErrors: readonly ErrorNotification[];
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const error: ErrorNotification = {
+        type: NotificationType.ErrorReport,
+        message: "the piece failed to load",
+      };
+      const stateAt = (next: unknown) => ({
+        ...root.app,
+        view: next as typeof root.app.view,
+      });
+
+      // A route parsed from a URL names the space first; a navigation mapped
+      // from a space DID back onto the current space name rebuilds the view
+      // with the piece first. Both address the same piece, so an error that
+      // piece raised is still the error of the piece on screen.
+      root.app = stateAt({ pieceId: "piece-1", spaceName: "atlas" });
+      internals._runtimeLoadErrors = [error];
+      internals.willUpdate(
+        new Map([["app", stateAt({ spaceName: "atlas", pieceId: "piece-1" })]]),
+      );
+      expect(internals._runtimeLoadErrors).toEqual([error]);
+
+      // Another piece is another view, and its errors are not this one's.
+      root.app = stateAt({ spaceName: "atlas", pieceId: "piece-2" });
+      internals.willUpdate(
+        new Map([["app", stateAt({ spaceName: "atlas", pieceId: "piece-1" })]]),
+      );
+      expect(internals._runtimeLoadErrors).toEqual([]);
     } finally {
       restore();
     }
@@ -398,12 +435,7 @@ describe("XRootView", () => {
       await view.spaceResolved();
       expect(view.getRuntimeSpaceDID()).toBe(atlas);
 
-      const task = (view as unknown as {
-        _rt: {
-          run(args: [typeof view.app]): void;
-          taskComplete: Promise<unknown>;
-        };
-      })._rt;
+      const task = view.accessForTestingOnly.rt;
 
       // One runtime creation starts and a second supersedes it, which is what
       // a compiler stack reload does to a creation already under way.
@@ -439,27 +471,26 @@ describe("XRootView", () => {
       view.connectedCallback();
       view.disconnectedCallback();
 
-      const handler = (view as unknown as {
-        _onBeforeUnload: (event: { preventDefault: () => void }) => void;
-      })._onBeforeUnload;
-      let prevented = 0;
-      const event = () => ({ preventDefault: () => prevented++ });
+      const handler = view.accessForTestingOnly.onBeforeUnload;
+      // A cancelable event records the prompt as `defaultPrevented`.
+      const unload = () => {
+        const event = new Event("beforeunload", { cancelable: true });
+        handler(event as BeforeUnloadEvent);
+        return event.defaultPrevented;
+      };
       const setRuntime = (runtime: unknown) =>
         (view as unknown as { runtime: unknown }).runtime = runtime;
 
       // No runtime yet: nothing to lose, so no prompt.
-      handler(event());
-      expect(prevented).toBe(0);
+      expect(unload()).toBe(false);
 
       // A runtime with no unconfirmed writes: no prompt.
       setRuntime({ hasPendingWrites: () => false });
-      handler(event());
-      expect(prevented).toBe(0);
+      expect(unload()).toBe(false);
 
       // Unconfirmed writes in flight: prompt the user before unload.
       setRuntime({ hasPendingWrites: () => true });
-      handler(event());
-      expect(prevented).toBe(1);
+      expect(unload()).toBe(true);
     } finally {
       restore();
     }

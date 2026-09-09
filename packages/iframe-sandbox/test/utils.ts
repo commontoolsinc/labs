@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { defer } from "@commonfabric/utils/defer";
 
 import type {
@@ -124,9 +124,11 @@ export class ContextShim {
     }
   }
 
-  // Watch writes to `key`. Observers are held apart from `subscribe`'s
-  // callbacks so that a test watching a key does not consume a receipt id,
-  // which would change the ids the guest's own subscriptions are given.
+  /**
+   * Watches writes to `key`. Observers are held apart from `subscribe()`'s
+   * callbacks so that a test watching a key does not consume a receipt id,
+   * which would change the ids the guest's own subscriptions are given.
+   */
   observe(key: string, callback: Callback): () => void {
     const entry: [string, Callback] = [key, callback];
     this.observers.push(entry);

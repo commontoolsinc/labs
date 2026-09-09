@@ -8,9 +8,9 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 import type { URI } from "../src/sigil-types.ts";
@@ -96,9 +96,10 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("UnsupportedMediaTypeError");
   });
 
-  // A parameterized header passes the prefix pre-gate but is not the exact
-  // media type (this format has no parameters).
   it("errors on a parameterized header", () => {
+    // A parameterized header passes the prefix pre-gate but is not the exact
+    // media type (this format has no parameters).
+
     const payload = toUnpaddedBase64url(
       new TextEncoder().encode(jsonFromFabricValue({ a: 1 })),
     );
@@ -109,9 +110,10 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("UnsupportedMediaTypeError");
   });
 
-  // Extraction-level failure (as opposed to payload-decode failure): a
-  // percent-encoded payload is not base64url.
   it("errors on a percent-encoded payload", () => {
+    // Extraction-level failure (as opposed to payload-decode failure): a
+    // percent-encoded payload is not base64url.
+
     const { ok, error } = load({
       id: `data:${DATA_URI_MEDIA_TYPE},${
         encodeURIComponent(jsonFromFabricValue({ a: 1 }))

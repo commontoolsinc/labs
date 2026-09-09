@@ -11,10 +11,7 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "@commonfabric/runner";
-import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
+import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 import {
   assertNoCloneFabricInstance,

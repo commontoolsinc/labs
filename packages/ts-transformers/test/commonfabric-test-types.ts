@@ -16,6 +16,7 @@ const staticCache = StaticCache.fromFileSystem();
 export const commonfabricTypes = await staticCache.getText(
   "types/commonfabric.d.ts",
 );
+
 export const cfcTypes = await staticCache.getText("types/cfc.ts");
 
 /**

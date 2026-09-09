@@ -7,11 +7,16 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { normalize } from "@std/path/posix";
+import { join } from "@std/path";
+import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
@@ -42,24 +47,44 @@ import type { HarnessToolContext } from "../src/tools/types.ts";
 
 const signer = await Identity.fromPassphrase("cf-harness describe-handle");
 
+/**
+ * The schema the label fixture's CFC metadata names. Stored metadata carries
+ * a schema reference the commit boundary verifies like any other, so a
+ * fixture that seeds label state installs this document beside it.
+ */
+const LABEL_SEED_SCHEMA = {
+  type: "object",
+  title: "cf-harness-describe-handle-label-seed",
+} as const;
+
+const LABEL_SEED_SCHEMA_HASH: string = internSchemaAsTaggedHashString(
+  LABEL_SEED_SCHEMA,
+);
+
 const HASH_A = "A".repeat(43);
 const REF_A = `/of:fid1:${HASH_A}/summary`;
 
-/**
- * A tagged hash and a DID, each in the position a schema's author controls
- * outright: the name of a property. Neither is a schemed link form, so the
- * handle boundary does not swap them — the scrub is what keeps them out.
- */
+/** The raw hash the hostile tagged property name below is built from. */
 const SCRUB_HASH = "C".repeat(43);
+
+/**
+ * A tagged hash in the position a schema's author controls outright: the name
+ * of a property. Not a schemed link form, so the handle boundary does not swap
+ * it — the scrub is what keeps it out.
+ */
 const HOSTILE_HASH_NAME = `fid1:${SCRUB_HASH}`;
+
+/** A DID in that same position, kept out the same way. */
 const HOSTILE_DID_NAME = "did:key:z6MkfffDescribeHandleScrubbing";
+
+/** The raw hash the linked property name below is built from. */
+const LINKED_NAME_HASH = "E".repeat(43);
 
 /**
  * A property name that is a link rather than a bare identifier. The scrub
  * deliberately leaves the schemed forms alone, because they are the handle
  * boundary's business: a link is swapped for a token, wherever it sits.
  */
-const LINKED_NAME_HASH = "E".repeat(43);
 const LINK_PROPERTY_NAME = `/of:fid1:${LINKED_NAME_HASH}/total`;
 
 /** The sandbox members the prompt loop reaches on a run with no shell work. */
@@ -134,6 +159,48 @@ const SPENDING_PATTERN_SOURCE = [
 ].join("\n");
 
 /**
+ * A SQLite database handle in the shape one arrives in when a connector
+ * injects it: the tables it was created under, carried in the handle's own
+ * value, with nothing declaring a schema for the cell that holds it. The
+ * table title, the column description and the column default are the prose
+ * and values a reduction has to drop; the `ifc` annotations are what a reader
+ * has to be told.
+ */
+const MAIL_DB_HANDLE = {
+  id: "db-mail",
+  rev: 3,
+  tables: {
+    messages: {
+      type: "object",
+      title: "The Inbox",
+      properties: {
+        sender: {
+          type: "string",
+          default: "noreply@example.test",
+          ifc: {
+            confidentiality: ["https://cfc.test/atom/email"],
+            integrity: ["https://cfc.test/atom/connector-observed"],
+          },
+        },
+        body: {
+          type: "string",
+          description: "every message this connector observed",
+          ifc: {
+            confidentiality: [{
+              anyOf: [
+                "https://cfc.test/atom/email",
+                "https://cfc.test/atom/screened",
+              ],
+            }],
+          },
+        },
+        received: { type: "integer" },
+      },
+    },
+  },
+};
+
+/**
  * The context members `describe_handle` reads. Everything else on a tool
  * context — sandbox, host runner — is deliberately unused by this tool, so a
  * stub that supplies more would misstate what it can reach.
@@ -152,6 +219,28 @@ const contextWith = (
   }) as unknown as HarnessToolContext;
 
 describe("describe_handle", () => {
+  it("refuses to resolve a skill-context handle", async () => {
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable("run-describe"),
+      REF_A,
+      { capability: "skill-context" },
+    );
+
+    const output = await describeHandleTool.invoke(
+      contextWith(minted.table),
+      { token: minted.token },
+    );
+
+    expect(output).toEqual({
+      outputId: output.outputId,
+      token: minted.token,
+      known: true,
+      hasSchema: false,
+      error:
+        "describe_handle cannot consume a skill-context handle; only delegate_task skillHandle can",
+    });
+  });
+
   it("returns the recorded schema for a known token and nothing but shape", async () => {
     const minted = await mintAddressHandle(
       createHarnessHandleTable("run-describe"),
@@ -258,6 +347,11 @@ describe("describe_handle", () => {
     expect(output.known).toBe(false);
     expect(output.hasSchema).toBe(false);
     expect(output.token).toBe("cfh:a:zzzzz");
+    // A token that names nothing has nothing to report about, database
+    // handles included: the reply's fields are these four and no others.
+    expect(Object.keys(output).sort()).toEqual(
+      ["hasSchema", "known", "outputId", "token"],
+    );
   });
 
   it("reports any token as unknown in a run that has minted none", async () => {
@@ -627,6 +721,131 @@ describe("describe_handle", () => {
       expect(reply).not.toContain("groceries");
     });
 
+    /**
+     * Seeds a document carrying the stored CFC labels `labels`, and returns a
+     * reference to it. The metadata names a schema document the commit
+     * boundary can verify, which is installed in the same transaction — a
+     * seeded label with an unbacked schema reference is refused like any
+     * other.
+     */
+    const seedLabelledCell = async (
+      labels: { confidentiality: unknown[]; integrity: unknown[] },
+    ): Promise<string> => {
+      const space = session.pieces.getSpace();
+      const seed = runtime.edit();
+      const cell = runtime.getCell(
+        space,
+        "describe-handle-labels",
+        undefined,
+        seed,
+      );
+      const id = cell.getAsNormalizedFullLink().id;
+      seed.writeOrThrow({
+        space,
+        scope: "space",
+        id: `cid:${LABEL_SEED_SCHEMA_HASH}` as URI,
+        path: [],
+      }, { value: LABEL_SEED_SCHEMA } as FabricValue);
+      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        value: { note: "a value nothing here reads" },
+        cfc: {
+          version: 1,
+          schemaHash: LABEL_SEED_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{ path: [], label: labels }],
+          },
+        },
+      } as unknown as FabricValue);
+      expect((await seed.commit()).ok).toBeDefined();
+      return `/${id}`;
+    };
+
+    it("discloses the atom types of a labelled cell, and keeps a disjunction a disjunction", async () => {
+      // What a handle demands of whoever holds it is the other half of what a
+      // handle is, and it is not on the schema: a cell states its labels in
+      // its own metadata. A disjunctive clause is one requirement satisfiable
+      // several ways, so it stays one entry naming its alternatives — listing
+      // them side by side would report a weaker requirement as a stronger one.
+      const ref = await seedLabelledCell({
+        confidentiality: [
+          "https://commonfabric.org/cfc/atom/Space",
+          {
+            anyOf: [
+              {
+                type: "https://commonfabric.org/cfc/atom/Resource",
+                class: "operator-chosen-class",
+                subject: "operator-chosen-subject",
+              },
+              "https://commonfabric.org/cfc/atom/Builtin",
+            ],
+          },
+        ],
+        integrity: [
+          {
+            type: "https://commonfabric.org/cfc/atom/ExternalIngest",
+            source: "operator-chosen-source",
+          },
+        ],
+      });
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        ref,
+      );
+
+      const output = await describeHandleTool.invoke(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+
+      const label = output.labels?.find((entry) => entry.path === undefined);
+      expect(label?.integrity).toEqual([
+        "https://commonfabric.org/cfc/atom/ExternalIngest",
+      ]);
+      expect(label?.confidentiality).toContainEqual([
+        "https://commonfabric.org/cfc/atom/Space",
+      ]);
+      // The clause's alternatives arrive in the runtime's canonical order,
+      // which is not the order they were written in; what matters is that the
+      // two stayed one clause.
+      expect(label?.confidentiality.map((clause) => [...clause].sort()))
+        .toContainEqual([
+          "https://commonfabric.org/cfc/atom/Builtin",
+          "https://commonfabric.org/cfc/atom/Resource",
+        ]);
+      // An atom's other fields say what a label was computed FROM, which is
+      // the thing a handle exists to withhold.
+      const reply = JSON.stringify(output);
+      expect(reply).not.toContain("operator-chosen-class");
+      expect(reply).not.toContain("operator-chosen-subject");
+      expect(reply).not.toContain("operator-chosen-source");
+    });
+
+    it("answers what the space says about a cell's labels, so unlabelled and unread are different answers", async () => {
+      // The distinction is the whole point of reading them through the
+      // session: a cell the space holds no label for answers with an empty
+      // list, while a run that never reached a space answers with no list at
+      // all. Collapsing the two would let a handle a run could not read about
+      // pass for one carrying nothing.
+      const resultRef = await createPiece();
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        resultRef,
+      );
+
+      const read = await describeHandleTool.invoke(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+      const unread = await describeHandleTool.invoke(
+        contextWith(minted.table),
+        { token: minted.token },
+      );
+
+      expect(read.labels).toEqual([]);
+      expect(unread.labels).toBeUndefined();
+    });
+
     it("reports an address in another space as shapeless even though the runtime could read it", async () => {
       // The session's authority ends at its own space. The neighbouring space
       // is on this very runtime and its piece declares a shape, so an answer
@@ -699,6 +918,177 @@ describe("describe_handle", () => {
       expect(output.known).toBe(true);
       expect(output.hasSchema).toBe(false);
     });
+
+    describe("a referent that is a database", () => {
+      /**
+       * Seeds a cell holding `value` and declaring no schema, and returns a
+       * reference to it — the shape a database injected by a connector
+       * arrives in, where the shape is in the value and nothing declares it.
+       */
+      const seedUndeclaredCell = async (value: unknown): Promise<string> => {
+        const space = session.pieces.getSpace();
+        const seed = runtime.edit();
+        const cell = runtime.getCell(
+          space,
+          `describe-handle-db-${crypto.randomUUID()}`,
+          undefined,
+          seed,
+        );
+        const id = cell.getAsNormalizedFullLink().id;
+        seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+          value,
+        } as FabricValue);
+        expect((await seed.commit()).ok).toBeDefined();
+        return `/${id}`;
+      };
+
+      it("discloses the tables and the columns' labels of a database that declares no schema", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(output.hasSchema).toBe(false);
+        expect(output.database?.tables).toEqual({
+          type: "object",
+          properties: {
+            messages: {
+              type: "object",
+              properties: {
+                sender: { type: "string" },
+                body: { type: "string" },
+                received: { type: "integer" },
+              },
+            },
+          },
+        });
+        // Ordered by column here, since the order the columns come back in is
+        // the storage layer's business rather than part of the disclosure.
+        const labels = [...(output.database?.labels ?? [])].sort((a, b) =>
+          (a.path ?? []).join(".").localeCompare((b.path ?? []).join("."))
+        );
+        expect(labels).toEqual([
+          {
+            path: ["messages", "body"],
+            confidentiality: [[
+              "https://cfc.test/atom/email",
+              "https://cfc.test/atom/screened",
+            ]],
+            integrity: [],
+          },
+          {
+            path: ["messages", "sender"],
+            confidentiality: [["https://cfc.test/atom/email"]],
+            integrity: ["https://cfc.test/atom/connector-observed"],
+          },
+        ]);
+      });
+
+      it("reports no row of the database and no prose off its table schemas", async () => {
+        // The tables are a declaration, so what the reduction does to a
+        // declared schema it must do here: the column default, the column
+        // description and the table title are all author-chosen text on the
+        // one structure this tool now reads out of a value.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        // Stated first, so the checks below cannot pass on a reply that
+        // disclosed nothing at all.
+        expect(output.database?.labels).toHaveLength(2);
+        const reply = JSON.stringify(output);
+        expect(reply).not.toContain("every message this connector observed");
+        expect(reply).not.toContain("noreply@example.test");
+        expect(reply).not.toContain("The Inbox");
+      });
+
+      it("bounds a column name in a label the way it bounds it in the tables", async () => {
+        // A column name is disclosed through two channels: the reduced table
+        // schema, which bounds it, and a label's path, which names the column
+        // it came off. A name the reduction refused has to be refused in both,
+        // or the label path is the prose channel the reduction exists to close.
+
+        const longColumn = "c".repeat(MAX_PROPERTY_NAME_LENGTH + 1);
+        const ref = await seedUndeclaredCell({
+          id: "db-long-column",
+          tables: {
+            messages: {
+              type: "object",
+              properties: {
+                [longColumn]: {
+                  type: "string",
+                  ifc: {
+                    confidentiality: ["https://cfc.test/atom/email"],
+                  },
+                },
+              },
+            },
+          },
+        });
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(JSON.stringify(output.database?.tables)).not.toContain(
+          longColumn,
+        );
+        expect(JSON.stringify(output)).not.toContain(longColumn);
+      });
+
+      it("reports nothing about a database whose handle names no tables", async () => {
+        const ref = await seedUndeclaredCell({ id: "db-with-no-tables" });
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(output.known).toBe(true);
+        expect(output.database).toBeUndefined();
+      });
+
+      it("does not read the value of a referent that declares a schema", async () => {
+        // The value read is conditional on nothing being declared. A piece
+        // states its own shape, so the reply is the shape and the database
+        // field is absent — which is also what says a value was never opened.
+        const resultRef = await createPiece();
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          resultRef,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(output.hasSchema).toBe(true);
+        expect(output.database).toBeUndefined();
+      });
+    });
   });
 
   describe("at the prompt-loop model boundary", () => {
@@ -710,102 +1100,146 @@ describe("describe_handle", () => {
       // down, so a scrub that reached only the reply's top-level strings
       // would leave them standing.
       const runId = "run-describe-scrub";
-      const minted = await mintAddressHandle(
-        createHarnessHandleTable(runId),
-        REF_A,
-        {
-          schema: {
-            type: "object",
-            properties: {
-              rows: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: { [HOSTILE_DID_NAME]: { type: "string" } },
+      const artifactRoot = await Deno.makeTempDir();
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId,
+      });
+      try {
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable(runId),
+          REF_A,
+          {
+            schema: {
+              type: "object",
+              properties: {
+                rows: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { [HOSTILE_DID_NAME]: { type: "string" } },
+                  },
                 },
-              },
-              report: {
-                type: "object",
-                properties: { [HOSTILE_HASH_NAME]: { type: "number" } },
+                report: {
+                  type: "object",
+                  properties: { [HOSTILE_HASH_NAME]: { type: "number" } },
+                },
               },
             },
           },
-        },
-      );
-      let calls = 0;
-      const fetchFn: typeof fetch = () => {
-        calls += 1;
-        const payload = calls === 1
-          ? {
-            choices: [{
-              index: 0,
-              message: {
-                role: "assistant",
-                content: "",
-                tool_calls: [{
-                  id: "call-1",
-                  type: "function",
-                  function: {
-                    name: "describe_handle",
-                    arguments: JSON.stringify({ token: minted.token }),
-                  },
-                }],
-              },
-            }],
-          }
-          : {
-            choices: [{
-              index: 0,
-              message: { role: "assistant", content: "Done." },
-            }],
-          };
-        return Promise.resolve(
-          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
-            status: 200,
-          }),
         );
-      };
-      const loop = new CfHarnessPromptLoop({
-        apiKey: "test-key",
-        engine: new CfHarnessEngine({
-          sandboxRuntime: new FakeSandboxRuntime(),
-          runState: createHarnessRunState({
-            runId,
-            cfcEnforcementMode: "disabled",
-            currentDir: "/workspace",
-            model: "gpt-5.4",
-            handleTable: minted.table,
+        let calls = 0;
+        const fetchFn: typeof fetch = () => {
+          calls += 1;
+          const payload = calls === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-1",
+                    type: "function",
+                    function: {
+                      name: "describe_handle",
+                      arguments: JSON.stringify({ token: minted.token }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: { role: "assistant", content: "Done." },
+              }],
+            };
+          return Promise.resolve(
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload)),
+              {
+                status: 200,
+              },
+            ),
+          );
+        };
+        const loop = new CfHarnessPromptLoop({
+          apiKey: "test-key",
+          engine: new CfHarnessEngine({
+            sandboxRuntime: new FakeSandboxRuntime(),
+            artifactStore,
+            runState: createHarnessRunState({
+              runId,
+              cfcEnforcementMode: "disabled",
+              currentDir: "/workspace",
+              model: "gpt-5.4",
+              handleTable: minted.table,
+            }),
           }),
-        }),
-        fetchFn,
-      });
+          fetchFn,
+        });
 
-      const result = await loop.runTranscript({
-        transcript: [{ role: "user", content: "Describe the handle." }],
-        model: "gpt-5.4",
-      });
+        const result = await loop.runTranscript({
+          transcript: [{ role: "user", content: "Describe the handle." }],
+          model: "gpt-5.4",
+        });
 
-      const toolMessage = result.transcript.find(
-        (message) => message.role === "tool",
-      );
-      expect(toolMessage?.content).toBeDefined();
-      const content = toolMessage!.content!;
-      const parsed = JSON.parse(content) as {
-        schema: {
-          properties: {
-            rows: { items: { properties: Record<string, unknown> } };
-            report: { properties: Record<string, unknown> };
+        const toolMessage = result.transcript.find(
+          (message) => message.role === "tool",
+        );
+        expect(toolMessage?.content).toBeDefined();
+        const content = toolMessage!.content!;
+        const parsed = JSON.parse(content) as {
+          schema: {
+            properties: {
+              rows: { items: { properties: Record<string, unknown> } };
+              report: { properties: Record<string, unknown> };
+            };
           };
         };
-      };
-      expect(Object.keys(parsed.schema.properties.rows.items.properties))
-        .toEqual(["[fabric-id]"]);
-      expect(Object.keys(parsed.schema.properties.report.properties))
-        .toEqual(["[fabric-id]"]);
-      // Stated again over the whole reply, so an identifier that escapes into
-      // some other field fails this too.
-      expect(content).not.toContain("did:key:");
-      expect(content).not.toContain(SCRUB_HASH);
+        expect(Object.keys(parsed.schema.properties.rows.items.properties))
+          .toEqual(["[fabric-id]"]);
+        expect(Object.keys(parsed.schema.properties.report.properties))
+          .toEqual(["[fabric-id]"]);
+        // Stated again over the whole reply, so an identifier that escapes into
+        // some other field fails this too.
+        expect(content).not.toContain("did:key:");
+        expect(content).not.toContain(SCRUB_HASH);
+        const omissionText = await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        );
+        expect(omissionText).not.toContain(HOSTILE_DID_NAME);
+        expect(omissionText).not.toContain(HOSTILE_HASH_NAME);
+        const omissionRecord = JSON.parse(omissionText) as {
+          results: Array<{
+            rules: Array<{
+              rule: string;
+              locations: Array<{ jsonPointer: string }>;
+            }>;
+          }>;
+        };
+        expect(omissionRecord.results[0].rules).toEqual([{
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{
+            artifactPath: join(
+              artifactStore.runRoot,
+              "tool-outputs",
+              `${runId}_describe_handle_1-describe_handle.json`,
+            ),
+            jsonPointer: "/schema/properties/rows/items/properties",
+          }, {
+            artifactPath: join(
+              artifactStore.runRoot,
+              "tool-outputs",
+              `${runId}_describe_handle_1-describe_handle.json`,
+            ),
+            jsonPointer: "/schema/properties/report/properties",
+          }],
+        }]);
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
     });
 
     it("swaps a disclosed property name that is a link for a handle token", async () => {

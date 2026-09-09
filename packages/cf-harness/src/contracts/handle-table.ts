@@ -7,6 +7,8 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 
+import type { HarnessSkillAcquisition } from "./skill.ts";
+
 /** Discriminator value of a {@link HarnessHandleTable}. */
 export const HARNESS_HANDLE_TABLE_TYPE = "cf-harness.handle-table";
 
@@ -16,6 +18,9 @@ export const HARNESS_HANDLE_TABLE_TYPE = "cf-harness.handle-table";
  * added without re-reading existing tokens.
  */
 export type HarnessHandleKind = "address";
+
+/** A restriction on which harness position may consume an address handle. */
+export type HarnessHandleCapability = "skill-context";
 
 /** Prefix of every address-handle token (`cfh:a:<suffix>`). */
 export const ADDRESS_HANDLE_TOKEN_PREFIX = "cfh:a:";
@@ -55,6 +60,7 @@ export const HANDLE_TOKEN_PATTERN = new RegExp(
 export interface HarnessHandleEntry {
   /** The full token, prefix included (`cfh:a:<suffix>`). */
   token: string;
+
   kind: HarnessHandleKind;
 
   /**
@@ -70,6 +76,14 @@ export interface HarnessHandleEntry {
    * identity: minting the same address twice returns the existing token.
    */
   addressKey: string;
+
+  /**
+   * An absent capability is a general address handle. `skill-context` is a
+   * narrower capability: the address may be materialized only by the
+   * `delegate_task` `skillHandle` slot. Generic resolvers keep its token
+   * opaque, so adding a new value-handle consumer does not inherit access.
+   */
+  capability?: HarnessHandleCapability;
 
   /**
    * Shape of the value at the referent, when a mint knew it — the compiled
@@ -92,6 +106,19 @@ export interface HarnessHandleEntry {
    * trusted.
    */
   schemaSource?: "harness";
+
+  /**
+   * Where the value behind a `skill-context` handle was fetched from, recorded
+   * by the host step that fetched it. The entry is the only durable place that
+   * knows: the parent holds a token, the child holds text, and neither can say
+   * which commit the bytes came from. Carrying it here is what lets the
+   * activation record a delegation writes name that commit.
+   *
+   * Absent on every handle whose value the harness did not fetch from an
+   * external source. A model can neither write nor read this field; it reaches
+   * a model-visible surface nowhere.
+   */
+  acquisition?: HarnessSkillAcquisition;
 }
 
 /**

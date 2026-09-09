@@ -285,6 +285,7 @@ export class SpeculationOverlayDestination
    * already terminal has no job — the authoritative consequences exist
    * (speculation.md §4 step 2) — and is not registered. */
   readonly #terminalIntents = new Set<string>();
+
   static readonly #MAX_TERMINAL_INTENTS = 4096;
 
   /** The client cascade THREAD (stage C W2.1): cascade child eventId →
@@ -309,26 +310,32 @@ export class SpeculationOverlayDestination
    * not enact. */
   readonly #droppedLateEchoTxs = new WeakSet<object>();
 
-  /** DIAGNOSTIC counters (tests). */
+  /** DIAGNOSTIC counter (tests): sweeps the ARRIVAL wake ran. */
   #arrivalSweeps = 0;
+
+  /** DIAGNOSTIC counter (tests): late echoes dropped at seal. */
   #lateEchoDrops = 0;
 
   /** Stage C W2.1: cascade-child echoes retired because an ANCESTOR
    * intent's terminal consequence arrived (`retireIntent` walked the
-   * cascade thread to them), and the subset retired while NO doc they
-   * wrote had yet moved past their read basis in the replica — the
-   * flicker witness (see `retireIntent`). */
+   * cascade thread to them). */
   #cascadeEchoRetirements = 0;
+
+  /** The subset of those retired while NO doc they wrote had yet moved
+   * past their read basis in the replica — the flicker witness; see
+   * `cascadeEchoRetirementUnarrivedCount` for the heuristic it uses. */
   #cascadeEchoRetirementsUnarrived = 0;
 
-  /** F6 telemetry (combined review 2026-08-19): the silent-strand
-   * distinguishers. A `#cascadeParents` eviction at the 4096 bound, or
-   * an ancestry walk stopped at the 64-hop depth cap with chain
-   * remaining, makes a live descendant read as "no ancestor" — the
-   * walk gives up and the entry strands exactly like the pre-W2.1
-   * posture, with nothing else to see. Zero in every expected
-   * workload; nonzero is the signal to look. */
+  /** F6 telemetry (combined review 2026-08-19): one of the two
+   * silent-strand distinguishers, counting `#cascadeParents` evictions
+   * at the 4096 bound. Either distinguisher makes a live descendant read
+   * as "no ancestor" — the walk gives up and the entry strands exactly
+   * like the pre-W2.1 posture, with nothing else to see. Zero in every
+   * expected workload; nonzero is the signal to look. */
   #cascadeThreadEvictions = 0;
+
+  /** The other silent-strand distinguisher: an ancestry walk stopped at
+   * the 64-hop depth cap with chain remaining. */
   #cascadeWalkDepthCaps = 0;
 
   /** space -> last observed watermark (for registration-time sweeps). */
@@ -366,11 +373,21 @@ export class SpeculationOverlayDestination
    * built, shifts the tail down), so a hint is never trusted unread. */
   readonly #intentSidecarStates = new Map<string, { hints: Set<number> }>();
 
-  /** DIAGNOSTIC counters (tests; the `commonfabric.*` surface reads the
-   * logger keys — `speculation-overlay/intent-*`). */
+  /** DIAGNOSTIC counter (tests): intent checks run. The `commonfabric.*`
+   * surface reads no counter here; it reads the logger keys —
+   * `speculation-overlay/intent-*`. */
   #intentCheckCount = 0;
+
+  /** DIAGNOSTIC counter (tests): sidecar entries visited across all
+   * checks. */
   #intentCheckVisits = 0;
+
+  /** DIAGNOSTIC counter (tests): the largest single check's visit
+   * count. */
   #intentCheckMaxVisits = 0;
+
+  /** DIAGNOSTIC counter (tests): times the intent listener was
+   * installed. */
   #intentListenerInstalls = 0;
 
   /** Subscribers to terminal intent outcomes — the events.md §5 "the
@@ -390,11 +407,13 @@ export class SpeculationOverlayDestination
     string,
     Array<(outcome: IntentConsequence) => void>
   >();
+
   readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
 
   /** Resolvers parked by `waitForIntentQuiescence`, flushed by the same
    * untrack step that empties the outstanding-intent set (and by close). */
   #intentQuiescenceWaiters: Array<() => void> = [];
+
   #closed = false;
 
   constructor(runtime: Runtime) {
@@ -404,6 +423,20 @@ export class SpeculationOverlayDestination
   /** DIAGNOSTIC (tests): live overlay entries for a space. */
   entryCount(space: MemorySpace): number {
     return this.#entries.get(space)?.size ?? 0;
+  }
+
+  /** DIAGNOSTIC (tests): await every live overlay entry in `space`
+   * settling, including entries registered while the wait is in flight.
+   * Event-driven: each pass sleeps on the entries' own settlement
+   * promises and rechecks after they resolve, rather than polling
+   * `entryCount`. Resolves immediately when the space is already empty
+   * and when the overlay closes. */
+  async waitForSpaceQuiescence(space: MemorySpace): Promise<void> {
+    while (!this.#closed) {
+      const entries = this.#entries.get(space);
+      if (entries === undefined || entries.size === 0) return;
+      await Promise.all([...entries.values()].map((entry) => entry.settled));
+    }
   }
 
   /** DIAGNOSTIC (tests): cumulative EVENT-HANDLER-kind seals this
@@ -417,6 +450,7 @@ export class SpeculationOverlayDestination
    * neutralized start's authored commit usually LOSES its create-only
    * race to the serving side and vanishes whole. */
   #eventEchoSeals = 0;
+
   get eventEchoSealCount(): number {
     return this.#eventEchoSeals;
   }
@@ -623,16 +657,25 @@ export class SpeculationOverlayDestination
       return { ok: {} };
     }
     const inner = tx.tx;
-    if (inner.sealInto === undefined) {
+    if (
+      inner.sealInto === undefined ||
+      inner.markWholeDocumentWrites === undefined
+    ) {
       // Fail CLOSED: a transport without seal support must not fall
       // back to committing a derivation — that would re-open the
       // client derivation-commit path this destination exists to
-      // remove (speculation.md §6's FORBIDDEN list).
+      // remove (speculation.md §6's FORBIDDEN list). One without the
+      // whole-document mark is refused on the same footing: a seal whose
+      // ops were patches would compose with the layer beneath them, and
+      // swallowing an unsupported mark makes that silent.
+      const missing = inner.sealInto === undefined
+        ? "sealing"
+        : "whole-document writes (speculation.md §1)";
       return {
         error: {
           name: "StorageTransactionAborted",
           message: "speculative derivation refused: the storage " +
-            "transaction does not support sealing, and committing a " +
+            `transaction does not support ${missing}, and committing a ` +
             "derivation client-side is forbidden under " +
             "EXPERIMENTAL_SERVER_EXECUTION (speculation.md §6)",
           reason: new Error("speculation-seal-unsupported"),
@@ -752,6 +795,12 @@ export class SpeculationOverlayDestination
     };
     let result: Result<Unit, CommitError>;
     try {
+      // An entry's ops say what the run computed, not how it differed from
+      // the layer it ran over, because that layer moves under them
+      // (speculation.md §1; IStorageTransaction.markWholeDocumentWrites).
+      // Inside the same try as the seal it precedes, which refuses a
+      // read-only transaction the same way.
+      inner.markWholeDocumentWrites();
       result = await inner.sealInto(collector);
     } catch (cause) {
       // A REJECTED sealInto (review thread r3739139536): without the
@@ -1606,6 +1655,7 @@ export class SpeculationOverlayDestination
     /** The mark frame's seq (the sidecar's confirmed seq at this check);
      * 0 = unknown → the witness does not count. */
     let markSeq: number | undefined;
+
     for (const entry of [...entries.values()]) {
       const own = entry.eventId === eventId;
       if (!own && !this.#cascadeReaches(entry, eventId)) continue;

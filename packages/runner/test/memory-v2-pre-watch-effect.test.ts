@@ -57,17 +57,24 @@ class PreWatchEffectTransport extends ScriptedSessionTransport {
   watchResponseSent = false;
   effectSentBeforeWatchResponse = false;
 
+  readonly #schemaId: URI;
+  readonly #schema: JSONSchemaObj;
+  readonly #referrerId: URI;
+
   constructor(
     space: MemorySpace,
-    private readonly schemaId: URI,
-    private readonly schema: JSONSchemaObj,
-    private readonly referrerId: URI,
+    schemaId: URI,
+    schema: JSONSchemaObj,
+    referrerId: URI,
   ) {
     super({
       name: "pre-watch-effect",
       sessionId: "session:pre-watch-effect",
       space,
     });
+    this.#schemaId = schemaId;
+    this.#schema = schema;
+    this.#referrerId = referrerId;
   }
 
   protected override ackServerSeq(): number {
@@ -81,7 +88,7 @@ class PreWatchEffectTransport extends ScriptedSessionTransport {
 
     this.effectSentBeforeWatchResponse = !this.watchResponseSent;
     this.emitSync(sync(0, 1, [
-      upsert(this.schemaId, 1, { value: this.schema }),
+      upsert(this.#schemaId, 1, { value: this.#schema }),
     ]));
 
     this.watchResponseSent = true;
@@ -91,14 +98,14 @@ class PreWatchEffectTransport extends ScriptedSessionTransport {
       ok: {
         serverSeq: 2,
         sync: sync(1, 2, [
-          upsert(this.referrerId, 2, {
+          upsert(this.#referrerId, 2, {
             value: {
               carried: {
                 "/": {
                   "link@1": {
                     id: "of:pre-watch-effect-target",
                     path: [],
-                    schema: { $ref: this.schemaId },
+                    schema: { $ref: this.#schemaId },
                   },
                 },
               },
@@ -113,16 +120,21 @@ class PreWatchEffectTransport extends ScriptedSessionTransport {
 class ReplacingPreWatchEffectTransport extends ScriptedSessionTransport {
   watchAddCount = 0;
 
+  readonly #schemaId: URI;
+  readonly #schema: JSONSchemaObj;
+
   constructor(
     space: MemorySpace,
-    private readonly schemaId: URI,
-    private readonly schema: JSONSchemaObj,
+    schemaId: URI,
+    schema: JSONSchemaObj,
   ) {
     super({
       name: "replacing-pre-watch-effect",
       sessionId: "session:replacing-pre-watch-effect",
       space,
     });
+    this.#schemaId = schemaId;
+    this.#schema = schema;
   }
 
   protected override ackServerSeq(): number {
@@ -137,7 +149,7 @@ class ReplacingPreWatchEffectTransport extends ScriptedSessionTransport {
     this.watchAddCount += 1;
     if (this.watchAddCount === 1) {
       this.emitSync(sync(0, 1, [
-        upsert(this.schemaId, 1, { value: this.schema }),
+        upsert(this.#schemaId, 1, { value: this.#schema }),
       ]));
       this.disconnect(new Error("scripted session replacement"));
       return;

@@ -29,6 +29,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import type { Pattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("scheduler idle pattern work");
 const space = signer.did();
@@ -99,10 +100,8 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     // is racy by construction; the registry entry IS the registration
     // the accessor must reflect): an entry present ⇒ pattern work
     // pending ⇒ the commit-aware barrier holds until it settles.
-    const manager = runtime.patternManager as unknown as {
-      inProgressByIdentityLoads: Map<string, Promise<unknown>>;
-    };
-    const gate = Promise.withResolvers<void>();
+    const manager = runtime.patternManager.accessForTestingOnly;
+    const gate = Promise.withResolvers<Pattern | undefined>();
     manager.inProgressByIdentityLoads.set(
       `${space}\0ow45-synthetic-load`,
       gate.promise,
@@ -117,7 +116,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     }
     expect(loadBarrierResolved).toBe(false);
     manager.inProgressByIdentityLoads.delete(`${space}\0ow45-synthetic-load`);
-    gate.resolve();
+    gate.resolve(undefined);
     await loadBarrier;
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
 
@@ -130,9 +129,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     // is not driven here: under the suite's fake clock the compiler's
     // real I/O and the logical timers cannot be sequenced
     // deterministically from outside.)
-    const writeManager = runtime.patternManager as unknown as {
-      compileCacheWrites: Set<Promise<unknown>>;
-    };
+    const writeManager = runtime.patternManager.accessForTestingOnly;
     const writeGate = Promise.withResolvers<void>();
     writeManager.compileCacheWrites.add(writeGate.promise);
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
@@ -157,9 +154,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     // scheduler — `inProgressCompilations` (registered synchronously at
     // compileOrGetPattern, resolved only after persistence) is the only
     // visibility that phase has, and the barrier must consult it.
-    const compileManager = runtime.patternManager as unknown as {
-      inProgressCompilations: Map<string, Promise<unknown>>;
-    };
+    const compileManager = runtime.patternManager.accessForTestingOnly;
     const compileGate = Promise.withResolvers<unknown>();
     compileManager.inProgressCompilations.set(
       "ow45-synthetic-compile",
@@ -197,9 +192,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     // registered beyond its cleanup microtask, which is also what
     // keeps the barrier's recheck fixpoint from spinning on a
     // settled-but-registered entry.
-    const manager = runtime.patternManager as unknown as {
-      inProgressCompilations: Map<string, Promise<unknown>>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     const failing = Promise.withResolvers<unknown>();
     const tracked = failing.promise.finally(() => {
       manager.inProgressCompilations.delete("ow45-rejecting-compile");

@@ -129,6 +129,19 @@ describe("pieces-controller", () => {
           expect(await pieces.remove(piece)).toBe(false);
         });
 
+        it("reads a bare id in the scope it is given, one id in two scopes being two documents", async () => {
+          const id = pieceId(piece)!;
+          expect(await registeredIds()).toContain(id);
+
+          // The registry holds the space-scoped document. The same id under
+          // `user` names another one, which was never registered.
+          expect(await pieces.remove(id, "user")).toBe(false);
+          expect(await registeredIds()).toContain(id);
+
+          expect(await pieces.remove(id, "space")).toBe(true);
+          expect(await registeredIds()).not.toContain(id);
+        });
+
         it("throws when the removal cannot commit, leaving the piece registered", async () => {
           const restore = failCommits();
           try {
@@ -200,6 +213,58 @@ describe("pieces-controller", () => {
           } finally {
             restore();
           }
+        });
+      });
+
+      describe("startPiece()", () => {
+        it("reads a bare id in the scope it is given", async () => {
+          const id = pieceId(piece)!;
+          await pieces.startPiece(id, "space");
+
+          // The same id under `user` names a document nothing was ever
+          // written to, so there is no pattern there to run.
+          await expect(pieces.startPiece(id, "user")).rejects.toThrow(
+            "No data at cell",
+          );
+        });
+      });
+
+      describe("stopPiece()", () => {
+        it("reads a bare id in the scope it is given", async () => {
+          // Stopping a piece that is not running is a no-op either way, so
+          // what the scope changes is which document is addressed. The
+          // lookup is replaced to read that address back, the way
+          // `failCommits()` replaces the commit.
+          const addressed: unknown[] = [];
+          const original = runtime
+            .getCellFromEntityId as unknown as (...args: unknown[]) => unknown;
+          runtime.getCellFromEntityId = ((
+            space: unknown,
+            entityId: unknown,
+            path: unknown,
+            schema: unknown,
+            tx: unknown,
+            scope: unknown,
+          ) => {
+            addressed.push(scope);
+            return original.call(
+              runtime,
+              space,
+              entityId,
+              path,
+              schema,
+              tx,
+              scope,
+            );
+          }) as unknown as typeof runtime.getCellFromEntityId;
+          try {
+            await pieces.stopPiece(pieceId(piece)!, "user");
+          } finally {
+            runtime.getCellFromEntityId =
+              original as unknown as typeof runtime.getCellFromEntityId;
+          }
+
+          expect(addressed).toEqual(["user"]);
         });
       });
 

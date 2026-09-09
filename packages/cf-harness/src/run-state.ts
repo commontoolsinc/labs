@@ -1,4 +1,9 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcConfClause,
+  CfcEnforcementMode,
+  CfcPostureReport,
+  CfcReadOnExceed,
+} from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
 import {
   appendHarnessCfcModelContextObservations as appendCfcModelContextObservations,
@@ -6,10 +11,12 @@ import {
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
+import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import type { HarnessInputCell } from "./contracts/input-cells.ts";
+import type { HarnessPatternRef } from "./contracts/pattern-refs.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
@@ -25,6 +32,7 @@ import type {
   HarnessSkillRegistry,
   HarnessSkillResourceReads,
   HarnessSkillScriptExecutions,
+  HarnessSkillsRootRecord,
 } from "./contracts/skill.ts";
 import type {
   HarnessSubagentLineage,
@@ -47,13 +55,23 @@ export type HarnessRunStatus =
   | "completed"
   | "failed";
 
+/**
+ * How a run ended. `assistant_completed` is the one success: the model
+ * answered without calling a tool. `setup_error` is a run that died before
+ * its first model turn, while what it holds — skill registry, grants, input
+ * cells — was being established; the others end the loop itself.
+ */
 export type HarnessRunTerminalReason =
   | "assistant_completed"
-  | "tool_completed"
-  | "tool_error"
   | "max_model_turns"
   | "prompt_loop_error"
+  | "setup_error"
   | "process_interrupted";
+
+/** Whether `status` is one a run leaves only by being resumed. */
+export const isTerminalHarnessRunStatus = (
+  status: HarnessRunStatus,
+): boolean => status === "completed" || status === "failed";
 
 /**
  * The resolved CFC posture of the run's fabric session — the Runtime that
@@ -64,10 +82,12 @@ export type HarnessRunTerminalReason =
  * session factory directly, whose runtime's posture the harness never saw.
  */
 export interface HarnessFabricSessionCfcPosture {
-  enforcementMode: "enforce-explicit" | "enforce-strict";
+  /** The rung the session's runtime resolves to, from the whole ladder. */
+  enforcementMode: CfcEnforcementMode;
 
   /** `configured` when the operator set the dial; `preset-pin` otherwise. */
   enforcementModeSource: "configured" | "preset-pin";
+
   flowLabels: "off" | "observe" | "persist";
 
   /**
@@ -83,6 +103,45 @@ export interface HarnessFabricSessionCfcPosture {
    * `MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets.
    */
   posture?: "max-enforcement";
+
+  /**
+   * The read ceiling the session's runtime bounds every `sqliteQuery` by:
+   * the run manifest's, met with any the operator configured. Absent when
+   * the session reads unbounded.
+   */
+  readMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The ceiling's `onExceed` default, when one was configured. */
+  readOnExceed?: CfcReadOnExceed;
+
+  /**
+   * Where the ceiling came from: the operator's session config, the run
+   * manifest, or both met. Absent with the ceiling.
+   */
+  readMaxConfidentialitySource?: "session" | "run-manifest" | "both";
+
+  /**
+   * The session runtime's whole posture, as the shared record every surface
+   * publishes (`cfc-posture.ts`). The itemized fields above are the dials an
+   * operator or a run manifest sets and where each came from; this is what
+   * the enforcement and flow-label dials, the named bundle, and the runtime's
+   * own defaults resolve to — every dial, the policy digest, every known sink
+   * governed or explicitly not, and every published deviation. The read
+   * ceiling is not part of the record; the itemized fields carry it.
+   *
+   * Absent on a run recorded before the record existed. Such a run stays
+   * frozen as history rather than being backfilled: the values would be this
+   * checkout's resolution, not the run's.
+   *
+   * Absent too when a host supplied its own session factory. That factory
+   * overrides the configuration this record is projected from, so the
+   * configuration no longer describes the runtime that will execute, and a
+   * record from it would assert a posture nothing honors. The exception is a
+   * host that says whose session it handed over: a delegated child runs on
+   * its parent's session, so it carries the parent's record stamped
+   * `inherited` rather than none.
+   */
+  record?: CfcPostureReport;
 }
 
 export interface HarnessRunState {
@@ -131,12 +190,26 @@ export interface HarnessRunState {
    * from the tree can learn what a cell is labelled.
    */
   cellLabels?: HarnessCellLabels;
+
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
+  docsCorpus?: HarnessDocsCorpusRecord;
+  skillsRoot?: HarnessSkillsRootRecord;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
+  patternRefs?: HarnessPatternRef[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
+
+  /**
+   * How many `query_docs` calls in this run and its descendants ended with no
+   * answer — the model that answers them was unreachable, or what came back
+   * was not a reply the tool could read. A run whose documentation channel is
+   * down still answers every call, with an error the model reads and the
+   * operator never sees, so the count is kept where a summary can state it.
+   */
+  docsQueryFailures?: number;
+
   toolOutputs: ToolResultRef[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -183,9 +256,13 @@ export interface CreateHarnessRunStateOptions {
   cellLabels?: HarnessCellLabels;
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
+  docsCorpus?: HarnessDocsCorpusRecord;
+  skillsRoot?: HarnessSkillsRootRecord;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
+  patternRefs?: HarnessPatternRef[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
+  docsQueryFailures?: number;
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
@@ -300,11 +377,20 @@ export const createHarnessRunState = (
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }
       : {}),
+    ...(options.docsCorpus !== undefined
+      ? { docsCorpus: structuredClone(options.docsCorpus) }
+      : {}),
+    ...(options.skillsRoot !== undefined
+      ? { skillsRoot: structuredClone(options.skillsRoot) }
+      : {}),
     ...(options.wellKnownGrants !== undefined
       ? { wellKnownGrants: structuredClone(options.wellKnownGrants) }
       : {}),
     ...(options.inputCells !== undefined
       ? { inputCells: structuredClone(options.inputCells) }
+      : {}),
+    ...(options.patternRefs !== undefined
+      ? { patternRefs: structuredClone(options.patternRefs) }
       : {}),
     ...(options.lineage !== undefined
       ? { lineage: structuredClone(options.lineage) }
@@ -312,6 +398,9 @@ export const createHarnessRunState = (
     policyEvents: [],
     ...(options.policyDecisions !== undefined
       ? { policyDecisions: [...options.policyDecisions] }
+      : {}),
+    ...(options.docsQueryFailures !== undefined
+      ? { docsQueryFailures: options.docsQueryFailures }
       : {}),
     toolOutputs: [],
     ...(options.subagentRuns !== undefined
@@ -362,13 +451,27 @@ export const appendToHarnessRunState = <K extends HarnessRunStateListField>(
     now,
   );
 
+/**
+ * Moves a run to `status`. A terminal status stamps `endedAt` and
+ * `terminalReason`; `running` clears both, which is how a resumed run
+ * re-enters its loop. A run's outcome is written once, by its driver, so a
+ * terminal status on a run that is already terminal is an invariant
+ * violation and throws rather than overwriting the outcome on record.
+ *
+ * @throws Error when `status` is terminal and `state` already is.
+ */
 export const setHarnessRunStatus = (
   state: HarnessRunState,
   status: HarnessRunStatus,
   now = new Date().toISOString(),
   terminalReason?: HarnessRunTerminalReason,
 ): HarnessRunState => {
-  if (status === "completed" || status === "failed") {
+  if (isTerminalHarnessRunStatus(status)) {
+    if (isTerminalHarnessRunStatus(state.status)) {
+      throw new Error(
+        `run ${state.runId} is already ${state.status}; its outcome is written once`,
+      );
+    }
     return patchHarnessRunState(
       state,
       { status, endedAt: now, terminalReason },
@@ -413,6 +516,21 @@ export const setHarnessSubagentRun = (
   }
   return patchHarnessRunState(state, { subagentRuns }, now);
 };
+
+/**
+ * The run with `count` more failed documentation queries against it. Called
+ * once for each explore turn a provider refused, and once more with a child's
+ * whole count when a delegation returns, so the number a summary reads covers
+ * the family rather than one run of it.
+ */
+export const addHarnessDocsQueryFailures = (
+  state: HarnessRunState,
+  count: number,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  count <= 0 ? state : patchHarnessRunState(state, {
+    docsQueryFailures: (state.docsQueryFailures ?? 0) + count,
+  }, now);
 
 export const appendHarnessFailureRecord = (
   state: HarnessRunState,

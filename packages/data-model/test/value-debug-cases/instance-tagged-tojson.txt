@@ -1,0 +1,68 @@
+(() => {
+  // What `toJSON()` returns is rendered as it stands inside the parentheses,
+  // including when it is something with a rendering of its own.
+  class Cyclic {
+    toJSON() {
+      return this;
+    }
+  }
+  class ToSet {
+    toJSON() {
+      return new Set([1]);
+    }
+  }
+  class ToFunction {
+    toJSON() {
+      return () => 1;
+    }
+  }
+  class ToSymbol {
+    toJSON() {
+      return Symbol("d");
+    }
+  }
+  return {
+    cyclic: new Cyclic(),
+    set: new ToSet(),
+    fn: new ToFunction(),
+    symbol: new ToSymbol(),
+  };
+})()
+
+--
+
+cyclic:
+/Cyclic(<circle>)
+/Cyclic(<circle>)
+{
+  "/Cyclic": {
+    "/circle": 0
+  }
+}
+
+set:
+/ToSet(/Set(...))
+/ToSet(/Set(...))
+{
+  "/ToSet": {
+    "/Set": "/..."
+  }
+}
+
+fn:
+/ToFunction((...)=>{...})
+/ToFunction((...) => {...})
+{
+  "/ToFunction": {
+    "/function": "<anonymous>(...)"
+  }
+}
+
+symbol:
+/ToSymbol(Symbol("d"))
+/ToSymbol(Symbol("d"))
+{
+  "/ToSymbol": {
+    "/uniqueSymbol": "d"
+  }
+}

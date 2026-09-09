@@ -118,10 +118,16 @@ function makeBuildTile(opts: { id: string; label: string; repo: string; workflow
         ? `<span class="running" title="${escapeHtml((latest.display_title ?? "").slice(0, 90))}"><span class="rdot"></span>${runningLabel}</span>`
         : "";
 
+      const value = s === "unknown"
+        ? "—"
+        : s === "good"
+        ? "passing"
+        : escapeHtml(conclusion);
       return {
         label: opts.label,
         status: s,
-        value: s === "unknown" ? "—" : s === "good" ? "passing" : escapeHtml(conclusion),
+        value,
+        valueLabel: value,
         sub: streak || "no completed runs in window",
         href: commitsUrl,
         hint: "commits ↗",

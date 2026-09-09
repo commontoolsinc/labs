@@ -10,37 +10,37 @@ import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-meta-seam");
 
-// The prepare pass requires a schema write-policy input for every write it
-// records on a document carrying stored label metadata. A raw meta write
-// (`setMetaRaw`) lands on a document-root sibling of `value` — `slug`,
-// `patternIdentity`, and the rest of the `MetaField` union — and no schema
-// describes that seam, so no writer can supply the input the requirement
-// asks for. Such a write must therefore commit without a "missing schema
-// write-policy input" reason, or every runtime flow that stamps meta on a
-// labeled piece document (slug assignment, the pattern updater's identity
-// swap, setup over an existing piece) rejects under the enforcing modes.
-//
-// The exemption reaches the schema-policy requirement and nothing else. A
-// meta write is still a flow-label target: it carries the writing
-// transaction's join onto the document it lands on, so a value read from a
-// labeled document and parked in a meta field arrives labeled.
-//
-// The exemption is recorded per RAW storage path. A user field literally
-// named `slug` lives under `["value", "slug"]` and canonicalizes to the
-// same logical path as the meta field's raw `["slug"]`, so keying on the
-// canonical path would exempt the user field too; it must stay a
-// policy-targeted value write.
 describe("cfc-meta-seam-write-policy", () => {
+  // The prepare pass requires a schema write-policy input for every write it
+  // records on a document carrying stored label metadata. A raw meta write
+  // (`setMetaRaw`) lands on a document-root sibling of `value` — `slug`,
+  // `patternIdentity`, and the rest of the `MetaField` union — and no schema
+  // describes that seam, so no writer can supply the input the requirement
+  // asks for. Such a write must therefore commit without a "missing schema
+  // write-policy input" reason, or every runtime flow that stamps meta on a
+  // labeled piece document (slug assignment, the pattern updater's identity
+  // swap, setup over an existing piece) rejects under the enforcing modes.
+  //
+  // The exemption reaches the schema-policy requirement and nothing else. A
+  // meta write is still a flow-label target: it carries the writing
+  // transaction's join onto the document it lands on, so a value read from a
+  // labeled document and parked in a meta field arrives labeled.
+  //
+  // The exemption is recorded per RAW storage path. A user field literally
+  // named `slug` lives under `["value", "slug"]` and canonicalizes to the
+  // same logical path as the meta field's raw `["slug"]`, so keying on the
+  // canonical path would exempt the user field too; it must stay a
+  // policy-targeted value write.
+
   const setup = async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-      cfcFlowLabels: "persist",
     });
 
     // Seed a doc whose stored ["cfc"] metadata labels the whole document:
@@ -82,11 +82,11 @@ describe("cfc-meta-seam-write-policy", () => {
       const tx = runtime.edit();
       const cell = runtime.getCell(signer.did(), cause, undefined, tx);
       await cell.sync();
-      cell.setMetaRaw("slug", "piece-slug");
+      cell.setMetaRaw("slug", "piece-slug", rawMetaWriteAuthorization);
       cell.setMetaRaw("patternIdentity", {
         identity: "cid:pattern",
         symbol: "main",
-      });
+      }, rawMetaWriteAuthorization);
       tx.prepareCfc();
       // Prepared (not invalidated): the prepare pass recorded no reasons at
       // all for the meta writes.
@@ -140,7 +140,9 @@ describe("cfc-meta-seam-write-policy", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The assertion at the end of this test reads the sink document's
+      // stored labelMap. Persisting flow labels is what puts the writing
+      // transaction's confidentiality into it.
       cfcFlowLabels: "persist",
     });
     try {
@@ -189,7 +191,7 @@ describe("cfc-meta-seam-write-policy", () => {
       });
       const sink = runtime.getCell(signer.did(), sinkCause, undefined, tx);
       await sink.sync();
-      sink.setMetaRaw("slug", secret as string);
+      sink.setMetaRaw("slug", secret as string, rawMetaWriteAuthorization);
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
 

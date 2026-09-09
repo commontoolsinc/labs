@@ -19,6 +19,7 @@ import {
   readRunFlow,
   startTask,
 } from "./api.ts";
+import { consolePath, pageMount } from "./mount.ts";
 import "./index-view.ts";
 import "./flow-view.ts";
 import "./run-view.ts";
@@ -92,28 +93,37 @@ export class ConsoleApp extends LitElement {
   declare turnId: string | undefined;
   declare runs: readonly ConsoleRunSummary[];
   declare openRunId: string | undefined;
+
   /** The open run's conversation map, which the third column draws. */
   declare flow: ConsoleFlow | undefined;
+
   /**
    * Why the map could not be read. Held apart from `flow` because an absent
    * map and a refused one are different things to a reader: one is still
    * arriving, the other needs asking for again.
    */
   declare flowError: string | undefined;
+
   /** Whether a map read is in flight, so a retry cannot start a second. */
   declare flowLoading: boolean;
+
   /** The step the middle column is reading, marked in the map. */
   declare focusStep: number | undefined;
+
   declare state: string;
   declare running: boolean;
+
   /** The last thing the live stream reported, shown while a turn runs. */
   declare activity: string | undefined;
+
   declare piece: Piece | undefined;
   declare error: string | undefined;
 
   /** The last sequence rendered; every reconnect resumes from it. */
   #lastSequence = 0;
+
   #stream: EventSource | undefined;
+
   /** Run ids known before the running turn started, so its own is spottable. */
   #runIdsBeforeTurn = new Set<string>();
 
@@ -241,9 +251,12 @@ export class ConsoleApp extends LitElement {
   #subscribe(): void {
     this.#stream?.close();
     const stream = new EventSource(
-      `/api/events?sessionId=${
-        encodeURIComponent(this.sessionId ?? "")
-      }&afterSequence=${this.#lastSequence}`,
+      consolePath(
+        pageMount(),
+        `/api/events?sessionId=${
+          encodeURIComponent(this.sessionId ?? "")
+        }&afterSequence=${this.#lastSequence}`,
+      ),
     );
     this.#stream = stream;
     stream.addEventListener("chat", (message) => {

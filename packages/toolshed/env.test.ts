@@ -1,3 +1,14 @@
+/**
+ * Parsing tests for toolshed's `EnvSchema`: strict-boolean flags and
+ * defaulted variables, pinned against the misparse their types invite.
+ *
+ * The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
+ * unset/true/false fidelity) now lives in the runner's canonical
+ * `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by
+ * toolshed, the CLI, and the background-piece-service; its coverage lives in
+ * `packages/runner/test/runtime-presets.test.ts`.
+ */
+
 import { assertEquals } from "@std/assert";
 import { EnvSchema } from "@/env.ts";
 
@@ -6,6 +17,7 @@ Deno.test("OTEL_ENABLED parses strictly: only 'true'/'1' enable telemetry", () =
   // true, which would silently enable telemetry (and, with the all-span
   // exporter, ship every HTTP request span) when an operator set
   // OTEL_ENABLED=false to disable it.
+
   const otel = (v: string | undefined) =>
     EnvSchema.parse(v === undefined ? {} : { OTEL_ENABLED: v }).OTEL_ENABLED;
 
@@ -21,12 +33,11 @@ Deno.test("OTEL_ENABLED parses strictly: only 'true'/'1' enable telemetry", () =
   assertEquals(otel(undefined), false);
 });
 
-//
-// The sibling boolean flags shared the same z.coerce.boolean() trap and now use
-// the strict boolFlag() parse. Guard them so they can't silently regress.
-//
-
 Deno.test("DISABLE_LOG_REQ_RES / PLAID_SYNC_ALL_TRANSACTIONS parse strictly", () => {
+  // The sibling boolean flags use the strict boolFlag() parse rather than
+  // z.coerce.boolean(), which reads "false" as true. Guard them so they
+  // can't silently regress.
+
   const flag = (key: string, v: string | undefined) =>
     (EnvSchema.parse(v === undefined ? {} : { [key]: v }) as Record<
       string,
@@ -54,19 +65,14 @@ Deno.test("MEMORY_ACL_MODE defaults to enforce and accepts rollout overrides", (
   assertEquals(aclMode("enforce"), "enforce");
 });
 
-// The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
-// unset/true/false fidelity) now lives in the runner's canonical
-// `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by
-// toolshed, the CLI, and the background-piece-service; its coverage lives in
-// `packages/runner/test/runtime-presets.test.ts`.
-
-// The self-serve ingest control plane must be OFF unless a deployment opts in.
-// Minting issues a durable, operator-backed append capability, and on a
-// deployment where named-space keys derive from a public passphrase anyone who
-// knows a space NAME can mint legitimately — which repairing the derivation
-// later does not retract. A default-on flag here would be a production
-// takeover primitive, so the default is the security property.
 Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
+  // The self-serve ingest control plane must be OFF unless a deployment opts
+  // in. Minting issues a durable, operator-backed append capability, and on a
+  // deployment where named-space keys derive from a public passphrase anyone
+  // who knows a space NAME can mint legitimately — which repairing the
+  // derivation later does not retract. A default-on flag here would be a
+  // production takeover primitive, so the default is the security property.
+
   const flag = (v: string | undefined) =>
     EnvSchema.parse(v === undefined ? {} : { INGEST_SELF_SERVE_ENABLED: v })
       .INGEST_SELF_SERVE_ENABLED;
@@ -79,28 +85,4 @@ Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
 
   assertEquals(flag("true"), true);
   assertEquals(flag("1"), true);
-});
-
-Deno.test("MEMORY_WS_IDLE_TIMEOUT_SECONDS defaults to 300 and accepts overrides", () => {
-  // The memory websocket pong deadline has to be tunable per deployment: it
-  // must exceed the memory server's longest synchronous busy stretch, which an
-  // operator observes in production, and 0 must disable the timeout entirely
-  // (Deno.upgradeWebSocket's contract for idleTimeout).
-  const idle = (value: string | undefined) =>
-    EnvSchema.parse(
-      value === undefined ? {} : { MEMORY_WS_IDLE_TIMEOUT_SECONDS: value },
-    ).MEMORY_WS_IDLE_TIMEOUT_SECONDS;
-
-  assertEquals(idle(undefined), 300);
-  assertEquals(idle(""), 300);
-  assertEquals(idle("   "), 300);
-  assertEquals(idle("45"), 45);
-  assertEquals(idle("0"), 0);
-
-  // A negative deadline has no meaning for a pong window; reject rather
-  // than hand Deno an invalid option at upgrade time.
-  assertEquals(
-    EnvSchema.safeParse({ MEMORY_WS_IDLE_TIMEOUT_SECONDS: "-5" }).success,
-    false,
-  );
 });

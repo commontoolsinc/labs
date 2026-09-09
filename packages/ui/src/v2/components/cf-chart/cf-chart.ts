@@ -98,7 +98,7 @@ export class CFChart extends BaseElement {
   private _crosshairX: number | null = null;
   private _tooltipInfo: NearestResult | null = null;
 
-  // CellController for $marks prop
+  /** Cell controller for the `$marks` prop. */
   private _marksController = createCellController<MarkConfig[]>(this, {
     timing: { strategy: "immediate" },
   });

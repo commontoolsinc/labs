@@ -35,8 +35,10 @@ import { fromFileUrl } from "@std/path/from-file-url";
 // a `FabricSpecialObject` (bytes, an epoch). Neither survives a structural
 // comparison unaided — see `comparableState`.
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FabricSpecialObject,
+  taggedHashStringOf,
+} from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -87,6 +89,7 @@ import {
   companionSpace,
   vintageCompanionDir,
 } from "./vintage-layout.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 class LoopbackSessions implements SessionFactory {
   readonly #server: () => MemoryV2Server.Server;
@@ -165,6 +168,7 @@ export interface VintageRuntime {
    * reader to work out why a root was not there.
    */
   restoredSpaces: readonly string[];
+
   storeDir: string;
 
   /**
@@ -176,6 +180,7 @@ export interface VintageRuntime {
    * write itself (`captureVintage` does).
    */
   snapshot(destPath: string): Promise<void>;
+
   dispose(): Promise<void>;
 }
 
@@ -486,6 +491,7 @@ export interface VintageManifestEntry {
 
   /** Entity id of the result cell the pattern was materialized onto. */
   cellId: string;
+
   space: string;
 }
 
@@ -1563,7 +1569,7 @@ export async function materializeOnCell(
     root.withTx(tx).setMetaRaw("patternIdentity", {
       identity: ref.identity,
       symbol: ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
   });
   if (stampError !== undefined) {
     throw new Error(

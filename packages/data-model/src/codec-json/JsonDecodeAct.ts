@@ -4,8 +4,8 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
+import { quotedDebugString } from "@/codec-common/quotedDebugString.ts";
 import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import {
   isEncodedInstance,
@@ -164,7 +164,7 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
             CODEC_META_TAGS.hole,
             count,
             `hole: expected a positive integer count, got ${
-              backtickQuote(toCompactDebugString(count, 30))
+              quotedDebugString(count)
             }`,
           );
         }

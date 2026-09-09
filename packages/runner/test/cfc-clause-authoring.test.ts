@@ -39,7 +39,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const schema = {
@@ -90,7 +89,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const schema = {
@@ -170,7 +168,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const schema = {
@@ -195,7 +192,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const caveat = {
@@ -260,7 +256,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const expires = {

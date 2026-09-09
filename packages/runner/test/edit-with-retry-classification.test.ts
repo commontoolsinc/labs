@@ -30,6 +30,7 @@ import {
   type SessionFactory,
   StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
+import { CFC_GRANT_ID_PREFIX } from "../src/cfc/grants.ts";
 import { DEFAULT_MAX_RETRIES, Runtime } from "../src/runtime.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 import type { FabricValue } from "../src/builder/types.ts";
@@ -236,6 +237,46 @@ describe("editWithRetry rejection classification", () => {
       expect(ok).toBe("done");
     });
   }
+
+  it("returns a `CfcCommitRefusalError` after one run of the action", async () => {
+    // A real CFC refusal rather than the stubs above: which shape a boundary
+    // refusal takes is settled before the classifier sees it. The transaction
+    // write chokepoint records an unprivileged write at a reserved CFC grant
+    // address, prepare refuses it with a verdict, and a refusal whose reasons
+    // are all verdicts is the terminal name.
+    //
+    // The rung decides this case, so it names one: the refusal exists from
+    // `enforce-explicit` upward, and under `observe` the reason stays a
+    // diagnostic while under `disabled` no gate runs at all.
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    let actions = 0;
+    try {
+      const result = await runtime.editWithRetry((tx) => {
+        actions++;
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: `${CFC_GRANT_ID_PREFIX}forged` as URI,
+          type: "application/json",
+          path: ["value"],
+        }, { forged: true });
+        return "written";
+      });
+      expect(actions).toBe(1);
+      expect(result.error?.name).toBe("CfcCommitRefusalError");
+      expect(result.error?.message).toContain(
+        "unprivileged write to protected cfc path",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
 
 // The classification above is only reachable if the wire name survives
@@ -251,12 +292,16 @@ class CountingLoopbackSessionFactory implements SessionFactory {
 
   /** Commits sent for the ACL document, across all sessions. */
   aclCommits = 0;
+
   #aclDocId: string;
 
+  readonly #server: MemoryV2Server.Server;
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
+    server: MemoryV2Server.Server,
     space: MemorySpace,
   ) {
+    this.#server = server;
     this.#aclDocId = `of:${space}`;
   }
 
@@ -266,7 +311,7 @@ class CountingLoopbackSessionFactory implements SessionFactory {
     requested: MemoryV2Client.MountOptions = {},
   ) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,
@@ -387,8 +432,9 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
 // `ConnectionError`'s — the commit was never evaluated, so a re-established
 // session could land it. It fails on a fact about the RETRY PATH, not about the
 // error: nothing between two `editWithRetry` attempts remounts the session.
-// `SpaceReplica.sessionHandle()` memoizes the mount and clears it only in
-// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.#reopen()` runs
+// `SpaceReplica.#memoizedSessionHandle()` memoizes the mount and clears it
+// only in `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.#reopen()`
+// runs
 // only from `restore()`, which only the client's transport `reconnect()` calls
 // (memory/v2/client.ts). So every attempt re-sends over the very handle the
 // server just refused.
@@ -406,9 +452,14 @@ class SessionErrorSessionFactory implements SessionFactory {
 
   /** transact() calls made after `arm()`. */
   commits = 0;
+
   #armed = false;
 
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   arm(): void {
     this.#armed = true;
@@ -421,7 +472,7 @@ class SessionErrorSessionFactory implements SessionFactory {
   ) {
     this.sessions++;
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,

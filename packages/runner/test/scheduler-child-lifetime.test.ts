@@ -27,7 +27,7 @@ function retainedChildCount(registry: NodeRegistry): number {
 }
 
 function registryOf(runtime: Runtime): NodeRegistry {
-  return (runtime.scheduler as unknown as { nodes: NodeRegistry }).nodes;
+  return runtime.scheduler.accessForTestingOnly.nodes;
 }
 
 const WINDOW_SIZE = 5;

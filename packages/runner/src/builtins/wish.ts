@@ -9,9 +9,11 @@ import {
   hashSchema,
   internSchema,
 } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
+  type DebugValueOptions,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
-import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
@@ -30,12 +32,12 @@ import {
   UI,
 } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
-import { getPatternEnvironment } from "../env.ts";
 import {
   createSigilLinkFromParsedLink,
   getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
+import { systemPatternSource } from "../pattern-source-scheme.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
@@ -46,8 +48,14 @@ import {
   isConflictRejection,
   isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
+import { isCfcRejectedCommitError } from "../scheduler/cfc-rejection-report.ts";
 import { onSchemaRegistryClear } from "../schema-registry.ts";
+import {
+  enrollRuntimeOwnedStore,
+  recordRuntimeOwnedStore,
+} from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { rawMetaWriteAuthorization } from "../meta-seam.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -129,6 +137,16 @@ class WishError extends Error {
 const MIN_INTERVAL_SECONDS = 1;
 const MAX_INTERVAL_SECONDS = 24 * 60 * 60;
 const ONE_SHOT_RESOLUTION_MS = 1000;
+
+/**
+ * Rendering options for a commit failure shown in a sidecar: strings and
+ * objects whole, since the error's message can be an inconsistency report
+ * whose tail is the difference it reports.
+ */
+const COMMIT_FAILURE_RENDER_OPTIONS: DebugValueOptions = {
+  maxProperties: Infinity,
+  maxStringLines: Infinity,
+};
 
 /**
  * Quantize timestamp to resolution boundary.
@@ -259,6 +277,7 @@ type WishContext = {
 
   /** The wish node's cause, keying the durable one-shot #now capture cell. */
   nowCause?: Cell<any>[];
+
   usedHomeSpace?: boolean;
 };
 
@@ -1032,10 +1051,42 @@ function writeIntervalNowTick(
       cell.withTx(tx).set(coarsened);
     }
   }).then(({ error }) => {
-    if (error) {
-      console.error("[wish] #now interval tick failed:", error);
+    if (!error) return;
+    // The generation is what a refusal answers for. A tick armed before the
+    // beat was torn down or restarted speaks for a generation that is gone,
+    // so it reports what it dropped and leaves the timer alone: stopping
+    // there would take down a beat this tick was never part of.
+    if (isCfcRejectedCommitError(error) && generation === timer.generation) {
+      // CFC enforcement refused the labels this transaction carries, and the
+      // instant being written has no part in that verdict, so the next tick
+      // would carry the same labels to the same cell for the same answer.
+      // The beat stops here rather than schedule one refused write per
+      // interval; the next acquire of this interval starts a fresh one.
+      //
+      // The other two rejections the vocabulary calls terminal leave the
+      // beat running. Each is terminal for its own transaction rather than
+      // for a writer that runs again later: a `SpeculativeBasisError` names
+      // the next derivation as its recovery, and a `RowLabelCommitError`
+      // reads server state a later tick may find changed.
+      stopIntervalNowTimer(timer);
+      console.error(
+        "[wish] #now interval tick refused; the tick is stopped:",
+        error,
+      );
+      return;
     }
+    console.error("[wish] #now interval tick failed:", error);
   });
+}
+
+// Stop a timer's beat. Clearing the pending timeout drops a tick that has not
+// fired; bumping the generation makes one that has fired a no-op. A cleared
+// `timerId` is also what marks the timer as not beating, which is what an
+// acquire reads to decide whether to start one.
+function stopIntervalNowTimer(timer: IntervalNowTimer): void {
+  clearTimeout(timer.timerId);
+  timer.timerId = undefined;
+  timer.generation++;
 }
 
 // Schedule the next tick on a wall-clock-aligned boundary, so patterns cannot
@@ -1076,14 +1127,21 @@ function acquireIntervalNowTimer(
     );
     timer = { cell, timerId: undefined, generation: 0, refCount: 0 };
     timers.set(key, timer);
+  }
 
-    // Initialize the value if the cell is empty or stale (e.g. after reload),
-    // then start the aligned timer. sample() reads without subscribing the
-    // acquiring action, so ticks never re-trigger it.
+  if (timer.timerId === undefined) {
+    // Nothing is beating this cell — a timer just minted, or one a refused
+    // tick stopped. Initialize the value if the cell is empty or stale (e.g.
+    // after reload, or after a stop the grid moved on from), then start the
+    // aligned timer. sample() reads without subscribing the acquiring
+    // action, so ticks never re-trigger it.
     const coarsened = coarsenTimestamp(Date.now(), intervalMs);
-    const existing = cell.withTx(tx).sample() as number | null | undefined;
+    const existing = timer.cell.withTx(tx).sample() as
+      | number
+      | null
+      | undefined;
     if (existing == null) {
-      cell.withTx(tx).set(coarsened);
+      timer.cell.withTx(tx).set(coarsened);
     } else if (existing !== coarsened) {
       writeIntervalNowTick(runtime, timer, intervalMs);
     }
@@ -1107,13 +1165,11 @@ function releaseIntervalNowTimer(
   if (timer.refCount > 0) return;
 
   // Last user gone: stop the recurring timer and drop the registry entry so an
-  // unused interval no longer consumes resources. Bumping the generation makes
-  // any already-queued tick a no-op. The durable cell (one small value per
-  // distinct interval per space, possibly shared with other tabs) is left in
-  // place; deleting it would race a re-acquire of the same content-addressed
-  // cell and could blank another tab still ticking it.
-  clearTimeout(timer.timerId);
-  timer.generation++;
+  // unused interval no longer consumes resources. The durable cell (one small
+  // value per distinct interval per space, possibly shared with other tabs) is
+  // left in place; deleting it would race a re-acquire of the same
+  // content-addressed cell and could blank another tab still ticking it.
+  stopIntervalNowTimer(timer);
   timers!.delete(key);
 }
 
@@ -1257,6 +1313,8 @@ function resolveSpaceTarget(
         undefined,
         ctx.tx,
       );
+      recordRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
+      enrollRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
       const existing = cell.withTx(ctx.tx).sample();
       if (existing == null) {
         cell.withTx(ctx.tx).set(
@@ -1527,132 +1585,127 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
   resolvers?.delete(key);
 }
 
-// Fetch-and-compile cache for one sidecar pattern (suggestion /
-// profile-create / profile-picker), shared across all wish invocations. The
-// cache tracks the URL each fetch was started for: `setPatternEnvironment`
-// can change the apiUrl while a fetch is in flight, so a launch for a
-// different URL starts a fresh fetch, and a superseded fetch leaves the cache
-// untouched and resolves to undefined when it settles.
-//
-// The cache is keyed only on the URL, not the user identity, even with
-// `compileInUserSpace`. A same-apiUrl identity switch reuses the prior user's
-// compiled pattern, which is intended: these system patterns are
-// space-independent and run against the current runtime.
-export function createSidecarPatternCache(options: {
-  // File name under `api/patterns/system/`. Also labels errors.
-  name: string;
-  // Compile with the user's home space as cache context, so the
-  // (space-independent) system pattern is reused across reloads for this
-  // user (CT-1623, per-space cache).
-  compileInUserSpace?: boolean;
-  // Drop a failed fetch from the cache so a later launch retries it.
-  retryOnFailure?: boolean;
-}) {
-  let fetchPromise: Promise<Pattern | undefined> | undefined;
-  let fetchUrl: string | undefined;
-  let pattern: Pattern | undefined;
+/**
+ * A surface the wish builtin instantiates: a pattern this deployment's
+ * toolshed serves, which the surface's piece records as its source origin.
+ *
+ * Nothing else knows where such a piece's code comes from. The runtime is what
+ * brings the piece into being, so the runtime is what claims its provenance —
+ * and once it is claimed, the surface is an ordinary piece whose source the
+ * ordinary lifecycle follows, rather than one kept current by a mechanism of
+ * its own.
+ */
+type SidecarSurface = {
+  /** The `system:` origin the surface's piece records. */
+  readonly origin: string;
 
-  // Resolved lazily (not at module load): in the browser worker this module
-  // is imported before the runtime calls `setPatternEnvironment` with the
-  // real API URL, so a module-load-time const would capture the default — the
-  // worker's own origin, i.e. the frontend server. That is only correct when
-  // the shell is served by the API host (as in CI); against a separate
-  // frontend the fetch gets the SPA index.html fallback and pattern
-  // compilation fails.
-  const patternUrl = () =>
-    getPatternEnvironment().apiUrl + `api/patterns/system/${options.name}`;
+  /** The file the origin names. Labels errors. */
+  readonly name: string;
+};
 
-  async function fetchPattern(
-    runtime: Runtime,
-    url: string,
-    compileSpace?: Cell<unknown>["space"],
-  ): Promise<Pattern | undefined> {
-    try {
-      const program = await runtime.harness.resolve(
-        new HttpProgramResolver(url),
-      );
+function sidecarSurface(name: string): SidecarSurface {
+  return { name, origin: systemPatternSource(`system/${name}`) };
+}
 
-      if (!program) {
-        throw new WishError(`Can't load ${options.name}`);
-      }
-      const compiled = await runtime.patternManager.compilePattern(
-        program,
-        options.compileInUserSpace
-          // Phase 5: a SERVING runtime's compile-cache context is the
-          // SERVED space (the wave's home — its writebacks are
-          // bookkeeping wave writes, serving-loop.md §3d), never the
-          // service identity's own space (a foreign wave write — the
-          // lunch-wall class). Callers pass it; clients keep the
-          // per-user cache context (CT-1623).
-          ? { space: compileSpace ?? runtime.userIdentityDID }
-          : undefined,
-      );
+const SUGGESTION_SURFACE = sidecarSurface("suggestion.tsx");
+const PROFILE_CREATE_SURFACE = sidecarSurface("profile-create.tsx");
+const PROFILE_PICKER_SURFACE = sidecarSurface("profile-picker.tsx");
 
-      if (!compiled) throw new WishError(`Can't compile ${options.name}`);
+/**
+ * What one wish node holds about a surface it instantiates: the pattern that
+ * surface's piece runs, and the open still answering that question.
+ *
+ * A compiled pattern's serialized graph embeds `cid:` schema references minted
+ * in the registry epoch that compiled it (`externalizeSchema` at binding
+ * serialization), and both backings of those references die with that epoch:
+ * the registry clears on last-lease-out, and the compile context's space is not
+ * the next session's. A pattern held across the clear would stage links whose
+ * references nothing anywhere can resolve — the emission gate throws on exactly
+ * that shape — so a pattern is only reused inside the epoch that produced it,
+ * and the next launch opens the surface again.
+ */
+export type SidecarSurfaceState = {
+  pattern?: Pattern;
+  patternEpoch?: number;
+  opening?: Promise<Pattern | undefined>;
+  openingEpoch?: number;
+};
 
-      return compiled;
-    } catch (e) {
-      console.error(`Can't load ${options.name}`, e);
-      return undefined;
-    }
+let schemaRegistryEpoch = 0;
+onSchemaRegistryClear(() => {
+  schemaRegistryEpoch += 1;
+});
+
+/** The pattern this slot has already opened, when it is still usable. */
+export function openedSidecarSurface(
+  state: SidecarSurfaceState,
+): Pattern | undefined {
+  return state.patternEpoch === schemaRegistryEpoch ? state.pattern : undefined;
+}
+
+/**
+ * Open a surface's piece and answer with the pattern it runs.
+ *
+ * Opening is what a piece gets when somebody looks at it: the runtime resolves
+ * the origin that piece records, adopts the source it names when the deployment
+ * has shipped a new version, and answers with what to run. A piece that does
+ * not exist yet is answered with the source its origin currently names, which
+ * the run then records as its creation revision.
+ *
+ * Once per slot, because that is what one look is. The wish node behind a
+ * surface re-runs whenever anything it reads changes, and a piece is not opened
+ * again by each of those.
+ *
+ * `retryOnFailure` decides what a launch that could not open the surface leaves
+ * behind. The profile surfaces retry, because a user with no profile has no
+ * other way to get one and nothing else re-triggers their launch. The
+ * suggestion surface keeps its failure: it is an addition to a view that
+ * already works.
+ */
+export function openSidecarSurface(
+  runtime: Runtime,
+  state: SidecarSurfaceState,
+  piece: Cell<unknown>,
+  surface: SidecarSurface,
+  options: { retryOnFailure?: boolean } = {},
+): Promise<Pattern | undefined> {
+  const opened = openedSidecarSurface(state);
+  if (opened !== undefined) return Promise.resolve(opened);
+  const epoch = schemaRegistryEpoch;
+  // An open started in an epoch that has since ended would answer with a
+  // pattern whose schema references nothing can resolve, so it is left to
+  // settle on its own and a fresh one is asked instead.
+  if (state.opening !== undefined && state.openingEpoch === epoch) {
+    return state.opening;
   }
-
-  // A compiled pattern's serialized graph embeds `cid:` schema references
-  // minted in the registry epoch that compiled it (`externalizeSchema` at
-  // binding serialization), and both backings of those references die with
-  // that epoch: the registry clears on last-lease-out, and the compile
-  // context's space is not the next session's. A cached pattern handed
-  // across the clear would stage links whose references nothing anywhere
-  // can resolve — the emission gate throws on exactly that shape — so the
-  // cache drops with the epoch and the next wish refetches and recompiles,
-  // minting into the epoch that will use it. (The listener registration is
-  // permanent; a cache abandoned by tests resets as a no-op.)
-  onSchemaRegistryClear(() => {
-    pattern = undefined;
-    fetchPromise = undefined;
-    fetchUrl = undefined;
-  });
-
-  return {
-    // Pattern from a completed fetch for the current environment's URL.
-    cached(): Pattern | undefined {
-      return fetchUrl === patternUrl() ? pattern : undefined;
-    },
-    // Memoized fetch for the current environment's URL, started by this call
-    // when none is in flight for that URL. When this call starts the fetch,
-    // `onSuccess` runs once it resolves with a pattern, unless a later fetch
-    // superseded it. A superseded fetch resolves to undefined.
-    fetch(
-      runtime: Runtime,
-      onSuccess?: (pattern: Pattern) => void,
-      compileSpace?: Cell<unknown>["space"],
-    ): Promise<Pattern | undefined> {
-      const url = patternUrl();
-      if (!fetchPromise || fetchUrl !== url) {
-        fetchUrl = url;
-        pattern = undefined;
-        const started: Promise<Pattern | undefined> = fetchPattern(
-          runtime,
-          url,
-          compileSpace,
-        ).then((fetched) => {
-          // Only the fetch the cache currently points to records and reports
-          // its result; launches chained on a superseded fetch get undefined
-          // so a stale pattern is never run.
-          if (fetchPromise !== started) return undefined;
-          pattern = fetched;
-          if (fetched) {
-            onSuccess?.(fetched);
-          } else if (options.retryOnFailure) {
-            fetchPromise = undefined;
-          }
-          return fetched;
-        });
-        fetchPromise = started;
+  const opening: Promise<Pattern | undefined> = runtime.sourceReconciler
+    .open(piece, surface.origin)
+    .then((pattern) => {
+      // An open answers about the registry epoch it ran in. Once that epoch has
+      // ended — because a later launch replaced this open, or because the
+      // registry simply cleared while it was in flight — the pattern it
+      // resolved carries `cid:` schema references that resolve to nothing, and
+      // running it would stage links nothing anywhere can resolve. So ask
+      // again, in the epoch that will use the answer: a launch that has already
+      // started one joins it, and otherwise a fresh one starts here. The
+      // caller is handed a live answer either way, rather than a dead one or an
+      // error account written over a surface still on its way.
+      if (epoch !== schemaRegistryEpoch) {
+        return openSidecarSurface(runtime, state, piece, surface, options);
       }
-      return fetchPromise;
-    },
-  };
+      if (pattern !== undefined) {
+        state.pattern = pattern;
+        state.patternEpoch = epoch;
+        state.opening = undefined;
+      } else {
+        console.error(`Can't load ${surface.name}`);
+        if (options.retryOnFailure) state.opening = undefined;
+      }
+      return pattern;
+    });
+  state.opening = opening;
+  state.openingEpoch = epoch;
+  return opening;
 }
 
 /** What a failed sidecar instantiation attempt does next — the OW45
@@ -1709,9 +1762,9 @@ export function sidecarValueIsWinner(raw: unknown): boolean {
 // vacuously when a timing window closes early. Monotonic; consumers compare
 // deltas, never absolutes.
 export const wishSidecarDiagnostics = {
-  /** Continuations registered on the profile-create fetch (one per launch
-   * that found no cached pattern — the duplicate-launch producer). */
-  profileCreateFetchContinuations: 0,
+  /** Opens of a profile-create surface (one per launch that found no pattern
+   * already opened — the duplicate-launch producer). */
+  profileCreateSurfaceOpens: 0,
 
   /** runSidecarInOwnTx invocations (instantiation attempts). */
   sidecarRunsStarted: 0,
@@ -1719,20 +1772,6 @@ export const wishSidecarDiagnostics = {
   /** Conflict-class losers that yielded to a materialized winner. */
   sidecarRunsRaced: 0,
 };
-
-const suggestionPatternCache = createSidecarPatternCache({
-  name: "suggestion.tsx",
-  compileInUserSpace: true,
-});
-const profileCreatePatternCache = createSidecarPatternCache({
-  name: "profile-create.tsx",
-  compileInUserSpace: true,
-  retryOnFailure: true,
-});
-const profilePickerPatternCache = createSidecarPatternCache({
-  name: "profile-picker.tsx",
-  retryOnFailure: true,
-});
 
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
@@ -1993,7 +2032,7 @@ export function wish(
   // causes key on (`homeSpaceUserDID(ctx) ?? runtime.userIdentityDID`),
   // so cells and closure state can never disagree. Clients stay
   // cardinality 1 (one slot: the runtime's own user).
-  interface SuggestionSidecarSlot {
+  interface SuggestionSidecarSlot extends SidecarSurfaceState {
     input?: {
       situation: string;
       context: Record<string, any>;
@@ -2001,7 +2040,7 @@ export function wish(
     };
     resultCell?: Cell<WishState<any>>;
   }
-  interface ProfileCreateSidecarSlot {
+  interface ProfileCreateSidecarSlot extends SidecarSurfaceState {
     input?: {
       profiles: unknown;
       inputId: string;
@@ -2010,7 +2049,7 @@ export function wish(
     resultCell?: Cell<any>;
     readyCell?: Cell<boolean>;
   }
-  interface ProfilePickerSidecarSlot {
+  interface ProfilePickerSidecarSlot extends SidecarSurfaceState {
     input?: {
       profiles: unknown;
       defaultProfile: unknown;
@@ -2065,9 +2104,14 @@ export function wish(
   // narrowed nodes are inert (nobody reads them) but not free; pinning a
   // per-demander sidecar to exactly its own demander is an unstated
   // semantic recorded in the register (OW29's row).
-  const sidecarRunOptions = {
+  // `sourceOrigin` is the surface's own provenance, recorded with the creation
+  // revision of the piece this run brings into being. A run that finds the
+  // piece already there changes neither, so what a surface records after that
+  // is decided by its source lifecycle.
+  const sidecarRunOptions = (surface: SidecarSurface) => ({
     parentPieceRootId: parentCell.getAsNormalizedFullLink().id,
-  };
+    sourceOrigin: surface.origin,
+  });
 
   addCancel(() => {
     cancelled = true;
@@ -2120,6 +2164,8 @@ export function wish(
       tx,
     );
     const scoped = scopedCell(runtime, tx, baseCell, outputScope);
+    recordRuntimeOwnedStore(tx, parentCell, scoped);
+    enrollRuntimeOwnedStore(tx, parentCell, scoped);
     if (scoped !== baseCell) {
       // Copy the meta result link from the base cell into our new scoped cell
       const resultLink = getMetaLink(baseCell.withTx(tx), "result");
@@ -2130,6 +2176,7 @@ export function wish(
             base: scoped,
             includeSchema: true,
           }),
+          rawMetaWriteAuthorization,
         );
       }
     }
@@ -2308,6 +2355,14 @@ export function wish(
     runtime.scheduler.trackBackgroundTask(launch);
   }
 
+  /** Whether this demander's suggestion surface has already been opened. */
+  function suggestionSurfaceOpened(ctx: WishContext): boolean {
+    const slot = suggestionSidecars.get(
+      homeSpaceUserDID(ctx) ?? runtime.userIdentityDID,
+    );
+    return slot !== undefined && openedSidecarSurface(slot) !== undefined;
+  }
+
   function launchSuggestionPattern(
     ctx: WishContext,
     input: {
@@ -2348,16 +2403,17 @@ export function wish(
       );
     }
 
-    const cachedSuggestionPattern = suggestionPatternCache.cached();
+    const openedSuggestionPattern = openedSidecarSurface(slot);
     if (sidecarIsServed) {
       // The SpaceServer instantiates the suggestion sidecar for this
       // demander; this speculative run references its cell only.
-    } else if (!cachedSuggestionPattern) {
-      // Once fetch completes, run the pattern without a tx (it creates its own)
-      const launch = suggestionPatternCache.fetch(
+    } else if (!openedSuggestionPattern) {
+      // Once the surface opens, run the pattern without a tx (it creates its own)
+      const launch = openSidecarSurface(
         runtime,
-        undefined,
-        runtime.servingPosture ? parentCell.space : undefined,
+        slot,
+        slot.resultCell,
+        SUGGESTION_SURFACE,
       ).then(
         (pattern) => {
           if (!cancelled && pattern && slot.resultCell) {
@@ -2366,7 +2422,7 @@ export function wish(
               pattern,
               slot.input,
               slot.resultCell,
-              sidecarRunOptions,
+              sidecarRunOptions(SUGGESTION_SURFACE),
             );
           }
         },
@@ -2376,10 +2432,10 @@ export function wish(
       if (!cancelled && slot.resultCell) {
         runtime.runner.run(
           tx,
-          cachedSuggestionPattern,
+          openedSuggestionPattern,
           slot.input,
           slot.resultCell,
-          sidecarRunOptions,
+          sidecarRunOptions(SUGGESTION_SURFACE),
         );
       }
     }
@@ -2441,14 +2497,15 @@ export function wish(
   async function runSidecarInOwnTx(
     resultCell: Cell<any>,
     pattern: Pattern,
+    surface: SidecarSurface,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
   ): Promise<void> {
     wishSidecarDiagnostics.sidecarRunsStarted += 1;
     // A conflict-class failure means SOME other writer advanced a doc this
     // run's basis read: a sibling instantiation of the same cause-derived
-    // sidecar (the same node launched again before the fetch resolved —
-    // every pre-resolve launch chains its own continuation on the memoized
-    // fetch — another runtime/instance of the node, or the serving loop's
+    // sidecar (the same node launched again before its surface opened —
+    // every pre-open launch chains its own continuation on that open —
+    // another runtime/instance of the node, or the serving loop's
     // re-run), or concurrent traffic on an INPUT doc (e.g. the home
     // `profiles` list). The decision is `sidecarRunFailureDisposition`
     // (module level, unit-pinned); loudness per serving-loop.md §3d's
@@ -2484,7 +2541,7 @@ export function wish(
       const lastAttempt = attempt === 2;
       try {
         const runTx = runtime.edit();
-        // Sidecar run from a cache-fetch continuation — no scheduler run
+        // Sidecar run from a surface-open continuation — no scheduler run
         // stamps it; bookkeeping per serving-loop.md §3d.
         runtime.stampServerRun(runTx, {
           actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
@@ -2495,7 +2552,7 @@ export function wish(
           pattern,
           inputForTx(runTx),
           resultCell.withTx(runTx),
-          sidecarRunOptions,
+          sidecarRunOptions(surface),
         );
         runtime.prepareTxForCommit(runTx);
         const { error } = await runTx.commit();
@@ -2510,7 +2567,10 @@ export function wish(
             return;
           }
           if (disposition === "retry") continue;
-          await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+          await commitPatternErrorUI(
+            resultCell,
+            toCompactDebugString(error, COMMIT_FAILURE_RENDER_OPTIONS),
+          );
           return;
         }
         // Under a serving wave, commit() resolving ok is not durability:
@@ -2613,6 +2673,8 @@ export function wish(
         undefined,
         tx,
       );
+      recordRuntimeOwnedStore(tx, parentCell, slot.readyCell);
+      enrollRuntimeOwnedStore(tx, parentCell, slot.readyCell);
     }
     slot.readyCell.get();
 
@@ -2627,63 +2689,62 @@ export function wish(
       };
     };
 
-    const cachedProfileCreatePattern = profileCreatePatternCache.cached();
+    const openedProfileCreatePattern = openedSidecarSurface(slot);
     if (sidecarIsServed) {
       // The SpaceServer fetches/instantiates the create surface for this
       // demander and flips its ready cell; this speculative run only
       // references the served cells (read above for the re-run trigger).
-    } else if (!cachedProfileCreatePattern) {
+    } else if (!openedProfileCreatePattern) {
       // Each entry here chains one instantiation continuation on the
-      // (possibly in-flight, memoized) fetch — the duplicate-launch
-      // producer the pin's witness counts at REGISTRATION time.
-      wishSidecarDiagnostics.profileCreateFetchContinuations += 1;
-      const launch = profileCreatePatternCache.fetch(runtime, () => {
-        // The pattern arrived: re-arm EVERY demander's create surface —
-        // the fetch is node-shared (memoized), so the ready signal must
-        // reach every slot registered while it was in flight, not only
-        // the demander whose launch started it (the F2 fix).
-        const readySlots = [...profileCreateSidecars.values()].filter(
-          (readySlot) => readySlot.readyCell !== undefined,
-        );
-        if (readySlots.length > 0) {
-          const readyTx = runtime.edit();
-          // Cache-fetch onLoaded continuation — no scheduler run stamps
-          // it; bookkeeping per serving-loop.md §3d.
-          runtime.stampServerRun(readyTx, {
-            actionId: `wish/profile-create-ready/${
-              readySlots[0].readyCell!.sourceURI
-            }`,
-            kind: "bookkeeping",
-          });
-          for (const readySlot of readySlots) {
-            readySlot.readyCell!.withTx(readyTx).set(true);
-          }
-          runtime.prepareTxForCommit(readyTx);
-          trackSidecarLaunch(readyTx.commit());
-        }
-      }, runtime.servingPosture ? parentCell.space : undefined).then(
+      // (possibly in-flight) open of this demander's surface — the
+      // duplicate-launch producer the pin's witness counts at REGISTRATION
+      // time.
+      wishSidecarDiagnostics.profileCreateSurfaceOpens += 1;
+      const launch = openSidecarSurface(
+        runtime,
+        slot,
+        slot.resultCell,
+        PROFILE_CREATE_SURFACE,
+        { retryOnFailure: true },
+      ).then(
         (pattern) => {
           if (cancelled || !slot.resultCell) return;
           if (pattern) {
+            // The surface's pattern is here: re-arm this demander's create
+            // surface so its wish re-runs and renders what just arrived. Every
+            // launch that joined this open runs this, so a signal already sent
+            // is not sent again.
+            const readyCell = slot.readyCell;
+            if (readyCell !== undefined && readyCell.get() !== true) {
+              const readyTx = runtime.edit();
+              // Surface-open continuation — no scheduler run stamps it;
+              // bookkeeping per serving-loop.md §3d.
+              runtime.stampServerRun(readyTx, {
+                actionId: `wish/profile-create-ready/${readyCell.sourceURI}`,
+                kind: "bookkeeping",
+              });
+              readyCell.withTx(readyTx).set(true);
+              runtime.prepareTxForCommit(readyTx);
+              trackSidecarLaunch(readyTx.commit());
+            }
             return runSidecarInOwnTx(
               slot.resultCell,
               pattern,
+              PROFILE_CREATE_SURFACE,
               profileCreateInputForTx,
             );
           }
-          // Fetch/compile failed, or a later fetch for a changed apiUrl
-          // superseded this one (createSidecarPatternCache swallows the
-          // error and resolves to undefined in both cases). The create
-          // surface is the only way a user with no profile gets one, and
-          // nothing re-triggers this launch, so a silent undefined leaves
-          // that surface blank for the life of the piece. Say so in the
-          // cell the surface renders from — unless a later fetch has since
-          // landed a pattern, whose surface is in that same cell and is
-          // the better answer than this launch's failure.
-          if (!profileCreatePatternCache.cached()) {
+          // The surface could not be opened (openSidecarSurface reports the
+          // reason and resolves to undefined). The create surface is the only
+          // way a user with no profile gets one, and nothing re-triggers this
+          // launch, so a silent undefined leaves that surface blank for the
+          // life of the piece. Say so in the cell the surface renders from —
+          // unless a later open has since landed a pattern, whose surface is
+          // in that same cell and is the better answer than this failure.
+          if (!openedSidecarSurface(slot)) {
             return commitPatternErrorUI(
               slot.resultCell,
-              `Can't load profile-create.tsx`,
+              `Can't load ${PROFILE_CREATE_SURFACE.name}`,
             );
           }
         },
@@ -2692,10 +2753,10 @@ export function wish(
     } else if (!cancelled && slot.resultCell) {
       runtime.runner.run(
         tx,
-        cachedProfileCreatePattern,
+        openedProfileCreatePattern,
         profileCreateInputForTx(tx),
         slot.resultCell.withTx(tx),
-        sidecarRunOptions,
+        sidecarRunOptions(PROFILE_CREATE_SURFACE),
       );
     }
 
@@ -2787,15 +2848,17 @@ export function wish(
       };
     };
 
-    const cachedProfilePickerPattern = profilePickerPatternCache.cached();
+    const openedProfilePickerPattern = openedSidecarSurface(slot);
     if (sidecarIsServed) {
       // The SpaceServer instantiates the picker for this demander; this
       // speculative run references its cell only.
-    } else if (!cachedProfilePickerPattern) {
-      const launch = profilePickerPatternCache.fetch(
+    } else if (!openedProfilePickerPattern) {
+      const launch = openSidecarSurface(
         runtime,
-        undefined,
-        runtime.servingPosture ? parentCell.space : undefined,
+        slot,
+        slot.resultCell,
+        PROFILE_PICKER_SURFACE,
+        { retryOnFailure: true },
       ).then(
         (pattern) => {
           if (cancelled || !slot.resultCell) return;
@@ -2803,24 +2866,24 @@ export function wish(
             runSidecarInOwnTx(
               slot.resultCell,
               pattern,
+              PROFILE_PICKER_SURFACE,
               pickerInputForTx,
             );
           } else {
-            // Fetch/compile failed (createSidecarPatternCache swallows the
-            // error and resolves to undefined). Surface it as an error UI in the
-            // picker sidecar cell so the picker slot doesn't stay blank forever.
-            // `.result` is unaffected: under CT-1829 it rides the main wish state
-            // (ordered[0]), not this sidecar (a superseded fetch also resolves
-            // to undefined — a benign extra error UI on a since-replaced cell).
+            // The surface could not be opened (openSidecarSurface reports the
+            // reason and resolves to undefined). Surface it as an error UI in
+            // the picker sidecar cell so the picker slot doesn't stay blank
+            // forever. `.result` is unaffected: under CT-1829 it rides the main
+            // wish state (ordered[0]), not this sidecar.
             commitPatternErrorUI(
               slot.resultCell,
-              `Can't load profile-picker.tsx`,
+              `Can't load ${PROFILE_PICKER_SURFACE.name}`,
             );
           }
         },
       ).catch((error) => {
         // Defensive: a throw inside the `.then` body (or a truly-rejecting
-        // fetch) would otherwise be an unhandled rejection. Surface it too.
+        // open) would otherwise be an unhandled rejection. Surface it too.
         if (!cancelled && slot.resultCell) {
           commitPatternErrorUI(
             slot.resultCell,
@@ -2832,10 +2895,10 @@ export function wish(
     } else if (!cancelled && slot.resultCell) {
       runtime.runner.run(
         tx,
-        cachedProfilePickerPattern,
+        openedProfilePickerPattern,
         pickerInputForTx(tx),
         slot.resultCell.withTx(tx),
-        sidecarRunOptions,
+        sidecarRunOptions(PROFILE_PICKER_SURFACE),
       );
     }
 
@@ -3111,11 +3174,11 @@ export function wish(
                   ),
               );
             } else {
-              // Multiple results — if suggestion pattern is already loaded,
-              // launch it and send its result cell so the picker's output
-              // flows through. Otherwise fall back to first result and kick
-              // off the fetch for next time.
-              if (suggestionPatternCache.cached()) {
+              // Multiple results — if this demander's suggestion surface is
+              // already open, launch it and send its result cell so the
+              // picker's output flows through. Otherwise fall back to first
+              // result and open the surface for next time.
+              if (suggestionSurfaceOpened(ctx)) {
                 measureWishPhase(
                   "send-suggestion",
                   queryKey,
@@ -3134,7 +3197,7 @@ export function wish(
                     ),
                 );
               } else {
-                // Pattern not loaded yet — send first result, start fetch
+                // Surface not open yet — send first result, start opening it
                 const resultUI = measureWishPhase(
                   "result-ui-get",
                   queryKey,

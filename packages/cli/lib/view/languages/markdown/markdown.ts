@@ -123,7 +123,7 @@ interface RichStyle {
 class RichLine {
   text = "";
   readonly spans: Span[] = [];
-  private sourceHidden = false;
+  #sourceHidden = false;
 
   append(value: string, style: RichStyle): void {
     if (value.length === 0) return;
@@ -149,7 +149,7 @@ class RichLine {
   }
 
   appendLine(line: Line, extra: Partial<RichStyle> = {}): void {
-    if (line.renderedSourceHidden) this.sourceHidden = true;
+    if (line.renderedSourceHidden) this.#sourceHidden = true;
     if (line.spans.length === 0 && line.text.length > 0) {
       this.append(line.text, { ...extra, cls: extra.cls ?? "plain" });
       return;
@@ -166,14 +166,14 @@ class RichLine {
   }
 
   hideSource(): void {
-    this.sourceHidden = true;
+    this.#sourceHidden = true;
   }
 
   line(): Line {
     return {
       text: this.text,
       spans: this.spans,
-      ...(this.sourceHidden ? { renderedSourceHidden: true } : {}),
+      ...(this.#sourceHidden ? { renderedSourceHidden: true } : {}),
     };
   }
 }

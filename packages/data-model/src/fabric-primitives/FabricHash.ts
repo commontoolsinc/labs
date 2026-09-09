@@ -54,6 +54,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    * unshared `ArrayBuffer`.
    */
   readonly #hash: Uint8Array<ArrayBuffer>;
+
   readonly #tag: string;
   readonly #justHashString: string;
   readonly #fullStringForm: string;

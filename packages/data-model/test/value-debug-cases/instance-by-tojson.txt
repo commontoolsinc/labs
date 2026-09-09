@@ -1,0 +1,40 @@
+(() => {
+  class HasJson {
+    ignored = "no";
+    toJSON() {
+      return { j: 1 };
+    }
+  }
+  class JsonArray {
+    toJSON() {
+      return [1, 2];
+    }
+  }
+  return { object: new HasJson(), array: new JsonArray() };
+})()
+
+--
+
+object:
+/HasJson(j:1)
+/HasJson(
+  j: 1
+)
+{
+  "/HasJson": {
+    j: 1
+  }
+}
+
+array:
+/JsonArray([1,2])
+/JsonArray([
+  1,
+  2
+])
+{
+  "/JsonArray": [
+    1,
+    2
+  ]
+}

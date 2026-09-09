@@ -40,6 +40,7 @@ import type {
   TransactionSealDestination,
 } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("p2f run supply");
 const space = signer.did();
@@ -506,14 +507,18 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     }
   });
 
+  //
+  // Fan-out stage B, review F1: a bounded RetryImmediately
+  //
   // Fan-out stage B, independent review F1: `RetryImmediately` inside a
-  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one
-  // queued retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE
-  // attempts, then the accepted zombie). Before the fix the loop re-ran
-  // the same instance in the SAME pass (its key never became clean, so
-  // the set kept offering it): 501 invocations of a 500-throw action
-  // inside ONE `run()`, and a never-resolving name spun the process's
-  // microtask queue forever — no timer fired, `idle()` never resolved.
+  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one queued
+  // retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE attempts,
+  // then the accepted zombie). Before the fix the loop re-ran the same instance
+  // in the SAME pass (its key never became clean, so the set kept offering it):
+  // 501 invocations of a 500-throw action inside ONE `run()`, and a
+  // never-resolving name spun the process's microtask queue forever — no timer
+  // fired, `idle()` never resolved.
+  //
 
   it("F1: a demanded action that keeps throwing RetryImmediately is bounded per pass — the loop DEFERS the instance instead of re-running it, the retry rides the queue (a timer fires between attempts), and the budget is MAX_RETRIES_FOR_REACTIVE", async () => {
     const rootId = "of:p2f-retry-root";
@@ -754,7 +759,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
   // handler-bearing V3 whose stream marker the V1 doc never
   // materialized — the exact durable state whose demanded start mints
   // a setup-REPAIR write on the serving runtime (`ensurePieceRunning`
-  // → start → startCore → applySetupState).
+  // → start → `Runner.#startCore()` → applySetupState).
   const brickedPiece = async () => {
     const tx = runtime.edit();
     const pm = runtime.patternManager;
@@ -781,7 +786,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     return cell;
   };
@@ -842,7 +847,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
 
   it("surfaces a refused fire-and-forget piece-INSTANTIATE commit through the observer (the start path's own arm, not only the repair's)", async () => {
     // A HEALTHY piece — no repair involved: run V1, stop, restart. The
-    // restart's startCore mints the self-minted fire-and-forget
+    // restart's `Runner.#startCore()` mints the self-minted fire-and-forget
     // instantiation tx (`piece-instantiate/<root>`) — the arm the F1
     // hazard was actually filed about (start() resolves before the
     // commit settles, so a swallowed refusal leaves the piece silently

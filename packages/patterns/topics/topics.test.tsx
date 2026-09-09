@@ -21,6 +21,14 @@ import {
   Writable,
 } from "commonfabric";
 import { pattern } from "commonfabric";
+import {
+  type MentionableRow,
+  mentionableRowsOf,
+} from "../collection-naming/mentionable.ts";
+import {
+  type NamesMap,
+  type NamesTableRow,
+} from "../collection-naming/naming.ts";
 import Topics, {
   mentionedBy,
   mentionListsOf,
@@ -224,6 +232,12 @@ export default pattern(() => {
   const profileBoardCrossrefs = new Writable<TopicCrossrefRow[] | Default<[]>>(
     [],
   );
+  // The namespace and the table the composer is handed, standalone for the
+  // same reason: the composer allocates into the one and wires the other onto
+  // the topic it files, so a browser create is named exactly as a headless one
+  // is.
+  const profileBoardNames = new Writable<NamesTableRow[] | Default<[]>>([]);
+  const profileNames = new Writable<NamesMap>({});
   const profileTitleDraft = new Writable("Profile topic");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
   const profileCommentDraft = new Writable("via the profile composer");
@@ -264,6 +278,8 @@ export default pattern(() => {
     topics: profileTopics,
     mentionable: profileTopics,
     boardCrossrefs: profileBoardCrossrefs,
+    boardNames: profileBoardNames,
+    names: profileNames,
     newTitle: profileTitleDraft,
     profileName: " Ada ",
     profileAvatar: " 🦊 ",
@@ -503,6 +519,17 @@ export default pattern(() => {
       profileTitleDraft.get() === "";
   });
 
+  // The browser composer allocates out of the same namespace the headless
+  // create does, in the same transaction as its append: drop the allocation
+  // and the map stays empty while the topic still lands.
+  const assert_profile_topic_named = assert(() =>
+    Object.keys(profileNames.get()).join(",") === "1" &&
+    equals(
+      profileNames.get()["1"] as object,
+      profileTopics.key(0),
+    )
+  );
+
   const assert_profile_comment_submitted = assert(() => {
     const list = profileComments.get() ?? [];
     return list.length === 1 &&
@@ -669,6 +696,107 @@ export default pattern(() => {
     );
   });
 
+  // --- mentionable: the board's mention index ---
+
+  // The mention index mirrors the board as COPIES plus a reference: the two
+  // strings the autocomplete needs are in the rows themselves, and `piece`
+  // is the topic each row stands for — the same document, by identity.
+  const assert_mention_index_baseline = assert(() =>
+    (board.mentionable ?? []).length === 2 &&
+    board.mentionable?.[0]?.[NAME] === "First topic" &&
+    board.mentionable?.[0]?.title === "First topic" &&
+    board.mentionable?.[1]?.[NAME] === "Second topic" &&
+    equals(
+      board.mentionable?.[0]?.piece as object,
+      board.topics?.[0] as object,
+    ) &&
+    equals(
+      board.mentionable?.[1]?.piece as object,
+      board.topics?.[1] as object,
+    )
+  );
+
+  // The bound: one self-contained list of scalars and held references.
+  // Serializing every row carries no expanded topic content, no verb
+  // streams, and no runtime values — the copies plus a link each, nothing
+  // else. The declared row schema, not reader discipline, is the guarantee.
+  const assert_mention_index_bounded = assert(() => {
+    const rows = board.mentionable ?? [];
+    if (rows.length < 2) return false;
+    const serialized = JSON.stringify(rows);
+    return !serialized.includes('"body"') &&
+      !serialized.includes('"comments"') &&
+      !serialized.includes('"addComment"') &&
+      !serialized.includes("vnode");
+  });
+
+  // The index tracks the board rather than snapshotting it: a topic added
+  // later gets its own row, standing for the new topic by identity.
+  const assert_mention_index_tracks_the_board = assert(() =>
+    (board.mentionable ?? []).length === 3 &&
+    board.mentionable?.[2]?.[NAME] === "Composed topic" &&
+    equals(
+      board.mentionable?.[2]?.piece as object,
+      board.topics?.[2] as object,
+    )
+  );
+
+  // The derivation's own rules, on sources a board cannot produce mid-run:
+  // a mid-sync entry contributes no row, the display name falls back to the
+  // persisted title until a topic derives its `[NAME]` (and past a blank
+  // one), the collection's name for a member is copied off the member's own
+  // and reads blank where it has none, and a row records its SOURCE as
+  // `piece` — identity, not a copy.
+  const assert_mention_index_rows_pure = assert(() => {
+    const named = {
+      get: () => ({ [NAME]: "Named", title: "Titled", shortName: "42" }),
+    };
+    const cold = {
+      get: () => ({ [NAME]: undefined, title: "Cold title" }),
+    };
+    const blankName = { get: () => ({ [NAME]: "", title: "Blank name" }) };
+    const midSync = { get: () => undefined };
+    const rows = mentionableRowsOf(
+      [named, cold, midSync, blankName, undefined],
+    );
+    return rows.length === 3 &&
+      rows[0]?.[NAME] === "Named" &&
+      rows[0]?.title === "Titled" &&
+      rows[0]?.shortName === "42" &&
+      rows[0]?.piece === named &&
+      rows[1]?.[NAME] === "Cold title" &&
+      rows[1]?.shortName === "" &&
+      rows[2]?.[NAME] === "Blank name" &&
+      rows[2]?.piece === blankName;
+  });
+
+  // A topic accepts the index's rows as its mention universe — the exact
+  // list the backfill rewires onto every existing topic. The consumer
+  // materializing proves the three-string demand validates a row list; the
+  // read-back proves the row landed with its copies intact and its piece
+  // still a reference, not a flattened copy of the cell.
+  const rowPieceTarget = new Writable({ title: "Row piece target" });
+  const rowUniverse = new Writable<MentionableRow[] | Default<[]>>([]);
+  const rowUniverseConsumer = Topic({
+    title: "Row universe consumer",
+    mentionable: rowUniverse,
+  });
+  const action_seed_row_universe = action(() => {
+    rowUniverse.push({
+      [NAME]: "Seeded row",
+      title: "Seeded row",
+      shortName: "7",
+      piece: rowPieceTarget,
+    });
+  });
+  const assert_row_universe_accepted = assert(() =>
+    rowUniverse.get().length === 1 &&
+    rowUniverse.get()[0]?.[NAME] === "Seeded row" &&
+    rowUniverse.get()[0]?.shortName === "7" &&
+    equals(rowUniverse.get()[0]?.piece as object, rowPieceTarget) &&
+    rowUniverseConsumer[NAME] === "Row universe consumer"
+  );
+
   // --- mention retraction through the UI affordance ---
 
   // The board's mention PIVOT is no longer exercisable from a pattern test.
@@ -699,6 +827,121 @@ export default pattern(() => {
   // `integration/topic-board-child-contract.test.ts` — but these verbs do not:
   // each one writes the topic's OWN `mentioned` list, and the set semantics
   // that make them mergeable are the part worth pinning here.
+  // --- Stamped removals (Stage C item 1) ---
+  //
+  // A retraction stamps the record and leaves it in place. Driven on a
+  // directly held topic that owns its own cells, for the reason the mention
+  // cases below are: these verbs write the topic's OWN lists, and the caller
+  // has to hand each one a REFERENCE to a stored element, which a projected
+  // array read back off a board cannot supply.
+  const retractionComments = new Writable<TopicComment[]>([]);
+  const retractionLinks = new Writable<TopicLink[]>([]);
+  const retractionSubject = Topic({
+    title: "Retraction subject",
+    comments: retractionComments,
+    links: retractionLinks,
+  });
+
+  const action_retraction_setup = action(() => {
+    retractionSubject.addComment.send({
+      body: "first thought",
+      agentName: "Sol",
+    });
+    // A second comment, so the thread's sort comparator actually compares.
+    // One comment sorts without ever calling it, which leaves the ordering
+    // rule — the thing that decides what a reader sees first — unexercised.
+    retractionSubject.addComment.send({
+      body: "second thought",
+      agentName: "Sol",
+    });
+    retractionSubject.addLink.send({
+      url: "https://example.com/a-page",
+      agentName: "Sol",
+    });
+  });
+
+  const action_edit_comment = action(() => {
+    retractionSubject.editComment.send({
+      comment: retractionComments.key(0),
+      body: "first thought, revised",
+      agentName: "Sol",
+    });
+  });
+
+  // An edit revises the body and stamps `editedAt`, leaving `author` and
+  // `sentAt` alone: an edit changes what was said, not who said it.
+  const assert_comment_edited = assert(() =>
+    retractionSubject.commentCount === 2 &&
+    retractionSubject.comments?.[0]?.body === "first thought, revised" &&
+    retractionSubject.comments?.[0]?.author?.name === "Sol" &&
+    (retractionSubject.comments?.[0]?.editedAt ?? 0) > 0 &&
+    retractionSubject.comments?.[0]?.removedAt === undefined
+  );
+
+  // What the view projection actually carries, which reading the stored
+  // records cannot tell you. `commentsView` filters inside `computed()` and
+  // its lambda touches only `removedAt`, so if this family's demand is
+  // usage-lowered all the way down, the rendered rows would come back with
+  // their bodies absent and every assertion above would still pass. Asserting
+  // through the render is the only place that shows.
+  const assert_rendered_thread_carries_bodies = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return serialized.includes("first thought, revised") &&
+      serialized.includes("Sol");
+  });
+
+  const action_remove_comment = action(() => {
+    retractionSubject.removeComment.send({
+      comment: retractionComments.key(0),
+      agentName: "Sol",
+    });
+  });
+
+  // Stamped, not deleted: the record is still stored and still carries what it
+  // said, while the count stops counting it.
+  const assert_comment_retracted = assert(() =>
+    retractionSubject.commentCount === 1 &&
+    (retractionSubject.comments ?? []).length === 2 &&
+    retractionSubject.comments?.[0]?.body === "first thought, revised" &&
+    (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.comments?.[0]?.removedBy?.name === "Sol"
+  );
+
+  // The reason the design is stamped rather than deleted, stated as the
+  // invariant rather than as a before-and-after. `lastActivityAt` is a max
+  // over what the arrays HOLD, so the retracted comment's own stamps are
+  // still in it — and the retraction, being the newest thing that happened,
+  // is what the max now equals. Skip retracted records in `lastActivityOf`
+  // and this reads the link's older `addedAt` instead, which is exactly the
+  // backwards move that would reorder the board under a reader.
+  const assert_retraction_moved_activity_forward = assert(() =>
+    (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.lastActivityAt ===
+      retractionSubject.comments?.[0]?.removedAt
+  );
+
+  // And the other direction: a retracted comment leaves the rendered thread,
+  // so the filter that `commentCount` applies is the same one the reader sees.
+  const assert_retracted_comment_leaves_the_render = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return !serialized.includes("first thought, revised");
+  });
+
+  const action_remove_link_by_url = action(() => {
+    retractionSubject.removeLink.send({
+      url: "https://example.com/a-page",
+      agentName: "Sol",
+    });
+  });
+
+  // The url spelling reaches a stored record — the spelling that exists
+  // because a link carries no fid for a CLI caller to name.
+  const assert_link_retracted = assert(() =>
+    (retractionSubject.links ?? []).length === 1 &&
+    (retractionSubject.links?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.links?.[0]?.removedBy?.name === "Sol"
+  );
+
   const mentionSubject = Topic({ title: "Mention subject" });
   // Plain cells, because `MentionEvent.topic` declares `Writable<{ title }>`
   // rather than a piece: the verb matches by cell identity, and a piece built
@@ -895,6 +1138,7 @@ export default pattern(() => {
       { assertion: assert_explicit_undefined_author_projection },
       { action: action_submit_profile_topic },
       { assertion: assert_profile_topic_submitted },
+      { assertion: assert_profile_topic_named },
       { action: action_submit_profile_comment },
       { assertion: assert_profile_comment_submitted },
       { action: action_save_profile_body },
@@ -915,11 +1159,25 @@ export default pattern(() => {
       { assertion: assert_body_set },
       { action: action_link_valid_unlabeled },
       { assertion: assert_link_added },
+      { action: action_retraction_setup },
+      { action: action_edit_comment },
+      { assertion: assert_comment_edited },
+      { render: retractionSubject[UI] },
+      { assertion: assert_rendered_thread_carries_bodies },
+      { action: action_remove_comment },
+      { assertion: assert_comment_retracted },
+      { assertion: assert_retraction_moved_activity_forward },
+      { render: retractionSubject[UI] },
+      { assertion: assert_retracted_comment_leaves_the_render },
+      { action: action_remove_link_by_url },
+      { assertion: assert_link_retracted },
       { action: action_add_second_topic },
       { assertion: assert_second_topic },
       { render: board[UI] },
       { assertion: assert_index_baseline },
       { assertion: assert_index_bounded },
+      { assertion: assert_mention_index_baseline },
+      { assertion: assert_mention_index_bounded },
       { assertion: assert_cell_link_markup },
       { render: board[UI] },
       { action: action_comment_first_again },
@@ -927,6 +1185,7 @@ export default pattern(() => {
       { assertion: assert_third_topic },
       { render: board[UI] },
       { assertion: assert_index_tracks_the_board },
+      { assertion: assert_mention_index_tracks_the_board },
       { action: action_submit_blank_comment_draft },
       { assertion: assert_blank_draft_rejected },
       { action: action_start_edit },
@@ -938,6 +1197,9 @@ export default pattern(() => {
       // board's shared TopicPiece projection.
       { render: directTopic[UI] },
       { assertion: assert_pure_helpers },
+      { assertion: assert_mention_index_rows_pure },
+      { action: action_seed_row_universe },
+      { assertion: assert_row_universe_accepted },
       { assertion: assert_self_mention_inert_through_a_twin },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
       { action: action_mention_subject_gets_a_link },

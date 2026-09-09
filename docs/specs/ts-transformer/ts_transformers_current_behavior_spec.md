@@ -971,8 +971,7 @@ legal, and a rule written without them breaks working patterns:
 - **Below the root.** A reserved key one level down names a field of another
   piece, where `unknown` is what keeps the field a reference to that piece's own
   screen rather than a copy, so the controls in it stay bound to the piece that
-  owns them. `packages/patterns/record.tsx` reads a sub-piece's settings screen
-  that way.
+  owns them.
 
 Root-ness follows a `$ref` into `$defs`, because a `$ref` measures the same
 value against another schema — a recursive result type emits exactly that
@@ -1036,8 +1035,9 @@ The rewriter uses normalized data-flow dependencies and ordered emitters:
 
 The container emitter owns a literal that holds other expressions, and a
 transparent wrapper around one: it rewrites the children and leaves the
-container unwrapped. It reads the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped container is owned on the
-same terms as a bare one.
+container unwrapped. It reads the transparent wrapper set (parentheses, `as`,
+`<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped container
+is owned on the same terms as a bare one.
 
 The data-flow analysis behind these emitters reads that same set twice. An
 expression wrapped in it is analyzed as the expression it wraps, which is what
@@ -1046,6 +1046,15 @@ named there falls to the generic child walk, which merges through
 `mergeAnalyses` and drops the hint. Normalization then groups flows by their
 normalized text, and strips the set before comparing, so flows differing only
 by a wrapper collapse into one dependency instead of splitting.
+
+Capture selection reads it a third time. A lift captures the fields its body
+reads, and the dedup deciding that asks each data flow for its root identifier,
+looking through member access, calls, and the wrapper set. A reference whose
+root goes unrecognized is not merely skipped: the free-identifier pass then adds
+that root as a capture of its own, and a whole-object capture subsumes the
+narrower paths beside it. The lift is then applied to the whole object and
+re-runs for any field of it, where it could have been applied to the one field
+the body reads.
 
 Key rewrite rules:
 
@@ -1848,7 +1857,7 @@ The JavaScript compiler exposes the sidecar through
 `CompiledTypeScriptModule.builderSourceSites`. Runner module artifacts persist
 it with module bytes through the in-memory and cell-backed caches; invalid or
 unknown sidecar data is discarded as debug-data loss without affecting module
-execution. After verified evaluation, `Engine.recordModuleProvenance` joins the
+execution. After verified evaluation, `Engine.#recordModuleProvenance` joins the
 module identity, runtime symbol, and source path into
 `cf:module/<identity>/<path>:<line>:<col>` and records it in the separate
 debug-only `authored-debug-source` `WeakMap`. Lazy `fn.src` and `fn.name`
@@ -1921,6 +1930,13 @@ Special path:
   schema).
 - `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains `true`
 - arrays of `unknown` emit `items: { type: "unknown" }`
+- the node-based generator analyzes through a `readonly` type operator to
+  its wrapped array type. A pattern-scope `.get()` on a `Cell<unknown[]>`
+  lowers to a lift with result type `readonly unknown[]` and result schema
+  `{ type: "array", items: { type: "unknown" } }`. The derived cell keeps
+  this reference-only element schema. The
+  `schema-injection/cell-get-readonly-array-result` fixture pins the emitted
+  lift schemas, including a `number[]` control.
 - synthetic unions preserve explicit `{ type: "unknown" }` members in `anyOf`
   rather than collapsing them away
 - `Reactive<T>` does not emit an opaque marker. Cell, stream, and opaque
@@ -1954,7 +1970,7 @@ form does.
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark
 `cf piece verbs` hides by default (verb contract WS-F; everything stays
-callable, `cf call` never consults marks). A property is marked when its
+callable, `cf piece call` never consults marks). A property is marked when its
 returned value resolves (identifier → nearest const initializer, callback body
 first then module scope) to an applied handler factory that:
 
@@ -3175,7 +3191,7 @@ CT-1886); stores hold claims minted under those spellings (see the
 spelling-compat note in the normalizer's doc comment).
 
 **Runtime consumption.** After a verified evaluation,
-`Engine.recordModuleProvenance` reads the annotation off each exported or
+`Engine.#recordModuleProvenance` reads the annotation off each exported or
 `__cfReg`-registered builder artifact (`readBindingIdentity`,
 `packages/runner/src/harness/verified-provenance.ts`) and records it as
 `VerifiedProvenance.bindingIdentity` against the implementation function.

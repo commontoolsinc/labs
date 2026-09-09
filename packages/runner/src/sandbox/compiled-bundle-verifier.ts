@@ -106,6 +106,7 @@ export const RESERVED_FACTORY_BINDING_SET: ReadonlySet<string> = new Set<
 >(
   RESERVED_FACTORY_BINDINGS,
 );
+
 const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
   "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
 

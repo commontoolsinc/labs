@@ -73,6 +73,7 @@ export class Page extends EventTarget {
   #page: AstralPage | null;
   #timeout: number;
   #afterNavigation: Array<() => Promise<void> | void> = [];
+  #beforeUnload: Array<() => Promise<void> | void> = [];
   #interactionObserver?: InteractionObserver;
   #defaultTypeDelay = 0;
   #decoratedElements = new WeakSet<AstralElementHandle>();
@@ -119,17 +120,19 @@ export class Page extends EventTarget {
     return this.#page!.dispatchEvent(event);
   }
 
-  // Extended method: Rewrites the contents' `console.*` methods to stringify
-  // objects. The astral console handler only provides a concatenated
-  // string of all console arguments, with objects represented as `"undefined"`.
-  // Calling this method after navigating to a fresh document will properly
-  // stringify objects in `ConsoleEvent#detail.text`.
-  //
-  // It also retains a bounded in-page tail of every formatted console message
-  // on `globalThis.__cfConsoleTail` ({ t, method, text } entries, oldest
-  // dropped). A failure probe evaluated in the page can include that tail, so
-  // a timeout error reports what the page logged around the stall without the
-  // test having to pipe the whole console stream.
+  /**
+   * Rewrites the contents' `console.*` methods to stringify objects. The
+   * Astral console handler only provides a concatenated string of all console
+   * arguments, with objects represented as `"undefined"`. Calling this method
+   * after navigating to a fresh document will properly stringify objects in
+   * `ConsoleEvent#detail.text`.
+   *
+   * It also retains a bounded in-page tail of every formatted console message
+   * on `globalThis.__cfConsoleTail` (`{ t, method, text }` entries, oldest
+   * dropped). A failure probe evaluated in the page can include that tail, so
+   * a timeout error reports what the page logged around the stall without the
+   * test having to pipe the whole console stream.
+   */
   async applyConsoleFormatter() {
     this.#checkIsOk();
 
@@ -189,7 +192,7 @@ export class Page extends EventTarget {
     }, { args: [trueConsoleKey, methods] });
   }
 
-  // Extended method: Takes a screenshot, storing the result at `filename`.
+  /** Takes a screenshot, storing the result at `filename`. */
   async screenshot(
     filename: string,
     options?: ScreenshotOptions,
@@ -199,8 +202,10 @@ export class Page extends EventTarget {
     return Deno.writeFile(filename, screenshot);
   }
 
-  // Extended method: Takes a screenshot and HTML capture, storing
-  // the timestamped artifacts in the provided `snapshotDir`.
+  /**
+   * Takes a screenshot and HTML capture, storing the timestamped artifacts in
+   * the provided `snapshotDir`.
+   */
   async snapshot(snapshotName: string, snapshotDir: string): Promise<void> {
     this.#checkIsOk();
     ensureDirSync(snapshotDir);
@@ -221,8 +226,10 @@ export class Page extends EventTarget {
     console.log(`→ Snapshot saved: ${filePrefix}`);
   }
 
-  // Extended method: Waits for `selector` to contain matching `text`.
-  // Times out after page `timeout` settings.
+  /**
+   * Waits for `selector` to contain matching `text`. Times out after the
+   * page's `timeout` settings.
+   */
   async waitForSelectorWithText(
     selector: string,
     text: string,
@@ -243,8 +250,19 @@ export class Page extends EventTarget {
     }
   }
 
-  // Returns Astral's keyboard with `type` patched to apply the configured
-  // default delay when a call omits one.
+  /**
+   * The Astral page this wraps. Everything this class does goes through it, so
+   * a caller that replaces something on it changes what this page does.
+   */
+  get astralPage(): AstralPage {
+    this.#checkIsOk();
+    return this.#page!;
+  }
+
+  /**
+   * Astral's keyboard, with `type()` patched to apply the configured default
+   * delay when a call omits one.
+   */
   get keyboard(): Keyboard {
     this.#checkIsOk();
     const keyboard = this.#page!.keyboard;
@@ -277,11 +295,38 @@ export class Page extends EventTarget {
     this.#defaultTypeDelay = delay;
   }
 
-  // Registers `hook` to run after every navigation this page performs, once
-  // the navigation itself has settled. Hooks run in the order they were added,
-  // and the returned function removes this one. A page carries several at a
-  // time: the shell driver waits here for the shell to finish booting, and a
-  // presentation run starts its recorder here.
+  /**
+   * Registers `hook` to run before this page's current document goes away: a
+   * navigation, a reload, or the page closing. Hooks run in the order they were
+   * added, and the returned function removes this one. Anything held in the
+   * document's realm — the runtime worker and what it has accumulated — is
+   * still reachable from a hook and gone once it returns.
+   */
+  addBeforeUnloadHook(hook: () => Promise<void> | void): () => void {
+    this.#beforeUnload.push(hook);
+    return () => {
+      const index = this.#beforeUnload.indexOf(hook);
+      if (index >= 0) this.#beforeUnload.splice(index, 1);
+    };
+  }
+
+  async #runBeforeUnloadHooks(): Promise<void> {
+    // Over a snapshot, so a hook registered by a hook waits for the next
+    // unload. Each is re-checked against the live list, so a hook whose remover
+    // ran while an earlier hook was awaiting does not run afterwards.
+    for (const hook of [...this.#beforeUnload]) {
+      if (!this.#beforeUnload.includes(hook)) continue;
+      await hook();
+    }
+  }
+
+  /**
+   * Registers `hook` to run after every navigation this page performs, once the
+   * navigation itself has settled. Hooks run in the order they were added, and
+   * the returned function removes this one. A page carries several at a time:
+   * the shell driver waits here for the shell to finish booting, and a
+   * presentation run starts its recorder here.
+   */
   addAfterNavigationHook(hook: () => Promise<void> | void): () => void {
     this.#afterNavigation.push(hook);
     return () => {
@@ -344,7 +389,7 @@ export class Page extends EventTarget {
     return () => celestial.removeEventListener("Page.screencastFrame", handler);
   }
 
-  // Passthru of `@astral/astral`'s `Page#evaluate`
+  /** Passes through to `@astral/astral`'s `Page#evaluate`. */
   async evaluate<T, R extends readonly unknown[]>(
     evaluate: EvaluateFunction<T, R>,
     evaluateOptions?: EvaluateOptions<R>,
@@ -353,8 +398,10 @@ export class Page extends EventTarget {
     return await this.#page!.evaluate(evaluate, evaluateOptions);
   }
 
-  // Navigates through the browser protocol and waits for the requested
-  // lifecycle event.
+  /**
+   * Navigates through the browser protocol and waits for the requested
+   * lifecycle event.
+   */
   async goto(url: string, options?: NavigationOptions): Promise<void> {
     this.#checkIsOk();
     await this.#runNavigation(() => this.#navigate(url, options));
@@ -368,6 +415,7 @@ export class Page extends EventTarget {
     });
     await previousNavigation;
     try {
+      await this.#runBeforeUnloadHooks();
       await operation();
     } finally {
       releaseNavigation();
@@ -557,7 +605,7 @@ export class Page extends EventTarget {
     await this.#runAfterNavigationHooks();
   }
 
-  // Passthru of `@astral/astral`'s `Page#reload`
+  /** Passes through to `@astral/astral`'s `Page#reload`. */
   async reload(options?: WaitForOptions): Promise<void> {
     this.#checkIsOk();
     await this.#runNavigation(async () => {
@@ -566,11 +614,13 @@ export class Page extends EventTarget {
     });
   }
 
-  // Passthru of `@astral/astral`'s `Page#waitForSelector`.
-  //
-  // With `strategy: "pierce"` the wait is driven by page events and takes no
-  // timeout, and it resolves against the same elements `$` with that strategy
-  // returns: light-DOM elements and elements inside open shadow roots alike.
+  /**
+   * Passes through to `@astral/astral`'s `Page#waitForSelector`.
+   *
+   * With `strategy: "pierce"` the wait is driven by page events and takes no
+   * timeout, and it resolves against the same elements `$` with that strategy
+   * returns: light-DOM elements and elements inside open shadow roots alike.
+   */
   async waitForSelector(
     selector: string,
     options?: WaitForSelectorOptions & SelectorOptions,
@@ -594,7 +644,7 @@ export class Page extends EventTarget {
     );
   }
 
-  // Passthru of `@astral/astral`'s `Page#waitForFunction`
+  /** Passes through to `@astral/astral`'s `Page#waitForFunction`. */
   async waitForFunction<T, R extends readonly unknown[]>(
     func: EvaluateFunction<T, R>,
     evaluateOptions?: EvaluateOptions<R>,
@@ -603,11 +653,13 @@ export class Page extends EventTarget {
     await this.#page!.waitForFunction(func, evaluateOptions);
   }
 
-  // Expose a CDP binding named `name` on the page's global object. Calling
-  // `globalThis[name](payload)` in the page produces a `Runtime.bindingCalled`
-  // notification that `onBindingCalled` delivers to the test process. This is
-  // how an in-page notifier signals the moment a condition holds without the
-  // test polling the DOM.
+  /**
+   * Exposes a CDP binding named `name` on the page's global object. Calling
+   * `globalThis[name](payload)` in the page produces a `Runtime.bindingCalled`
+   * notification that `onBindingCalled()` delivers to the test process. This is
+   * how an in-page notifier signals the moment a condition holds without the
+   * test polling the DOM.
+   */
   async addBinding(name: string): Promise<void> {
     this.#checkIsOk();
     await this.#page!.unsafelyGetCelestialBindings().Runtime.addBinding({
@@ -615,9 +667,11 @@ export class Page extends EventTarget {
     });
   }
 
-  // Unsubscribe the current connection from a binding's notifications. The
-  // bound function may remain on the page's global object; the unique per-wait
-  // name keeps that harmless.
+  /**
+   * Unsubscribes the current connection from a binding's notifications. The
+   * bound function may remain on the page's global object; the unique per-wait
+   * name keeps that harmless.
+   */
   async removeBinding(name: string): Promise<void> {
     this.#checkIsOk();
     await this.#page!.unsafelyGetCelestialBindings().Runtime.removeBinding({
@@ -625,8 +679,11 @@ export class Page extends EventTarget {
     });
   }
 
-  // Subscribe to every `Runtime.bindingCalled` notification, invoking `listener`
-  // with the binding name and its payload. Returns an unsubscribe function.
+  /**
+   * Subscribes to every `Runtime.bindingCalled` notification, invoking
+   * `listener` with the binding name and its payload. Returns an unsubscribe
+   * function.
+   */
   onBindingCalled(
     listener: (name: string, payload: string) => void,
   ): () => void {
@@ -642,7 +699,7 @@ export class Page extends EventTarget {
       celestial.removeEventListener("Runtime.bindingCalled", handler);
   }
 
-  // Passthru of `@astral/astral`'s `Page#$`
+  /** Passes through to `@astral/astral`'s `Page#$`. */
   async $(
     selector: string,
     opts?: SelectorOptions,
@@ -654,7 +711,7 @@ export class Page extends EventTarget {
     return this.#decorateElement(element);
   }
 
-  // Passthru of `@astral/astral`'s `Page#$$`
+  /** Passes through to `@astral/astral`'s `Page#$$`. */
   async $$(selector: string, opts?: SelectorOptions): Promise<ElementHandle[]> {
     this.#checkIsOk();
     const elements = opts?.strategy === "pierce"
@@ -663,15 +720,17 @@ export class Page extends EventTarget {
     return elements.map((element) => this.#decorateElement(element));
   }
 
-  // Extended method: Dispatch one trusted click at a viewport point.
-  //
-  // For a caller that has already worked out where to click — a wait that
-  // measured its target at the instant the target was ready, say — this is the
-  // dispatch on its own. A caller whose target can move may provide a function
-  // that refreshes the point after the interaction observer has finished.
-  // The interaction observer sees this dispatch as it sees an element's, with
-  // no element to name, so a presentation recording still moves and pulses its
-  // cursor over a click aimed by coordinates.
+  /**
+   * Dispatches one trusted click at a viewport point.
+   *
+   * For a caller that has already worked out where to click — a wait that
+   * measured its target at the instant the target was ready, say — this is the
+   * dispatch on its own. A caller whose target can move may provide a function
+   * that refreshes the point after the interaction observer has finished. The
+   * interaction observer sees this dispatch as it sees an element's, with no
+   * element to name, so a presentation recording still moves and pulses its
+   * cursor over a click aimed by coordinates.
+   */
   async clickPoint(
     point: { x: number; y: number },
     options?: { refreshPoint?: () => Promise<{ x: number; y: number }> },
@@ -685,9 +744,10 @@ export class Page extends EventTarget {
     );
   }
 
-  // Passthru of `@astral/astral`'s `Page#close`
+  /** Passes through to `@astral/astral`'s `Page#close`. */
   async close() {
     this.#checkIsOk();
+    await this.#runBeforeUnloadHooks();
     const page = this.#page;
     this.#page = null;
     await page!.close();
@@ -790,10 +850,12 @@ export class Page extends EventTarget {
     );
   }
 
-  // Dispatch one trusted click at `point`, with the interaction observer told
-  // before and after. The point can be refreshed after the observer has
-  // finished. The observer's failure is reported only when the click itself
-  // succeeded, so a recording problem never masks a click problem.
+  /**
+   * Dispatches one trusted click at `point`, with the interaction observer told
+   * before and after. The point can be refreshed after the observer has
+   * finished. The observer's failure is reported only when the click itself
+   * succeeded, so a recording problem never masks a click problem.
+   */
   async #dispatchObservedClick(
     element: ElementHandle | undefined,
     point: { x: number; y: number },

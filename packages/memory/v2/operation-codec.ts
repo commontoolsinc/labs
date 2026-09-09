@@ -1,7 +1,7 @@
 import { rebaseUpdates, type Update } from "@codemirror/collab";
 import { ChangeSet, StateEffect, Text } from "@codemirror/state";
 import type { FabricValue } from "@commonfabric/api";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { CODEMIRROR_CHANGESET_CODEC, encodeMemoryBoundary } from "../v2.ts";
 
 export { CODEMIRROR_CHANGESET_CODEC } from "../v2.ts";

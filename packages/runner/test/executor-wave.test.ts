@@ -29,7 +29,11 @@
 // - DR1/§2: a lease lost mid-wave aborts the wave commit — work sealed
 //   under a lapsed tenure never commits;
 // - protocol.md §2b: multi-space seals commit foreign-first, and a
-//   foreign failure withholds the home commit.
+//   foreign failure withholds the home commit;
+// - protocol.md §2b, the F1b fix: a foreign space whose engine cannot be
+//   resolved withdraws exactly the contributions that sealed into it —
+//   the handler requeues, the derivation drops, everything else commits,
+//   and no batch is ever built for the failed space.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -59,6 +63,7 @@ import {
 } from "../src/storage/v2.ts";
 import type { Signer } from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
+import type { Module, Pattern } from "../src/builder/types.ts";
 import type {
   ITransactionSealSink,
   MemorySpace,
@@ -144,6 +149,132 @@ describe("stage D seal-into-wave", () => {
       // exactly the stage-F SpaceServer posture.
       sessionId: executionLeaseHolder(`service:${space}`),
     });
+
+  const stoppedWitnessPiece = async (
+    id: string,
+    options: { throwOnInstantiation?: number; on?: Runtime } = {},
+  ) => {
+    const host = options.on ?? runtime;
+    let instantiations = 0;
+    let lastRunInstantiation = 0;
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { witness: { type: "number" } },
+      },
+      result: {},
+      nodes: [{
+        module: {
+          type: "raw",
+          implementation: (...args: unknown[]) => {
+            const parentCell = args[4] as {
+              key: (name: string) => { set: (value: number) => void };
+            };
+            instantiations += 1;
+            if (instantiations === options.throwOnInstantiation) {
+              throw new Error(`witness instantiation ${instantiations} failed`);
+            }
+            // `parentCell` is bound to `Runner.#startCore()`'s actual
+            // transaction. A changing value makes every instantiation
+            // contribute a real bookkeeping write instead of being optimized
+            // to a no-op.
+            parentCell.key("witness").set(instantiations);
+            const thisInstantiation = instantiations;
+            const action = () => {
+              lastRunInstantiation = thisInstantiation;
+            };
+            return {
+              action,
+            };
+          },
+        } as Module,
+        inputs: {},
+        outputs: {},
+      }],
+    };
+    const tx = host.edit();
+    const cell = host.getCell<Record<string, unknown>>(
+      space,
+      id,
+      undefined,
+      tx,
+    );
+    const running = host.runner.run(tx, pattern, {}, cell);
+    expect((await tx.commit()).error).toBeUndefined();
+    await running.pull();
+    host.runner.stop(cell);
+    return {
+      cell,
+      instantiations: () => instantiations,
+      lastRunInstantiation: () => lastRunInstantiation,
+    };
+  };
+
+  const routePieceInstantiationWaves = (
+    firstWave: WaveAccumulator,
+    recoveryWave: WaveAccumulator,
+  ) => {
+    let destinationWave = firstWave;
+    const firstSeal = Promise.withResolvers<void>();
+    const recoverySeal = Promise.withResolvers<void>();
+    let recoverySeals = 0;
+    let sealChain = Promise.resolve();
+    runtime.installSealDestination({
+      seal: (tx) => {
+        const target = destinationWave;
+        const sealed = sealChain.then(async () => {
+          const result = await target.seal(tx);
+          if (
+            result.error === undefined &&
+            waveSettlementOf(tx) !== undefined &&
+            waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+          ) {
+            if (target === firstWave) firstSeal.resolve();
+            else {
+              recoverySeals += 1;
+              recoverySeal.resolve();
+            }
+          }
+          return result;
+        });
+        sealChain = sealed.then(() => undefined, () => undefined);
+        return sealed;
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+    return {
+      firstSeal: firstSeal.promise,
+      recoverySeal: recoverySeal.promise,
+      recoverySeals: () => recoverySeals,
+      idleSeals: () => sealChain,
+      useRecoveryWave: () => {
+        destinationWave = recoveryWave;
+      },
+    };
+  };
+
+  const wholeDocumentConflictSink = (
+    inner: WaveCommitSink,
+  ): WaveCommitSink => {
+    const conflictHead = Engine.serverSeq(engine) + 1;
+    return {
+      currentHeads: (_targetSpace, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [
+            `${doc.id} ${doc.scopeKey}`,
+            conflictHead,
+          ])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([[]]),
+      commitWave: (batch) => inner.commitWave(batch),
+    };
+  };
 
   /** Seed a foreign engine's GENESIS ACL as its first commit (OW31 B4:
    * the sink refuses a foreign data batch into a seq-0/no-ACL engine —
@@ -404,6 +535,8 @@ describe("stage D seal-into-wave", () => {
     stampWaveRunContext(tx1, { actionId: "derive-x", kind: "derivation" });
     x.withTx(tx1).set({ value: 10 });
     expect((await tx1.commit()).error).toBeUndefined();
+    const tx1Settlement = waveSettlementOf(tx1);
+    expect(tx1Settlement).toBeDefined();
 
     const tx2 = runtime.edit();
     stampWaveRunContext(tx2, { actionId: "derive-z", kind: "derivation" });
@@ -431,6 +564,7 @@ describe("stage D seal-into-wave", () => {
     runtime.clearSealDestination();
     const outcome = await wave.commitWave(newSink());
     await wave.settled();
+    const tx1Settled = await tx1Settlement!;
 
     // The superseded pure write dropped (counted), and the derivation
     // that READ the withdrawn write dropped with it — nothing derived
@@ -440,6 +574,10 @@ describe("stage D seal-into-wave", () => {
     expect(outcome.dependencyDroppedWrites).toBe(1);
     expect(outcome.dispositions[0]).toEqual({ kind: "dropped" });
     expect(outcome.dispositions[1]).toEqual({ kind: "dropped" });
+    expect(
+      (tx1Settled.error as { waveWithdrawalCause?: unknown } | undefined)
+        ?.waveWithdrawalCause,
+    ).toBe("contribution-dropped");
     // No wave commit happened at all (nothing survived), and the
     // authored value stands — dropping is what makes that sound.
     expect(outcome.seq).toBeUndefined();
@@ -900,107 +1038,86 @@ describe("stage D seal-into-wave", () => {
     expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
   });
 
-  it("rebases an indexed stream consequence across a concurrent tail append", async () => {
-    const stream = runtime.getCell<{ $stream: boolean }>(
+  it("rebases an event's consequence mark against a CONCURRENT tail append to the same stream sidecar (§3d's stream-sidecar refinement)", async () => {
+    // The sidecar's two writers meet at `/value/entries`: the loop marks
+    // the entry it just processed, and a delivery appends a new one. The
+    // general prefix-overlap rule reads that as a conflict — an
+    // index-addressed mark sits under the appended-to array — and would
+    // requeue every event whose stream took a concurrent fire. A tail
+    // append creates only NEW indices, so the two commute.
+
+    const streamLink = { id: "of:sidecar-rebase-stream", path: ["stream"] };
+    const sidecarId = streamEntriesDocId(streamLink);
+    const deliver = (eventId: string, localSeq: number) =>
+      server.commitDelegatedAppend({
+        targetSpace: space,
+        targetStream: sidecarId,
+        targetStreamLink: streamLink,
+        eventId,
+        payload: { via: "sidecar rebase" },
+        actingPrincipal: "did:key:alice",
+        actingSession: "sidecar-rebase-session",
+        capabilityRef: "cap-sidecar-rebase",
+        sessionId: `service:${space}`,
+        localSeq,
+      });
+
+    // The event under processing: one durable entry at index 0.
+    expect((await deliver("e-marked", 900_001)).deduped).toBe(false);
+    // Loaded before the mark, as the drain leaves it: a write against an
+    // unloaded doc commits as a whole-doc set, and only a patch can
+    // commute with anything.
+    await runtime.getCellFromLink({
       space,
-      "wave-stream-rebase",
-      undefined,
-    );
-    const streamLink = stream.getAsNormalizedFullLink();
-    const streamRef = { id: streamLink.id, path: [...streamLink.path] };
-    const sidecarId = streamEntriesDocId(streamRef);
+      id: sidecarId as never,
+      scope: "space",
+      path: [],
+    }).sync();
 
     const lease = liveLease();
-    const sink = newSink();
-    const seedWave = newWave({ lease });
-    runtime.installSealDestination(seedWave);
-    const seedTx = runtime.edit();
-    stampWaveRunContext(seedTx, {
-      actionId: "seed-stream-entry",
-      kind: "derivation",
-      acting: { user: "did:key:alice", session: "sess-1" },
-    });
-    seedTx.writeValueOrThrow(
-      { space, id: sidecarId, path: [] } as never,
-      {
-        entries: [{
-          eventId: "e-stream-seed",
-          stream: streamRef,
-          payload: { value: 1 },
-          firedAt: { user: "did:key:alice", session: "sess-1" },
-        }],
-      } as never,
-    );
-    expect((await seedTx.commit()).error).toBeUndefined();
-    runtime.clearSealDestination();
-    const seedOutcome = await seedWave.commitWave(sink);
-    await seedWave.settled();
-    expect(seedOutcome.aborted).toBeUndefined();
-
     const wave = newWave({ lease });
     runtime.installSealDestination(wave);
-    const consequenceTx = runtime.edit();
-    stampWaveRunContext(consequenceTx, {
-      actionId: "handle-stream-entry",
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "sidecar-handler",
       kind: "event-handler",
-      eventId: "e-stream-seed",
+      eventId: "e-marked",
       acting: { user: "did:key:alice" },
     });
-    consequenceTx.writeValueOrThrow(
-      {
-        space,
-        id: sidecarId,
-        path: ["entries", "0", "consequenced"],
-      } as never,
-      true as never,
-    );
-    expect((await consequenceTx.commit()).error).toBeUndefined();
+    // The consequence mark, written exactly as the dispatch writes it:
+    // the handler's own tx carries `entries/<index>/consequenced`.
+    runtime.getCellFromLink<boolean>({
+      space,
+      id: sidecarId as never,
+      scope: "space",
+      path: ["entries", "0", "consequenced"],
+    }).withTx(tx).set(true);
+    expect((await tx.commit()).error).toBeUndefined();
     runtime.clearSealDestination();
 
-    Engine.applyCommit(engine, {
-      sessionId: "stream-rival-session",
-      space,
-      principal: "user:rival",
-      commit: {
-        localSeq: 1,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "patch",
-          id: sidecarId,
-          patches: [{
-            op: "append",
-            path: "/value/entries",
-            values: [{
-              eventId: "e-stream-rival",
-              stream: streamRef,
-              payload: { value: 2 },
-            }],
-          }],
-        }],
-        eventAppends: [{ id: sidecarId, eventId: "e-stream-rival" }],
-      },
-    });
+    // The concurrent writer: a second event delivered onto the same
+    // stream after the wave's basis — a tail append at `/value/entries`,
+    // the only shape the sidecar admits from anyone but the loop.
+    expect((await deliver("e-appended", 900_002)).deduped).toBe(false);
 
-    const outcome = await wave.commitWave(sink);
+    const outcome = await wave.commitWave(newSink());
     await wave.settled();
 
     expect(outcome.aborted).toBeUndefined();
     expect(outcome.requeuedEventIds).toEqual([]);
-    expect(outcome.dispositions).toEqual([{ kind: "committed" }]);
+    expect(outcome.committedEventIds).toEqual(["e-marked"]);
+    // Both survive: the appended entry AND the mark on the entry that
+    // was already there.
     const stored = Engine.readState(engine, { id: sidecarId })?.document
-      ?.value as
-        | {
-          entries?: Array<{
-            eventId?: string;
-            consequenced?: boolean;
-          }>;
-        }
-        | undefined;
+      ?.value as {
+        entries?: Array<{ eventId?: string; consequenced?: boolean }>;
+      } | undefined;
     expect(stored?.entries?.map((entry) => entry.eventId)).toEqual([
-      "e-stream-seed",
-      "e-stream-rival",
+      "e-marked",
+      "e-appended",
     ]);
     expect(stored?.entries?.[0].consequenced).toBe(true);
+    expect(stored?.entries?.[1].consequenced).toBeUndefined();
   });
 
   it("aborts the wave commit when the lease tenure lapsed (work sealed under a lapsed tenure never commits)", async () => {
@@ -1161,70 +1278,153 @@ describe("stage D seal-into-wave", () => {
     }
   });
 
-  it("commits contributions that do not target a failed foreign space", async () => {
+  it("an unresolvable foreign space withdraws exactly its own crossings: the handler requeues, the derivation drops, a home-only contribution commits, and no batch reaches the failed space (protocol.md §2b; the F1b fix)", async () => {
+    // What a wave is carrying when a foreign space fails decides which
+    // arms of the withdrawal run: the requeue arm needs a handler that
+    // crossed into that space, the drop arm needs a derivation that
+    // crossed, and the skip arm needs a contribution that stayed home.
+    // A test driving the serving loop gets whichever of the three
+    // happen to seal into one wave, so this one builds the wave itself
+    // and puts all three in it.
     const foreignSigner = await Identity.fromPassphrase(
-      "wave unresolved foreign space",
+      "wave foreign unresolvable",
     );
     const foreign = foreignSigner.did() as MemorySpace;
-    const wave = newWave({ lease: liveLease() });
+    const foreignEngine = await server.engineForSpace(foreign);
+    seedGenesisAcl(foreignEngine, foreign);
+    const lease = liveLease();
+
+    const wave = newWave({ lease });
     runtime.installSealDestination(wave);
 
-    const failedHome = runtime.getCell<{ value: number }>(
-      space,
-      "failed-foreign-home",
-      undefined,
-    );
-    const failedForeign = runtime.getCell<{ value: number }>(
+    // The crossing handler: a §2b provisioning run with a home write of
+    // its own, so its withdrawal is visible in both spaces.
+    const handlerForeign = runtime.getCell<{ value: number }>(
       foreign,
-      "failed-foreign-target",
+      "f1b-handler-foreign",
       undefined,
     );
-    const failedTx = runtime.edit();
-    stampWaveRunContext(failedTx, {
-      actionId: "failed-foreign-event",
+    const handlerHome = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-handler-home",
+      undefined,
+    );
+    const handlerTx = runtime.edit();
+    stampWaveRunContext(handlerTx, {
+      actionId: "provision/handler",
       kind: "event-handler",
-      eventId: "e-failed-foreign",
+      eventId: "e-crossing",
       acting: { user: "did:key:alice", session: "sess-1" },
       capabilityRef: "cap:test-grant",
     });
-    failedTx.enableMultiSpaceWrites?.([space, foreign]);
-    failedHome.withTx(failedTx).set({ value: 1 });
-    failedForeign.withTx(failedTx).set({ value: 2 });
-    expect((await failedTx.commit()).error).toBeUndefined();
+    handlerTx.enableMultiSpaceWrites?.([foreign, space]);
+    handlerForeign.withTx(handlerTx).set({ value: 1 });
+    handlerHome.withTx(handlerTx).set({ value: 2 });
+    expect((await handlerTx.commit()).error).toBeUndefined();
 
-    const survivingHome = runtime.getCell<{ value: number }>(
-      space,
-      "failed-foreign-survivor",
+    // The crossing derivation: same target space, and no event behind
+    // it, so it takes the drop arm rather than the requeue arm.
+    const derivationForeign = runtime.getCell<{ value: number }>(
+      foreign,
+      "f1b-derivation-foreign",
       undefined,
     );
-    const survivingTx = runtime.edit();
-    stampWaveRunContext(survivingTx, {
-      actionId: "unrelated-home-derivation",
+    const derivationHome = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-derivation-home",
+      undefined,
+    );
+    const derivationTx = runtime.edit();
+    stampWaveRunContext(derivationTx, {
+      actionId: "derive/crossing",
+      kind: "derivation",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      scopeKeyIdentity: { principal: "did:key:alice", sessionId: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    derivationTx.enableMultiSpaceWrites?.([foreign, space]);
+    derivationForeign.withTx(derivationTx).set({ value: 3 });
+    derivationHome.withTx(derivationTx).set({ value: 4 });
+    expect((await derivationTx.commit()).error).toBeUndefined();
+
+    // The bystander: everything else the wave is carrying. It never
+    // touched the failed space and reads nothing the withdrawals take
+    // away, so it commits.
+    const bystander = runtime.getCell<{ value: number }>(
+      space,
+      "f1b-bystander",
+      undefined,
+    );
+    const bystanderTx = runtime.edit();
+    stampWaveRunContext(bystanderTx, {
+      actionId: "derive/bystander",
       kind: "derivation",
     });
-    survivingHome.withTx(survivingTx).set({ value: 3 });
-    expect((await survivingTx.commit()).error).toBeUndefined();
-
-    wave.failForeignSpace(foreign, "injected engine lookup failure");
+    bystander.withTx(bystanderTx).set({ value: 5 });
+    expect((await bystanderTx.commit()).error).toBeUndefined();
     runtime.clearSealDestination();
-    const outcome = await wave.commitWave(newSink());
+
+    wave.failForeignSpace(foreign, "engine open failed (test)");
+
+    // The sink stands in for the serving loop's own, which reaches the
+    // failed space through an engine lookup that has nothing to return:
+    // a batch built for it can only be refused, and the refusal aborts
+    // the wave. The recorded spaces say whether one was built at all.
+    const foreignSeqBefore = Engine.serverSeq(foreignEngine);
+    const inner = newSink();
+    const committedSpaces: MemorySpace[] = [];
+    const recordingSink: WaveCommitSink = {
+      currentHeads: (s, docs) => inner.currentHeads(s, docs),
+      concurrentWritePaths: (s, doc, since) =>
+        inner.concurrentWritePaths(s, doc, since),
+      commitWave: (
+        batch,
+      ): Promise<Result<{ seq: number }, WaveCommitRejection>> => {
+        committedSpaces.push(batch.space);
+        if (batch.space !== space) {
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: `no resolved co-hosted engine for ${batch.space}`,
+            },
+          });
+        }
+        return inner.commitWave(batch);
+      },
+    };
+    const outcome = await wave.commitWave(recordingSink);
     await wave.settled();
 
     expect(outcome.aborted).toBeUndefined();
-    expect(outcome.requeuedEventIds).toEqual(["e-failed-foreign"]);
     expect(outcome.dispositions).toEqual([
       { kind: "requeued" },
+      { kind: "dropped" },
       { kind: "committed" },
     ]);
+    // The handler's event stays pending and replays; the derivation is
+    // recomputed on demand, and its one withdrawn home write is counted.
+    expect(outcome.requeuedEventIds).toEqual(["e-crossing"]);
+    expect(outcome.dependencyDroppedWrites).toBe(1);
+
+    // Nothing reached the failed space, and at home only the bystander's
+    // write landed.
+    expect(committedSpaces).toEqual([space]);
+    expect(Engine.serverSeq(foreignEngine)).toBe(foreignSeqBefore);
     expect(
       Engine.selectDocHead(engine, {
-        id: failedHome.getAsNormalizedFullLink().id,
+        id: handlerHome.getAsNormalizedFullLink().id,
         scopeKey: "space",
       }),
     ).toBe(0);
     expect(
       Engine.selectDocHead(engine, {
-        id: survivingHome.getAsNormalizedFullLink().id,
+        id: derivationHome.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBe(0);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: bystander.getAsNormalizedFullLink().id,
         scopeKey: "space",
       }),
     ).toBeGreaterThan(0);
@@ -2034,6 +2234,8 @@ describe("stage D seal-into-wave", () => {
     x.withTx(tx).set({ value: 1 });
     keep.withTx(tx).set({ value: 2 });
     expect((await tx.commit()).error).toBeUndefined();
+    const settlement = waveSettlementOf(tx);
+    expect(settlement).toBeDefined();
     runtime.clearSealDestination();
 
     // The rival lands BETWEEN the accumulator's head query and the store
@@ -2069,6 +2271,7 @@ describe("stage D seal-into-wave", () => {
 
     const outcome = await wave.commitWave(racingSink);
     await wave.settled();
+    const settled = await settlement!;
 
     // Attempt 1 was rejected with the doc NAMED; the loop folded it in,
     // dropped the superseded write, and attempt 2 committed the rest.
@@ -2079,6 +2282,11 @@ describe("stage D seal-into-wave", () => {
       kind: "partially-dropped",
       droppedOps: 1,
     });
+    expect(settled.error).toBeDefined();
+    expect(
+      (settled.error as { waveWithdrawalCause?: unknown })
+        .waveWithdrawalCause,
+    ).toBeUndefined();
     const stored = Engine.readState(engine, { id: xLink.id });
     expect(stored?.document).toEqual({ value: { value: 99 } });
     const keepLink = keep.getAsNormalizedFullLink();
@@ -2598,7 +2806,11 @@ describe("stage D seal-into-wave", () => {
     class BootstrapLoopbackFactory implements SessionFactory {
       readonly supportsAclBootstrap = true;
       readonly principals: string[] = [];
-      constructor(private readonly server: MemoryV2Server.Server) {}
+      readonly #server: MemoryV2Server.Server;
+
+      constructor(server: MemoryV2Server.Server) {
+        this.#server = server;
+      }
       async create(
         targetSpace: MemorySpace,
         sessionSigner?: Signer,
@@ -2606,7 +2818,7 @@ describe("stage D seal-into-wave", () => {
       ) {
         this.principals.push(sessionSigner?.did() ?? "<anonymous>");
         const client = await MemoryV2Client.connect({
-          transport: MemoryV2Client.loopback(this.server),
+          transport: MemoryV2Client.loopback(this.#server),
         });
         const session = await client.mount(
           targetSpace,
@@ -3493,6 +3705,600 @@ describe("stage D seal-into-wave", () => {
     const stored = Engine.readState(engine, { id: link.id });
     expect(stored?.document).toEqual({ value: { seq: 9, other: 7 } });
   });
+
+  it("reinstantiates a piece once after an immediate stale-read refusal", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read",
+    );
+    let pieceInstantiationSeals = 0;
+    let readinessCalls = 0;
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    // The refusal names a REAL document, in the shape `toRejectedError`
+    // hands the runner: the engine's message plus the conflict descriptor
+    // parsed out of it. Readiness has two halves — the wire's `readyToRetry`
+    // gate and the named document's pull — and a refusal carrying no
+    // `conflict` silently exercises only the first.
+    const conflicted = witness.cell.getAsNormalizedFullLink().id;
+    const pulled: string[] = [];
+    const provider = runtime.storageManager.open(space);
+    const providerSync = provider.sync.bind(provider);
+    (provider as { sync: typeof provider.sync }).sync = ((
+      ...args: Parameters<typeof provider.sync>
+    ) => {
+      pulled.push(String(args[0]));
+      return providerSync(...args);
+    }) as typeof provider.sync;
+    const staleRead = {
+      name: "ConflictError" as const,
+      message: `stale confirmed read: ${conflicted} at seq 0 ` +
+        "conflicted with seq 1",
+      conflict: { space, the: "application/json", of: conflicted },
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit();
+        }
+        pieceInstantiationSeals += 1;
+        if (pieceInstantiationSeals === 1) {
+          return Promise.resolve({ error: staleRead as never });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(pieceInstantiationSeals).toBe(2);
+    expect(readinessCalls).toBe(1);
+    expect(
+      pulled,
+      "readiness must also pull the conflicted document, so the retry's " +
+        "write carries its true version instead of re-asserting seq 0",
+    ).toContain(conflicted);
+    expect(
+      failures,
+      "a refusal the retry repaired is not a structure-load failure",
+    ).toEqual([]);
+    expect(witness.instantiations()).toBe(3);
+    expect(witness.lastRunInstantiation()).toBe(3);
+  });
+
+  it("keeps a stale-read instantiation refusal terminal off the flag", async () => {
+    const offManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const offRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: offManager,
+      experimental: { serverExecution: false },
+    });
+    try {
+      const witness = await stoppedWitnessPiece(
+        "off-piece-instantiate-stale-read",
+        { on: offRuntime },
+      );
+
+      // The instantiate transaction names ITSELF through `stampServerRun`,
+      // which an OFF runtime still calls even though it records nothing.
+      // That is the handle this test needs: an OFF runtime rejects the seal
+      // destination the flag-ON tests refuse through, and a start mints
+      // several transactions, so refusing merely the first would not say
+      // which one was refused.
+      const instantiateTxs = new WeakSet<object>();
+      const originalStamp = offRuntime.stampServerRun.bind(offRuntime);
+      (offRuntime as { stampServerRun: typeof offRuntime.stampServerRun })
+        .stampServerRun = ((
+          tx: Parameters<typeof offRuntime.stampServerRun>[0],
+          info: Parameters<typeof offRuntime.stampServerRun>[1],
+        ) => {
+          if (info.actionId.startsWith("piece-instantiate/")) {
+            instantiateTxs.add(tx);
+          }
+          return originalStamp(tx, info);
+        }) as typeof offRuntime.stampServerRun;
+
+      const conflicted = witness.cell.getAsNormalizedFullLink().id;
+      const staleRead = {
+        name: "ConflictError" as const,
+        message: `stale confirmed read: ${conflicted} at seq 0 ` +
+          "conflicted with seq 1",
+        conflict: { space, the: "application/json", of: conflicted },
+        readyToRetry: () => Promise.resolve(),
+      };
+      let refusals = 0;
+      const originalEdit = offRuntime.edit.bind(offRuntime);
+      (offRuntime as { edit: typeof offRuntime.edit }).edit = ((
+        ...args: Parameters<typeof offRuntime.edit>
+      ) => {
+        const tx = originalEdit(...args);
+        const commit = tx.commit.bind(tx);
+        (tx as { commit: typeof tx.commit }).commit = (() => {
+          if (!instantiateTxs.has(tx)) return commit();
+          refusals += 1;
+          tx.abort(staleRead.message);
+          return Promise.resolve({ error: staleRead as never });
+        }) as typeof tx.commit;
+        return tx;
+      }) as typeof offRuntime.edit;
+
+      let readinessCalls = 0;
+      const originalReadiness = offRuntime.awaitCommitRetryReadiness.bind(
+        offRuntime,
+      );
+      offRuntime.awaitCommitRetryReadiness = ((
+        ...args: Parameters<typeof offRuntime.awaitCommitRetryReadiness>
+      ) => {
+        readinessCalls += 1;
+        return originalReadiness(...args);
+      }) as typeof offRuntime.awaitCommitRetryReadiness;
+
+      const started = await offRuntime.start(witness.cell);
+      await offRuntime.idle();
+      await offRuntime.runner.idlePieceInstantiationSettlements();
+
+      // The refusal reached the instantiate commit itself, and off the flag
+      // it stays terminal: no catch-up is awaited and no second attempt is
+      // made. The repaired view a retry would read is the serving side's to
+      // supply, and an OFF runtime has none, so the start reports the piece
+      // as not running rather than recovering it. The same refusal under
+      // the flag leaves `start` true and instantiates a third time.
+      expect(refusals).toBe(1);
+      expect(started).toBe(false);
+      expect(readinessCalls).toBe(0);
+      expect(witness.instantiations()).toBe(2);
+    } finally {
+      await offRuntime.dispose();
+      await offManager.close();
+    }
+  });
+
+  it("tears down after a second stale-read refusal instead of spinning", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-twice",
+    );
+    let pieceInstantiationSeals = 0;
+    let readinessCalls = 0;
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    const conflicted = witness.cell.getAsNormalizedFullLink().id;
+    const staleRead = {
+      name: "ConflictError" as const,
+      message: `stale confirmed read: ${conflicted} at seq 0 ` +
+        "conflicted with seq 1",
+      conflict: { space, the: "application/json", of: conflicted },
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit();
+        }
+        pieceInstantiationSeals += 1;
+        if (pieceInstantiationSeals <= 2) {
+          return Promise.resolve({ error: staleRead as never });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    // Exactly one retry. A basis the serving side does not repair is a
+    // permanent refusal, so the second one retires the registration rather
+    // than spinning on it.
+    expect(pieceInstantiationSeals).toBe(2);
+    expect(readinessCalls).toBe(1);
+    expect(failures).toContain(staleRead);
+    expect(witness.instantiations()).toBe(3);
+
+    // Retired, not wedged: a later owner starts the piece afresh.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(4);
+  });
+
+  it("declines a stale-read refusal the stopped piece no longer owns", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-stopped",
+    );
+    let pieceInstantiationSeals = 0;
+    let readinessCalls = 0;
+    const refusalRequested = Promise.withResolvers<void>();
+    const heldRefusal = Promise.withResolvers<{ error: unknown }>();
+    const staleRead = {
+      name: "ConflictError" as const,
+      message: "stale confirmed read: of:piece-start at seq 0 " +
+        "conflicted with seq 1",
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit();
+        }
+        pieceInstantiationSeals += 1;
+        if (pieceInstantiationSeals === 1) {
+          refusalRequested.resolve();
+          return heldRefusal.promise as never;
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await refusalRequested.promise;
+
+    // The stop lands while the instantiate commit is still in flight, so the
+    // refusal arrives against a registration this attempt no longer owns.
+    // Recovery declines: the stop keeps the key, and no readiness gate is
+    // entered on behalf of retired nodes.
+    runtime.runner.stop(witness.cell);
+    heldRefusal.resolve({ error: staleRead as never });
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(pieceInstantiationSeals).toBe(1);
+    expect(readinessCalls).toBe(0);
+    expect(witness.instantiations()).toBe(2);
+  });
+
+  it("tears down after an immediate non-stale instantiation refusal", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-terminal-refusal",
+    );
+    const refusal = {
+      name: "TransactionError" as const,
+      message: "piece instantiate destination refused",
+    };
+    const failures: unknown[] = [];
+    let refusals = 0;
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/") &&
+          refusals === 0
+        ) {
+          refusals += 1;
+          return Promise.resolve({ error: refusal as never });
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(refusals).toBe(1);
+    expect(failures).toContain(refusal);
+    expect(witness.instantiations()).toBe(2);
+
+    // A terminal refusal retires the exact outer registration, so a later
+    // owner can start the piece afresh instead of finding a dead entry.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(3);
+  });
+
+  it("reinstantiates a piece once after its bookkeeping contribution is withdrawn, preserving the live registration and action", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-recovery",
+    );
+    const { cell } = witness;
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const failures: Array<{ actionId: string; error: unknown }> = [];
+    runtime.pieceStartCommitFailureObserver = (failure) => {
+      failures.push(failure);
+    };
+
+    expect(await runtime.start(cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+
+    // Every document the first wave wrote appears to have advanced, and a
+    // whole-document rival write overlaps it. Bookkeeping cannot commute with
+    // that shape, so the accumulator deterministically drops the complete
+    // piece-instantiate contribution instead of relying on event-loop timing.
+    const inner = newSink();
+    const conflictSink = wholeDocumentConflictSink(inner);
+    const firstOutcome = await firstWave.commitWave(conflictSink);
+    await firstWave.settled();
+    expect(
+      firstOutcome.dispositions.some((disposition) =>
+        disposition.kind === "dropped"
+      ),
+    ).toBe(true);
+
+    // Settlement, not seal acceptance, triggers one fresh instantiation into
+    // the next wave. Let its newly registered actions quiesce before closing
+    // that wave, matching the serving loop's seal barrier.
+    await route.recoverySeal;
+    await runtime.idle();
+    runtime.clearSealDestination();
+    const recoveryOutcome = await recoveryWave.commitWave(inner);
+    await recoveryWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(recoveryOutcome.aborted).toBeUndefined();
+    expect(route.recoverySeals()).toBe(1);
+    expect(
+      failures.filter((failure) =>
+        failure.actionId.startsWith("piece-instantiate/")
+      ),
+      "a withdrawal the retry repaired is not a structure-load failure",
+    ).toEqual([]);
+
+    // The retry kept the original outer registration alive, and the action
+    // belonging to its third raw-module instantiation ran.
+    expect(witness.instantiations()).toBe(3);
+    expect(witness.lastRunInstantiation()).toBe(3);
+    lease.release();
+  });
+
+  it("tears down after a second dropped piece-instantiation contribution instead of retrying again", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-second-drop",
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const conflictSink = wholeDocumentConflictSink(newSink());
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    await firstWave.commitWave(conflictSink);
+    await firstWave.settled();
+    await route.recoverySeal;
+    await runtime.idle();
+    await recoveryWave.commitWave(conflictSink);
+    await recoveryWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    // Initial materialization + losing start + its one retry. A loop would
+    // instantiate a fourth graph after the recovery wave withdrew it.
+    expect(witness.instantiations()).toBe(3);
+
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(4);
+    lease.release();
+  });
+
+  it("surfaces a synchronous reinstantiation failure and tears down the registration", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-retry-throws",
+      { throwOnInstantiation: 3 },
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    await firstWave.commitWave(wholeDocumentConflictSink(newSink()));
+    await firstWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(witness.instantiations()).toBe(3);
+    expect(
+      failures.some((error) =>
+        error instanceof Error && error.message ===
+          "witness instantiation 3 failed"
+      ),
+    ).toBe(true);
+    expect(route.recoverySeals()).toBe(0);
+
+    // The failed retry retired the exact outer registration, so an ordinary
+    // later start can instantiate it afresh instead of finding a dead entry.
+    runtime.clearSealDestination();
+    recoveryWave.abandon("test cleanup");
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(4);
+    lease.release();
+  });
+
+  it("surfaces a rejected piece-instantiation commit and tears down the registration", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-commit-rejects",
+    );
+    const rejection = new Error("piece instantiate destination rejected");
+    const failures: unknown[] = [];
+    let rejections = 0;
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          rejections += 1;
+          return Promise.reject(rejection);
+        }
+        return tx.tx.commit();
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(rejections).toBe(1);
+    expect(failures).toContain(rejection);
+
+    // Promise rejection takes the same exact-registration teardown path as a
+    // refused Result, so the next owner can start the piece normally.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(3);
+  });
+
+  it("aborts held retry readiness when the piece stops and does not revive it", async () => {
+    const { cell } = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stop",
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const readinessEntered = Promise.withResolvers<void>();
+    const heldReadiness = Promise.withResolvers<void>();
+    // Park the recovery inside the readiness gate. The withdrawal error the
+    // wave mints carries no `readyToRetry`, so one is threaded onto it here
+    // and the real gate still races it against the teardown signal — which
+    // is the behavior under test.
+    const originalReadiness = runtime.awaitCommitRetryReadiness.bind(runtime);
+    runtime.awaitCommitRetryReadiness = ((
+      error: unknown,
+      signal?: AbortSignal,
+    ) => {
+      (error as { readyToRetry?: () => Promise<void> }).readyToRetry = () => {
+        readinessEntered.resolve();
+        return heldReadiness.promise;
+      };
+      return originalReadiness(error, signal);
+    }) as typeof runtime.awaitCommitRetryReadiness;
+
+    expect(await runtime.start(cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    await firstWave.commitWave(wholeDocumentConflictSink(newSink()));
+    await firstWave.settled();
+    await readinessEntered.promise;
+
+    // The settlement is parked inside readyToRetry(), not merely waiting for
+    // its post-readiness exact-registration guard. Stopping must abort that
+    // wait so fire-and-forget settlement can quiesce without releasing it.
+    runtime.runner.stop(cell);
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(route.recoverySeals()).toBe(0);
+    runtime.clearSealDestination();
+    recoveryWave.abandon("test cleanup");
+    heldReadiness.resolve();
+    lease.release();
+  });
+
+  it("does not retry an abandoned piece-instantiation wave in place", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-abandon",
+    );
+    const lease = liveLease();
+    const firstWave = newWave({ lease });
+    const recoveryWave = newWave({ lease });
+    const route = routePieceInstantiationWaves(firstWave, recoveryWave);
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await route.firstSeal;
+    await runtime.idle();
+    await route.idleSeals();
+    route.useRecoveryWave();
+    firstWave.abandon("whole-wave lifecycle recovery owns this case");
+    await firstWave.settled();
+    await runtime.runner.idlePieceInstantiationSettlements();
+
+    expect(route.recoverySeals()).toBe(0);
+    expect(witness.instantiations()).toBe(2);
+    // Explicit wave abandonment is clean enclosing-lifecycle teardown: it
+    // remains visible as a warning, but does not tick the failure observer.
+    expect(failures).toEqual([]);
+
+    // The non-retryable withdrawal removed the dead registration, so an
+    // ordinary later start can rebuild it through its owning lifecycle.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(3);
+    recoveryWave.abandon("test cleanup");
+    lease.release();
+  });
 });
 
 describe("stage F fix round: foreign-batch settle sequences and shallow reads", () => {
@@ -3592,7 +4398,12 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
     runtime.clearSealDestination();
     wave2.abandon("test-induced abort");
     await wave2.settled();
-    expect((await settlement2!).error).toBeDefined();
+    const settled2 = await settlement2!;
+    expect(settled2.error).toBeDefined();
+    expect(
+      (settled2.error as { waveWithdrawalCause?: unknown })
+        .waveWithdrawalCause,
+    ).toBe("wave-abandoned");
 
     // A tx that never sealed into a wave has no settlement (the OFF
     // arm's discriminator).

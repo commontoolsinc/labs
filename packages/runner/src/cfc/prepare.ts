@@ -19,7 +19,7 @@ import {
   FabricPrimitive,
   isFabricObjectOrArray,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -28,6 +28,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { entityKindOfIdString } from "../entity-kind.ts";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
@@ -41,7 +42,11 @@ import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
-import { UnknownCfcMetadataVersionError } from "./metadata.ts";
+import {
+  isCfcMetadata,
+  UnknownCfcMetadataVersionError,
+  UnreadableCfcMetadataError,
+} from "./metadata.ts";
 import {
   isPrimitiveCellLink,
   isWriteRedirectLink,
@@ -101,6 +106,7 @@ import {
 } from "./migration-reason.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
+  type CfcRefusalDetail,
   type ConsumedAtomSource,
   describeRefusalInputs,
   renderCfcAtom,
@@ -109,12 +115,14 @@ import {
   type ReadClassSelection,
   readConsumesEntry,
   type ReadObservationShape,
+  readObservationShapes,
 } from "./observation-classes.ts";
 import {
   atomsOutsideCeiling,
   type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloor,
   cfcIntegritySatisfiesFloorCoherently,
+  clauseBearsReadFailedMarker,
   uniqueCfcAtoms,
 } from "./observation.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
@@ -132,6 +140,7 @@ import {
   type ImplementationIdentity,
   type LabelMapEntry,
   type LabelObservationClass,
+  runtimeWritePolicyAuthorization,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -239,13 +248,244 @@ const labelForEntriesAtPath = (
   if (matches.size === 0) {
     return undefined;
   }
-  let joined: IFCLabel | undefined;
-  for (const match of matches.values()) {
-    joined = joined === undefined
-      ? match.label
-      : mergeLabels(joined, match.label);
+  const labels = Array.from(matches.values(), (match) => match.label);
+  return labels.length === 1 ? labels[0] : joinLabels(labels);
+};
+
+// The §4.6.4 redundant-entry collapse, applied to the per-value components
+// this pass mints. `labelForEntriesAtPath` resolves each component on its own
+// and joins the results, and that join is a clause union with structural
+// dedup, so a `derived` or `structure` entry contributes nothing at a path
+// where the DECLARED component already carries every one of its clauses.
+// Which component supplied a clause does not survive that join: §8.11.4
+// keeps content and flow clauses in one array rather than tracking them
+// apart, and §10's observer model has a label map outside the introspection
+// API as an enforcement artifact rather than an observable surface, so two
+// entry sets that resolve the same boundary labels say the same thing.
+//
+// The growth this closes shows up on a collection whose schema declares an
+// element label. An append reads the collection through that declaration, so
+// the transaction's join is the declared label, and stamping the join onto
+// the appended index records there what the declared `*` entry already says.
+// Two entries per element (the value/shape class split), plus the
+// label-metadata templates derived from them, accumulate for the life of the
+// collection and carry nothing a reader did not already have.
+//
+// How much of that an append sheds depends on whether the runtime attributes
+// it. An action transaction carries an implementation identity, which mints
+// §8.9.3's `TransformedBy` into the join's integrity, and the value stamp
+// carries it; no declaration states derivation provenance, so the third
+// condition below keeps that stamp and the templates derived from it. What
+// collapses on an attributed append is the confidentiality-only shape stamps,
+// leaving four entries per element where an unattributed one leaves none.
+//
+// Four conditions keep the collapse exact rather than merely fail-safe:
+// every effective label a boundary computes stays the label it computes with
+// the entry in place, rather than a wider one.
+//
+//  - The entry's path is concrete. At a concrete path the resolution
+//    computed here is the resolution a read performs. A `*` segment would
+//    make the entry stand for many concrete paths, at some of which a more
+//    specific declared entry could resolve instead.
+//  - No declared entry sits strictly below that path. Every read at-or-below
+//    the entry's path then resolves the declared component to what it
+//    resolves to at the entry's own path, which is the one place this checks.
+//  - The entry carries confidentiality only. Integrity is never unioned
+//    across components (§8.12.8), so a declared integrity claim cannot stand
+//    in for a per-value one.
+//  - The declared component covers the entry's clauses under every read
+//    selection that consumes the entry, and covers whatever the entry's own
+//    component resolves to once the entry is gone; and that residual
+//    resolution carries no integrity the resolution with the entry in place
+//    does not. `"all"` is one of those selections in its own right: it
+//    applies no class filter, so the declared entry it resolves to can be a
+//    classed one the classified selections filter out, carrying clauses
+//    their covers need not.
+//
+//    The residual half of that condition is what holds an entry in place
+//    while it shadows a less specific entry of its own component.
+//    Replace-down picks one entry per component, so dropping this one hands
+//    reads at its path the whole of the ancestor's label: its
+//    confidentiality, which the cover has to carry, and its integrity, which
+//    no other component states. Integrity arriving that way is an
+//    over-claim, and §8.9.3's hereditary meet is what it would fool — the
+//    weakest-link rule turns on a read of this path resolving no
+//    certification, and the ancestor's would survive the meet in its
+//    place.
+//
+// Past those conditions the collapse rests on the declared component not
+// shrinking, which §8.12.1 requires of it: a clause the declaration stops
+// carrying is one no dropped entry is left to state. The schema walk holds
+// to that by merging the stored envelope's own schema into the one a write
+// arrives with, so a write through a schema declaring less at a path does
+// not lower the entry there.
+//
+// One boundary-visible difference rides along. The §4.6.4.2 population rule
+// fails closed for a declared entry, so a path this leaves carrying its
+// declaration alone reports its atoms' source-bearing fields as
+// unobservable, where the derived entry it dropped supplied them the interim
+// label (`label-introspection.ts`).
+//
+// The `shape` (existence) entries collapse like any other, and the
+// freeze-at-creation mint reads their absence the way it reads the absence
+// left by a path created under an empty join: a later write to that path
+// whose join the declared component does not cover mints the existence entry
+// then, carrying that write's join.
+const READ_CLASS_SELECTIONS: readonly ReadClassSelection[] = [
+  ...readObservationShapes(),
+  "all",
+];
+
+const atomsContained = (
+  atoms: readonly unknown[],
+  within: readonly unknown[],
+): boolean =>
+  atoms.every((atom) => within.some((candidate) => deepEqual(candidate, atom)));
+
+const clausesCoveredBy = (
+  clauses: readonly CfcConfClause[],
+  cover: readonly CfcConfClause[],
+): boolean =>
+  atomsContained(
+    clauses.map((clause) => normalizeClause(clause)),
+    cover.map((clause) => normalizeClause(clause)),
+  );
+
+/**
+ * Entries arranged so the ones bearing on a concrete path are found without
+ * walking the set. `labelForEntriesAtPath` considers exactly the entries
+ * `isPrefix(entry.path, path)` admits, and for a concrete path that is the
+ * entry's own path, one of its prefixes, or a `*` pattern matching one of
+ * them — so a keyed lookup per prefix plus a walk of the `*` entries finds
+ * every one of them. The `*` entries are a schema's `items` templates and the
+ * runtime's `*`-child class templates, whose count follows the schema and the
+ * container inventory rather than a collection's length.
+ *
+ * `descendants` answers the other direction, for the condition that refuses
+ * an entry with a declared entry strictly below it: it holds a key for each
+ * strict prefix of each concrete path, so the question is one lookup.
+ */
+type PathIndex = {
+  byPath: Map<string, LabelMapEntry[]>;
+  patterns: LabelMapEntry[];
+  descendants: Set<string>;
+};
+
+const pathIndexOf = (entries: readonly LabelMapEntry[]): PathIndex => {
+  const byPath = new Map<string, LabelMapEntry[]>();
+  const patterns: LabelMapEntry[] = [];
+  const descendants = new Set<string>();
+  for (const entry of entries) {
+    const path = canonicalizeLogicalPath(entry.path);
+    if (path.includes("*")) {
+      patterns.push(entry);
+      continue;
+    }
+    const key = pathKey(path);
+    const at = byPath.get(key);
+    if (at === undefined) {
+      byPath.set(key, [entry]);
+    } else {
+      at.push(entry);
+    }
+    for (let depth = 0; depth < path.length; depth++) {
+      descendants.add(pathKey(path.slice(0, depth)));
+    }
   }
-  return joined;
+  return { byPath, patterns, descendants };
+};
+
+/** The indexed entries that bear on a read at `path`. */
+const indexedEntriesAt = (
+  index: PathIndex,
+  path: readonly string[],
+): LabelMapEntry[] => {
+  const out = index.patterns.filter((entry) =>
+    isPrefix(canonicalizeLogicalPath(entry.path), path)
+  );
+  for (let depth = 0; depth <= path.length; depth++) {
+    const at = index.byPath.get(pathKey(path.slice(0, depth)));
+    if (at !== undefined) {
+      out.push(...at);
+    }
+  }
+  return out;
+};
+
+/** Whether an indexed entry sits strictly below `path`. */
+const indexedEntryBelow = (
+  index: PathIndex,
+  path: readonly string[],
+): boolean =>
+  index.descendants.has(pathKey(path)) ||
+  index.patterns.some((entry) => {
+    const entryPath = canonicalizeLogicalPath(entry.path);
+    return entryPath.length > path.length && isPrefix(path, entryPath);
+  });
+
+const isRedundantWithDeclared = (
+  entry: LabelMapEntry,
+  declared: PathIndex,
+  sameComponent: PathIndex,
+): boolean => {
+  const clauses = entry.label.confidentiality ?? [];
+  if (clauses.length === 0 || (entry.label.integrity?.length ?? 0) > 0) {
+    return false;
+  }
+  const path = canonicalizeLogicalPath(entry.path);
+  if (path.includes("*") || indexedEntryBelow(declared, path)) {
+    return false;
+  }
+  const declaredAt = indexedEntriesAt(declared, path);
+  const sameComponentAt = indexedEntriesAt(sameComponent, path);
+  return READ_CLASS_SELECTIONS.every((selection) => {
+    if (!readConsumesEntry(selection, entry)) {
+      return true;
+    }
+    const consumes = (candidate: LabelMapEntry) =>
+      readConsumesEntry(selection, candidate);
+    const consumed = sameComponentAt.filter(consumes);
+    const cover = labelForEntriesAtPath(declaredAt.filter(consumes), path)
+      ?.confidentiality ?? [];
+    const shadowed = labelForEntriesAtPath(consumed, path);
+    const residual = labelForEntriesAtPath(
+      consumed.filter((candidate) => candidate !== entry),
+      path,
+    );
+    return clausesCoveredBy(clauses, cover) &&
+      clausesCoveredBy(residual?.confidentiality ?? [], cover) &&
+      atomsContained(residual?.integrity ?? [], shadowed?.integrity ?? []);
+  });
+};
+
+/**
+ * Drop the per-value entries the declared component already covers. Runs on
+ * the final payload entry set, before the label-metadata templates are
+ * derived from it, so a dropped entry takes its templates with it.
+ */
+const collapseRedundantEntries = (
+  entries: readonly LabelMapEntry[],
+): LabelMapEntry[] => {
+  const declared = entries.filter((entry) => entry.origin === "declared");
+  if (declared.length === 0) {
+    return [...entries];
+  }
+  const declaredIndex = pathIndexOf(declared);
+  const derivedIndex = pathIndexOf(
+    entries.filter((entry) => entry.origin === "derived"),
+  );
+  const structureIndex = pathIndexOf(
+    entries.filter((entry) => entry.origin === "structure"),
+  );
+  return entries.filter((entry) => {
+    const sameComponent = entry.origin === "derived"
+      ? derivedIndex
+      : entry.origin === "structure"
+      ? structureIndex
+      : undefined;
+    return sameComponent === undefined ||
+      !isRedundantWithDeclared(entry, declaredIndex, sameComponent);
+  });
 };
 
 // Effective label of a consumed read. A recursive read materializes the
@@ -308,13 +548,13 @@ const effectiveReadLabel = (
   if (read.nonRecursive === true || view === undefined) {
     return base;
   }
-  let joined = base;
+  const parts: (IFCLabel | undefined)[] = [base];
   for (const entry of view.labelMap.entries) {
     if (entry.path.length <= path.length) continue;
     if (!isPrefix(path, entry.path)) continue;
-    joined = mergeLabels(joined, entry.label);
+    parts.push(entry.label);
   }
-  return joined;
+  return parts.length === 1 ? base : joinLabels(parts);
 };
 
 // Read-like shape (space/id/scope/path + a recursive read profile) for the
@@ -350,18 +590,31 @@ const triggerReadSources = (
   }));
 };
 
-const mergeLabelValues = (
-  ...sources: Array<readonly unknown[] | undefined>
+const joinLabelValues = (
+  sources: Iterable<readonly unknown[] | undefined>,
 ) => {
   // Structural dedup via `uniqueCfcAtoms()` rather than reference dedup
   // via `new Set()`. Atoms can be fabric-converted clones (each
   // `cloneIfNecessary()` produces a fresh frozen object), so two
   // logically-identical caveats may not share a JS reference.
-  const merged = uniqueCfcAtoms(
-    sources.flatMap((source) => source ? [...source] : []),
-  );
+  //
+  // Every source is collected before the dedup runs, so a join over any number
+  // of sources deduplicates once.
+  const atoms: unknown[] = [];
+  for (const source of sources) {
+    if (source !== undefined) {
+      for (const atom of source) {
+        atoms.push(atom);
+      }
+    }
+  }
+  const merged = uniqueCfcAtoms(atoms);
   return merged.length > 0 ? merged : undefined;
 };
+
+const mergeLabelValues = (
+  ...sources: Array<readonly unknown[] | undefined>
+) => joinLabelValues(sources);
 
 const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
@@ -818,6 +1071,25 @@ const writeIsPatternSetupInitialization = (
   );
 };
 
+// What reading a label needs of a stored envelope beyond its being one:
+// entries it can iterate, each carrying the path a resolution matches
+// against and the label a consumer reads clauses out of. `isCfcMetadata`
+// settles the envelope, this settles its entries. Records, not arrays: an
+// array carries neither clause field, so one standing where an entry or a
+// label belongs reads as an entry that labels nothing rather than as the
+// unreadable envelope it is. Both clause arrays are optional, and an entry
+// that omits one carries none of that kind; one that holds something other
+// than an array is an entry no consumer can read.
+const isWalkableLabelMap = (metadata: CfcMetadata): boolean =>
+  metadata.labelMap.entries.every((entry) =>
+    isObjectNotArray(entry) && Array.isArray(entry.path) &&
+    isObjectNotArray(entry.label) &&
+    (entry.label.confidentiality === undefined ||
+      Array.isArray(entry.label.confidentiality)) &&
+    (entry.label.integrity === undefined ||
+      Array.isArray(entry.label.integrity))
+  );
+
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -825,8 +1097,8 @@ const storedMetadataFor = (
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
-  // Read AT ["cfc"], never the whole document: this read is a commit-time
-  // concurrency precondition scoped to what the verifier CONSUMES. A
+  // Read AT ["cfc"], never the whole document: the read is scoped to what
+  // the verifier CONSUMES, and it is what reactivity re-runs on. A
   // path-[] recursive read made the whole document a value dependency, so
   // a concurrent, metadata-irrelevant value write between the reader's
   // confirmed basis and the server head conflicted the commit — for a
@@ -835,8 +1107,9 @@ const storedMetadataFor = (
   // typed input as a stale-confirmed-read conflict the moment the §6
   // layer-naming half was fixed (verification-coverage.md OW47's
   // re-close; the name-draft triage's arm (c), the path half of the
-  // ruled arm (b)). A concurrent /cfc change still conflicts — the
-  // precondition the ruling kept.
+  // ruled arm (b)). The read is marked as a runtime-internal verifier
+  // read, so it stays in the journal and drives reactivity while the
+  // commit's conflict set drops it (spec §18.6.2, §8.9.4).
   const metadata = tx.readOrThrow({
     space,
     id,
@@ -857,7 +1130,15 @@ const storedMetadataFor = (
     // unreadable envelope (rejected in enforcing modes) or abort loudly.
     throw new UnknownCfcMetadataVersionError(version);
   }
-  return metadata as CfcMetadata;
+  if (!isCfcMetadata(metadata) || !isWalkableLabelMap(metadata)) {
+    // A record at the reserved position naming a version this build
+    // interprets, carrying a label map it cannot walk. Every resolution
+    // reads `labelMap.entries` and matches each entry's `path`, so the
+    // refusal belongs where the value is read rather than wherever a walk
+    // first reaches the part that is missing.
+    throw new UnreadableCfcMetadataError(id);
+  }
+  return metadata;
 };
 
 /**
@@ -1579,6 +1860,35 @@ const isMetaSeamPath = (
   path: readonly string[],
 ): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
 
+/**
+ * Whether a schema could have declared a store policy for a write at `path`
+ * on `id` — the surfaces the §8.12.4 writer-fit measurement quantifies over.
+ *
+ * Two are outside it. The raw meta seam is one, per {@link isMetaSeamPath}:
+ * no value schema describes the document-root siblings of `value`. A computed
+ * cell is the other: the derived internal cell the runtime materializes to
+ * hold a derivation's result, addressed under its own URI scheme
+ * (`computed:fid1:<hash>`; see `entity-kind.ts` and
+ * `docs/specs/computed-cell-identity.md`). A pattern declares policy on the
+ * data it names, and it names neither.
+ *
+ * Both stay flow stamp targets: the join lands on them as the `derived`
+ * component, so a later read of one is tainted and a later egress of one is
+ * gated on that label. The residency clause is part of the ceiling this
+ * skips, so a derivation's result may land in a space whose name none of the
+ * label's clauses carry.
+ *
+ * `docs/specs/cfc-enforcement-matrix.md` §4 carries the reasoning.
+ */
+const isDeclarablePolicyPath = (
+  id: string,
+  joinIsLocal: boolean,
+  metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
+  path: readonly string[],
+): boolean =>
+  (entityKindOfIdString(id) !== "computed" || !joinIsLocal) &&
+  !isMetaSeamPath(metaOnlyByPath, path);
+
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
 // wrote (§8.9.2/§8.9.3 collapsed to tx granularity). Reads of runtime-internal
@@ -1930,11 +2240,9 @@ export const deriveFlowJoin = (
   options?: {
     /**
      * Collect the spaces of observations that contributed label content to
-     * the join (inv-12 Stage 1): the per-target cross-space predicate in
-     * `prepareBoundaryCommit` tests whether any labeled contribution
-     * originated outside the destination space. Opt-in so the default path
-     * — every prepare with `cfcLabelMetadataProtection: "off"` — allocates
-     * nothing for it.
+     * the join (inv-12 Stage 1). The per-target predicates in
+     * `prepareBoundaryCommit` test whether any labeled contribution
+     * originated outside the destination space.
      */
     collectLabeledSpaces?: boolean;
   },
@@ -3364,6 +3672,7 @@ export type CfcPrefixProvenanceWrite = {
    * consumers can recover the exact segments via parsePointer.
    */
   path: string;
+
   boundSource: CfcPrefixBoundSource;
 
   /** Gated reads within this write's D4 prefix (post-S7-exemption). */
@@ -3537,8 +3846,30 @@ const verifyInputRequirements = (
   // Stage-0 measurement: read activities lacking a clock position (counted
   // below only while a hook collects; the enforcement path pays a
   // short-circuited presence check per read, nothing else).
+  //
+  // The stored envelope of each read's document is resolved here, ahead of
+  // the label: `storedMetadataFor` refuses an envelope this build cannot
+  // interpret, by version or by shape, and a transaction that consumed such
+  // a document fails closed whether or not anything asks what its label
+  // says. That refusal must not depend on what a target declares, nor on
+  // whether the measurement dial is on. One resolution serves every read
+  // that landed in the same document: nothing writes between here and the
+  // end of this map, so a later read sees the envelope the first one saw.
+  const envelopes = new Map<string, CfcMetadata | undefined>();
+  const envelopeFor = (
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    type: MediaType,
+  ): CfcMetadata | undefined => {
+    const key = `${targetKey({ space, id, scope })}\u0000${type}`;
+    if (!envelopes.has(key)) {
+      envelopes.set(key, storedMetadataFor(tx, space, id, scope, type));
+    }
+    return envelopes.get(key);
+  };
   let clockLessReads = 0;
-  const gatedReads = [
+  const readSources = [
     ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
       !isInternalVerifierRead(read.meta)
     ).map((read) => {
@@ -3567,57 +3898,72 @@ const verifyInputRequirements = (
   ].map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
-    label: effectiveReadLabel(
-      storedMetadataFor(
-        tx,
-        read.space,
-        read.id,
-        normalizeCellScope(read.scope),
-        read.type ?? "application/json",
-      ),
-      canonicalizeLogicalPath(read.path),
-      { nonRecursive: read.nonRecursive, consumes: "all" },
+    metadata: envelopeFor(
+      read.space,
+      read.id,
+      normalizeCellScope(read.scope),
+      read.type ?? "application/json",
     ),
-  })).filter((read) =>
-    read.label !== undefined &&
-    // A present-but-empty label ({} — no atoms) is the same trust level as an
-    // absent one (excluded above); whether metadata materialized an empty
-    // entry is a persistence/sync artifact and must not decide gate
-    // membership.
-    hasLabelValues(read.label)
-  );
-  // Label-metadata observations (inv-12 Stage 2) join the gate with their
-  // pre-resolved §4.6.4.2 population labels. Like trigger reads they have no
-  // journal position, so they sit at -Infinity and join EVERY protected
-  // write's prefix — the conservative direction for a screen, and only new
-  // introspection-using code ever records one (no existing flow regresses).
-  // Confidentiality-only records: never provenance-only, never a floor
-  // witness.
-  for (const observation of tx.getCfcState().labelMetadataObservations) {
-    gatedReads.push({
-      space: observation.target.space,
-      id: observation.target.id as URI,
-      scope: normalizeCellScope(observation.target.scope),
-      path: canonicalizeLogicalPath(observation.target.path),
-      type: "application/json",
-      meta: {},
-      journalIndex: -Infinity,
-      label: { confidentiality: [...observation.confidentiality] },
-    });
+  }));
+  if (provenance !== undefined) {
+    provenance.clockLessReads = clockLessReads;
   }
+
+  // Resolving one read's label joins every entry of that document's stored
+  // label map that bears on the read path, so the whole set costs the
+  // transaction's read count times those maps' sizes. Only a schema entry
+  // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
+  // so the set is assembled on first ask and kept for the rest of the call.
+  const buildGatedReads = () => {
+    const gatedReads = readSources.map(({ metadata, ...read }) => ({
+      ...read,
+      label: effectiveReadLabel(
+        metadata,
+        read.path,
+        { nonRecursive: read.nonRecursive, consumes: "all" },
+      ),
+    })).filter((read) =>
+      read.label !== undefined &&
+      // A present-but-empty label ({} — no atoms) is the same trust level as
+      // an absent one (excluded above); whether metadata materialized an
+      // empty entry is a persistence/sync artifact and must not decide gate
+      // membership.
+      hasLabelValues(read.label)
+    );
+    // Label-metadata observations (inv-12 Stage 2) join the gate with their
+    // pre-resolved §4.6.4.2 population labels. Like trigger reads they have
+    // no journal position, so they sit at -Infinity and join EVERY protected
+    // write's prefix — the conservative direction for a screen, and only new
+    // introspection-using code ever records one (no existing flow regresses).
+    // Confidentiality-only records: never provenance-only, never a floor
+    // witness.
+    for (const observation of tx.getCfcState().labelMetadataObservations) {
+      gatedReads.push({
+        space: observation.target.space,
+        id: observation.target.id as URI,
+        scope: normalizeCellScope(observation.target.scope),
+        path: canonicalizeLogicalPath(observation.target.path),
+        type: "application/json",
+        meta: {},
+        journalIndex: -Infinity,
+        label: { confidentiality: [...observation.confidentiality] },
+      });
+    }
+    return gatedReads;
+  };
+  let gatedReadsMemo: ReturnType<typeof buildGatedReads> | undefined;
+  const gatedReadsOf = () => (gatedReadsMemo ??= buildGatedReads());
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
   // applied transaction-globally — so the baseline is the label filter
   // without the prefix condition. The gate-visible read set is the same on
   // every call within one prepare, hence assignment (not accumulation) for
-  // the per-prepare clock-less count.
-  const txGlobalGatedReads = provenance === undefined ? 0 : gatedReads
+  // the per-prepare clock-less count. The counter describes the whole set,
+  // which the dial therefore resolves.
+  const txGlobalGatedReads = provenance === undefined ? 0 : gatedReadsOf()
     .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
     .length;
-  if (provenance !== undefined) {
-    provenance.clockLessReads = clockLessReads;
-  }
 
   for (const entry of cfcSchemaEntries(schema)) {
     if (
@@ -3690,10 +4036,12 @@ const verifyInputRequirements = (
     // protected writes (audit S7), now only ever needed for reads WITHIN the
     // prefix. Confidentiality- or endorsement-bearing reads stay, keeping
     // the prompt-injection screen sound.
-    const gating = gatedReads.filter((read) =>
-      read.journalIndex < bound &&
-      !isProvenanceOnlyConsumedLabel(read.label!)
-    );
+    const gating = protectedEntry
+      ? gatedReadsOf().filter((read) =>
+        read.journalIndex < bound &&
+        !isProvenanceOnlyConsumedLabel(read.label!)
+      )
+      : [];
     // Stage-0 precision counters (cfc-value-level-provenance.md §6): what
     // the shipped prefix did for THIS protected write versus the pre-D4
     // transaction-global quantification. Recorded before the entry's own
@@ -3701,7 +4049,7 @@ const verifyInputRequirements = (
     // these values.
     if (provenance !== undefined && protectedEntry) {
       let inPrefix = 0;
-      for (const read of gatedReads) {
+      for (const read of gatedReadsOf()) {
         if (read.journalIndex < bound) inPrefix += 1;
       }
       // Within-prefix reads excluded as provenance-only structural plumbing
@@ -3753,7 +4101,7 @@ const verifyInputRequirements = (
       // different witness per read — "each input was screened by someone"
       // is not "the inputs were screened". The single-read case reduces to
       // the plain floor. Quantifies over D4's per-write prefix `gating`, not
-      // the transaction-global `gatedReads`.
+      // the transaction-global gate-visible read set.
       const ok = cfcIntegritySatisfiesFloorCoherently(
         gating.map((read) => read.label?.integrity ?? []),
         requiredIntegrity,
@@ -4370,16 +4718,21 @@ const persistedLabelFromSchemaAtPath = (
   );
 };
 
+// Join a series of labels in one pass: each channel collects its atoms from
+// every part and deduplicates them once.
+const joinLabels = (
+  parts: readonly (IFCLabel | undefined)[],
+): IFCLabel => ({
+  confidentiality: joinLabelValues(
+    parts.map((part) => part?.confidentiality),
+  ),
+  integrity: joinLabelValues(parts.map((part) => part?.integrity)),
+});
+
 const mergeLabels = (
   left: IFCLabel | undefined,
   right: IFCLabel | undefined,
-): IFCLabel => ({
-  confidentiality: mergeLabelValues(
-    left?.confidentiality,
-    right?.confidentiality,
-  ),
-  integrity: mergeLabelValues(left?.integrity, right?.integrity),
-});
+): IFCLabel => joinLabels([left, right]);
 
 const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
   type: CFC_ATOM_TYPE.LinkReference,
@@ -4629,12 +4982,12 @@ const coalesceLabelEntries = (
  * unconditional. A spelling that refuses decomposition simply fails the
  * check and the caller falls through as before.
  */
-// Exported for unit testing of the fallback arms; the persist loop's merge
-// is the one production caller.
 export const decomposeToSameRoot = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean => {
+  // Exported for unit testing of the fallback arms; the persist loop's merge
+  // is the one production caller.
   if (!isObjectNotArray(left) || !isObjectNotArray(right)) return false;
   try {
     return decomposeSchema(left, { resolveDocument: lookupSchemaDocument })
@@ -4844,10 +5197,13 @@ export const loadStoredCfcEnvelope = (
       type,
     );
   } catch (error) {
-    // Unknown-version metadata is a property of the DOCUMENT, not of the
-    // caller's transaction, so it lands in the unreadable arm of the
-    // taxonomy; a transaction read failure keeps propagating.
-    if (error instanceof UnknownCfcMetadataVersionError) {
+    // An envelope this build cannot interpret is a property of the DOCUMENT,
+    // not of the caller's transaction, so it lands in the unreadable arm of
+    // the taxonomy; a transaction read failure keeps propagating.
+    if (
+      error instanceof UnknownCfcMetadataVersionError ||
+      error instanceof UnreadableCfcMetadataError
+    ) {
       return { status: "unreadable", reason: error.message };
     }
     throw error;
@@ -5015,6 +5371,78 @@ const collectConsumedLabel = (
     modulePolicySpaces,
     sources,
   };
+};
+
+/**
+ * The refusal a sink's ceiling states about `offending`, with the reads that
+ * carried each clause.
+ *
+ * The reason text is the pairing key between a recorded detail and the reason
+ * that refused, so the two are built together rather than assembled twice.
+ */
+const sinkCeilingRefusal = (
+  sink: string,
+  offending: readonly unknown[],
+  sources: readonly ConsumedAtomSource[],
+): CfcRefusalDetail => {
+  // Name the offending atom(s) so an observe-mode diagnostic identifies the
+  // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
+  const offendingAtoms = offending.map(renderCfcAtom);
+  return {
+    gate: "sink-ceiling",
+    sink,
+    offendingAtoms,
+    ...describeRefusalInputs(offending, sources),
+    reason: `sink-request confidentiality exceeds ceiling for ${sink}: ` +
+      offendingAtoms.join(", "),
+  };
+};
+
+/**
+ * What `ceiling` refuses about everything `released` has read, as the §8.12.4
+ * sink gate would state it, or `undefined` when it refuses nothing.
+ *
+ * The commit boundary answers this question for the sink requests a
+ * transaction records, which covers an egress a pattern performs. An egress
+ * the HOST performs — a tool answering a model with what a piece computed —
+ * has no request to record and no commit to gate, so it asks here instead:
+ * read what it is about to release through a transaction, and measure that
+ * transaction's consumed join against the ceiling the destination carries.
+ * Both routes measure the same join against the same membership predicate,
+ * so a host gate cannot admit a flow the boundary refuses.
+ *
+ * `attributedTo` is the read set the refusal is EXPLAINED in terms of, which
+ * a host narrows to the reads its caller can act on. A clause carried by no
+ * read of `attributedTo` is reported as unattributed. Passing one transaction
+ * for both asks the boundary's own question.
+ *
+ * The join is what `released` has read, and a label on a field is consumed
+ * where that field is read: a read that resolves a document root and stops
+ * there counts entries at or above it only. A caller measuring a release
+ * therefore walks the value it is about to hand over.
+ *
+ * The membership predicate is the one `verifySinkRequestCeilings` fits with,
+ * so a clause outside a ceiling here is outside it there. The join is what
+ * `released` read, with no exchange-rule rewriting applied to it, so a clause
+ * a policy evaluation would have discharged is refused here.
+ *
+ * Neither transaction is committed, written, or recorded against.
+ */
+export const describeSinkReleaseRefusal = (
+  released: IExtendedStorageTransaction,
+  attributedTo: IExtendedStorageTransaction,
+  sink: string,
+  ceiling: readonly CfcConfClause[],
+): CfcRefusalDetail | undefined => {
+  const offending = atomsOutsideCeiling(
+    collectConsumedLabel(released).confidentiality,
+    ceiling,
+  );
+  return offending.length === 0 ? undefined : sinkCeilingRefusal(
+    sink,
+    offending,
+    collectConsumedLabel(attributedTo).sources,
+  );
 };
 
 /**
@@ -5252,24 +5680,13 @@ const verifySinkRequestCeilings = (
     // so the egress gate and the observation fits-test cannot drift.
     const offending = atomsOutsideCeiling(effective, ceiling);
     if (offending.length > 0) {
-      // Name the offending atom(s) so an observe-mode diagnostic identifies the
-      // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
-      const offendingAtoms = offending.map(renderCfcAtom);
-      const reason = `sink-request confidentiality exceeds ceiling for ` +
-        `${sink}: ` +
-        offendingAtoms.join(", ");
-      reasons.push(verdict ? verdictReason(reason) : reason);
+      const detail = sinkCeilingRefusal(sink, offending, consumed.sources);
+      reasons.push(verdict ? verdictReason(detail.reason) : detail.reason);
       // The remedy channel (cfc/refusal-detail.ts): which reads carried the
       // clauses this ceiling refused. Recorded for every mode — an observe-mode
       // rollout wants the same answer a refusal does, and the commit boundary
       // keeps only the details whose reason actually refused.
-      tx.recordCfcRefusalDetail?.({
-        gate: "sink-ceiling",
-        sink,
-        offendingAtoms,
-        ...describeRefusalInputs(offending, consumed.sources),
-        reason,
-      });
+      tx.recordCfcRefusalDetail?.(detail);
     }
   }
   return reasons;
@@ -5580,20 +5997,16 @@ export const prepareBoundaryCommit = (
   const flowMode = state.flowLabelsMode;
   const flowPersist = flowMode === "persist";
   // Inv-12 Stage 1 (SC-25): the cross-space label-metadata representation
-  // dial. When active (observe/enforce), the flow join additionally collects
-  // which spaces contributed label content, so the per-target predicate
-  // below can tell a same-space join from one that consumed foreign labels.
-  // `off` pays nothing — no space collection, no eligibility tracking.
+  // dial. The flow join collects which spaces contributed label content, so
+  // the per-target predicates below can tell a same-space join from one that
+  // consumed foreign labels: the label-metadata protection dial reads it for
+  // its cross-space eligibility, and the writer-fit measurement reads it to
+  // decide whether a computed target's exemption applies.
   const labelProtectionMode = state.labelMetadataProtectionMode;
   const flowTargets = flowMode === "off" ? undefined : valueWriteTargets(tx);
   const flowJoin = flowMode === "off"
     ? { confidentiality: [], integrity: [] }
-    : deriveFlowJoin(
-      tx,
-      labelProtectionMode !== "off"
-        ? { collectLabeledSpaces: true }
-        : undefined,
-    );
+    : deriveFlowJoin(tx, { collectLabeledSpaces: true });
   const flowConfidentiality = flowJoin.confidentiality;
   // Read provenance for a refusal's remedy channel, computed only if a gate
   // below actually refuses. `collectConsumedLabel` walks every read against
@@ -5676,6 +6089,12 @@ export const prepareBoundaryCommit = (
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  // Only the strict rung's §8.12.5 route-2 declaration asks whether a target
+  // is a store the runtime owns, and only where the flow join is stamped, so
+  // no other posture pays for the question — and every rung below keeps the
+  // persist-and-flag diagnostic that is its rollout signal, storing no
+  // declared policy it could never take back.
+  const askRuntimeOwnership = flowPersist && writerFitRejects;
   // A vouched ingest writes its provenance mark even when the payload write
   // carries no schema candidate and flow labels are off, so the ingest target
   // must enter the persist loop on its own. The anchor is the cell the helper
@@ -5775,19 +6194,29 @@ export const prepareBoundaryCommit = (
     //   foreign labeled contribution makes the WHOLE stamped entry eligible
     //   — ambiguous provenance fails toward protection.
     //
-    // NOT eligible (persist verbatim): `declared` entries (authored schema
+    // NOT eligible (persist verbatim): AUTHORED `declared` entries (schema
     // policy — the schema document replicates to the destination anyway, so
     // transforming the mirror entries would protect nothing), carried-
     // forward existing entries (already at rest in this doc; migration
     // never rewrites persisted envelopes), and the local external-ingest
     // mark (minted from this tx's own channel stamp — no cross-space
     // observation feeds it; its atoms commit like any others if they later
-    // flow into a foreign target through the join).
+    // flow into a foreign target through the join). The §8.12.5 route-2
+    // declaration below is the one `declared` entry that IS eligible: its
+    // content comes from the flow join rather than from an author's schema,
+    // so leaving it verbatim beside a committed derived stamp carrying those
+    // same clauses would publish in one entry what the other protects.
     const crossSpaceEligible = labelProtectionMode !== "off"
       ? new Set<LabelMapEntry>()
       : undefined;
     const flowJoinIsCrossSpace = flowLabeledSpaces !== undefined &&
       [...flowLabeledSpaces].some((labeled) => labeled !== space);
+    // Every document that contributed a clause to the join belongs to this
+    // target's own space. An unknown provenance is not local: the spaces are
+    // collected on every prepare that derives a join, so their absence means
+    // there was no join to collect them from.
+    const flowJoinIsLocal = flowLabeledSpaces !== undefined &&
+      !flowJoinIsCrossSpace;
     const markFlowStampEntry = (entry: LabelMapEntry): LabelMapEntry => {
       if (flowJoinIsCrossSpace) crossSpaceEligible?.add(entry);
       return entry;
@@ -6050,8 +6479,12 @@ export const prepareBoundaryCommit = (
     // item 3): the declared-component monotonicity gate. Each declared entry
     // this walk is about to persist replaces the stored declared entry at
     // the same path (the carry-forward below skips replaced paths), so this
-    // is the ONE point where the store policy can change — compare against
-    // the stored entries per canUpdateStoreLabel before it does. The stored
+    // is where a schema-minted store policy changes — compare against the
+    // stored entries per canUpdateStoreLabel before it does. The §8.12.5
+    // route-2 declaration in the flow-persist stamping below adds clauses
+    // after this point rather than replacing any, which is the restricting
+    // direction; it coalesces with the carried-forward stored entry instead
+    // of standing in for it. The stored
     // metadata was read above under the internal-verifier meta
     // (storedMetadataFor), so the gate consumes no additional reads. Under
     // `enforce` a violation records fail-closed reasons and skips persisting
@@ -6559,18 +6992,62 @@ export const prepareBoundaryCommit = (
       // stamp below persists the full join, leaving the egress and display
       // gates the unchanged label.
       //
-      // `Space` is the only form admitted here. `PersonalSpace` and the bare
-      // DID-string spelling gate by equality against one acting reader
-      // (`label-field-classification.ts` classes their subject fields with
-      // `User.subject`), so they name a person rather than the container and
-      // reach a narrower audience than the space's readers.
+      // `Space` is the only form admitted here, for two reasons. The bare
+      // DID-string spelling gates by equality against one acting reader, so
+      // it reaches a narrower audience than the space's readers.
+      // `PersonalSpace(<owner>)` names a space rather than a person (SC-39),
+      // and what keeps it out is that this clause is built from the target's
+      // address alone: nothing in an address names a space's owner or marks
+      // the space as personal, so the atom cannot be constructed here.
       const residencyCeiling: readonly CfcConfClause[] = [cfcAtom.space(space)];
+      // Whether an alternative names a CONTAINER audience — the readers of
+      // some space, resolved from that space's ACL — other than this
+      // document's own. `PersonalSpace(owner)` is the second spelling
+      // (§4.9.4 calls the two forms "the two `Space(...)` atoms"), and its
+      // space is the owner's: §3.6.4 makes that principal its sole owner,
+      // and the space's id is that principal. A person-audience clause is
+      // not one of these: `User(alice)` is honored by the reader check
+      // whoever holds the bytes, so it needs no replica set to agree.
+      const namesAnotherSpace = (alternative: unknown): boolean => {
+        if (!isObjectOrArray(alternative)) return false;
+        const atom = alternative as {
+          type?: unknown;
+          id?: unknown;
+          owner?: unknown;
+        };
+        if (atom.type === CFC_ATOM_TYPE.Space) return atom.id !== space;
+        if (atom.type === CFC_ATOM_TYPE.PersonalSpace) {
+          return atom.owner !== space;
+        }
+        return false;
+      };
       const declaredPolicyEntries = flowConfidentiality.length > 0
         ? persistedLabelEntries.filter((entry) =>
           (entry.origin === undefined || entry.origin === "declared") &&
           readConsumesEntry("value", entry)
         )
         : [];
+      // Whether a misfit below is answered by declaring a covering policy
+      // (§8.12.5 route 2) instead of refusing: this document is a store the
+      // runtime owns, at a rung that would reject.
+      // `cfc-enforcement-matrix.md` §4 states the route; the rest of the
+      // conditions on it are at the mint below.
+      //
+      // The route ACTS on the runtime's claim rather than measuring it, which
+      // is why the transaction answers only for markers that arrived carrying
+      // the runtime's authorization. `recordCfcWritePolicyInput` is on the
+      // public transaction interface and pattern-authored code reaches the
+      // transaction its cells are bound to, so an input's own fields say only
+      // what its recorder wrote. The two sibling markers in this file
+      // corroborate against transaction state instead, which suits a claim
+      // about a write that has already happened; this one is a claim about
+      // whose write it is.
+      const runtimeOwnedStore = askRuntimeOwnership &&
+        tx.isRuntimeOwnedStore(
+          target.space,
+          id,
+          runtimeWritePolicyAuthorization,
+        );
       // SC-4, freeze-at-creation form: a path's shape (existence) entry is
       // minted ONCE — at creation, or at the one-time migration of legacy
       // pre-class entries (whose accumulated confidentiality is absorbed
@@ -6659,10 +7136,10 @@ export const prepareBoundaryCommit = (
           structureStampPaths.push(structureContainerPath);
         }
       }
-      // Writer-fit measures the paths a schema could have declared a policy
-      // at, and the raw meta seam is not one: no value schema describes the
-      // document-root siblings of `value`. The measurement is skipped there
-      // at every rung, so a meta path raises neither a strict reject nor a
+      // Writer-fit measures the surfaces a schema could have declared a
+      // policy at, which leaves out the raw meta seam and computed cells
+      // alike (`isDeclarablePolicyPath`). The measurement is skipped on both
+      // at every rung, so neither raises a strict reject nor a
       // persist-and-flag diagnostic.
       //
       // A ceiling can still resolve at a meta path, from a document-root
@@ -6670,7 +7147,7 @@ export const prepareBoundaryCommit = (
       // that entry sits at logical `[]`, the PAYLOAD root, and reaches the
       // seam only because canonicalization strips a leading `"value"`.
       //
-      // Meta paths stay flow stamp targets in the loop below, so the join
+      // Exempt paths stay flow stamp targets in the loop below, so the join
       // still lands on them as the `derived` component. Where a payload
       // field carries a `MetaField` name the two share one logical path, so
       // an exempt meta write can raise the stored derived label there past
@@ -6678,7 +7155,12 @@ export const prepareBoundaryCommit = (
       // entry untouched and reads protected.
       if (flowConfidentiality.length > 0) {
         const measuredPaths = derivedStampPaths.filter((path) =>
-          !isMetaSeamPath(flowTarget?.metaOnlyByPath, path)
+          isDeclarablePolicyPath(
+            id,
+            flowJoinIsLocal,
+            flowTarget?.metaOnlyByPath,
+            path,
+          )
         );
         for (const path of measuredPaths) {
           // Deeper paths are covered by the write at a measured ancestor;
@@ -6712,6 +7194,99 @@ export const prepareBoundaryCommit = (
               ...residencyCeiling,
             ],
           );
+          if (
+            offending.length > 0 && runtimeOwnedStore &&
+            // A schema that declares at this exact path owns the store's
+            // policy there; widening it from the join would make the walk's
+            // own re-mint non-monotone on the next write and brick the path
+            // under the declared-monotonicity gate. That store's route 2 is
+            // the author's, in the schema.
+            !remintedDeclaredPaths.has(pathKey(path)) &&
+            // The read-failed marker is ungrantable: a measurement the
+            // runtime could not take proves nothing about the audience, so
+            // it is outside every ceiling including one that names it.
+            // Declaring it would both admit a poisoned measurement and
+            // write a clause no reader can ever satisfy.
+            !offending.some(clauseBearsReadFailedMarker) &&
+            // A container clause is honored by a replica set, not by a
+            // reader check: §4.9.3 resolves it against that space's ACL,
+            // the document that also decides who holds the bytes. A store
+            // in THIS space cannot keep a promise made to another space's
+            // readers, which is why residency admits only this space's own
+            // clause. Declaring a foreign one would put the bytes in front
+            // of this space's members under a promise made to somebody
+            // else's, so the route leaves that write to the refusal below.
+            // The space's own clause is not reachable here: residency
+            // covers it, so it is never offending.
+            !offending.some((clause) =>
+              clauseAlternatives(clause as CfcConfClause).some(
+                namesAnotherSpace,
+              )
+            )
+          ) {
+            // §8.12.5 route 2, the monotone-safe upgrade: the transaction
+            // writing the join onto this path also declares, in that same
+            // transaction, a policy covering it. What lands is the ceiling
+            // resolved above plus exactly the clauses that had nowhere to
+            // go, so the store's promise becomes the audience of what it
+            // holds. What lands is what the ceiling did not already cover,
+            // so a clause residency satisfies stays in the stamp alone.
+            // A store the runtime owns is filled by the runtime out of what
+            // the writing transaction read — a piece's argument document,
+            // the internal documents and streams its result projects to,
+            // and the state documents a builtin mints from its own node's
+            // cause — and no value schema can carry that declaration,
+            // because the atoms are a property of the transaction rather
+            // than of the pattern.
+            //
+            // The declaration only ever grows by CLAUSE, which is what
+            // §8.12.1 asks of a declared component. `declaredCeiling`
+            // resolves over the entries this walk is about to persist,
+            // carried-forward stored declared entries among them, so the
+            // union below contains every clause the path already declared,
+            // and adding clauses is the restricting direction.
+            //
+            // Growing a stored clause's ALTERNATIVES would be the other
+            // thing: it enlarges that clause's reader set, which §8.12.7
+            // and safety invariant 1 admit only through a grant record or
+            // an intent-gated declassification event. `foldedUnique` folds
+            // clause LISTS — `normalizeClause` works inside one clause and
+            // never merges two — so a stored disjunction comes back with
+            // the alternatives it went in with.
+            //
+            // Growth is also what makes the route safe to run on every
+            // write rather than only while the runtime is setting a piece
+            // up. A clause list is read two ways, and the two agree: as a
+            // ceiling §8.12.4's `canWrite` admits a label clause when SOME
+            // declared clause subsumes it, and as a reader's floor that
+            // same section taints a reader with at least the declared
+            // label. Subsumption means satisfying the declared clause
+            // implies satisfying the label, so a reader of this store
+            // satisfies every clause the store admits. Adding a clause
+            // therefore admits more data AND narrows the audience by the
+            // same step, however many times it happens — §8.12.5's own
+            // argument for option 2, applied per write.
+            //
+            // Marked like a flow stamp rather than like an authored
+            // declaration: the content is the join, so it carries whatever
+            // foreign label metadata the join carries.
+            persistedLabelEntries.push(markFlowStampEntry({
+              path,
+              label: {
+                confidentiality: foldedUnique([
+                  ...declaredCeiling as readonly CfcConfClause[],
+                  ...offending as readonly CfcConfClause[],
+                ]),
+              },
+              origin: "declared",
+            }));
+            tx.noteCfcDiagnostic(
+              `writer-fit(runtime-owned-store-declared): ${id} at /${
+                path.join("/")
+              } (§8.12.5 route 2): ${offending.map(renderCfcAtom).join(", ")}`,
+            );
+            continue;
+          }
           if (offending.length > 0) {
             // SC-18c error contract: a stable reason naming the rule id and
             // the target path, plus the offending clause(s) so a flag names
@@ -6948,25 +7523,29 @@ export const prepareBoundaryCommit = (
     }
 
     if (isIngestTarget && ingestStamp !== undefined) {
-      // The split-mint: a builtin-authored ExternalIngest provenance mark,
-      // derived ONLY from the verified channel metadata the operator-side
-      // helper stamped on this tx — channel, audience, receivedAt, and a digest
-      // of the payload the helper wrote — touching zero attacker bytes. Pushed
-      // with a runtime origin, so it bypasses gateRuntimeMintedIntegrity (the
-      // member-authored payload's `declared` label above is still gated,
-      // stripping any ExternalIngest atom an attacker smuggled into the
-      // payload). Anchored at the declared ingest target path; the stale prior
-      // mark for this doc was dropped from carry-forward above, so this
-      // replaces rather than accumulates.
+      // The split-mint is derived only from trusted host metadata stamped on
+      // the transaction, touching zero attacker bytes. A vouched-channel stamp
+      // names the grant and its audience; the weaker fetch stamp names only
+      // the immutable source the host read. Pushed with a runtime origin, so
+      // it bypasses `gateRuntimeMintedIntegrity`; a smuggled payload atom is
+      // still stripped by that gate. The declared target anchors either form.
       persistedLabelEntries.push({
         path: canonicalizeLogicalPath(ingestStamp.target.path),
         label: {
-          integrity: [cfcAtom.externalIngest(
-            ingestStamp.channel,
-            ingestStamp.audience,
-            ingestStamp.receivedAt,
-            ingestStamp.valueDigest,
-          )],
+          integrity: [
+            ingestStamp.kind === "fetch"
+              ? cfcAtom.externalFetchIngest(
+                ingestStamp.pinnedSource,
+                ingestStamp.receivedAt,
+                ingestStamp.valueDigest,
+              )
+              : cfcAtom.externalIngest(
+                ingestStamp.channel,
+                ingestStamp.audience,
+                ingestStamp.receivedAt,
+                ingestStamp.valueDigest,
+              ),
+          ],
         },
         origin: "external-ingest",
       });
@@ -7003,6 +7582,16 @@ export const prepareBoundaryCommit = (
       }
     }
 
+    // The §4.6.4 redundant-entry collapse, ahead of the template derivation
+    // so a dropped entry takes its label-metadata templates with it. It runs
+    // on the final payload set, so it reaches carried-forward entries as well
+    // as this attempt's mints: a document that accumulated redundant
+    // per-value entries under an earlier build sheds them on its next
+    // persist.
+    const collapsedLabelEntries = collapseRedundantEntries(
+      persistedLabelEntries,
+    );
+
     // Stage B (template-population §5/§6; spec §4.6.4.2): derive the
     // label-metadata population templates from the FINAL payload entries —
     // after every clear/carry/mint AND after the Stage-1 representation
@@ -7016,21 +7605,21 @@ export const prepareBoundaryCommit = (
     // the per-path §4.6.4.1 metadata addressing requires. No new dial: the
     // templates describe whatever payload entries the existing dials
     // persisted.
-    persistedLabelEntries.push(
-      ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
+    collapsedLabelEntries.push(
+      ...deriveLabelMetadataTemplateEntries(collapsedLabelEntries),
     );
 
     const manifestFailures = installCarriedPolicyManifests(
       tx,
       space,
-      persistedLabelEntries,
+      collapsedLabelEntries,
     );
     if (manifestFailures.length > 0) {
       reasons.push(...manifestFailures);
       continue;
     }
 
-    const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
+    const coalescedLabelEntries = coalesceLabelEntries(collapsedLabelEntries);
 
     if (
       coalescedLabelEntries.length === 0 && !flowCleared && !remintCleared &&

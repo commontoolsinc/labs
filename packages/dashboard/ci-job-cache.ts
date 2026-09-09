@@ -810,9 +810,12 @@ export class CiJobHistoryStore {
     return this.latest(run.repo, run.workflow, run.runId) ?? run;
   }
 
-  // Every retained attempt of one source, newest first by the time its run
-  // started. Unlike `list`, a run that was attempted more than once contributes
-  // each of its attempts, because each attempt has its own Gantt detail.
+  /**
+   * Returns every retained attempt of one source, newest first by the time
+   * its run started. Unlike `list()`, a run that was attempted more than once
+   * contributes each of its attempts, because each attempt has its own Gantt
+   * detail.
+   */
   attempts(
     repo: string,
     workflow: string,

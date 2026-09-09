@@ -35,6 +35,7 @@ import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { SpaceOutbox } from "../src/executor/outbox.ts";
 import { emptyServingLoopStats } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const signer = await Identity.fromPassphrase("executor outbox budget test");
 const space = signer.did() as MemorySpace;
@@ -55,20 +56,6 @@ describe("Phase 6 outbox budgets (serving-loop.md §5)", () => {
   afterEach(async () => {
     await server.close();
   });
-
-  const waitUntil = async (
-    predicate: () => boolean,
-    label: string,
-    timeoutMs = 10_000,
-  ): Promise<void> => {
-    const deadline = Date.now() + timeoutMs;
-    while (!predicate()) {
-      if (Date.now() > deadline) {
-        throw new Error(`timed out waiting for ${label}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-  };
 
   const heldEffect = (
     id: string,

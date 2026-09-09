@@ -515,12 +515,12 @@ describe("module-policy manifest consultation", () => {
     }
   });
 
-  // Reserved manifest documents are not value-write targets: the privileged
-  // persistence during prepare is CFC machinery, so the strict writer-fit
-  // must not measure the manifest write against its own (undeclared) store
-  // policy, and the flagged modes must not attach flow labels or misfit
-  // flags to it.
   it("commits a tainted flow that persists its manifest under enforce-strict", async () => {
+    // Reserved manifest documents are not value-write targets: the privileged
+    // persistence during prepare is CFC machinery. So the strict writer-fit
+    // must not measure the manifest write against its own (undeclared) store
+    // policy.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -546,12 +546,19 @@ describe("module-policy manifest consultation", () => {
       );
       expect(stored?.value).toEqual(artifact);
       expect(stored?.cfc).toBeUndefined();
-      // The derived write itself was measured: the tainted join persisted a
-      // derived component onto the declared-covered target.
+      // The value target went through the persist loop while the manifest
+      // document did not: its envelope carries the declared store policy,
+      // and no derived component beside it — the tainted join is the
+      // declared policy, which the §4.6.4 redundant-entry collapse leaves
+      // stated once.
       const derivedEntries =
         storedDocument(storageManager, derivedId)?.cfc?.labelMap?.entries ?? [];
+      expect(derivedEntries.some((entry) =>
+        entry.origin === "declared" &&
+        (entry.label.confidentiality ?? []).includes("secret")
+      )).toBe(true);
       expect(derivedEntries.some((entry) => entry.origin === "derived")).toBe(
-        true,
+        false,
       );
       expect(
         tx.getCfcState().diagnostics.filter((diagnostic) =>
@@ -565,6 +572,10 @@ describe("module-policy manifest consultation", () => {
   });
 
   it("flags no writer-fit diagnostic naming a manifest document under enforce-explicit", async () => {
+    // Reserved manifest documents are not value-write targets: the privileged
+    // persistence during prepare is CFC machinery. So the flagged modes must
+    // not attach flow labels or misfit flags to it.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),

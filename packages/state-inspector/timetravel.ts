@@ -10,7 +10,7 @@
 // Values are normalized with `annotate` first, so links/streams compare as
 // stable shapes instead of exploding into nested objects.
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { applyPatch } from "@commonfabric/memory/v2/patch";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
@@ -35,6 +35,7 @@ import {
 
 /** Annotation depth used for values included in diff output. */
 const COMPARE_DEPTH = 32;
+
 const DEFAULT_DIFF_DEPTH = 12;
 
 export type ChangeKind = "added" | "removed" | "changed";
@@ -60,6 +61,7 @@ export interface ValueChange {
 
   /** Exact path segments, e.g. `["value", "items", "0"]`. */
   pathSegments?: string[];
+
   kind: ChangeKind;
   before?: unknown;
   after?: unknown;

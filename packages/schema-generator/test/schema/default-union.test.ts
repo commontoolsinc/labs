@@ -234,15 +234,16 @@ describe("Schema: Default in unions", () => {
     expect(result.default).toEqual({ theme: "dark", retries: 3 });
   });
 
-  // A `typeof CONST` payload reads the const's initializer off the AST, so the
-  // const must be found through its import when it lives in another module —
-  // the shape a pattern that keeps its defaults in a `contract.ts` has.
-  // `getSymbolAtLocation` on the import returns the alias symbol, whose
-  // valueDeclaration is the ImportSpecifier, not the const; without the alias
-  // hop the default silently disappears from the schema (2026-08-28, found
-  // through the pattern-iframe wrapper: every deployed guest hydrated to
-  // `undefined`).
   describe("typeof values imported from another module", () => {
+    // A `typeof CONST` payload reads the const's initializer off the AST, so
+    // the const must be found through its import when it lives in another
+    // module — the shape a pattern that keeps its defaults in a `contract.ts`
+    // has. `getSymbolAtLocation` on the import returns the alias symbol, whose
+    // valueDeclaration is the ImportSpecifier, not the const; without the alias
+    // hop the default silently disappears from the schema (2026-08-28, found
+    // through the pattern-iframe wrapper: every deployed guest hydrated to
+    // `undefined`).
+
     const contract = `
       export interface Config {
         theme: string;
@@ -313,11 +314,12 @@ describe("Schema: Default in unions", () => {
     });
   });
 
-  // A default the reader cannot fully evaluate is withheld, never shipped as
-  // a fragment: a partial object satisfies every "is there a default?" check
-  // while missing a required member, and the runtime's own `Writable(CONST)`
-  // holds the whole value, so schema and runtime would disagree.
   describe("a payload the reader cannot fully evaluate", () => {
+    // A default the reader cannot fully evaluate is withheld, never shipped as
+    // a fragment: a partial object satisfies every "is there a default?" check
+    // while missing a required member, and the runtime's own `Writable(CONST)`
+    // holds the whole value, so schema and runtime would disagree.
+
     async function defaultFor(main: string) {
       const { type, checker, typeNode } = await getTypeFromFiles(
         {

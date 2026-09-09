@@ -5,13 +5,13 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 // CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
 // compiles to a verified-binding `writeAuthorizedBy` claim. At commit the CFC
 // verifier resolves the authoring handler's identity — sourceFile/bindingPath
 // — from the function's content-addressed provenance (`bindingIdentity`,
-// recorded by Engine.recordModuleProvenance from the transformer's
+// recorded by Engine.#recordModuleProvenance from the transformer's
 // `__cfBindVerifiedBinding` annotation on the FACTORY object). A handler
 // declared as a NON-exported module-scope const (the shape used throughout
 // system/profile-home.tsx) surfaces through the `__cfReg` registration sink —
@@ -21,10 +21,10 @@ import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 //
 // Scope: these tests assert the writer identity is REGISTERED (provenance
 // carries the bindingIdentity) and RESOLVES onto transactions while handlers
-// run — the value the CFC verifier consumes at commit — under `observe`. A
-// full enforce-mode, end-to-end "the write is accepted" assertion additionally
-// needs trust-snapshot + owner-principal + trusted-event provenance setup,
-// which profile-owner-cfc.test.ts drives via a mocked authoring identity.
+// run — the value the CFC verifier consumes at commit. An end-to-end "the
+// write is accepted" assertion additionally needs trust-snapshot +
+// owner-principal + trusted-event provenance setup, which
+// profile-owner-cfc.test.ts drives via a mocked authoring identity.
 
 const signer = await Identity.fromPassphrase("ct1665-repro");
 const space = signer.did();
@@ -58,23 +58,17 @@ function programFor(src: string): RuntimeProgram {
   return { main: "/main.tsx", files: [{ name: "/main.tsx", contents: src }] };
 }
 
+// The binding paths each runtime's engine has registered so far, collected
+// from its `harness.implementation.register` markers from the moment
+// `newRuntime()` built it.
+const bindingPathsByRuntime = new WeakMap<Runtime, string[][]>();
+
 function recordedBindingPaths(rt: Runtime): string[][] {
-  // The binding identity lives on each registered function's content-addressed
-  // provenance (the former `verifiedBindingMetadata` map is gone — PR E2);
-  // enumerate the engine's implementation index to reach the registered fns.
-  const reg = (rt.harness as any).executableRegistry;
-  const byRef = reg.verifiedImplementationsByEntryRef as Map<
-    string,
-    Map<string, unknown>
-  >;
-  const out: string[][] = [];
-  for (const bucket of byRef.values()) {
-    for (const fn of bucket.values()) {
-      const path = getVerifiedProvenance(fn)?.bindingIdentity?.bindingPath;
-      if (Array.isArray(path)) out.push(path);
-    }
+  const paths = bindingPathsByRuntime.get(rt);
+  if (paths === undefined) {
+    throw new Error("Runtime was not built by `newRuntime()`");
   }
-  return out;
+  return paths;
 }
 
 // Capture the bindingPaths of the writer identities STAMPED on transactions
@@ -109,12 +103,24 @@ async function bindingPathsResolvedDuring(
 describe("CT-1665: verified binding metadata for non-exported handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  const newRuntime = () =>
-    new Runtime({
+  const newRuntime = () => {
+    const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
+    const paths: string[][] = [];
+    rt.telemetry.addEventListener("telemetry", (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (
+        marker.type === "harness.implementation.register" &&
+        marker.bindingPath !== undefined
+      ) {
+        paths.push(marker.bindingPath);
+      }
+    });
+    bindingPathsByRuntime.set(rt, paths);
+    return rt;
+  };
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -144,6 +150,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
           tx,
         );
         const r = rt.run(tx, pattern, {}, resultCell);
+        rt.prepareTxForCommit(tx);
         await tx.commit();
         await r.pull();
 
@@ -183,6 +190,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
         tx,
       );
       const r = rt.run(tx, pattern, { initialName: "Init" }, resultCell);
+      rt.prepareTxForCommit(tx);
       await tx.commit();
       await r.pull();
 
@@ -212,6 +220,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
         tx1,
       );
       const r1 = rt1.run(tx1, cold, {}, resultCell1);
+      rt1.prepareTxForCommit(tx1);
       await tx1.commit();
       await r1.pull();
       await pm1.flushCompileCacheWrites();
@@ -225,6 +234,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
         undefined,
         tx2,
       );
+      rt2.prepareTxForCommit(tx2);
       await tx2.commit();
       await resultCell2.sync();
       await rt2.start(resultCell2);

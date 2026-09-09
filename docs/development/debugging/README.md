@@ -24,7 +24,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Stream.subscribe doesn't exist | Using new Stream()/subscribe() | Bound handler IS the stream ([quick gotchas](gotchas/quick.md#stream-subscribe-doesnt-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([reactivity-issues](reactivity-issues.md#variable-scoping-in-reactive-contexts)) |
 | "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([@reactivity](../../common/concepts/reactivity.md)) |
-| CLI `get` returns stale computed values | `cf set` doesn't trigger recompute | Run `piece step` after `set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-cf-set)) |
+| CLI `cell get` returns stale computed values | `cf cell set` doesn't trigger recompute | Run `piece step` after `cell set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-cf-cell-set)) |
 | A field's properties read as `undefined` though the value is there; rendering the same path works | The field is typed `unknown`, which declares a reference: the runner hands back something that answers presence and identity and carries no properties | Name the field on the operand reading it — a lift/computed operand shape, or a `Cell<>` in a handler ([gotchas/unknown-typed-field-reads-a-reference](gotchas/unknown-typed-field-reads-a-reference.md)) |
 | Browser UI stale after a handler write | The write usually worked — the cell, piece, or render path is what to check | Inspect actual cell state first via `readCell`; don't rewrite the mutation ([gotchas/browser-stale-ui](gotchas/browser-stale-ui.md)) |
 | "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
@@ -45,7 +45,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "secure mode %SharedMath%.random() throws" (or `Date.now` in computed) | SES gates ambient `Math.random()`/`Date.now()` in the pattern sandbox — allowed in a handler, forbidden in a lift/computed or pattern body | Call `Math.random()` / `Date.now()` directly from a handler; for reactive time in a computed, read the `#now` wish ([gotchas/scoped-cell-pitfalls](gotchas/scoped-cell-pitfalls.md), section 7) |
 | "Cannot read properties of null/undefined" exactly when a conditional section renders the fallback | Ternary branches are evaluated eagerly — the lowered `ifElse()` builds both branch expressions even when the condition is falsy | Defer the property-accessing branch in `computed()` ([gotchas/eager-ternary-branch-evaluation](gotchas/eager-ternary-branch-evaluation.md)) |
 | Handler silently never runs; runner logs "action argument is undefined (potential schema mismatch) -- not running" | Handler state holds a cross-space value typed as the plain value; argument validation resolves it before it has loaded | Type the state field `Cell<T>` and read inside the handler ([gotchas/cross-space-handler-state-link](gotchas/cross-space-handler-state-link.md)) |
-| "Source cannot contain reserved helper symbol '__cfHelpers'" loading a deployed piece | The piece's stored source closure holds transformer-processed source instead of authored source; a compile-cache rotation forces a recompile that the transformer rejects | `cf piece recreate-root` ([gotchas/stale-source-closure-cfhelpers](gotchas/stale-source-closure-cfhelpers.md)) |
+| "Source cannot contain reserved helper symbol '__cfHelpers'" loading a deployed piece | The piece's stored source closure holds transformer-processed source instead of authored source; a compile-cache rotation forces a recompile that the transformer rejects | `cf space recreate-root` ([gotchas/stale-source-closure-cfhelpers](gotchas/stale-source-closure-cfhelpers.md)) |
 
 ---
 
@@ -80,7 +80,7 @@ typed `any` unwraps Writables; performance quick tips.
 - [Browser UI Stale After a Handler Write](gotchas/browser-stale-ui.md) - Inspect actual cell state before assuming the write failed
 - [A Field Typed `unknown` Reads Back as a Reference](gotchas/unknown-typed-field-reads-a-reference.md) - The reading operand's schema decides what materializes; naming the field is what makes the read follow the link
 - [Cross-Space Handler State Must Be a Cell Link](gotchas/cross-space-handler-state-link.md) - A cross-space value in handler state silently blocks the handler; pass the link, not the value
-- [Stale Source Closure: Reserved Helper Symbol on Load](gotchas/stale-source-closure-cfhelpers.md) - A deployed piece whose stored source is not pristine authored TypeScript; repair with `cf piece recreate-root`
+- [Stale Source Closure: Reserved Helper Symbol on Load](gotchas/stale-source-closure-cfhelpers.md) - A deployed piece whose stored source is not pristine authored TypeScript; repair with `cf space recreate-root`
 
 ### Error Categories
 

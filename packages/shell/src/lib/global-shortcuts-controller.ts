@@ -18,16 +18,18 @@ type ReactiveAppHost = ReactiveControllerHost & BaseView & { app: AppState };
  * `preventDefault()`.
  */
 export class GlobalShortcutsController implements ReactiveController {
-  private host: ReactiveAppHost;
+  #host: ReactiveAppHost;
 
-  // Whether the platform's primary shortcut modifier is Command rather than
-  // Control. Read when the host connects, since it depends on `navigator`.
-  // No current binding branches on it; a Cmd/Ctrl shortcut is what does.
+  /**
+   * Whether the platform's primary shortcut modifier is Command rather than
+   * Control. Read when the host connects, since it depends on `navigator`. No
+   * current binding branches on it; a Cmd/Ctrl shortcut is what does.
+   */
   #usesCommandKey = false;
 
   constructor(host: ReactiveAppHost) {
-    this.host = host;
-    this.host.addController(this);
+    this.#host = host;
+    this.#host.addController(this);
   }
 
   hostConnected() {
@@ -48,7 +50,7 @@ export class GlobalShortcutsController implements ReactiveController {
       e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
     ) {
       e.preventDefault();
-      navigate(spaceOf(this.host.app));
+      navigate(spaceOf(this.#host.app));
     }
   };
 }

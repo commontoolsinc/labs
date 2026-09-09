@@ -76,6 +76,42 @@ the rules therein. These include:
 
 ## Engineering principles and coding style
 
+### Writing Code
+
+Before writing or changing code anywhere in this tree, read
+`docs/development/DEVELOPMENT.md` and `docs/development/code-comment-style.md`.
+That obligation does not depend on which part of the tree you are working in, on
+how small the change is, or on whether you would call the work "development".
+
+The `writing-code` skill at `skills/writing-code/SKILL.md` is the map: which
+document governs the thing you are about to touch, what to run before pushing,
+and — the part a green run tells you nothing about — the conventions no gate
+enforces, which are therefore left to a reviewer to find by reading. `skills/`
+is the canonical authored source; Codex discovers the repo-local mirror through
+`.agents/skills/`, and Claude through `.claude/skills/`.
+
+### Reviewing Code
+
+Reviewing a changeset — including reviewing your own before you push — goes
+through the `cf-review` skill at `skills/cf-review/SKILL.md`. It holds code to
+the same documents `writing-code` hands the author, so that a convention
+enforced in review is one its author was told about. A general-purpose review
+command supplied by your agent harness knows nothing about this repository and
+is not a substitute for it.
+
+`docs/development/pr-review-comments.md` covers reading and answering the review
+comments a pull request collects.
+
+### Running the CLI
+
+The `cf` CLI runs from source through `bin/cf`, which `deno task install-cf`
+puts on PATH once per machine, and `skills/cf/SKILL.md` covers invoking it.
+`deno task cf …` runs the same CLI from any directory inside the checkout and
+needs nothing on PATH, which makes it the spelling for a shell where `cf` is not
+found, as an agent's non-interactive shell is on a machine that never ran the
+install. The two differ in one respect: `cf which`, which reports the checkout a
+`cf` would run, is answered by `bin/cf` alone.
+
 ### Avoid timeouts, retry loops, and sleeps
 
 Timeouts cause flakiness because they put an upper bound on success: anything
@@ -188,15 +224,24 @@ that package's own `AGENTS.md`.
 
 #### Adding New Packages
 
-A new workspace package needs two edits, and the second one bites hard when it
+A new workspace package needs three edits, and the second one bites hard when it
 is missed:
 
 1. Its path added to the `"workspace"` array in the root `deno.jsonc`.
 2. A `"tasks"` object in its own `deno.jsonc` carrying a `"test"` entry — either
    `"deno test"`, or `"echo 'No tests defined.'"` when it has no tests yet.
-   Without one, `deno task test` falls through to the root workspace's task and
-   re-runs the whole suite inside itself, spawning processes exponentially until
-   CI times out. `packages/utils/deno.jsonc` is a correct example.
+   Without one, `deno task test` falls through to the root workspace's task,
+   which would re-run the whole suite inside itself, spawning processes
+   exponentially. The workspace runner reads every member's manifest before it
+   runs any of their test tasks, and refuses to start when one has no `"test"`
+   entry, so what a missing entry costs is a message naming the member rather
+   than a CI timeout. `packages/utils/deno.jsonc` is a correct example.
+3. A checked path in `tasks/typecheck.ts`, usually a single directory entry, so
+   `deno task check` opens the package at all. Naming the package in the
+   `workspace` array is what puts it under the type check's coverage claim, so a
+   package added there and left out here fails `tasks/typecheck.test.ts` with
+   its unchecked files named — unless it earns an `UNCHECKED_TREES` entry
+   recording why it has no path.
 
 When the package needs a dependency, follow `docs/development/DEPENDENCIES.md`.
 
@@ -219,11 +264,55 @@ difficulties getting coverage checks to pass, consider the information in
 
 `deno task check` type-checks a hand-maintained list of paths in
 `tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
-there), and that list now names every workspace package. Most are covered in
-full; a few are partial by design. The `*.input.ts` transformer fixtures under
-`schema-generator` and `ts-transformers` name ambient wrappers the transformer
-supplies, so they do not compile on their own and are left out. `ui` is checked
-only for its `v2` components, and not the outliner among them.
+there). The list is written by hand; its completeness is not left to hand.
+`UNCHECKED_TREES` beside it records every tree the list leaves out together with
+the reason, and `tasks/typecheck.test.ts` walks the workspace that `deno.jsonc`
+declares and fails — naming the files — on any module that is neither checked
+nor covered by one of those entries. That population is every extension the
+checker opens, JavaScript included: `deno check` type-checks a `.js` file
+carrying `// @ts-check`, so a claim stated over TypeScript alone would be
+narrower than the gate it describes. A directory left out on purpose and one
+left out by accident look identical in a list of paths, so the record is what
+separates them: a tree nobody decided about fails the test rather than passing
+in silence. Adding an exemption means adding an entry that says why.
+
+Four trees are recorded as unchecked. `packages/schema-generator/test/fixtures`
+and `packages/ts-transformers/test/fixtures` are fixture corpora — the inputs
+those tests feed their transformer, and the outputs they compare against — and
+`packages/static/assets/types` is the ambient environment a pattern compiles
+against, handed to the in-memory compiler. What earns all three the exemption is
+holding data rather than modules this repository builds; neither corpus compiles
+as a unit, though files within one may well compile alone. The fourth is
+`packages/patterns`, which the next paragraph covers.
+
+An exemption's reason is held to being true of every file it matches, which is
+what decides how wide the entry may be. Two entries divide `packages/patterns`,
+because two different things happen to the files there. The one pointing at
+`deno task cfcheck` may excuse only files the collector in
+`tasks/pattern-files.ts` hands that gate, and no single entry may span both
+sides of that line; a test cross-checks both against the collector itself. The
+other covers pattern tests, which the lane that runs them also type-checks —
+`deno test` for a `.test.ts`, since `packages/patterns` runs without
+`--no-check`, and `cf test` for a `.test.tsx`, whose harness reports a type
+error as a failed test. That entry is scoped to what those two lanes take, not
+to the test suffix in general. A test module under another extension has no
+lane; a `.browser.test.ts` is kept out of the `deno test` pass and bundled to
+its browser by a step that transpiles without checking; and a nested
+`integration` tree is excluded from that pass by the package's test config while
+the `integration` task names its top-level paths explicitly. Each falls through
+and is reported unless a checked path names it. An entry claiming coverage is
+the one that can mislead most quietly, since a file it wrongly matches is one
+every later reader believes is checked — and where these keep going wrong is a
+predicate matching by a file's shape while the reason beside it names a lane,
+the two agreeing in the middle and parting at the edges.
+
+The reasons that do not name another gate say what a tree _is_ rather than
+asserting a property of each file in it. That is why the three above are
+described as corpora and as an ambient environment: none is a set of modules the
+repository builds, which is what earns the exemption. Individual files in them
+may well compile alone, so a reason claiming that none of them does would be
+false the moment one did — a universal quantifier over a corpus is the shape to
+avoid when writing one of these.
 
 Patterns are the exception `deno task check` does not own. It lists some pattern
 directories and checks them through the automatic-JSX environment the rest of
@@ -236,8 +325,9 @@ pattern type-check. Run `deno task test` in every package you touched.
 Each of these gates fails CI on its own, and none of them run as part of
 `deno task check`:
 
-- `deno task check-no-waitfor` — a test that polls instead of waiting on a real
-  event
+- `deno task check-no-waitfor` — an integration test that imports the polling
+  `waitFor`. It reads only `integration/` directories under `packages/`, so its
+  green says nothing about a poll in a unit test
 - `deno task check-docs` — a TypeScript block under `docs/` that stopped
   compiling
 - `deno task check-docs-history-index` — an entry in `docs/history/INDEX.md`
@@ -264,13 +354,16 @@ Each of these gates fails CI on its own, and none of them run as part of
   hand-maintained tables, and a slot missing from both is silent: it offers
   nothing, exactly as an unreachable fabric does. Give it candidates, or record
   in the task why it has none
-- `deno task check-command-docs` — a `cf` command no live document names. The
-  obligation to update a document when behavior changes cannot fire for a
-  command no document describes, so a command ships and its prose does not.
-  Describe it in a live document — the README of the package that implements it
-  is the usual home — or record in the task why it needs none. It fails the
-  other way round too, on a recorded reason naming a command the tree no longer
-  accepts: a command removed takes its entry with it
+- `deno task check-command-docs` — a `cf` command, or a shuttle verb, that no
+  live document describes. The obligation to update a document when behavior
+  changes cannot fire for a surface no document describes, so a command ships
+  and its prose does not. Describe it in a live document — the README of the
+  package that implements it is the usual home — or record in the task why it
+  needs none. What counts as described differs with the surface: a command is
+  named the way a caller types it, and a verb, whose name is a word a sentence
+  may hold for its own reasons, is given a row of its own in a table. It fails
+  the other way round too, on a recorded reason naming a command or a verb that
+  no longer exists: one removed takes its entry with it
 - `deno task check-local-program` — a program built from local files by hand
   rather than through `resolveLocalProgram`, which silently drops any data files
   the caller attached
@@ -278,6 +371,11 @@ Each of these gates fails CI on its own, and none of them run as part of
   rather than added to
 - `deno task check-test-aliases` — a test-identity alias line that was edited or
   removed rather than appended, mapped an identity twice, or formed a cycle
+- `deno task check-pattern-tiers` — a legacy or fixture pattern that does not
+  open with the marker saying so. `packages/patterns` is example code of unequal
+  authority, and the marker is what stops the wrong example being copied by
+  someone who never found the index. Membership is `tasks/pattern-tiers.ts`, and
+  `deno task fix-pattern-tiers` applies or corrects a marker
 
 The detail behind each of these lives in `.claude/rules/`, one file per kind of
 file it governs. Claude Code loads the matching rule on its own when it reads a

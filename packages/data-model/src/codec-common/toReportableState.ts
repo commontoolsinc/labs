@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import { isValidFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /** How much of a rendered state to keep. */
@@ -46,5 +46,5 @@ export function toReportableState(state: any): FabricValue {
     // cannot classify gets anyway.
   }
 
-  return toCompactDebugString(state, MAX_RENDERED_LENGTH);
+  return toCompactDebugString(state, { maxLength: MAX_RENDERED_LENGTH });
 }

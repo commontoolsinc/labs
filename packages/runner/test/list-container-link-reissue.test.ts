@@ -64,10 +64,14 @@ const signer = await Identity.fromPassphrase("list container link reissue");
 const space = signer.did();
 
 class SharedSessionFactory implements SessionFactory {
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.getServer()),
+      transport: MemoryV2Client.loopback(this.#getServer()),
     });
     const session = await client.mount(
       spaceId,
@@ -112,6 +116,7 @@ type ReconcileRecord = {
 
   /** Whether this reconcile called `sendResult`, the container link's only writer. */
   issuedLink: boolean;
+
   outcome: string;
 };
 
@@ -372,9 +377,14 @@ describe("list container link reissue", () => {
         );
 
         // The scenario this test exists to cover: the reconcile that issued the
-        // link lost its commit, and a later one converged without it.
+        // link lost its commit, and a later one converged without it. Found by
+        // attempt, not by position in the log: a reconcile's verdict lands
+        // when its commit settles, and a rejected first attempt's rejection
+        // rides a catch-up that later, fresher attempts can commit ahead of —
+        // the resume pre-sync names the coordinator's children, so those
+        // attempts read warm results rather than sharing the stale basis.
         expect(
-          outcome.log[0],
+          outcome.log.find((record) => record.attempt === 1),
           "the first reconcile issued the container link and was rejected on a stale basis",
         ).toEqual({
           attempt: 1,

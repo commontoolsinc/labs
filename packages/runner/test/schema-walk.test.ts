@@ -637,7 +637,7 @@ describe("values that are not schemas", () => {
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain("additionalProperties");
     expect(warnings[0]).toContain("null");
-    expect(warnings[0]).toContain('"properties":{"a":{"type":"number"}}');
+    expect(warnings[0]).toContain('properties:{a:{type:"number"}}');
   });
 
   it("names the entry of a record keyword by key, and of an array by index", () => {

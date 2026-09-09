@@ -1,5 +1,6 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { CfcConfClause } from "./clause.ts";
@@ -133,17 +134,18 @@ const redactCaveatSourceAtom = (atom: unknown): unknown => {
  *
  * Apply ONLY at main-thread-facing DISPLAY responses: the three IPC label
  * responses (`handleCellGet` includeCfcLabel, the subscribe sink,
- * `handleCellGetCfcLabel`), the sigil `cfcLabelView` copies inside response
- * values (`redactSigilCfcLabelViewsForDisplay`), and response cell refs
- * (`createCellRef`) — inv-12 Stage 0. Redacting every outbound copy is safe
- * because the worker no longer consumes inbound views: the persist seam
- * re-derives link-origin labels from stored source metadata, and the IPC
- * ingress (`cellRefToSigilLink` / `getCell`) drops ref-carried views. It is
- * deliberately NOT used by `cloneCfcLabel`, `cfcLabelViewFromMetadata`, or
- * `cfcLabelViewForCell` — those feed observation labeling
- * (`cfcConfidentialityForObservationNode`), the dereference-trace path
- * `prepare.ts` consumes, and the worker-internal carried-label views, all of
- * which must keep `source` intact for enforcement.
+ * `handleCellGetCfcLabel`), the sigil `cfcLabelView` copies the conversion
+ * attaches inside response values (`convertCellsToLinks()` under
+ * `includeCfcLabelView`), and response cell refs (`createCellRef`) — inv-12
+ * Stage 0. Redacting every outbound copy is safe because the worker no longer
+ * consumes inbound views: the persist seam re-derives link-origin labels from
+ * stored source metadata, and the IPC ingress (`cellRefToSigilLink` /
+ * `getCell`) drops ref-carried views. It is deliberately NOT used by
+ * `cloneCfcLabel`, `cfcLabelViewFromMetadata`, or `cfcLabelViewForCell` —
+ * those feed observation labeling (`cfcConfidentialityForObservationNode`),
+ * the dereference-trace path `prepare.ts` consumes, and the worker-internal
+ * carried-label views, all of which must keep `source` intact for
+ * enforcement.
  */
 export const redactCaveatSourcesForDisplay = (
   view: CfcLabelView,
@@ -309,12 +311,25 @@ export const rebaseCfcLabelView = (
   ]);
 };
 
+/**
+ * Whether two label views carry the same labels.
+ *
+ * `cloneCfcLabelView` puts each side into canonical form: logical paths, entry
+ * order, empty labels dropped, and a view left holding nothing reduced to
+ * `undefined`. `deepEqual` then compares what remains property by property, so
+ * an atom written `{type, subject}` equals the same atom written
+ * `{subject, type}`. That is the reading `uniqueCfcAtoms` gives atoms on the
+ * merge path, where a fabric-converted clone of an atom is the same atom.
+ *
+ * The clause list and the integrity set are compared IN ORDER. That matches
+ * `canonicalizeCfcLabel`, which reorders the alternatives inside an OR-clause
+ * and leaves those two lists as they were given, so this answer stays aligned
+ * with the persist-side idempotence check in `prepare.ts` that deep-equals
+ * canonicalized metadata.
+ */
 export const cfcLabelViewsEqual = (
   left: CfcLabelView | undefined,
   right: CfcLabelView | undefined,
-): boolean => {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return JSON.stringify(cloneCfcLabelView(left)) ===
-    JSON.stringify(cloneCfcLabelView(right));
-};
+): boolean =>
+  left === right ||
+  deepEqual(cloneCfcLabelView(left), cloneCfcLabelView(right));

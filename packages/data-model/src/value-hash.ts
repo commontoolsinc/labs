@@ -443,11 +443,19 @@ function computeHashAsString(value: unknown): string {
 // Caches
 //
 
-/** Pre-computed constant hashes (these values never change). */
+/** Pre-computed hash of `null`. */
 const NULL_HASH = computeHash(null);
+
+/** Pre-computed hash of `undefined`. */
 const UNDEFINED_HASH = computeHash(undefined);
+
+/** Pre-computed hash of `true`. */
 const TRUE_HASH = computeHash(true);
+
+/** Pre-computed hash of `false`. */
 const FALSE_HASH = computeHash(false);
+
+/** Pre-computed hash of negative zero. */
 const NEGATIVE_ZERO_HASH = computeHash(-0);
 
 /**
@@ -477,6 +485,15 @@ const primitiveHashCache = new LRUCache<
  * Mutable objects are always recomputed.
  */
 const frozenObjectHashCache = new WeakMap<object, FabricHash>();
+
+/**
+ * Returns an already computed immutable hash without reading the value.
+ *
+ * @internal Used by equality to reuse hashes without expanding a value graph.
+ */
+export function cachedHashStringOf(value: object): string | undefined {
+  return frozenObjectHashCache.get(value)?.hashString;
+}
 
 /**
  * Looks up the given primitive in the LRU cache, computing and storing on

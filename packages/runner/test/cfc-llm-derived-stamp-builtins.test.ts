@@ -82,15 +82,15 @@ function childDocIntegrity(
 }
 
 describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
-  // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
-  // Prove the gate keys the stamp on the write's authoring identity at the
-  // result field-path: a builtin write stamps, a pattern write is stripped.
   it("stamps a builtin write to the result field; strips a pattern write", async () => {
+    // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
+    // Prove the gate keys the stamp on the write's authoring identity at the
+    // result field-path: a builtin write stamps, a pattern write is stripped.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // Model-output write: builtin identity + the stamp schema at ["result"].
@@ -168,7 +168,6 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     tx = runtime.edit();
     ({ commonfabric: builder } = createTrustedBuilder(runtime));
@@ -569,6 +568,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
+      // The assertion below reads that `result` carries no LlmDerived atom.
+      // That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const disabledTx = disabledRuntime.edit();
@@ -618,6 +619,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
+      // The assertion below reads that `result` carries no LlmDerived atom.
+      // That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const disabledTx = disabledRuntime.edit();

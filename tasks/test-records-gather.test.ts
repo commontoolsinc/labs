@@ -154,7 +154,7 @@ describe("test-records-gather", () => {
     it("rejects an empty variant from a direct caller", async () => {
       await expect(
         gather({ out: join(dir, "out"), job: "Check", variant: "", junit: [] }),
-      ).rejects.toThrow("--variant must not be empty");
+      ).rejects.toThrow("a declared variant must not be empty");
     });
 
     it("records the commit, branch, and pull request head from the environment", async () => {

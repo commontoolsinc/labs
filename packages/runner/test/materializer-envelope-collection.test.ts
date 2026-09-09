@@ -17,6 +17,9 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 const signer = await Identity.fromPassphrase(
   "materializer envelope collection",
@@ -40,15 +43,16 @@ describe("materializer envelope collection", () => {
     await storageManager?.close();
   });
 
+  // The fixtures' schemas are plain literals; they declare themselves here,
+  // where the walk is handed them.
   const collect = (
     argumentSchema: unknown,
     inputs: unknown,
-    resultCell: unknown,
+    resultCell: Cell<any>,
     writeInputPaths?: readonly (readonly string[])[],
   ): NormalizedFullLink[] =>
-    // deno-lint-ignore no-explicit-any
-    (runtime.runner as any).collectWritableCellArgumentLinks(
-      argumentSchema,
+    runtime.runner.accessForTestingOnly.collectWritableCellArgumentLinks(
+      argumentSchema as JSONSchema | undefined,
       inputs,
       resultCell,
       writeInputPaths,
@@ -298,45 +302,61 @@ describe("materializer envelope branch selection", () => {
     ],
   });
 
-  const materializerIndex = () =>
-    (runtime.scheduler as unknown as {
-      materializers: {
-        materializers: Set<unknown>;
-        materializersByEntity: Map<string, Set<unknown>>;
-      };
-    }).materializers;
-
-  const runPattern = async (withWriteMetadata: boolean) => {
-    const resultCell = runtime.getCell(
-      space,
-      `branch-selection-${withWriteMetadata}`,
-    );
-    const result = runtime.run(
-      undefined,
-      trustExecutable(
-        runtime,
-        triConditionPattern(withWriteMetadata) as never,
-      ),
-      { notifyArg: {}, targetArg: 1 } as never,
-      resultCell as never,
-    );
-    await result.pull();
-    await runtime.idle();
+  // Runs the pattern to idle, and returns the write envelopes each action
+  // ended up registered under, read from the scheduler's
+  // `scheduler.materializer.register` markers: an action's latest marker
+  // says whether it is a materializer, and under which writes.
+  const runPattern = async (
+    withWriteMetadata: boolean,
+  ): Promise<Map<string, string[]>> => {
+    const writesByAction = new Map<string, string[]>();
+    const listener = (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type !== "scheduler.materializer.register") return;
+      writesByAction.set(marker.actionId, marker.writes);
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        `branch-selection-${withWriteMetadata}`,
+      );
+      const result = runtime.run(
+        undefined,
+        trustExecutable(
+          runtime,
+          triConditionPattern(withWriteMetadata) as never,
+        ),
+        { notifyArg: {}, targetArg: 1 } as never,
+        resultCell as never,
+      );
+      await result.pull();
+      await runtime.idle();
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
+    return writesByAction;
   };
 
+  const materializers = (writesByAction: Map<string, string[]>) =>
+    [...writesByAction.values()].filter((writes) => writes.length > 0);
+
   it("send-only write metadata suppresses the opaque-result fallback", async () => {
-    await runPattern(true);
+    const registered = materializers(await runPattern(true));
     // The stream path does not brand-match and the writable arg does not
     // path-match: no envelopes, so the action never registers as a
     // materializer.
-    expect(materializerIndex().materializers.size).toBe(0);
+    expect(registered).toHaveLength(0);
   });
 
   it("without write metadata the opaque-result fallback collects writable args", async () => {
-    await runPattern(false);
-    const index = materializerIndex();
-    expect(index.materializers.size).toBe(1);
-    // The registered envelope addresses the writable arg's backing entity.
-    expect(index.materializersByEntity.size).toBeGreaterThan(0);
+    const registered = materializers(await runPattern(false));
+    expect(registered).toHaveLength(1);
+    // The registered envelope addresses the writable arg's backing entity,
+    // which lives in the test's space.
+    expect(registered[0].length).toBeGreaterThan(0);
+    for (const write of registered[0]) {
+      expect(write.startsWith(`${space}/`)).toBe(true);
+    }
   });
 });

@@ -46,12 +46,15 @@ interface FakeLink {
 // implemented.
 class FakeCell {
   setValues: unknown[] = [];
+  readonly #syncResult: () => Promise<unknown>;
+
   constructor(
     readonly id: string,
     public value: unknown,
-    private readonly syncResult: () => Promise<unknown> = () =>
-      Promise.resolve(),
-  ) {}
+    syncResult: () => Promise<unknown> = () => Promise.resolve(),
+  ) {
+    this.#syncResult = syncResult;
+  }
   getAsNormalizedFullLink(): FakeLink {
     return { space: "space", id: this.id, path: [], scope: "space" };
   }
@@ -68,7 +71,7 @@ class FakeCell {
     this.setValues.push(v);
   }
   sync(): Promise<unknown> {
-    return this.syncResult();
+    return this.#syncResult();
   }
   asCell(): this {
     return this;
@@ -78,7 +81,11 @@ class FakeCell {
 // An input-list cell: get() returns `{ list }`. The list is whatever the test
 // supplies (a real array, a sparse array, or a non-array to drive the guard).
 class FakeInputsCell {
-  constructor(private readonly listValue: unknown) {}
+  readonly #listValue: unknown;
+
+  constructor(listValue: unknown) {
+    this.#listValue = listValue;
+  }
   asSchema(): this {
     return this;
   }
@@ -86,7 +93,7 @@ class FakeInputsCell {
     return this;
   }
   get(): { list?: unknown } {
-    return { list: this.listValue };
+    return { list: this.#listValue };
   }
 }
 

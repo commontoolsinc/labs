@@ -181,6 +181,7 @@ export function parseWorkspaceMembers(rootConfigText: string): string[] {
 interface SourceFile {
   /** The owning workspace member, or undefined when under none. */
   owner: string | undefined;
+
   content: string;
 }
 
@@ -261,6 +262,7 @@ interface Entry {
 
   /** The declaring member, or undefined for the root config. */
   member: string | undefined;
+
   alias: string;
   specifier: string;
 }

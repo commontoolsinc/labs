@@ -1,12 +1,12 @@
 import type { FabricValue } from "@commonfabric/api";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
+  deepFreeze,
   type MutableFabricContainerValueLayer,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";

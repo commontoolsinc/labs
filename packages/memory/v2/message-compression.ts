@@ -4,6 +4,8 @@
  * payload travels without another encoding layer.
  */
 
+import { getLogger } from "@commonfabric/utils/logger";
+
 /** Frames produced by the compression encoder. */
 export type EncodedMemoryMessage = string | Uint8Array<ArrayBuffer>;
 
@@ -30,6 +32,11 @@ const MEMORY_COMPRESSION_THRESHOLD_BYTES = 1_024;
 
 /** Maximum expanded size accepted from one compression envelope. */
 export const MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES = 256 * 1_024 * 1_024;
+
+const logger = getLogger("memory.compression", {
+  enabled: true,
+  level: "error",
+});
 
 const MAX_GZIP_MEMORY_MESSAGE_BYTES = MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES +
   1_024 * 1_024;
@@ -89,9 +96,11 @@ export class MemoryMessageCompressionChannel {
     const compressionEnabled = this.#sendCompressionEnabled;
     const send = this.#outgoing.then(async () => {
       if (this.#closed) return;
+      const encodeStart = performance.now();
       const frame = compressionEnabled
         ? await encodeCompressedMemoryMessage(payload)
         : payload;
+      logger.time(encodeStart, "send", "encode");
       if (!this.#closed) {
         // Every send stays on this queue, including uncompressed control and
         // pre-negotiation frames. A mode change therefore cannot move its

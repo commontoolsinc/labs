@@ -11,6 +11,7 @@ import { resolveFabricRefToIdentity } from "../src/fabric-ref-resolution.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase(
   "fabric imports snapshot semantics test",
@@ -93,7 +94,7 @@ describe("fabric import snapshot semantics", () => {
       cellWithTx.setMetaRaw("patternIdentity", {
         identity: entryIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     return cell;
   }

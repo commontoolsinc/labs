@@ -2,6 +2,7 @@
 import * as path from "@std/path";
 import { hasExecutableCode } from "./executable-source.ts";
 import { type LcovFileCoverage, parseLcovReports } from "./lcov.ts";
+import { readUnlaunchedMembers } from "./unlaunched-members.ts";
 import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
@@ -46,6 +47,14 @@ export interface CoverageDebtMetricsOptions {
 export interface CoverageDebtMetricsFromLcovOptions {
   rootDir: string;
   lcov: string;
+
+  /**
+   * Workspace members that no run of this measurement launched, as the root
+   * manifest lists them. Every metric group holding one goes unscored, and so
+   * does the workspace total; see
+   * {@link collectCoverageDebtMetricsFromLcov}.
+   */
+  unlaunchedMembers?: Iterable<string>;
 }
 
 export interface CoverageDebtMetric {
@@ -60,6 +69,11 @@ interface SourceFile {
   trackedLineCount: number;
 }
 
+/**
+ * The debt metrics for a coverage profile directory, which is scored against
+ * the record of unlaunched members the directory carries when the run that
+ * wrote it stopped before launching everything it selected.
+ */
 export async function collectCoverageDebtMetrics(
   options: CoverageDebtMetricsOptions,
 ): Promise<CoverageDebtMetric[]> {
@@ -67,13 +81,50 @@ export async function collectCoverageDebtMetrics(
   return await collectCoverageDebtMetricsFromLcov({
     rootDir: options.rootDir,
     lcov,
+    unlaunchedMembers: await readUnlaunchedMembers(options.coverageProfileDir),
   });
 }
 
+/**
+ * The metric groups a measurement cannot speak for, given the workspace
+ * members it never launched. A member is named the way the root manifest names
+ * it, `./packages/shell` or `./tasks`, and the group it falls in is the one a
+ * source file under it would be counted toward.
+ *
+ * A group is unscorable whole. One member of it going unlaunched leaves the
+ * group's count short by whatever that member's own tests would have covered,
+ * and nothing in the report says by how much, so the other members of the
+ * group are no more scorable than the missing one.
+ */
+export function unscoredMetricGroups(
+  unlaunchedMembers: Iterable<string>,
+): Set<string> {
+  return new Set(
+    [...unlaunchedMembers].map((member) =>
+      metricGroupFor(toPosix(member).replace(/^\.\//, ""))
+    ),
+  );
+}
+
+/**
+ * The debt metrics for one joined LCOV report: the uncovered line count of
+ * every metric group the report speaks for, and their total.
+ *
+ * A file the report has no record for is charged by
+ * `debtWithoutCoverageRecord()`, which reads the absence as a file no test
+ * loaded. That reading holds only where every package ran, so a group named by
+ * `options.unlaunchedMembers` is left out of the result rather than counted,
+ * and so is the workspace total, which no longer totals the workspace. A
+ * consumer of these metrics gates what it is given; a group it is not given a
+ * count for is one this run cannot report on.
+ */
 export async function collectCoverageDebtMetricsFromLcov(
   options: CoverageDebtMetricsFromLcovOptions,
 ): Promise<CoverageDebtMetric[]> {
-  const sourceFiles = await collectSourceFiles(options.rootDir);
+  const unscored = unscoredMetricGroups(options.unlaunchedMembers ?? []);
+  const sourceFiles = (await collectSourceFiles(options.rootDir)).filter(
+    (source) => !unscored.has(source.metricGroup),
+  );
   const lcovCoverage = parseLcov(options.lcov);
 
   let workspaceUncovered = 0;
@@ -93,12 +144,13 @@ export async function collectCoverageDebtMetricsFromLcov(
     );
   }
 
-  const metrics: CoverageDebtMetric[] = [
-    {
+  const metrics: CoverageDebtMetric[] = [];
+  if (unscored.size === 0) {
+    metrics.push({
       name: `${COVERAGE_METRIC_PREFIX} workspace uncovered lines`,
       uncoveredLines: workspaceUncovered,
-    },
-  ];
+    });
+  }
 
   for (const group of [...groupNames].sort()) {
     metrics.push({
@@ -112,11 +164,15 @@ export async function collectCoverageDebtMetricsFromLcov(
 
 /**
  * Helper for `collectCoverageDebtMetricsFromLcov()`, which returns the debt
- * charged to a file the report has no record for. Two different things produce
- * a missing record, and they owe different amounts.
+ * charged to a file the report has no record for. Three different things
+ * produce a missing record, and they owe different amounts.
  *
  * A file no test ever loaded owes every tracked line: that is the case this
  * rule exists to catch.
+ *
+ * A file that opted out of coverage owes nothing. Deno leaves such a file out
+ * of the report whether or not a test loaded it, so its absence says nothing
+ * about what ran; see `isCoverageIgnoredFile()`.
  *
  * A file that compiles to no executable code — one holding only interfaces,
  * type aliases, or other declarations — owes nothing. It has no statement a
@@ -127,9 +183,24 @@ export async function collectCoverageDebtMetricsFromLcov(
  */
 async function debtWithoutCoverageRecord(source: SourceFile): Promise<number> {
   const content = await Deno.readTextFile(source.absolutePath);
+  if (isCoverageIgnoredFile(content)) return 0;
   return hasExecutableCode(content, source.absolutePath)
     ? source.trackedLineCount
     : 0;
+}
+
+/**
+ * Returns whether `content` opts its file out of coverage, which a
+ * `// deno-coverage-ignore-file` line comment does when it is the file's first
+ * line, or the line after a shebang. Those are the lines Deno reads it from:
+ * the same comment anywhere later leaves the file in the report, and so
+ * leaves it charged here. Text may follow the directive after whitespace, as
+ * in `// deno-coverage-ignore-file -- runs only in a browser`.
+ */
+export function isCoverageIgnoredFile(content: string): boolean {
+  const lines = content.split(/\r?\n/, 2);
+  const line = lines[0].startsWith("#!") ? lines[1] ?? "" : lines[0];
+  return /^\s*\/\/\s*deno-coverage-ignore-file(?:\s|$)/.test(line);
 }
 
 /**
@@ -160,8 +231,8 @@ export async function collectUncoveredLinesForFiles(
       uncoveredLines = uncoveredProfileLineNumbers(coverage);
     } else {
       // No coverage record: either no test loaded the file, in which case every
-      // tracked line is uncovered, or it compiles to no executable code, in
-      // which case none of its lines can be covered (see
+      // tracked line is uncovered, or it opted out of coverage or compiles to
+      // no executable code, in which case none of its lines counts (see
       // debtWithoutCoverageRecord).
       let content: string;
       try {
@@ -173,7 +244,8 @@ export async function collectUncoveredLinesForFiles(
         if (error instanceof Deno.errors.NotFound) continue;
         throw error;
       }
-      uncoveredLines = hasExecutableCode(content, absolutePath)
+      uncoveredLines = !isCoverageIgnoredFile(content) &&
+          hasExecutableCode(content, absolutePath)
         ? trackedSourceLineNumbers(content)
         : [];
     }

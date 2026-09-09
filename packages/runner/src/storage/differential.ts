@@ -3,7 +3,7 @@ import {
   FabricSpecialObject,
   isFabricObjectOrArray,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,

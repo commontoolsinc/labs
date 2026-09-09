@@ -2,10 +2,7 @@
 
 import type { JSONSchemaObj, JSONSchemaTypes } from "@commonfabric/api";
 
-import {
-  FabricPrimitive,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { FabricPrimitive, type FabricValue } from "@commonfabric/data-model";
 import { internSchema } from "./schema-intern.ts";
 import { schemaTypeOfFabricPrimitive } from "./schemaTypeOfFabricPrimitive.ts";
 

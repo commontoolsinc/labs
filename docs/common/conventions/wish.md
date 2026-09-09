@@ -24,7 +24,7 @@ const wishResult = wish<{ content: string }>({ query: "#note" });
 |--------------|---------|-------------------------------------------------------|
 | `result`     | `T`     | The resolved piece (auto-confirmed or user-selected)  |
 | `candidates` | `T[]`   | All matching pieces                                   |
-| `[UI]`       | `VNode` | Built-in UI: picker (multiple matches) or result cell |
+| `[UI]?`      | `VNode` | Built-in UI: picker (multiple matches) or result cell |
 | `error`      | `any`   | Error message if resolution failed                    |
 
 Access the resolved piece via `wishResult.result`:
@@ -60,11 +60,15 @@ user browses candidates and clicks "Confirm Selection". Until confirmed,
 > (CT-1829). Generalizing this "single-best by default; picker opt-in" shape to
 > all wishes is a future step.
 
-You can render the built-in UI directly:
+You can render the built-in UI directly. `[UI]` is optional — a wish that has
+resolved to nothing to show leaves it unset — so read the slot rather than
+rendering the whole state. Hand it over as the slot itself, rather than wrapping
+it: an element around it is still an element when the slot is unset, and shows
+as an empty box.
 
 ```tsx
 // Shown inside a pattern body.
-return { [UI]: <div>{wishResult}</div> };
+return { [UI]: wishResult[UI] };
 ```
 
 ## Wishing for a Specific Piece
@@ -164,6 +168,16 @@ shell's `commonfabric.viewSettled()` — covers it: a settled view is one whose
 wish surfaces have arrived, not one that is about to grow them. A launch that
 cannot load its pattern writes that into the same slot rather than leaving it
 blank.
+
+Each surface is an ordinary piece in the space of the piece that wished, and it
+records the `system:` ref naming the file it was made from — the same kind of
+origin a space root records. So the piece menu shows where its code came from,
+its history holds the source it was created with, and it follows that origin
+through the ordinary source lifecycle: the launch opens the piece, which
+resolves the ref against the host serving its space and adopts the source it
+names when the deployment has shipped a new version. Opening happens once per
+surface per process, not on every re-run of the wish behind it.
+`docs/specs/piece-source-lifecycle.md` is the design of record.
 
 When rendering profile data from a shared piece, use a user-scoped result schema
 for the rendered output so each viewer sees their own home profile projection.

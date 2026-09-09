@@ -65,7 +65,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
           (callKind.builderName === "action" ||
             callKind.builderName === "handler")
         ) {
-          this.validateVoidDeclaredBody(node, callKind.builderName, context);
+          this.#validateVoidDeclaredBody(node, callKind.builderName, context);
         }
       }
       // JSX-aware: the stock visitor skips `JsxExpression.expression`, which
@@ -76,7 +76,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
   }
 
-  private validateVoidDeclaredBody(
+  #validateVoidDeclaredBody(
     call: ts.CallExpression,
     builderName: VerbBuilderName,
     context: TransformationContext,

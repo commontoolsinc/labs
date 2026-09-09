@@ -1,6 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 
 /**
  * Computes a deterministic hash of a JSONSchema. Structurally-equal schemas

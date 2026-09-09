@@ -59,7 +59,10 @@ describe("link-ifc-read-relevance", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
     tx = runtime.edit();
     seq++;
   });
@@ -184,16 +187,14 @@ describe("link-ifc-read-relevance", () => {
 
   it("marks a crossing whose only label signal is the stored schema's declaration", () => {
     // The seam's non-redundant case. The target document carries no
-    // stored cfc metadata and no label view — the ifc exists only as the
-    // stored link schema's declaration — and the flow-label machinery
-    // that marks relevance off persisted metadata is at its default
-    // (off). Without the crossing seam, this read's transaction would
-    // stay non-relevant and enforcement would never engage for it.
+    // stored cfc metadata and no label view, so the ifc exists only as
+    // the stored link schema's declaration. Every diagnostic the read
+    // records names a schema-ifc seam, so the crossing is what marked
+    // the transaction.
     const holder = holderOverLinkCarrying(labeledLinkSchema);
 
     expect(holder.key("item").get()).toEqual({ name: "Ada" });
 
-    expect(tx.getCfcState().flowLabelsMode).toBe("off");
     expect(cfcLabelViewForCell(holder.key("item"))?.entries ?? []).toEqual([]);
     expect(tx.getCfcState().relevant).toBe(true);
     const reasons = tx.getCfcState().diagnostics;
@@ -219,7 +220,10 @@ describe("link-ifc-read-relevance at resolution and handle hops", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
     tx = runtime.edit();
     seq++;
   });
@@ -331,7 +335,10 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
     tx = runtime.edit();
     seq++;
   });

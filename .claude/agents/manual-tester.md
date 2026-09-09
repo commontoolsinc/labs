@@ -78,18 +78,18 @@ roots.
 
 ### 3. CLI Verification (call -> step -> inspect)
 
-Test each handler via the CLI. **Always run `piece step` after `cf call`** —
+Test each handler via the CLI. **Always run `piece step` after `cf piece call`** —
 without it, computed values remain stale.
 
 ```bash
 # Example: test addCard handler (every target flag before the callable name —
 # after it, flags belong to the callable's own parser)
-deno task cf call --piece {ID} \
+deno task cf piece call --cell {ID} \
   --identity claude.key --api-url {api-url} --space {space-name} \
   addCard '{"columnIndex": 0, "title": "Test"}'
-deno task cf piece step --piece {ID} \
+deno task cf piece step --cell {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
-deno task cf piece inspect --piece {ID} \
+deno task cf piece inspect --cell {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
 ```
 

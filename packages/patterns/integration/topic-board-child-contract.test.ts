@@ -33,17 +33,27 @@ import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-sk
 
 const { API_URL, SPACE_NAME } = env;
 
-// The server-execution v2 posture this test process runs (testing.md §2):
-// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
+// The RAW env posture, read only to key the skip guard below (testing.md
+// §2): the `opposite` lane sets EXPERIMENTAL_SERVER_EXECUTION explicitly
+// to the inverse of the first-party default; the `default` lanes leave it
+// unset and resolve the constant. This value is therefore undefined on the default lane — NOT the
+// resolved posture. The test's runtime posture is not taken from here: it is
+// whatever the lane's toolshed publishes and `PiecesController` adopts.
 const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
   .serverExecution;
 
 // The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
 // a step listed there for this file is skipped ONLY under the ON posture,
 // loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. No step of this file is listed
-// today; the guard stays wired on the pivot baseline case so a future
-// entry binds without re-plumbing.
+// arm and an unlisted step always run. The registry is EMPTY: no step of
+// any file is listed today, so this guard is inert everywhere and stays
+// wired on the pivot baseline case only so a future entry binds without
+// re-plumbing. Note
+// the key: it is the RAW env, while the on-skips module asks callers to
+// resolve env-else-first-party-default (as runtime-client's host now
+// does). Inert today for exactly that reason — undefined on the default
+// lane — and a future entry for this file would fail LOUD there (a red
+// lane, never a silent skip), which is when the key gets converted.
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
@@ -246,11 +256,11 @@ describe("topic-board-pivot-contract", () => {
    * back the rows so the caller can pin the exact set.
    *
    * Waits on content rather than on a count, because `referencedBy` is served
-   * from the board-wide pivot rather than written here: a count that settles
-   * one row away from the expected number — which server execution has been
-   * seen to do — makes a count-wait wait for a number that is never coming,
-   * while a content-wait still resolves the moment the edge lands and the
-   * assertion after it still catches the extra row. */
+   * from the board-wide pivot rather than written here: a count-wait cannot
+   * tell a number that has not arrived from one that never will, and
+   * `waitForCellValue` has no deadline, so a pivot serving the wrong number
+   * hangs it. A content-wait resolves the moment the edge lands, and the
+   * assertion after it still catches an extra row. */
   const awaitInbound = async (
     t: PieceController,
     ...titles: string[]
@@ -288,11 +298,10 @@ describe("topic-board-pivot-contract", () => {
     ),
     fn: async () => {
       // Waits on the three topics this suite filed, which `addTopic` produces
-      // directly, rather than on the pivot's row count — the pivot is
-      // board-wide and has been seen to settle a row away from the topic
-      // count under server execution, which a count-wait would never recover
-      // from. The table is then asserted rather than awaited, so an extra
-      // row still fails.
+      // directly, rather than on the pivot's row count: the pivot is
+      // board-wide, and a count-wait on it would hang rather than fail if it
+      // ever served a different number. The table is then asserted rather
+      // than awaited, so an extra row still fails.
       const topics = (await board.result.getCell()).key("topics");
       await waitForCellValue<unknown[]>(
         cc.runtime,

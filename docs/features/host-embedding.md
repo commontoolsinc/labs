@@ -101,6 +101,11 @@ DOM). A host embeds by listening for:
   clicks), the detail is an `AppView`. Bind to the common fields —
   space + `pieceId` — and loud-log + no-op anything else.
 
+  A view naming a collection member carries `pieceSlug` **and**
+  `pieceMember`, and the two are one address: a host that binds the slug and
+  drops the member opens the piece holding the collection instead of the
+  member the view named. Carry both, or no-op the view whole.
+
   ```ts
   import type { DID } from "@commonfabric/identity";
 
@@ -112,10 +117,16 @@ DOM). A host embeds by listening for:
   import type { DID } from "@commonfabric/identity";
 
   // Condensed from packages/navigation/src/view.ts
+  type PieceViewRef = {
+    pieceId?: string;
+    // A slug naming a collection, and the member it selects.
+    pieceSlug?: string;
+    pieceMember?: string;
+  };
   export type AppView =
     | { builtin: "home" }
-    | { spaceName: string; pieceId?: string; pieceSlug?: string; mode?: "embed" }
-    | { spaceDid: DID; pieceId?: string; pieceSlug?: string; mode?: "embed" };
+    | ({ spaceName: string; mode?: "embed" } & PieceViewRef)
+    | ({ spaceDid: DID; mode?: "embed" } & PieceViewRef);
   ```
 
 - **`cf-replace-navigation`** — same `AppView` detail; replaces the
@@ -169,15 +180,26 @@ through `RuntimeClient.getPieceSource()`,
 `RuntimeClient.getPieceSourceRevision()`, `RuntimeClient.clonePiece()`, and
 `RuntimeClient.updatePieceSource()` on the runtime the piece already runs in.
 
-After the piece-specific entries, a divider separates **Space access rights...**.
-The dialog reads the target space's ACL through `RuntimeClient.getSpaceAcl()`.
+The menu addresses a space, and usually a piece in it. A divider separates the
+two: above it the entries that need a piece, below it a heading naming the
+space and the entries that act on the space itself. `openPieceMenu()` takes
+either — a `cell`, from which the space, the scope, and the runtime are read,
+or a `space` and `runtime` with no piece. A host with a surface that no piece
+loaded into opens the menu that second way: the piece heading reads "Piece
+unavailable", every entry that needs a piece is disabled, and the space
+entries stay live. A call carrying neither leaves the menu closed. The menu
+covers the viewport while it is up, so one with nothing to show would take the
+page's clicks with nothing on screen to account for it.
+
+**Space access rights...** reads the target space's ACL through
+`RuntimeClient.getSpaceAcl()`.
 Every principal that can read the space sees the entries. A principal whose
 effective ACL capability is `OWNER` also gets controls backed by
 `RuntimeClient.setSpaceAclEntry()` and `RuntimeClient.removeSpaceAclEntry()`.
 The runtime uses `ACLManager` for these mutations, so the memory server remains
 the authority that accepts owner changes and preserves a concrete owner.
 
-Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
+Calling `RuntimeClient.createPiece()` with an HTTP or HTTPS `URL` creates a
 followed piece. The runtime records the canonical URL and retained initial
 source in one creation transaction. Calling it with a source string or
 `Program` creates a detached piece when that source can be retained.
@@ -348,7 +370,7 @@ principal, with **no `uiContract`**. Creating a profile, by contrast,
 *is* gesture-gated: `profile-create.tsx` carries the only `uiContract`
 (the `ProfileCreateSurface` trusted pattern).
 
-**Consequence.** Headless pinning (`cf call` into the `addPiece`
+**Consequence.** Headless pinning (`cf piece call` into the `addPiece`
 stream) and cross-pattern pin flows are **sanctioned** use cases.
 Future guards must keep supporting them — do not "harden" pinning with
 a `uiContract`; that conflates the create seam (correctly

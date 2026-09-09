@@ -1,9 +1,9 @@
 import { expect } from "@std/expect";
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
 
+import { hashOf } from "@commonfabric/data-model";
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";

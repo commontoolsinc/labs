@@ -6,6 +6,7 @@ import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("transactional setup ownership");
@@ -28,18 +29,23 @@ describe("transactional setup ownership", () => {
     await storageManager.close();
   });
 
-  // Two runs of one computation overlap: the first materializes the child and
-  // then aborts, while the second commits in between. Only the first run
-  // materializes anything — the second finds the pattern unchanged and writes no
-  // child setup at all — so the aborting run is the one that installed the
-  // registration and the memo, and it is the one that has to take them back. The
-  // requirement is that the child comes back and stays reactive, not that any
-  // particular bookkeeping survives the abort untouched.
   it("keeps a shared child reactive when a newer setup commits first", async () => {
-    type RegistrationKey = Parameters<typeof runtime.runner.cancels.has>[0];
-    const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<RegistrationKey, string>;
-    };
+    // Two runs of one computation overlap: the first materializes the child and
+    // then aborts, while the second commits in between. Only the first run
+    // materializes anything — the second finds the pattern unchanged and writes
+    // no child setup at all — so the aborting run is the one that installed the
+    // registration and the memo, and it is the one that has to take them back.
+    // The requirement is that the child comes back and stays reactive, not that
+    // any particular bookkeeping survives the abort untouched.
+
+    // Whether a child has been memoized yet, read from the runner's memoize
+    // marker: it is what tells a commit of the computation's own transaction
+    // from one issued before any child was materialized.
+    let childMemoized = false;
+    runtime.telemetry.addEventListener("telemetry", (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type === "runner.result-pattern.memoize") childMemoized = true;
+    });
     const originalEdit = runtime.edit.bind(runtime);
     type TestTx = ReturnType<typeof originalEdit>;
     type CommitResult = Awaited<ReturnType<TestTx["commit"]>>;
@@ -62,7 +68,7 @@ describe("transactional setup ownership", () => {
         const action = tx.tx.sourceAction;
         if (
           held.length >= 2 || action === undefined ||
-          internals.resultPatternCache.size === 0 ||
+          !childMemoized ||
           (sourceAction !== undefined && action !== sourceAction)
         ) {
           return originalCommit();
@@ -119,8 +125,6 @@ describe("transactional setup ownership", () => {
       await runtime.scheduler.run(sourceAction);
       await secondCaptured.promise;
 
-      const cacheKey = [...internals.resultPatternCache.keys()][0];
-      expect(cacheKey).toBeDefined();
       const newerCommit = await held[1].commit();
       expect(newerCommit.error).toBeUndefined();
       held[1].result = newerCommit;

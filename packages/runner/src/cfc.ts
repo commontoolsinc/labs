@@ -1,5 +1,5 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -244,6 +244,7 @@ const symbolicSchemaAtPathPart = (
  * for a default it no longer describes.
  */
 const defaultSchemaTags = new WeakMap<object, string>();
+
 let nextDefaultSchemaTag = 0;
 
 const defaultSchemaTag = (schema: JSONSchema): string | undefined => {
@@ -373,7 +374,7 @@ export class ContextualFlowControl {
     return joined;
   }
 
-  // Get the joined confidentiality atoms from the schema.
+  /** Returns the joined confidentiality atoms from the schema. */
   static lubSchema(
     schema: JSONSchema,
     extraConfidentiality?: Set<unknown>,
@@ -392,7 +393,7 @@ export class ContextualFlowControl {
     return ContextualFlowControl.uniqueAtoms(joined);
   }
 
-  // Return a copy of the schema with joined confidentiality atoms.
+  /** Returns a copy of the schema with joined confidentiality atoms. */
   static schemaWithLub(
     schema: JSONSchema,
     confidentiality: readonly CfcConfClause[],
@@ -500,8 +501,10 @@ export class ContextualFlowControl {
     return resolveCfcSchemaRefsOrThrow(schemaObj, fullSchema);
   }
 
-  // This is a variant of schemaAtPath that allows for an undefined schema.
-  // It will return the empty object instead of true and undefined instead of false.
+  /**
+   * Like `schemaAtPath()`, except it allows an undefined schema, and returns
+   * the empty object instead of `true` and `undefined` instead of `false`.
+   */
   static getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
@@ -571,7 +574,7 @@ export class ContextualFlowControl {
       emptyTag !== undefined && missingTag !== undefined &&
       isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
-      return ContextualFlowControl.schemaAtPathInternal(
+      return ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -592,7 +595,7 @@ export class ContextualFlowControl {
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
       const missesBefore = externalResolutionMissCount();
-      result = internSchema(ContextualFlowControl.schemaAtPathInternal(
+      result = internSchema(ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -613,7 +616,7 @@ export class ContextualFlowControl {
     return result;
   }
 
-  private static schemaAtPathInternal(
+  static #schemaAtPathInternal(
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
@@ -658,7 +661,7 @@ export class ContextualFlowControl {
           const entryDefs = isObjectOrArray(entry) && entry.$defs !== undefined
             ? entry.$defs as Record<string, JSONSchema>
             : defs;
-          const optSchema = ContextualFlowControl.schemaAtPathInternal(
+          const optSchema = ContextualFlowControl.#schemaAtPathInternal(
             entry,
             path.slice(index),
             entryDefs,
@@ -788,14 +791,19 @@ export class ContextualFlowControl {
     return result as JSONSchema;
   }
 
-  // Check to see if the specified schema is one of the special values meaning
-  // it should always validate.
+  /**
+   * Returns whether `schema` is one of the special values meaning it should
+   * always validate.
+   */
   static isTrueSchema(schema: JSONSchema): boolean {
     return cfcSchemaIsTrue(schema);
   }
 
-  // Symbol keys are not included in Object.keys return values, so no
-  // symbol-keyed entry needs checking here.
+  /**
+   * Returns whether `key` is an internal schema key. Symbol keys are not
+   * included in `Object.keys()` return values, so no symbol-keyed entry needs
+   * checking here.
+   */
   static isInternalSchemaKey(key: string): boolean {
     return cfcSchemaIsInternalKey(key);
   }
@@ -804,7 +812,10 @@ export class ContextualFlowControl {
     return cfcSchemaIsFalse(schema);
   }
 
-  // Utility function to handle the asCell array tag.
+  /**
+   * Returns the `asCell` entries of `schema`, or none when it has no `asCell`
+   * array.
+   */
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {

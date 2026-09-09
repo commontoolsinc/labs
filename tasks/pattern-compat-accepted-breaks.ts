@@ -63,11 +63,13 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
-    // ONE entry per pattern, and that is a requirement rather than tidiness:
-    // the gate keys accepted pairs into a Map, so a second entry naming a
-    // baseline this one also names REPLACES its path set rather than adding to
-    // it. Two breaks on one pattern therefore share an entry, and share its
-    // single `record`; the other is named in the reason.
+    // One entry per (pattern, BASELINE) pair, and that is a requirement
+    // rather than tidiness: the gate keys accepted pairs into a Map, so a
+    // second entry naming a baseline this one also names REPLACES its path
+    // set rather than adding to it. Breaks that share baselines therefore
+    // share an entry — and its single `record`, the other break named in
+    // the reason — while a later break against baselines no earlier entry
+    // names gets its own entry, with the pairs kept disjoint.
     //
     // Carried here: the reference graph rebuilt on cell identity, and the
     // board's demand narrowed to the eight members it reads — which narrows
@@ -112,11 +114,41 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/topics-demand-narrowing-break.md",
   },
   {
-    // ONE entry per pattern, and that is a requirement rather than tidiness:
-    // the gate keys accepted pairs into a Map, so a second entry naming a
-    // baseline this one also names REPLACES its path set rather than adding to
-    // it. Two breaks on one pattern therefore share an entry, and share its
-    // single `record`; the other is named in the reason.
+    // A SECOND entry for this pattern, deliberately: the one-entry rule the
+    // neighbors state guards against two entries naming the SAME baseline —
+    // the gate's Map keeps one path set and drops the other — and no
+    // baseline here appears above. Keeping the pairs disjoint is what keeps
+    // the bound tight: forgiving this path on the older baselines too would
+    // let the proof's one-issue-per-role limit hide an unintended break
+    // behind pairs this break never produced a finding against.
+    pattern: "topics/main.tsx",
+    baselines: [
+      "20260826T221814Z-pt-HCeVbN-iyz9VX",
+      "20260831T174843Z-iQFp3QQPN2zAkRuJ",
+    ],
+    paths: [
+      // The published mention universe stopped carrying the topics' own
+      // surface: a row is two strings and an unread `piece` reference,
+      // because every field a row carries by value ships to every reader
+      // of the universe.
+      "result.mentionable[].body",
+    ],
+    reason:
+      "The board's mention universe became a derived index of two-string " +
+      "rows holding each topic as an unread reference, so the published " +
+      "`mentionable` stopped carrying a topic's own surface. Wired to the " +
+      "raw topics list it multiplied every topic's resume into every " +
+      "sibling topic under document-granular delivery.",
+    record: "docs/history/topics-mentionable-index-break.md",
+  },
+  {
+    // One entry per (pattern, BASELINE) pair, and that is a requirement
+    // rather than tidiness: the gate keys accepted pairs into a Map, so a
+    // second entry naming a baseline this one also names REPLACES its path
+    // set rather than adding to it. Breaks that share baselines therefore
+    // share an entry — and its single `record`, the other break named in
+    // the reason — while a later break against baselines no earlier entry
+    // names gets its own entry, with the pairs kept disjoint.
     //
     // Carried here: the reference graph rebuilt on cell identity, and the
     // board's demand narrowed to the eight members it reads — which narrows
@@ -191,6 +223,33 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/parking-admin-floor-contract-break.md",
   },
   {
+    // Lot Watch's admin roster declared a `requiredIntegrity` floor nothing
+    // could satisfy: no `addIntegrity` mint on the roster path, and a floor
+    // atom that differed from the one its roles carry, so the roster read a
+    // roster change has to make could never witness the floor either. Under
+    // `cfcWriteFloor: "enforce"` every write to the roster is refused. The
+    // declaration gained the mint, the single `lot-watch-admin` atom, and a
+    // `writeAuthorizedBy` binding naming the one handler that may write it,
+    // so the roster is no longer written by any action that holds the cell.
+    pattern: "factory-outputs/lot-watch/main.tsx",
+    baselines: [
+      "20260729T022742Z-W-iDVp0QJ9fPJBsi",
+      "20260804T003803Z-MtNQDxsoMJZjryZC",
+    ],
+    // `ifc` is compared for exact equality, so any correction to an
+    // unsatisfiable floor reads as a break. The registry is not published in
+    // the result, so only the argument role names the roster's own path.
+    paths: ["argument.adminRegistry.admins"],
+    reason:
+      "The admin roster's integrity floor was unsatisfiable, so no write to " +
+      "it could be accepted once the write floor is enforced. Correcting the " +
+      "declaration changes the `ifc` at that path, which no shape of the " +
+      "pattern avoids. A piece holding a roster keeps its stored roles; what " +
+      "it loses is the ability to be updated in place to the corrected " +
+      "contract.",
+    record: "docs/history/lot-watch-admin-floor-contract-break.md",
+  },
+  {
     // The lunch poll's identity moved from display names to profile cells
     // (see docs/history/lunch-poll-identity-break.md). The proof reports two
     // paths here: the published name-keyed admin result went away, and the
@@ -237,5 +296,210 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "command input. The earlier contract was not deployed, and neither " +
       "input has a safe compatibility default.",
     record: "docs/history/agent-connector-owner-identity-break.md",
+  },
+  {
+    // A parking-admin role named a person by name. Review asked for the CFC
+    // primitives instead — compare profiles by their cells, not by what those
+    // cells are called — so a role names the viewer's `#profile` cell, and the
+    // stored shape of a role changed with it.
+    pattern: "factory-outputs/parking-coordinator/main.tsx",
+    baselines: [
+      "20260820T191154Z-Fah23u1z5LYk4qKk",
+      "20260825T211621Z-wEoO6wvf7g-fhtJd",
+    ],
+    // The same change seen from the two roles a contract has: the subject is a
+    // cell where it was an inline object, and the name inside it goes with it.
+    paths: [
+      "argument.adminRegistry.admins[].subject",
+      "result.adminRegistry.admins[].subject.personName",
+    ],
+    reason:
+      "A role's subject moved from a person's name to their profile cell, so " +
+      "authority is compared by identity rather than by a string. A stored " +
+      "role of the old shape names nobody the pattern can resolve, and the " +
+      "piece holding it keeps running its own source; a space starting over " +
+      "on the new contract recovers through the same open-roster bootstrap " +
+      "that lets a fresh space have an admin at all.",
+    record: "docs/history/parking-admin-profile-subject-break.md",
+  },
+  {
+    // The exemplar's index rows became the members themselves. A row's own
+    // address is the item's address, so nothing in a row carries a separate
+    // reference to it; and a row reads the board's name for its item out of
+    // the item's own `shortName`, so the demand carries that member too.
+    pattern: "collection-naming/board.tsx",
+    baselines: [
+      "20260904T001531Z-WRSzkgeFJQmQt1ZM",
+      "20260904T022635Z-OsLnrwxWR4PfC0gG",
+    ],
+    // The one ruling seen from the two roles a contract has: the published
+    // row lost the reference the derived row document carried, and the demand
+    // gained the defaulted `shortName` a row reads its name from.
+    paths: [
+      "argument.items[]",
+      "result.index[].member",
+    ],
+    reason:
+      "An index row IS the member, so the derived row document's `member` " +
+      "reference is what the ruling removed, and no shape of the board both " +
+      "keeps it and makes a row the member. The row demand's `shortName` " +
+      "needs its `| undefined` arm, without which the pattern compiler " +
+      "refuses the board where an item meets the row type, and that arm moves " +
+      "the demand's defaults below a constraint the proof cannot prove stable " +
+      "under default insertion. The exemplar had no instance beyond a " +
+      "throwaway local demo, so no piece held the contract this replaces.",
+    record: "docs/history/collection-naming-index-rows-break.md",
+  },
+  {
+    // A second entry for this pattern, with baselines disjoint from the other
+    // one's, which is what keeps the bound tight: forgiving this path on the
+    // older baselines too would let the proof's one-issue-per-role limit hide
+    // an unintended break behind pairs this break never produced a finding
+    // against. Those older baselines report `bodyUpdatedBy.kind` or
+    // `boardCrossrefs` for the argument role, so `mentionable` is not the
+    // reported issue there.
+    pattern: "topics/topic.tsx",
+    baselines: [
+      "20260826T221814Z-RZiIzB74VkCoXYty",
+      "20260831T181712Z-hoTDhhCHJzB2Umnc",
+      "20260831T204059Z-2Fi9qBnr1mK4_p2J",
+      "20260901T191235Z-4uo6zrdZRahgZ98O",
+      "20260905T021503Z-Y-lXQUSup41JBSeM",
+      "20260906T050633Z-d6Et9xqrHqjlhlzA",
+    ],
+    // One path, and only in the argument role: the element type is untouched,
+    // so `asCell` at the mention universe's own node is the whole break.
+    paths: ["argument.mentionable"],
+    reason:
+      "The board's mention universe reaches a topic as a readable cell rather " +
+      "than a writable one, so the retained link's proof drops the write-back " +
+      "leg that refused a topic its own bytes. `asCell` is compared for exact " +
+      "equality, so narrowing a cell reads as a break however narrow the " +
+      "narrowing is. The one shape that keeps the writable handle instead " +
+      "declares the board's `piece` on the topic's projection, which is the " +
+      "wide demand the narrow one was adopted to avoid. A deployed topic takes " +
+      "this one update forced and is proven again on every update after it.",
+    record: "docs/history/topics-mentionable-readonly-break.md",
+  },
+  {
+    // A SECOND entry for this pattern, and no baseline here appears above:
+    // the pairs stay disjoint so that the older ones, which predate
+    // `shortName` entirely, keep the tight bound the entry above gave them.
+    //
+    // The exemplar's `shortName` takes the spelling Topics ships,
+    // `shortName?: string`. One property in two roles here, because a row IS
+    // the item: the board's demand of a stored item, and the row the board
+    // publishes.
+    pattern: "collection-naming/board.tsx",
+    baselines: [
+      "20260904T051612Z-5rtP1U2c-e31PtKt",
+      "20260904T063417Z-pWfbKiYw-7bd7xpC",
+      "20260905T003604Z-uX940wR7R4lVwuOt",
+    ],
+    // The one spelling seen from the two roles a contract has: an optional
+    // property carries no default, so the demand's defaults move, and the
+    // published row stops requiring the name.
+    paths: [
+      "argument.items[]",
+      "result.index[].shortName",
+    ],
+    reason:
+      "The exemplar exists to prove a contract before it is grafted onto " +
+      "Topics, and on this property it proved a spelling Topics does not " +
+      "ship. Aligning it makes the demand's defaults move and drops the " +
+      "published row's requirement, neither of which any shape of the board " +
+      "avoids while the property is optional. The exemplar has no " +
+      "deployment, so no piece holds the contract this replaces.",
+    record: "docs/history/collection-naming-shortname-spelling-break.md",
+  },
+  {
+    // The member's side of the same alignment: an item publishes its name the
+    // way a topic does, and demands it of a universe entry the same way.
+    pattern: "collection-naming/item.tsx",
+    baselines: [
+      "20260904T001531Z-z0Gy14PpefRML1fx",
+      "20260904T022635Z-GMG883UMGFeAnh-r",
+    ],
+    // These two baselines predate the item's mention universe, so the
+    // published name is the whole of what they blame.
+    paths: ["result.shortName"],
+    reason:
+      "An item publishes `shortName` as `shortName?: string`, the spelling " +
+      "Topics ships, where it published a required property whose type " +
+      "admitted `undefined`. The published property stops being required, " +
+      "which no shape of the item avoids while it is optional. The exemplar " +
+      "has no deployment, so no piece holds the contract this replaces.",
+    record: "docs/history/collection-naming-shortname-spelling-break.md",
+  },
+  {
+    // A second entry for the item, keeping its pairs disjoint from the two
+    // above for the reason the board's pair of entries states.
+    //
+    // Carried here: the `shortName` alignment recorded in the entry above,
+    // and the mention universe becoming a readable binding — the two
+    // breaks land on the same baselines, which is what puts them in one
+    // entry.
+    pattern: "collection-naming/item.tsx",
+    baselines: [
+      "20260904T082808Z-1fwb7SfgxGYK3VR0",
+      "20260905T003605Z-gslMTuThImQHhkVQ",
+    ],
+    // These two carry the mention universe, which is what makes them the
+    // pairs both breaks blame. `asCell` is compared for exact equality, so
+    // the readable binding is reported at the whole property rather than at
+    // an element of it, and it is reported ahead of the defaults the
+    // optional `shortName` moves.
+    paths: [
+      "argument.mentionable",
+      "result.shortName",
+    ],
+    reason:
+      "Two accepted breaks on one pattern. An item publishes `shortName` as " +
+      "`shortName?: string`, the spelling Topics ships, and demands it of a " +
+      "universe entry the same way " +
+      "(docs/history/collection-naming-shortname-spelling-break.md). And " +
+      "the universe binding became readable, recorded below. Neither has a " +
+      "shape of the item that avoids the break, and the exemplar has no " +
+      "deployment, so no piece holds the contract they replace.",
+    record: "docs/history/collection-naming-mentionable-readonly-break.md",
+  },
+  {
+    // Two entries, one per pattern, for one ruling: `LLMMessageSchema` stopped
+    // admitting the `system` role, and that schema reaches the argument
+    // contract of every pattern whose `messages` it types.
+    pattern: "chatbot.tsx",
+    baselines: [
+      "20260729T022742Z-Wx_o-CaAUThcJygl",
+      "20260818T183826Z-ibsxlvix5LQH7bfY",
+    ],
+    paths: [
+      "argument.messages[].role",
+    ],
+    reason:
+      "A system instruction travels in the request's `system` field. The " +
+      "guard the toolshed route gates on refused a system-role message " +
+      "already, and behind it the AI SDK refuses one inside `messages` " +
+      "whatever its content, so the role named a message no piece could ever " +
+      "send. An enum in a deployed contract cannot stop accepting a value " +
+      "compatibly, and no shape of the schema both drops the role and applies " +
+      "over a baseline declaring it. The narrowing strands nothing: the " +
+      "runtime enforces an enum neither on read nor on write, so a stored " +
+      "system-role message materializes under the new contract unchanged.",
+    record: "docs/history/features/llm-message-role-narrowing-break.md",
+  },
+  {
+    // The second pattern of the same ruling. Its baseline appears in no other
+    // entry, so the pairs stay disjoint.
+    pattern: "deep-research.tsx",
+    baselines: [
+      "20260729T022742Z-6PInVAlNOHThJNGH",
+    ],
+    paths: [
+      "argument.messages[].role",
+    ],
+    reason:
+      "The `system` role leaving `LLMMessageSchema`, recorded once for both " +
+      "patterns it breaks.",
+    record: "docs/history/features/llm-message-role-narrowing-break.md",
   },
 ];

@@ -54,10 +54,14 @@ const SCHEMA = {
 } as const;
 
 class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
   async create(id: string, signer?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       id as MemorySpace,
@@ -81,6 +85,7 @@ class CountingStorageManager extends StorageManager {
    * the relay's own membership is private, and its `hasSubscribers()` would
    * read the same whether teardown was clean or leaked two per runtime. */
   readonly live = new Set<IStorageSubscription>();
+
   static over(server: MemoryV2Server.Server): CountingStorageManager {
     return new CountingStorageManager(
       { as: signer, memoryHost: new URL("memory://") } as Options,
@@ -128,6 +133,7 @@ describe("runtime.dispose({ closeStorage })", () => {
 
   /** An independent view of the same durable state, for witnessing writes. */
   let witness: CountingStorageManager;
+
   let witnessRuntime: Runtime;
 
   /** What the durable store holds for `cause`, read through `witness`. */

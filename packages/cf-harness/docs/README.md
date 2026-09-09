@@ -22,6 +22,20 @@ migration notes live under `docs/history/` at the repository root.
   against the pattern index is measured so two runs can be compared: the task
   wording rule the finding rests on, what a batch records, and what its counts
   do and do not establish.
+- [WEAVER.md](WEAVER.md) — the operator procedure for driving the console from
+  Weaver's command pill: loom, the console on loom's fabric, and Weaver
+  configured, so a harness-built piece lands in the person's own space.
+- [system-map/](system-map/README.md) — an interactive map of the harness and
+  the runtime around it, drawn by trust boundary: where every gate sits and its
+  status, where the threats lie and which are closed by planned work, guarded by
+  CFC, or held by people and process; with the procedure for keeping it true.
+
+The system map moves in lockstep with the implementation. A change that lands or
+downgrades a gate, adds a boundary, threat, sink, or posture, or changes what
+`CURRENT_STATE.md` or `IMPLEMENTATION_PROFILE.md` says updates the map's data
+tables and `SNAPSHOT` in the same pull request, following the map's
+[update procedure](system-map/README.md#updating-it). The map is a reading aid,
+never a source of truth; when it disagrees with code, the map is wrong.
 
 ## Normative boundary
 

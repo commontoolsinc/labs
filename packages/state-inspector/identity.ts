@@ -31,6 +31,7 @@ export interface IdentitySpace {
 
   /** Total per-user + per-session entities this identity has here. */
   scopedEntities: number;
+
   evidence: string[];
 }
 
@@ -39,6 +40,7 @@ export interface IdentityWorld {
 
   /** A non-empty home space exists locally for this identity. */
   homePresent: boolean;
+
   spaces: IdentitySpace[];
   totals: {
     spaces: number;
@@ -46,6 +48,7 @@ export interface IdentityWorld {
 
     /** Spaces where this identity has per-user/session state. */
     spacesWithScopedState: number;
+
     scopedEntities: number;
   };
 }

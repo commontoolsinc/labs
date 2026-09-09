@@ -159,12 +159,13 @@ describe("cross-space value reads (CT-1667)", () => {
     }
   });
 
-  // This is THE regression guard: red without the fix (the deep value read
-  // goes through traverse's followPointer, which had no fetch trigger at
-  // all). The key-path-pull and sink steps above/below converge through
-  // link-resolution's pre-existing cross-space kick under loopback timing —
-  // they pin the contract but already passed on main in this harness.
   it("a whole-value pull() of the linking parent materializes the child", async () => {
+    // This is THE regression guard: red without the fix (the deep value read
+    // goes through traverse's followPointer, which had no fetch trigger at
+    // all). The key-path-pull and sink steps above/below converge through
+    // link-resolution's pre-existing cross-space kick under loopback timing —
+    // they pin the contract but already passed on main in this harness.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: writerStorage,

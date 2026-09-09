@@ -13,22 +13,25 @@
  * where it begins: a page anywhere on the web can drive requests at this
  * socket, and a hostile name that resolves to 127.0.0.1 can make these routes
  * same-origin. So every request has to name this server's own host, and every
- * `/api` route has to carry the per-process token the page is handed as a
- * `SameSite=Strict` cookie when it loads — a token a cross-origin caller
- * cannot send and a rebound origin cannot obtain. Do not put this behind a
- * public address.
+ * `/api` route except health has to carry the per-process token the page is
+ * handed as a `SameSite=Strict` cookie when it loads — a token a cross-origin
+ * caller cannot send and a rebound origin cannot obtain. Do not put this
+ * behind a public address.
  *
- * Two pieces of configuration are what make a run able to finish with a link
- * rather than a transcript. The fabric session — API URL, identity keyfile,
- * space *name* — reaches the engine as `fabricSession` in the base prompt-loop
- * options, which is what backs `run_pattern` and `assign_slug`; the space has
- * to be a name because `assign_slug` composes its URL from one and offers no
- * URL at all for a space named by `did:key`. The chat policy then has to name
- * those tools: the default parent tool surface does not include them, so a
- * session started with the default policy has a fabric session and no way to
- * use it.
+ * What a task runs under is not decided here. This server resolves flags, the
+ * environment and the request body into a `HarnessSessionConfig` — the same
+ * description the batch CLI resolves argv into — and `src/session-assembly.ts`
+ * turns that into the run. So a capability configurable on the CLI is
+ * configurable here by the same name, and the tools a session offers are
+ * derived from what it can back rather than listed by this file.
+ *
+ * The one piece of configuration this surface insists on is the fabric
+ * session, whose space has to be a name rather than a `did:key`: `assign_slug`
+ * composes a piece's URL from the name and offers none for a DID, and finishing
+ * with a link rather than a transcript is what this surface is for.
  */
 
+import { readLoomAuthoringConfig } from "../src/loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import {
   dirname,
@@ -53,16 +56,15 @@ import {
   FileHarnessProviderSettingsStore,
   resolveHarnessModelProviderPreference,
 } from "../src/auth/provider-settings.ts";
+import { harnessFabricSessionPostureBanner } from "../src/cfc-posture.ts";
 import type {
   HarnessFabricCfcEnforcementMode,
   HarnessFabricCfcFlowLabelsMode,
   HarnessFabricSessionConfig,
   HarnessModelProviderId,
-  HarnessPatternIndexConfig,
 } from "../src/config.ts";
 import type { CfcPosture } from "@commonfabric/runner";
 import {
-  DEFAULT_HARNESS_CHAT_POLICY,
   type HarnessChatError,
   type HarnessChatEventEnvelope,
   type HarnessChatPolicy,
@@ -70,10 +72,27 @@ import {
 } from "../src/contracts/interactive-chat.ts";
 import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest.ts";
 import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
-import { PATTERN_AUTHOR_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
-import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
+import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
+import {
+  DEFAULT_SUBAGENT_PROFILE,
+  PATTERN_AUTHOR_SUBAGENT_PROFILE,
+} from "../src/contracts/subagent.ts";
+import { parseHostMountSpecs } from "../src/host-mounts.ts";
+import { parseInputCellArgument } from "../src/input-cells.ts";
+import type { HarnessPatternRefSpec } from "../src/contracts/pattern-refs.ts";
+import {
+  checkPatternRefSpec,
+  MAX_HARNESS_PATTERN_REFS,
+} from "../src/pattern-refs.ts";
+import {
+  harnessSessionChatPolicy,
+  type HarnessSessionConfig,
+  harnessSessionEngineOptions,
+} from "../src/session-assembly.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import {
   createHarnessInteractiveChatService,
+  type CreateHarnessInteractiveChatServiceOptions,
   type HarnessInteractiveChatEventListener,
   type HarnessInteractiveChatService,
 } from "../src/interactive-chat-service.ts";
@@ -91,8 +110,8 @@ import {
 } from "../src/sandbox/docker-runsc.ts";
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
-import { FileSystemHarnessArtifactStore } from "../src/artifacts.ts";
-import type { HarnessRunState } from "../src/run-state.ts";
+import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
+import { liveCanonicalRedirect } from "./src/mount.ts";
 import {
   listConsoleRuns,
   readConsoleRun,
@@ -112,6 +131,11 @@ import {
   parseAfterSequence,
   pingFrame,
 } from "./sse.ts";
+import {
+  type ConsoleTurnCompletedEvent,
+  type ConsoleTurnResult,
+  readConsoleTurnResult,
+} from "./turn-result.ts";
 
 /** Loopback only. See the module comment on what does and does not protect. */
 const HOSTNAME = "127.0.0.1";
@@ -154,6 +178,14 @@ const cookieValue = (
  * itself, and the two directories felt emits into.
  */
 const ASSET_PATH = /^\/(scripts\/|styles\/|build-manifest\.json$|$)/;
+
+/**
+ * The live pane's address, which names the session it shows. It is served the
+ * same built page whatever session it names — the page reads the session out
+ * of its own address — and it is one of the paths served from the build, so it
+ * is handed the token cookie its own script needs to reach `/api`.
+ */
+const LIVE_PATH = /^\/live\/[^/]+\/?$/;
 
 /**
  * What the page is allowed to load and where it may send what it holds.
@@ -205,7 +237,7 @@ const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
 const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
 
 /** The CLI's own default model, so both entrypoints bill the same route. */
-const DEFAULT_MODEL = "gpt-5.6-terra";
+const DEFAULT_MODEL = "gpt-5.6-sol";
 
 /** How often the stream publishes a liveness tick, in milliseconds. */
 const PING_INTERVAL_MS = 15_000;
@@ -220,22 +252,6 @@ const CONSOLE_CREDENTIAL_OWNER = {
   version: 1,
   ownerKey: "local",
 } as const;
-
-/**
- * The tools a console session is allowed, over the default parent surface: the
- * two that need a fabric session, and the two that need an index. Each is
- * withheld again by the prompt loop when its backing is absent, so naming them
- * here asks for them rather than asserting they exist.
- */
-const FABRIC_TOOL_IDS = [
-  "run_pattern",
-  "assign_slug",
-] as const satisfies readonly BuiltinToolId[];
-
-const PATTERN_INDEX_TOOL_IDS = [
-  "search_patterns",
-  "record_feedback",
-] as const satisfies readonly BuiltinToolId[];
 
 /**
  * The index functions the Index view may reach through the proxy. Every one of
@@ -297,28 +313,157 @@ const callPatternIndex = (
   }
 };
 
-/** Everything the server needs before it can serve a single request. */
-interface ConsoleConfig {
+/**
+ * The input cells a `/api/task` body attaches to the turn it starts, each a
+ * `{ name, ref }` pair. The name is what the model is told, the reference is
+ * the cell it stands for, and neither the value nor the address ever reaches
+ * the page — the run mints a token for the reference and the model works
+ * through that.
+ *
+ * The grammar is the flag's, checked by the flag's own parser, so a spelling
+ * the CLI refuses is refused here too. A body that names no cells yields
+ * none, which is the ordinary task.
+ *
+ * @throws Error naming the defect, which the route answers 400 with.
+ */
+const parseTaskInputCells = (
+  value: unknown,
+): readonly HarnessInputCellSpec[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("inputCells must be an array");
+  }
+  const specs: HarnessInputCellSpec[] = [];
+  const names = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error("each input cell must be an object");
+    }
+    const { name, ref } = entry as { name?: unknown; ref?: unknown };
+    if (typeof name !== "string" || typeof ref !== "string") {
+      throw new Error("each input cell needs a string name and ref");
+    }
+    // Checked through the flag's own parser, so the two surfaces cannot come
+    // to accept different references under the same name.
+    const spec = parseInputCellArgument(`${name}=${ref}`);
+    if (names.has(spec.name)) {
+      throw new Error(`inputCells names \`${spec.name}\` twice`);
+    }
+    names.add(spec.name);
+    specs.push(spec);
+  }
+  return specs;
+};
+
+/**
+ * The pattern references a `/api/task` body attaches to the turn it starts,
+ * each a `{ patternId }`. An id is the index's own — the content-addressed
+ * identity of published source — so it names an entry the index holds or it
+ * names nothing, and the reference is the whole of what the caller says.
+ *
+ * The grammar is the run's, checked by the run's own parser, so a spelling
+ * the run refuses is refused here too, before a turn is spent on the read.
+ * Whether the index holds the id is the run's to find out. A body that names
+ * no patterns yields none, which is the ordinary task.
+ *
+ * @throws Error naming the defect, which the route answers 400 with.
+ */
+const parseTaskPatternRefs = (
+  value: unknown,
+): readonly HarnessPatternRefSpec[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("patternRefs must be an array");
+  }
+  if (value.length > MAX_HARNESS_PATTERN_REFS) {
+    throw new Error(
+      `patternRefs takes at most ${MAX_HARNESS_PATTERN_REFS} references`,
+    );
+  }
+  const specs: HarnessPatternRefSpec[] = [];
+  const ids = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error("each pattern reference must be an object");
+    }
+    const { patternId } = entry as { patternId?: unknown };
+    if (typeof patternId !== "string") {
+      throw new Error("each pattern reference needs a string patternId");
+    }
+    const spec = { patternId };
+    checkPatternRefSpec(spec);
+    if (ids.has(patternId)) {
+      throw new Error(`patternRefs names \`${patternId}\` twice`);
+    }
+    ids.add(patternId);
+    specs.push(spec);
+  }
+  return specs;
+};
+
+/**
+ * Everything the server needs before it can serve a single request: the
+ * session every task runs under, plus what belongs to this surface alone.
+ *
+ * The session half is {@link HarnessSessionConfig}, the same description the
+ * batch CLI resolves argv into, so a capability configurable there is
+ * configurable here by the same name. This surface adds only what an HTTP
+ * server has and a command does not — a port, a durable session store, a
+ * seeded system prompt.
+ */
+interface ConsoleConfig extends HarnessSessionConfig {
   port: number;
-  workspacePath: string;
-  artifactRoot: string;
+  harnessHome: string;
+
+  /** A fabric session is required here; see `resolveConsoleConfig`. */
+  fabricSession: HarnessFabricSessionConfig;
+
+  /**
+   * The sandbox's two CFC sidecar transports, always sited: this surface
+   * creates them under its own data directory rather than asking an operator
+   * to name a path before their first run.
+   */
   cfcResultDir: string;
   cfcInvocationContextDir: string;
-  harnessHome: string;
-  model: string;
-  fabricSession: HarnessFabricSessionConfig;
-  patternIndex?: HarnessPatternIndexConfig;
+
   sessionDbPath?: string;
 
   /**
-   * The space database the per-cell label snapshot reads, for a host whose
-   * store is not where the discovery walk looks. Absent, the space the
-   * fabric session names is resolved against the caches on this host.
+   * System prompt seeded into every console session, read from the file named
+   * by `--system-prompt-file`. Absent, a session runs with no system message,
+   * which is this surface's default: the parent's only standing guidance is
+   * its tool descriptors.
    */
-  spaceDbPath?: string;
-  maxModelTurns?: number;
-  skillsRoot?: string;
+  systemPrompt?: string;
 }
+
+/**
+ * Reads the seeded system prompt off disk. A named file that is empty or
+ * unreadable is a startup failure rather than a session that quietly runs
+ * without the prompt the operator asked for — a variant measured against a
+ * prompt that never loaded is a variant that measured nothing.
+ */
+const readSystemPromptFile = (path: string, cwd: string): string => {
+  const resolved = resolve(cwd, path);
+  let contents: string;
+  try {
+    contents = Deno.readTextFileSync(resolved);
+  } catch (error) {
+    throw new Error(
+      `--system-prompt-file could not be read: ${resolved}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (contents.trim() === "") {
+    throw new Error(`--system-prompt-file is empty: ${resolved}`);
+  }
+  return contents;
+};
 
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value.trim();
@@ -346,31 +491,49 @@ const positiveInteger = (value: string, flag: string): number => {
  * and never hand back an address for it, which is the one outcome this surface
  * exists to avoid.
  */
-export const resolveConsoleConfig = (
+export const resolveConsoleConfig = async (
   args: readonly string[],
   env: Record<string, string | undefined>,
   cwd: string,
-): ConsoleConfig => {
+): Promise<ConsoleConfig> => {
   const parsed = parseArgs(args, {
     string: [
       "port",
       "workspace",
       "artifact-root",
       "model",
+      "loom-authoring-config",
       "fabric-api-url",
       "fabric-identity",
       "fabric-space",
       "pattern-index-url",
+      "skills-registry-url",
+      "skills-root",
+      "host-mount",
       "session-db",
       "space-db",
       "max-model-turns",
       "fabric-cfc-enforcement-mode",
       "fabric-cfc-flow-labels",
       "fabric-cfc-posture",
+      "system-prompt-file",
     ],
+    boolean: [
+      "no-child-composition-guidance",
+      "no-pattern-index-publish",
+      "pattern-index-publish-discoverable",
+    ],
+    collect: ["host-mount"],
   });
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
+
+  const loomAuthoring = await readLoomAuthoringConfig(
+    flag("loom-authoring-config") ??
+      nonEmpty(env.CF_HARNESS_LOOM_AUTHORING_CONFIG),
+  );
+  const systemPromptFile = flag("system-prompt-file") ??
+    nonEmpty(env.CF_HARNESS_CONSOLE_SYSTEM_PROMPT_FILE);
 
   const port = flag("port") !== undefined
     ? positiveInteger(flag("port")!, "--port")
@@ -471,15 +634,26 @@ export const resolveConsoleConfig = (
       : {}),
   };
 
-  // The repo's skills/ tree gives the pattern-author subagent its preloaded
-  // pattern-dev + pattern-schema skills; without a skills root the parent
-  // model authors patterns blind and burns turns on idiom errors.
-  const skillsRootFlag = flag("skills-root") ??
-    nonEmpty(env.CF_HARNESS_CONSOLE_SKILLS_ROOT) ??
-    resolve(cwd, join(moduleDir, "../../../skills"));
+  // The checkout's skills/ tree gives the pattern-author subagent its
+  // preloaded pattern-dev + pattern-schema skills; without a skills root the
+  // parent model authors patterns blind and burns turns on idiom errors. The
+  // default is found the same way the CLI finds it, so the two surfaces scan
+  // one tree.
+  const skillsRootRecord = resolveHarnessSkillsRoot(
+    flag("skills-root") ?? nonEmpty(env.CF_HARNESS_CONSOLE_SKILLS_ROOT),
+  );
 
   const patternIndexUrl = flag("pattern-index-url") ??
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
+  // Publishing posture reads exactly as it does on the CLI: on unless turned
+  // off, and recorded-only unless discoverability is asked for.
+  const patternIndexPublish = parsed["no-pattern-index-publish"] !== true &&
+    nonEmpty(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+  const patternIndexPublishDiscoverable =
+    parsed["pattern-index-publish-discoverable"] === true ||
+    nonEmpty(env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE) === "1";
+  const skillsRegistryUrl = flag("skills-registry-url") ??
+    nonEmpty(env.CF_HARNESS_SKILLS_REGISTRY_URL);
   const sessionDb = flag("session-db") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_SESSION_DB) ??
     join(dataDir, "sessions.sqlite");
@@ -493,7 +667,7 @@ export const resolveConsoleConfig = (
 
   return {
     port,
-    workspacePath,
+    workspace: workspacePath,
     artifactRoot,
     cfcResultDir,
     cfcInvocationContextDir,
@@ -503,11 +677,26 @@ export const resolveConsoleConfig = (
     ),
     model: flag("model") ?? nonEmpty(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL,
     fabricSession,
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
     ...(patternIndexUrl !== undefined
       ? {
         patternIndex: {
           baseUrl: requiredUrl(patternIndexUrl, "--pattern-index-url"),
+          ...(patternIndexPublish ? {} : { publish: false }),
+          ...(patternIndexPublishDiscoverable
+            ? { publishDiscoverable: true }
+            : {}),
+        },
+      }
+      : {}),
+    ...(skillsRegistryUrl !== undefined
+      ? {
+        skillsSh: {
+          baseUrl: requiredUrl(
+            skillsRegistryUrl,
+            "--skills-registry-url",
+          ),
         },
       }
       : {}),
@@ -515,39 +704,51 @@ export const resolveConsoleConfig = (
     // is what a throwaway run wants and what a machine without the SQLite
     // native library can still do.
     ...(sessionDb === "none" ? {} : { sessionDbPath: resolve(cwd, sessionDb) }),
-    ...(maxModelTurns !== undefined
-      ? {
-        maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
-      }
+    maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
+    ...(skillsRootRecord !== undefined
+      ? { skillsRoot: skillsRootRecord.hostPath, skillsRootRecord }
       : {}),
-    skillsRoot: skillsRootFlag,
+    ...(systemPromptFile !== undefined
+      ? { systemPrompt: readSystemPromptFile(systemPromptFile, cwd) }
+      : {}),
+    hostMounts: await parseHostMountSpecs(
+      parsed["host-mount"] as string[] | undefined,
+      cwd,
+    ),
+    // The rest of the session description this surface does not vary. Skills
+    // are scanned rather than preloaded by name, scripts are not allowlisted,
+    // handles materialize nowhere, and a task's input cells and pattern
+    // references arrive per task on `/api/task` rather than at startup.
+    skillNames: [],
+    allowedSkillScripts: [],
+    skillScriptExecutionTarget: "sandbox",
+    handleValueOrigins: [],
+    inputCells: [],
+    patternRefs: [],
+    // The tool surface is left to the session's own backing rather than
+    // listed here, so a tool the harness gains reaches this surface with it.
+    allowedSubagentProfiles: [
+      DEFAULT_SUBAGENT_PROFILE,
+      PATTERN_AUTHOR_SUBAGENT_PROFILE,
+    ],
+    // Stated only when it is being turned off: guidance is what the profile
+    // ships with, so saying so restates a default rather than configuring one.
+    ...(parsed["no-child-composition-guidance"] === true
+      ? { subagentCompositionGuidance: false }
+      : {}),
   };
 };
 
 /**
- * The policy a console session runs under: see `FABRIC_TOOL_IDS`. The prompt
- * slot is bound as a direct command because the page's textarea is the user
- * typing the command themselves — the same standing the batch CLI's prompt
- * argument has, and what authorizes effectful tools under CFC enforce modes.
+ * The prompt slot a console turn is bound under. The page's textarea is the
+ * user typing the command themselves — the same standing the batch CLI's
+ * prompt argument has, and what authorizes effectful tools under CFC enforce
+ * modes.
  */
-export const consoleChatPolicy = (
-  patternIndexConfigured: boolean,
-): HarnessChatPolicy => ({
-  ...DEFAULT_HARNESS_CHAT_POLICY,
-  allowedToolIds: [
-    ...DEFAULT_HARNESS_CHAT_POLICY.allowedToolIds,
-    ...FABRIC_TOOL_IDS,
-    ...(patternIndexConfigured ? PATTERN_INDEX_TOOL_IDS : []),
-  ],
-  allowedSubagentProfiles: [
-    ...DEFAULT_HARNESS_CHAT_POLICY.allowedSubagentProfiles,
-    PATTERN_AUTHOR_SUBAGENT_PROFILE,
-  ],
-  promptSlot: createCliPromptSlotBinding({
-    kernelName: "cf-harness",
-    surface: "console-web",
-    role: "direct-command",
-  }),
+const CONSOLE_PROMPT_SLOT = createCliPromptSlotBinding({
+  kernelName: "cf-harness",
+  surface: "console-web",
+  role: "direct-command",
 });
 
 /**
@@ -662,7 +863,6 @@ export class ConsoleServer {
   readonly #patternIndexClientFactory:
     | HarnessPatternIndexClientFactory
     | undefined;
-  readonly #recordCellLabels: (sessionId: string) => Promise<void>;
 
   /**
    * The tail of the fan-out a terminal event is holding, or `undefined` when
@@ -670,6 +870,7 @@ export class ConsoleServer {
    * envelope reaches the streams on the call that broadcast it.
    */
   #heldFanOut: Promise<void> | undefined;
+
   #beats = 0;
 
   /**
@@ -681,9 +882,7 @@ export class ConsoleServer {
    *
    * The index client is the other way round: it reads the fabric identity from
    * disk to sign with, so it is built lazily, cached once healthy, and handed
-   * in by a test that has no keyfile to read. The cell-label snapshot is
-   * handed in for the same reason — it reads a space database this host may
-   * not hold, and it is what a terminal event waits on.
+   * in by a test that has no keyfile to read.
    */
   constructor(
     config: ConsoleConfig,
@@ -691,11 +890,8 @@ export class ConsoleServer {
       onEvent: HarnessInteractiveChatEventListener,
     ) => HarnessInteractiveChatService,
     patternIndexClientFactory?: HarnessPatternIndexClientFactory,
-    recordCellLabels?: (sessionId: string) => Promise<void>,
   ) {
     this.#config = config;
-    this.#recordCellLabels = recordCellLabels ??
-      ((sessionId) => this.#snapshotCellLabels(sessionId));
     this.#service = createService((envelope) => this.broadcast(envelope));
     const factory = patternIndexClientFactory ??
       (config.patternIndex !== undefined
@@ -717,38 +913,71 @@ export class ConsoleServer {
   /**
    * Writes one envelope to every stream that has not already seen it.
    *
-   * The run's cells are settled once its turn is, so a terminal event is what
-   * the snapshot is taken on — and the page re-reads the run on that same
-   * event, so the event is held until the snapshot has landed. An event that
-   * overtook its own snapshot would hand the page a run whose labels read
-   * `absent`, with no later event to correct it. Nothing of the turn waits
-   * behind the event that closes it, and an envelope broadcast while one is
-   * held queues behind it, so the stream stays in sequence order — which is
-   * the order it delivers in or not at all. A snapshot this server could not
-   * write still lets the event through: the run stands as it is, and the page
-   * is owed the turn either way.
+   * The event that closes a turn carries the turn's result, which is read
+   * from the run's artifacts, so that event is held while the read runs.
+   * Nothing of the turn waits behind the event that closes it, and an
+   * envelope broadcast while one is held queues behind it, so the stream
+   * stays in sequence order — which is the order it delivers in or not at
+   * all.
    */
-  broadcast(envelope: HarnessChatEventEnvelope): void {
-    const snapshot = TERMINAL_TURN_EVENT_KINDS.has(envelope.event.kind)
-      ? this.#recordCellLabels(envelope.sessionId).catch((error: unknown) => {
-        console.error(
-          `cell label snapshot failed for session ${envelope.sessionId}:`,
-          error,
-        );
-      })
-      : undefined;
-    if (snapshot === undefined && this.#heldFanOut === undefined) {
+  broadcast(envelope: HarnessChatEventEnvelope): Promise<void> {
+    if (
+      !TERMINAL_TURN_EVENT_KINDS.has(envelope.event.kind) &&
+      this.#heldFanOut === undefined
+    ) {
       this.#fanOut(envelope);
-      return;
+      return Promise.resolve();
     }
     const held = (this.#heldFanOut ?? Promise.resolve())
-      .then(() => snapshot)
-      .then(() => this.#fanOut(envelope), () => this.#fanOut(envelope));
+      .then(async () => this.#fanOut(await this.#consoleEnvelope(envelope)));
     this.#heldFanOut = held;
     void held.finally(() => {
       if (this.#heldFanOut === held) {
         this.#heldFanOut = undefined;
       }
+    });
+    return held;
+  }
+
+  async #consoleEnvelope(
+    envelope: HarnessChatEventEnvelope,
+  ): Promise<HarnessChatEventEnvelope> {
+    if (envelope.event.kind !== "turn_completed") {
+      return envelope;
+    }
+    const result = await this.#readTurnResult(
+      envelope.sessionId,
+      envelope.event.turnId,
+    ) ?? {
+      pieces: [],
+      looms: [],
+      spaceName: this.#config.fabricSession.space,
+      finalText: envelope.event.finalText ?? "",
+    };
+    const event: ConsoleTurnCompletedEvent = {
+      ...envelope.event,
+      result,
+    };
+    return {
+      ...envelope,
+      event,
+    };
+  }
+
+  async #readTurnResult(
+    sessionId: string,
+    turnId: string,
+  ): Promise<ConsoleTurnResult | undefined> {
+    const [session] = this.#service.status(sessionId).sessions;
+    const turns = await this.#service.listTurnsForReplay({ sessionId });
+    const originLoomId = turns.turns.find((entry) =>
+      entry.turn.turnId === turnId
+    )?.input.loomId;
+    return await readConsoleTurnResult({
+      ...(originLoomId !== undefined ? { originLoomId } : {}),
+      artifactRoot: session?.artifactRoot ?? this.#config.artifactRoot,
+      turnId,
+      spaceName: this.#config.fabricSession.space,
     });
   }
 
@@ -768,64 +997,6 @@ export class ConsoleServer {
     }
   }
 
-  /**
-   * Reads the run's space for what it holds about the cells a finished turn
-   * touched, and records it beside the run.
-   *
-   * The run's own artifacts say which cells it made and read; the space says
-   * what each of them is labelled, and nothing else joins the two. A turn is
-   * its own run, so this runs once per turn, over that run and the
-   * `delegate_task` children beneath it — a parent commonly names a cell its
-   * child produced, and a snapshot of the parent alone would leave that cell
-   * unlabelled in the family map.
-   *
-   * The space is read read-only and best-effort: a host holding no copy of it
-   * writes a snapshot that says so, which is a different page from a run whose
-   * cells carry no label.
-   */
-  async #snapshotCellLabels(sessionId: string): Promise<void> {
-    const [session] = this.#service.status(sessionId).sessions;
-    const runId = session?.harnessRunId;
-    if (runId === undefined) {
-      return;
-    }
-    const artifactRoot = session.artifactRoot ?? this.#config.artifactRoot;
-    // The harness ids a child `<parent>.subagent.N`, so the family is a
-    // directory listing rather than a walk of every run's state.
-    const family: string[] = [];
-    for await (const entry of Deno.readDir(artifactRoot)) {
-      if (
-        entry.isDirectory &&
-        (entry.name === runId || entry.name.startsWith(`${runId}.`))
-      ) {
-        family.push(entry.name);
-      }
-    }
-    for (const name of family) {
-      const runState = JSON.parse(
-        await Deno.readTextFile(join(artifactRoot, name, "run-state.json")),
-      ) as HarnessRunState;
-      const refs = (runState.handleTable?.entries ?? []).map((entry) =>
-        entry.ref
-      );
-      if (refs.length === 0) {
-        continue;
-      }
-      // deno-lint-ignore cf-imports/no-inline-module-import -- reading a space database opens SQLite's native library, and a console process whose runs have no cell to snapshot must be able to serve its page without `--allow-ffi`
-      const { readSpaceCellLabels } = await import("../src/space-labels.ts");
-      const labels = await readSpaceCellLabels({
-        space: this.#config.fabricSession.space,
-        ...(this.#config.spaceDbPath !== undefined
-          ? { dbPath: this.#config.spaceDbPath }
-          : {}),
-        refs,
-        generatedAt: new Date().toISOString(),
-      });
-      await new FileSystemHarnessArtifactStore({ artifactRoot, runId: name })
-        .persistCellLabels(labels);
-    }
-  }
-
   /** Publishes a liveness tick so a quiet session still reads as alive. */
   ping(): void {
     const frame = encoder.encode(pingFrame(++this.#beats));
@@ -840,7 +1011,31 @@ export class ConsoleServer {
     if (refusal !== undefined) {
       return refusal;
     }
-    if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
+    // The live pane's assets are written relative to `/live/<sessionId>`
+    // (`./src/mount.ts`), so the trailing-slash form is sent to the
+    // canonical one rather than served with a stylesheet that cannot load.
+    // Relative `Location`: it resolves under any host prefix on the client.
+    // The query rides along: `?turn=` and `?piecesBase=` are the address.
+    const canonical = request.method === "GET"
+      ? liveCanonicalRedirect(url.pathname, url.search)
+      : undefined;
+    if (canonical !== undefined) {
+      return new Response(null, {
+        status: 308,
+        headers: { location: canonical },
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return Response.json({
+        ok: true,
+        fabricApiUrl: this.#config.fabricSession.apiUrl,
+        fabricSession: "unverified",
+      });
+    }
+    if (
+      request.method === "GET" &&
+      (ASSET_PATH.test(url.pathname) || LIVE_PATH.test(url.pathname))
+    ) {
       const response = await this.#asset(url.pathname);
       response.headers.set(
         "content-security-policy",
@@ -869,9 +1064,18 @@ export class ConsoleServer {
       return Response.json(await this.#sessions());
     }
     if (request.method === "GET" && url.pathname === "/api/status") {
-      return Response.json(
-        this.#service.status(url.searchParams.get("sessionId") ?? undefined),
-      );
+      return Response.json({
+        artifactRoot: this.#config.artifactRoot,
+        ...this.#service.status(url.searchParams.get("sessionId") ?? undefined),
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/api/policy") {
+      return Response.json(this.#policy());
+    }
+    if (
+      request.method === "GET" && url.pathname.startsWith("/api/turns/")
+    ) {
+      return await this.#turnResult(url);
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       return this.#events(url);
@@ -892,9 +1096,9 @@ export class ConsoleServer {
    * the request is one this server's own page made. The `Host` gate comes
    * first and covers every route, including the page: a request that arrived
    * under another name was addressed to somewhere else, whatever it asks for.
-   * The token then gates `/api` whole, reads included, because a read here
-   * hands out run artifacts and a write starts an effectful turn under the
-   * local fabric identity.
+   * The token then gates the API's artifact reads and writes. Health carries
+   * configuration and an explicitly unverified liveness value, so it keeps
+   * the host and origin gates and needs no token.
    */
   #refuse(request: Request, url: URL): Response | undefined {
     const port = this.#config.port;
@@ -912,6 +1116,9 @@ export class ConsoleServer {
     if (origin !== null && !allowedOrigins(port).includes(origin)) {
       return new Response("forbidden", { status: 403 });
     }
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return undefined;
+    }
     if (
       cookieValue(request.headers.get("cookie"), TOKEN_COOKIE) !== this.#token
     ) {
@@ -926,6 +1133,65 @@ export class ConsoleServer {
       return new Response("unsupported media type", { status: 415 });
     }
     return undefined;
+  }
+
+  /**
+   * One turn's durable external result, or where the turn stands instead.
+   * The answer follows the turn's status: a turn still running is 409, and a
+   * poller asks again; a completed turn is its result, or 404 when the
+   * artifacts cannot supply one; a failed or canceled turn is 410, because
+   * its result will never exist. A poller stops on anything but 409.
+   */
+  async #turnResult(url: URL): Promise<Response> {
+    const match = /^\/api\/turns\/([^/]+)\/result$/.exec(url.pathname);
+    if (match === null) {
+      return new Response("not found", { status: 404 });
+    }
+    let turnId: string;
+    try {
+      turnId = decodeURIComponent(match[1]);
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+    const turns = await this.#service.listTurnsForReplay({});
+    const turn = turns.turns.find((entry) => entry.turn.turnId === turnId);
+    if (turn === undefined) {
+      return Response.json({
+        code: "turn_not_found",
+        error: `turn ${turnId} was not found`,
+      }, { status: 404 });
+    }
+    switch (turn.turn.status) {
+      case "running":
+      case "canceling":
+        return Response.json({
+          code: "turn_not_completed",
+          error: `turn ${turnId} has not completed`,
+        }, { status: 409 });
+      case "failed":
+        return Response.json({
+          code: "turn_failed",
+          error: `turn ${turnId} failed`,
+          ...(turn.turn.error !== undefined ? { detail: turn.turn.error } : {}),
+        }, { status: 410 });
+      case "canceled":
+        return Response.json({
+          code: "turn_canceled",
+          error: `turn ${turnId} was canceled`,
+          ...(turn.turn.cancelReason !== undefined
+            ? { detail: turn.turn.cancelReason }
+            : {}),
+        }, { status: 410 });
+      case "completed":
+        break;
+    }
+    const result = await this.#readTurnResult(turn.sessionId, turnId);
+    return result === undefined
+      ? Response.json({
+        code: "turn_result_unavailable",
+        error: `result for turn ${turnId} is unavailable`,
+      }, { status: 404 })
+      : Response.json(result);
   }
 
   /**
@@ -982,12 +1248,18 @@ export class ConsoleServer {
   }
 
   /**
-   * One file of the built page. The page is a felt build under `dist/`, so a
+   * One file of the built pages. They are a felt build under `dist/`, so a
    * server started before `deno task console:build` has nothing to serve and
    * says which command produces it rather than answering an empty 404.
    */
   async #asset(pathname: string): Promise<Response> {
-    const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
+    const live = LIVE_PATH.test(pathname);
+    const page = pathname === "/" || live;
+    const relativePath = pathname === "/"
+      ? "index.html"
+      : live
+      ? "live.html"
+      : pathname.slice(1);
     if (relativePath.split("/").some((segment) => segment === "..")) {
       return new Response("not found", { status: 404 });
     }
@@ -999,7 +1271,7 @@ export class ConsoleServer {
       });
     } catch {
       return new Response(
-        pathname === "/"
+        page
           ? "the console page is not built; run `deno task --cwd packages/cf-harness console:build`"
           : "not found",
         {
@@ -1021,6 +1293,35 @@ export class ConsoleServer {
   }
 
   /**
+   * The policy every new session here is started with. One expression rather
+   * than two because `/api/policy` answers for the sessions `/api/task`
+   * creates, and a client that acts on the answer is owed the same object the
+   * next session actually gets.
+   */
+  #sessionPolicy(): HarnessChatPolicy {
+    return harnessSessionChatPolicy(this.#config, CONSOLE_PROMPT_SLOT);
+  }
+
+  /**
+   * What a new session would run under. The seeded system prompt crosses as a
+   * digest, so a client can check that this console holds the prompt it was
+   * told to measure without the prompt's text leaving the process.
+   */
+  #policy(): ConsolePolicyReport {
+    return consolePolicyReport({
+      policy: this.#sessionPolicy(),
+      fabricSpace: this.#config.fabricSession.space,
+      artifactRoot: this.#config.artifactRoot,
+      ...(this.#config.systemPrompt !== undefined
+        ? { systemPrompt: this.#config.systemPrompt }
+        : {}),
+      ...(this.#config.sessionDbPath !== undefined
+        ? { sessionDbPath: this.#config.sessionDbPath }
+        : {}),
+    });
+  }
+
+  /**
    * Starts a turn, in the session the request names or in a new one. One
    * request rather than two because a session with no turn is not a thing
    * anyone asked for, and the page needs both identifiers before it can
@@ -1037,8 +1338,22 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const body: { text?: unknown; sessionId?: unknown } =
-      typeof parsed === "object" && parsed !== null ? parsed : {};
+    const body: {
+      text?: unknown;
+      sessionId?: unknown;
+      inputCells?: unknown;
+      patternRefs?: unknown;
+      loomId?: unknown;
+    } = typeof parsed === "object" && parsed !== null ? parsed : {};
+    if (
+      body.loomId !== undefined &&
+      (typeof body.loomId !== "string" ||
+        !/^loom-[a-f0-9]{16}$/.test(body.loomId))
+    ) {
+      return Response.json({
+        error: "loomId must be a canonical Loom identifier",
+      }, { status: 400 });
+    }
     const text = body.text;
     if (typeof text !== "string" || text.trim() === "") {
       return Response.json({ error: "text is required" }, { status: 400 });
@@ -1048,13 +1363,23 @@ export class ConsoleServer {
         status: 400,
       });
     }
+    let inputCells: readonly HarnessInputCellSpec[];
+    let patternRefs: readonly HarnessPatternRefSpec[];
+    try {
+      inputCells = parseTaskInputCells(body.inputCells);
+      patternRefs = parseTaskPatternRefs(body.patternRefs);
+    } catch (error) {
+      return Response.json({
+        error: error instanceof Error ? error.message : String(error),
+      }, { status: 400 });
+    }
     let sessionId = body.sessionId;
     if (sessionId === undefined) {
       const session = await this.#service.startSession(crypto.randomUUID(), {
-        workspace: { hostPath: this.#config.workspacePath },
+        workspace: { hostPath: this.#config.workspace },
         model: this.#config.model,
         artifactRoot: this.#config.artifactRoot,
-        policy: consoleChatPolicy(this.#config.patternIndex !== undefined),
+        policy: this.#sessionPolicy(),
       });
       if (!session.ok) {
         return chatErrorResponse(session);
@@ -1063,7 +1388,12 @@ export class ConsoleServer {
     }
     const turn = await this.#service.startTurn(crypto.randomUUID(), {
       sessionId,
-      input: { text },
+      input: {
+        text,
+        ...(typeof body.loomId === "string" ? { loomId: body.loomId } : {}),
+      },
+      ...(inputCells.length > 0 ? { inputCells } : {}),
+      ...(patternRefs.length > 0 ? { patternRefs } : {}),
     });
     if (!turn.ok) {
       return chatErrorResponse(turn);
@@ -1212,12 +1542,12 @@ export class ConsoleServer {
     this.#service.listEventsForReplay({
       ...(sessionId !== undefined ? { sessionId } : {}),
       afterSequence,
-    }).then((replay) => {
+    }).then(async (replay) => {
       for (const envelope of envelopesAfter(replay.events, afterSequence)) {
-        this.#write(client, envelope);
+        this.#write(client, await this.#consoleEnvelope(envelope));
       }
       for (const envelope of envelopesAfter(client.pending, afterSequence)) {
-        this.#write(client, envelope);
+        this.#write(client, await this.#consoleEnvelope(envelope));
       }
       client.pending.length = 0;
       client.ready = true;
@@ -1279,6 +1609,33 @@ const chatErrorResponse = (response: HarnessChatResponse): Response =>
   );
 
 /**
+ * Carries resolved console configuration into each interactive chat session.
+ */
+export const createConsoleInteractiveServiceOptions = (
+  config: ConsoleConfig,
+  modelOptions: CreateHarnessPromptLoopOptions,
+  onEvent: HarnessInteractiveChatEventListener,
+  sessionStore?: HarnessChatSessionStore,
+): CreateHarnessInteractiveChatServiceOptions => ({
+  basePromptLoopOptions: {
+    ...harnessSessionEngineOptions(config),
+    ...modelOptions,
+  },
+  ...(config.systemPrompt !== undefined
+    ? { systemPrompt: config.systemPrompt }
+    : {}),
+  ...(modelOptions.credentialOwner !== undefined
+    ? { credentialOwner: modelOptions.credentialOwner }
+    : {}),
+  ...(sessionStore !== undefined ? { sessionStore } : {}),
+  // Console turn ids are process-generated UUIDs and name the durable run
+  // directory that its result route reads. Other interactive transports keep
+  // their existing run-id policy.
+  runIdForTurn: (_sessionId, turnId) => turnId,
+  onEvent,
+});
+
+/**
  * Builds the service and starts serving. The fabric session and the pattern
  * index reach the engine as resolved configuration on the base prompt-loop
  * options: `CreateHarnessPromptLoopOptions` extends the engine's options,
@@ -1291,10 +1648,10 @@ export const startConsoleServer = async (
   env: Record<string, string | undefined> = Deno.env.toObject(),
   cwd: string = Deno.cwd(),
 ): Promise<void> => {
-  const config = resolveConsoleConfig(args, env, cwd);
+  const config = await resolveConsoleConfig(args, env, cwd);
   for (
     const directory of [
-      config.workspacePath,
+      config.workspace,
       config.artifactRoot,
       config.cfcResultDir,
       config.cfcInvocationContextDir,
@@ -1310,31 +1667,14 @@ export const startConsoleServer = async (
   const server = new ConsoleServer(
     config,
     (onEvent) =>
-      createHarnessInteractiveChatService({
-        basePromptLoopOptions: {
-          ...modelOptions,
-          model: config.model,
-          artifactRoot: config.artifactRoot,
-          workspaceHostPath: config.workspacePath,
-          cfcResultDir: config.cfcResultDir,
-          cfcInvocationContextDir: config.cfcInvocationContextDir,
-          fabricSession: config.fabricSession,
-          ...(config.patternIndex !== undefined
-            ? { patternIndex: config.patternIndex }
-            : {}),
-          ...(config.maxModelTurns !== undefined
-            ? { maxModelTurns: config.maxModelTurns }
-            : {}),
-          ...(config.skillsRoot !== undefined
-            ? { skillsRoot: config.skillsRoot }
-            : {}),
-        },
-        ...(modelOptions.credentialOwner !== undefined
-          ? { credentialOwner: modelOptions.credentialOwner }
-          : {}),
-        ...(sessionStore !== undefined ? { sessionStore } : {}),
-        onEvent,
-      }),
+      createHarnessInteractiveChatService(
+        createConsoleInteractiveServiceOptions(
+          config,
+          modelOptions,
+          onEvent,
+          sessionStore,
+        ),
+      ),
   );
   await server.service.initializeFromStore();
 
@@ -1350,15 +1690,13 @@ export const startConsoleServer = async (
         `  index:      ${config.patternIndex?.baseUrl ?? "(not configured)"}`,
       );
       console.log(
-        `  cfc:        ${
-          config.fabricSession.cfcPosture ?? "first-party default"
-        }, flow labels ${
-          config.fabricSession.cfcFlowLabels ??
-            (config.fabricSession.cfcPosture === "max-enforcement"
-              ? "persist"
-              : "off")
-        }, ${config.fabricSession.cfcEnforcementMode ?? "enforce-explicit"}`,
+        `  skills:     ${config.skillsSh?.baseUrl ?? "(not configured)"}`,
       );
+      for (
+        const line of harnessFabricSessionPostureBanner(config.fabricSession)
+      ) {
+        console.log(line);
+      }
       // The two sidecar transports a run's mediation moves over. The engine's
       // guard asks only that they are named, so a console pointed at
       // directories no sandbox sidecar writes starts cleanly and then denies
@@ -1367,7 +1705,7 @@ export const startConsoleServer = async (
       // reason the posture is printed rather than left to be inferred.
       console.log(`  results:    ${config.cfcResultDir}`);
       console.log(`  contexts:   ${config.cfcInvocationContextDir}`);
-      console.log(`  workspace:  ${config.workspacePath}`);
+      console.log(`  workspace:  ${config.workspace}`);
       console.log(`  artifacts:  ${config.artifactRoot}\n`);
     },
     onError: (error) => {

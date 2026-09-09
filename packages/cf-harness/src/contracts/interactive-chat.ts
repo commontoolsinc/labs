@@ -1,11 +1,14 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessBrowserAccessLease } from "./browser-access.ts";
 import type { HarnessImageAttachment } from "./image.ts";
+import type { HarnessInputCellSpec } from "./input-cells.ts";
+import type { HarnessPatternRefSpec } from "./pattern-refs.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
   type BuiltinToolId,
   DEFAULT_PARENT_TOOL_IDS,
+  LOOM_AUTHORING_TOOL_IDS,
 } from "./tool-descriptor.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
@@ -134,10 +137,21 @@ const READONLY_INTERACTIVE_CHAT_TOOL_ID_SET = new Set<BuiltinToolId>(
 export const resolveHarnessChatPolicy = (
   policy: HarnessChatPolicy = DEFAULT_HARNESS_CHAT_POLICY,
   context?: HarnessChatContext,
+  allowCommentLoomAuthoring = false,
 ): HarnessChatPolicy => {
   if (context?.type === "comment-thread") {
     return {
       ...COMMENT_THREAD_HARNESS_CHAT_POLICY,
+      ...(allowCommentLoomAuthoring
+        ? {
+          allowedToolIds: [
+            ...READONLY_INTERACTIVE_CHAT_TOOL_IDS,
+            ...policy.allowedToolIds.filter((id) =>
+              LOOM_AUTHORING_TOOL_IDS.has(id)
+            ),
+          ],
+        }
+        : {}),
       ...(policy.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: policy.cfcEnforcementMode }
         : {}),
@@ -161,6 +175,9 @@ export const resolveHarnessChatPolicy = (
 
 export interface HarnessChatTurnInput {
   text: string;
+
+  /** Originating Loom supplied by the caller, persisted with this turn only. */
+  loomId?: string;
   imageAttachments?: readonly HarnessImageAttachment[];
 }
 
@@ -183,6 +200,23 @@ export interface HarnessChatStartTurnParams {
   input: HarnessChatTurnInput;
   policy?: HarnessChatPolicy;
   browserAccess?: HarnessChatBrowserAccessLease;
+
+  /**
+   * Cells the caller attaches to this turn by reference, each under a name the
+   * model sees. A turn is its own run with its own handle table, so input
+   * cells are named per turn rather than per session: the tokens the model is
+   * given are the ones this turn's run minted.
+   */
+  inputCells?: readonly HarnessInputCellSpec[];
+
+  /**
+   * Published patterns the caller attaches to this turn by index id, resolved
+   * before the turn's first model turn and seeded into its run as searched
+   * hits. Named per turn for the same reason an input cell is: the run that
+   * holds them is this turn's.
+   */
+  patternRefs?: readonly HarnessPatternRefSpec[];
+
   metadata?: Record<string, unknown>;
 }
 
@@ -301,7 +335,6 @@ export interface HarnessChatSessionStatus {
   context?: HarnessChatContext;
   model?: string;
   loomLocalHostBinding?: LoomLocalHostBinding;
-  harnessRunId?: string;
   artifactRoot?: string;
   capabilities: HarnessChatCapabilities;
   policy: HarnessChatPolicy;
@@ -354,6 +387,7 @@ export interface HarnessChatSubagentRef {
 export interface HarnessChatSubagentSummary extends HarnessChatSubagentRef {
   /** The task the parent delegated, as the parent worded it. */
   goal?: string;
+
   summary?: string;
 }
 
@@ -474,7 +508,6 @@ export interface CreateHarnessChatSessionStatusOptions {
   context?: HarnessChatContext;
   model?: string;
   loomLocalHostBinding?: LoomLocalHostBinding;
-  harnessRunId?: string;
   artifactRoot?: string;
   capabilities?: Partial<HarnessChatCapabilities>;
   policy?: HarnessChatPolicy;
@@ -500,9 +533,6 @@ export const createHarnessChatSessionStatus = (
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.loomLocalHostBinding !== undefined
       ? { loomLocalHostBinding: structuredClone(options.loomLocalHostBinding) }
-      : {}),
-    ...(options.harnessRunId !== undefined
-      ? { harnessRunId: options.harnessRunId }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }

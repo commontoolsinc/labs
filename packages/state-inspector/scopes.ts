@@ -25,7 +25,7 @@
 
 import type { SpaceDb } from "./db.ts";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 
 import { annotate, summarize } from "./decode.ts";
 import {
@@ -41,6 +41,7 @@ export type ScopeKind = "space" | "user" | "session" | "other";
 export interface Scope {
   /** The raw scope_key as stored (often %-encoded). */
   raw: string;
+
   kind: ScopeKind;
 
   /** Owning principal DID (user/session scopes). */
@@ -48,6 +49,7 @@ export interface Scope {
 
   /** Session uuid (session scopes). */
   sessionId?: string;
+
   entities: number;
   revisions: number;
 }
@@ -154,6 +156,7 @@ export interface IdentityValue {
 
   /** The scope the value resolved from (the most specific that held the id). */
   resolvedScope?: string;
+
   resolvedKind?: ScopeKind;
   value?: unknown;
 

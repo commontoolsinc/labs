@@ -34,8 +34,10 @@ export class ConsoleRunView extends LitElement {
   declare runId: string | undefined;
   declare detail: ConsoleRunDetail | undefined;
   declare pane: Pane;
+
   /** The step the map asked the timeline to show. */
   declare focusStep: number | undefined;
+
   declare rawName: string | undefined;
   declare rawText: string | undefined;
   declare error: string | undefined;

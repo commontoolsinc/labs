@@ -26,7 +26,7 @@ import {
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
-import type { IFCLabel } from "../src/cfc/mod.ts";
+import type { CfcEnforcementMode, IFCLabel } from "../src/cfc/mod.ts";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
@@ -39,7 +39,10 @@ import {
   StorageManager,
 } from "../src/storage/cache.deno.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { isPermanentRejection } from "../src/storage/rejection.ts";
+import {
+  isCfcEnforcementRejection,
+  isPermanentRejection,
+} from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-single-use-grants");
 
@@ -73,7 +76,10 @@ const baseInput = {
 };
 
 describe("CFC single-use grants (§2.2 single-use releases)", () => {
-  // Item 1: the `singleUse` field.
+  //
+  // Item 1: the `singleUse` field
+  //
+
   describe("singleUse field (writer validation)", () => {
     it("accepts singleUse: true and stores it in the value", () => {
       const prepared = prepareCfcGrantWrite(
@@ -161,7 +167,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // Item 2: the consumption receipt identity.
+  //
+  // Item 2: the consumption receipt identity
+  //
+
   describe("consumption receipt derivation", () => {
     const grantId = cfcGrantDocId(identity);
 
@@ -179,9 +188,14 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // Shared harness (cfc-grant-records.test.ts style): a labeled cell, a
-  // policyState-guarded sink rule, and a Runtime whose experimental
-  // commitPreconditions flag is the receipts dial.
+  //
+  // Shared harness
+  //
+  // A labeled cell, a policyState-guarded sink rule, and a Runtime whose
+  // experimental commitPreconditions flag is the receipts dial. Every region
+  // below draws on these.
+  //
+
   const SECRET_SCHEMA = internSchema(
     {
       type: "object",
@@ -252,10 +266,13 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     opts: {
       receipts?: boolean;
       policyEvaluation?: "off" | "observe" | "enforce";
-      enforcement?: "enforce-explicit" | "observe" | "disabled";
+      enforcement?: CfcEnforcementMode;
       rules?: readonly ExchangeRule[];
     },
-    body: (runtime: Runtime) => void | Promise<void>,
+    body: (
+      runtime: Runtime,
+      storageManager: ReturnType<typeof StorageManager.emulate>,
+    ) => void | Promise<void>,
   ): Promise<void> => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
@@ -264,16 +281,21 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       // The receipts dial: the Runtime constructor propagates it to the
       // ambient commit-preconditions config the storage commit consults.
       experimental: { commitPreconditions: opts.receipts ?? true },
-      cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
       cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
       cfcPolicyRecords: [{
         id: "share-policy",
         rules: [...(opts.rules ?? [sinkShareRule])],
       }],
+      // The rule firings these tests assert on happen inside policy
+      // evaluation.
       cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
+      // An unstated rung is the one the runtime resolves for a construction
+      // that names none. The S18 gate case below names its own; nothing else
+      // in this file does.
+      cfcEnforcementMode: opts.enforcement,
     });
     try {
-      await body(runtime);
+      await body(runtime, storageManager);
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -361,9 +383,13 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       (write) => write.address.id === receiptId,
     );
 
-  // Consuming vs observing context (the seam decision): single-use grants
-  // resolve ONLY in consuming contexts; everywhere else they are
-  // unsatisfiable, fail closed.
+  //
+  // Consuming vs observing context (the seam decision)
+  //
+  // Single-use grants resolve ONLY in consuming contexts; everywhere else they
+  // are unsatisfiable, fail closed.
+  //
+
   describe("consumption context (resolver + evaluator threading)", () => {
     const singleUseRule: ExchangeRule = {
       id: "single-use-share",
@@ -525,28 +551,13 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
 
     it("garbage at the receipt address still counts as consumed (presence is the signal)", async () => {
-      // Seed garbage at the receipt address through an observe-enforcement
-      // runtime (the forged-write diagnosis path — same discipline as the
-      // malformed-grant test in cfc-grant-records).
-      const storageManager = StorageManager.emulate({ as: signer });
-      const observeRuntime = new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        experimental: { commitPreconditions: true },
-        cfcEnforcementMode: "observe",
-        cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
-        cfcPolicyEvaluation: "enforce",
-      });
-      try {
-        const grantId = cfcGrantDocId({
-          space: signer.did(),
-          kind: "ShareGrant",
-          owner: signer.did(),
-          resource: PHOTO_REF,
-        });
-        const receiptId = cfcGrantConsumedReceiptId(grantId);
-        await writeGrant(observeRuntime);
-        const seed = observeRuntime.edit();
+      await withRuntime({}, async (runtime, storageManager) => {
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await writeGrant(runtime);
+        // A bare storage transaction carries no CFC state, so the forged
+        // receipt lands at the reserved address unexamined. The subject is
+        // what the resolver then makes of the document sitting there.
+        const seed = new ExtendedStorageTransaction(storageManager.edit());
         seed.writeOrThrow({
           space: signer.did(),
           id: receiptId,
@@ -555,7 +566,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
         }, { forged: "garbage" });
         expect((await seed.commit()).ok).toBeDefined();
 
-        const tx = observeRuntime.edit();
+        const tx = runtime.edit();
         const resolver = createTxCfcGrantResolver(tx);
         expect(
           resolver({
@@ -565,10 +576,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
           }),
         ).toEqual([]);
         tx.abort();
-      } finally {
-        await observeRuntime.dispose();
-        await storageManager.close();
-      }
+      });
     });
 
     it("a metadata-only (value-less) receipt document still counts as consumed", async () => {
@@ -580,27 +588,14 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       // create-only backstop would still kill the release at commit — any
       // prior set on the entity fails the entity-absent precondition — but
       // resolution itself must already fail closed as consumed.
-      const storageManager = StorageManager.emulate({ as: signer });
-      const observeRuntime = new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        experimental: { commitPreconditions: true },
-        cfcEnforcementMode: "observe",
-        cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
-        cfcPolicyEvaluation: "enforce",
-      });
-      try {
-        const grantId = cfcGrantDocId({
-          space: signer.did(),
-          kind: "ShareGrant",
-          owner: signer.did(),
-          resource: PHOTO_REF,
-        });
-        const receiptId = cfcGrantConsumedReceiptId(grantId);
-        await writeGrant(observeRuntime);
+      await withRuntime({}, async (runtime, storageManager) => {
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await writeGrant(runtime);
         // A full-document write with NO value key: the document exists, its
         // ["value"] subpath does not (the `source`-only sibling-field shape).
-        const seed = observeRuntime.edit();
+        // A bare storage transaction carries no CFC state, so it lands at the
+        // reserved address unexamined.
+        const seed = new ExtendedStorageTransaction(storageManager.edit());
         seed.writeOrThrow({
           space: signer.did(),
           id: receiptId,
@@ -609,7 +604,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
         }, { source: { note: "metadata-only" } } as never);
         expect((await seed.commit()).ok).toBeDefined();
 
-        const tx = observeRuntime.edit();
+        const tx = runtime.edit();
         const resolver = createTxCfcGrantResolver(tx);
         expect(
           resolver({
@@ -625,10 +620,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
           ),
         ).toBe(true);
         tx.abort();
-      } finally {
-        await observeRuntime.dispose();
-        await storageManager.close();
-      }
+      });
     });
 
     it("flag off: unsatisfiable even in consuming queries, with a diagnostic", async () => {
@@ -682,7 +674,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // Claim staging arms.
+  //
+  // Claim staging arms
+  //
+
   describe("claim staging (flushCfcGrantConsumptionClaims)", () => {
     it("no claims → no writes, no reasons", async () => {
       await withRuntime({}, (runtime) => {
@@ -818,7 +813,12 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // The core: consumption semantics at the sink egress gate, end to end.
+  //
+  // The core
+  //
+  // Consumption semantics at the sink egress gate, end to end.
+  //
+
   describe("single-use release at the sink egress gate", () => {
     it("releases once, committing the receipt atomically; the second evaluation fails closed", async () => {
       await withRuntime({}, async (runtime) => {
@@ -942,9 +942,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
         apiUrl: new URL("https://example.com"),
         storageManager: base,
         experimental: { commitPreconditions: true },
-        cfcEnforcementMode: "enforce-explicit",
         cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
         cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+        // The release under test is a rule firing, which happens inside
+        // policy evaluation.
         cfcPolicyEvaluation: "enforce",
       });
       try {
@@ -1182,6 +1183,9 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       };
       const gatedSchema = {
         type: "object",
+        // The released value lands on the document root carrying the owner's
+        // confidentiality, so the store declares it there.
+        ifc: { confidentiality: [cfcAtom.user(signer.did())] },
         properties: {
           out: {
             type: "string",
@@ -1238,24 +1242,53 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
+    // The enforcement rung decides this case, so it names one. A reserved
+    // grant address written through the ordinary write surface is refused
+    // from `enforce-explicit` upward. Under `observe` the recorded reason
+    // stays a diagnostic and under `disabled` no gate runs, so under either
+    // of those the commit succeeds and the forged write lands.
     it("rejects an unprivileged write at the receipt address (S18 gate)", async () => {
-      await withRuntime({}, async (runtime) => {
-        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
-        const tx = runtime.edit();
-        tx.writeOrThrow({
-          space: signer.did(),
-          id: receiptId,
-          type: "application/json",
-          path: ["value"],
-        }, { forged: true });
-        const result = await tx.commit();
-        expect(result.error).toBeDefined();
-      });
+      await withRuntime(
+        { enforcement: "enforce-explicit" },
+        async (runtime) => {
+          const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+          const tx = runtime.edit();
+          tx.writeOrThrow({
+            space: signer.did(),
+            id: receiptId,
+            type: "application/json",
+            path: ["value"],
+          }, { forged: true });
+          // Prepare, the way the runtime's own commit paths do, so the gate
+          // this case is named for is the one that decides the commit. An
+          // unprepared transaction is refused too, but for being unprepared:
+          // that arm carries no reason and would still refuse if the gate
+          // stopped recording the write.
+          tx.prepareCfc();
+          const state = tx.getCfcState().prepare;
+          expect(state.status).toBe("invalidated");
+          if (state.status === "invalidated") {
+            expect(state.reasons.join(" ")).toContain(
+              `unprivileged write to protected cfc path ${receiptId}`,
+            );
+          }
+          const result = await tx.commit();
+          // The refusal, rather than any error at all. The message prefix is
+          // what tells a CFC refusal apart from an ordinary abort or a storage
+          // failure.
+          expect(isCfcEnforcementRejection(result.error)).toBe(true);
+        },
+      );
     });
   });
 
-  // Digest binding (item 3): receipt consulted-state rides consultedGrants
-  // with the grants' own canonicalization + invalidation discipline.
+  //
+  // Digest binding (item 3)
+  //
+  // Receipt consulted-state rides consultedGrants with the grants' own
+  // canonicalization + invalidation discipline.
+  //
+
   describe("digest binding of the receipt state", () => {
     it("a receipt appearing between evaluations invalidates the prepared digest", async () => {
       await withRuntime({}, (runtime) => {

@@ -1,5 +1,5 @@
 /**
- * Integration tests for `cf piece get` against a live toolshed. The suite
+ * Integration tests for `cf cell get` against a live toolshed. The suite
  * runs when API_URL names a running toolshed (as in the CI cli-integration
  * jobs) and is skipped otherwise. A throwaway identity keyfile and space are
  * created per run. Run locally with:
@@ -12,8 +12,12 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import type { Identity } from "@commonfabric/identity";
+import { experimentalOptionsForDeployedClient } from "@commonfabric/runner";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
+import {
+  type TempIdentity,
+  writeTempIdentity,
+} from "@commonfabric/integration/temp-identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   callPieceHandler,
@@ -45,10 +49,22 @@ const noteEntry: EntryConfig = {
 
 let pieceId = "";
 let sessionResultPieceId = "";
+let coldSessionResultPieceId = "";
+let staleSessionResultPieceId = "";
+let coldSelectionResultPieceId = "";
+let staleSelectionResultPieceId = "";
 let sessionScopedPieceId = "";
 let flags = "";
 let identityPath = "";
+let tempIdentity: TempIdentity | undefined;
 let spaceConfig: SpaceConfig;
+// The server-execution arm `cf` itself runs at (server-execution v2,
+// testing.md §2): resolved exactly as the cf binary resolves it — the
+// deployed-client rule (explicit EXPERIMENTAL_* env, else the server's
+// published posture, else the first-party default). ON since the flip in
+// the default CI lane; the explicit-`false` OFF guard lane, and a
+// pre-flip toolshed, resolve OFF.
+let serverExecutionOn = false;
 
 // Resolves once the piece's result/content cell holds `expected`. Uses its
 // own controller, so readiness is judged from a fresh client's view of the
@@ -80,9 +96,14 @@ async function waitForContent(
   }
 }
 
-describe("cf piece get (integration)", { ignore: !API_URL }, () => {
+describe("cf cell get (integration)", { ignore: !API_URL }, () => {
   beforeAll(async () => {
-    const { identity, path } = await writeTempIdentity();
+    serverExecutionOn = (await experimentalOptionsForDeployedClient({
+      apiUrl: new URL(API_URL!),
+      env: Deno.env.get,
+    })).serverExecution === true;
+    tempIdentity = await writeTempIdentity();
+    const { identity, path } = tempIdentity;
     identityPath = path;
     const spaceName = `cf-piece-get-test-${Date.now()}`;
     spaceConfig = {
@@ -92,6 +113,22 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     };
     pieceId = await newPiece(spaceConfig, noteEntry);
     sessionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    }, { start: false });
+    coldSessionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    }, { start: false });
+    staleSessionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    }, { start: false });
+    coldSelectionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    }, { start: false });
+    staleSelectionResultPieceId = await newPiece(spaceConfig, {
       mainPath: SESSION_RESULT_PATTERN,
       rootPath: REPO_ROOT,
     }, { start: false });
@@ -120,27 +157,25 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
   afterAll(async () => {
     // Ephemeral space names ensure isolation; only the throwaway identity
     // keyfile needs removing.
-    if (identityPath) {
-      await Deno.remove(identityPath);
-    }
+    await tempIdentity?.remove();
   });
 
   it("bad path exits 1 with Available keys: in output", async () => {
     const { code, stderr } = await integrationCf(
-      `piece get ${flags} nonexistent`,
+      `cell get ${flags} nonexistent`,
     );
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("Available keys:");
   });
 
   it("good path exits 0 with valid output", async () => {
-    const { code, stdout } = await integrationCf(`piece get ${flags} content`);
+    const { code, stdout } = await integrationCf(`cell get ${flags} content`);
     expect(code).toBe(0);
     expect(stdout.length).toBeGreaterThan(0);
   });
 
   it("no path returns full result JSON", async () => {
-    const { code, stdout } = await integrationCf(`piece get ${flags}`);
+    const { code, stdout } = await integrationCf(`cell get ${flags}`);
     expect(code).toBe(0);
     const json = JSON.parse(stdout.join(""));
     expect(typeof json).toBe("object");
@@ -148,12 +183,24 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(json.content).toBe(NOTE_CONTENT);
   });
 
-  it("reports present result data that cannot project in a fresh session", async () => {
+  it("reports present result data that cannot project in a fresh session (OFF) — and serves it under the flipped default (ON)", async () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
-    const { code, stderr } = await integrationCf(
-      `piece get ${sessionFlags}`,
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags}`,
     );
+    if (serverExecutionOn) {
+      // Under ON the refusal scenario DISSOLVES by design: the serving
+      // loop materializes the session-derived result server-side
+      // (derived-class commits under the space's lease), so a fresh
+      // session projects the value that OFF could only report as
+      // present-but-unprojectable. The strong assert is the served
+      // value itself, not merely exit 0.
+      expect(code).toBe(0);
+      const json = JSON.parse(stdout.join(""));
+      expect(json.value).toBe("session-ready");
+      return;
+    }
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("stored data is present");
     expect(stderr.join("\n")).toContain("--step");
@@ -167,7 +214,7 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     const scopedFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionScopedPieceId}`;
     const { code, stdout, stderr } = await integrationCf(
-      `piece get ${scopedFlags}`,
+      `cell get ${scopedFlags}`,
     );
     expect(code, stderr.join("\n")).toBe(0);
     const json = JSON.parse(stdout.join(""));
@@ -179,10 +226,76 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
     const { code, stdout, stderr } = await integrationCf(
-      `piece get ${sessionFlags} --step`,
+      `cell get ${sessionFlags} --step`,
     );
     expect(code, stderr.join("\n")).toBe(0);
     expect(JSON.parse(stdout.join(""))).toEqual({ value: "session-ready" });
+  });
+
+  it("steps and reads a cold session-scoped result path", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${coldSessionResultPieceId}`;
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} value --step`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toBe("session-ready");
+  });
+
+  it("reads a current result path after changing an unstarted piece's input", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${staleSessionResultPieceId}`;
+    const write = await integrationCf(
+      `cell set ${sessionFlags} values --input`,
+      { stdin: '["updated-while-stopped"]' },
+    );
+    expect(write.code, write.stderr.join("\n")).toBe(0);
+
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} value --step`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toBe("updated-while-stopped");
+  });
+
+  it("steps and reads an input path of an unstarted piece", async () => {
+    // The input side of the same fork: the stepped read starts the piece and
+    // pulls the requested input path, without the whole-result pull.
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${staleSessionResultPieceId}`;
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} values --input --step`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual(["updated-while-stopped"]);
+  });
+
+  it("selects a cold session-scoped computed result", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${coldSelectionResultPieceId}`;
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} --step --select value`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual({ value: "session-ready" });
+  });
+
+  it("selects a current result after changing an unstarted piece's input", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${staleSelectionResultPieceId}`;
+    const write = await integrationCf(
+      `cell set ${sessionFlags} values --input`,
+      { stdin: '["selected-while-stopped"]' },
+    );
+    expect(write.code, write.stderr.join("\n")).toBe(0);
+
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} --step --select value`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual({
+      value: "selected-while-stopped",
+    });
   });
 
   it("list and inspect expose the running pattern reference", async () => {

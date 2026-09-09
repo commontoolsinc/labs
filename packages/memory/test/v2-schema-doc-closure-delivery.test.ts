@@ -31,6 +31,7 @@
  * a walking selector the traversal loads them anyway and every
  * assertion here passes with the closure pass entirely disabled.
  */
+
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";

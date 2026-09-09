@@ -322,7 +322,7 @@ export class XSchedulerSource extends LitElement {
   private accessor selectedEntryIdx = 0;
 
   /** Build lookup: file -> line -> LineAnnotation */
-  private buildAnnotations(): Map<string, Map<number, LineAnnotation>> {
+  #buildAnnotations(): Map<string, Map<number, LineAnnotation>> {
     const result = new Map<string, Map<number, LineAnnotation>>();
 
     for (const [nodeId, node] of this.nodes) {
@@ -394,7 +394,7 @@ export class XSchedulerSource extends LitElement {
   }
 
   /** Compute heat color based on totalTime relative to max */
-  private heatColor(
+  #heatColor(
     totalTime: number,
     maxTime: number,
     types: Set<string>,
@@ -412,18 +412,18 @@ export class XSchedulerSource extends LitElement {
     return `rgba(59, 130, 246, ${alpha})`;
   }
 
-  private formatTime(ms: number): string {
+  #formatTime(ms: number): string {
     if (ms === 0) return "";
     if (ms < 1) return `${(ms * 1000).toFixed(0)}us`;
     if (ms < 1000) return `${ms.toFixed(1)}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
   }
 
-  private hasAnyBreakpoint(entries: ActionEntry[]): boolean {
+  #hasAnyBreakpoint(entries: ActionEntry[]): boolean {
     return entries.some((e) => this.breakpoints.has(e.nodeId));
   }
 
-  private handleBreakpointToggle(entries: ActionEntry[]) {
+  #handleBreakpointToggle(entries: ActionEntry[]) {
     // If all are set, disable all; otherwise enable all
     const allSet = entries.every((e) => this.breakpoints.has(e.nodeId));
     const actionIds = entries.map((e) => e.nodeId);
@@ -438,7 +438,7 @@ export class XSchedulerSource extends LitElement {
     this.requestUpdate();
   }
 
-  private handleLineClick(entries: ActionEntry[]) {
+  #handleLineClick(entries: ActionEntry[]) {
     // Caller must pass a non-empty entries array.
     if (entries.length === 0) {
       throw new Error("handleLineClick requires a non-empty entries array");
@@ -463,7 +463,7 @@ export class XSchedulerSource extends LitElement {
   }
 
   /** Navigate to the correct pattern, file, and line for the selected node */
-  private navigateToSelectedNode() {
+  #navigateToSelectedNode() {
     if (!this.selectedNodeId || this.patternSources.length === 0) return;
 
     const loc = parseActionLocation(this.selectedNodeId);
@@ -507,7 +507,7 @@ export class XSchedulerSource extends LitElement {
       changedProperties.has("selectedNodeId") ||
       changedProperties.has("patternSources")
     ) {
-      this.navigateToSelectedNode();
+      this.#navigateToSelectedNode();
     }
   }
 
@@ -537,7 +537,7 @@ export class XSchedulerSource extends LitElement {
     const lines = file.contents.split("\n");
 
     // Build annotations for current file
-    const annotations = this.buildAnnotations();
+    const annotations = this.#buildAnnotations();
     const fileAnnotations = annotations.get(file.name) ?? new Map();
 
     // Use delta time for heat scaling when baseline exists, else total
@@ -614,22 +614,22 @@ export class XSchedulerSource extends LitElement {
                 ? (hasBaseline ? ann.deltaTime : ann.totalTime)
                 : 0;
               const bgColor = ann
-                ? this.heatColor(heatTime, maxTime, ann.types)
+                ? this.#heatColor(heatTime, maxTime, ann.types)
                 : "transparent";
 
               const bpToggle = hasAction
-                ? () => this.handleBreakpointToggle(ann!.entries)
+                ? () => this.#handleBreakpointToggle(ann!.entries)
                 : undefined;
               const nodeSelect = hasAction
-                ? () => this.handleLineClick(ann!.entries)
+                ? () => this.#handleLineClick(ann!.entries)
                 : undefined;
 
-              const bpClass = ann && this.hasAnyBreakpoint(ann.entries)
+              const bpClass = ann && this.#hasAnyBreakpoint(ann.entries)
                 ? "active"
                 : "";
 
               // deno-fmt-ignore
-              return html`<tr class="source-line ${hasAction ? "has-action" : ""} ${isSelected ? "selected" : ""}" data-line="${lineNum}" style="background-color: ${bgColor}"><td class="line-bp" @click=${bpToggle}><span class="bp-indicator ${bpClass}"></span></td><td class="line-gutter" @click=${bpToggle}>${lineNum}</td><td class="line-markers" @click=${nodeSelect}>${ann ? ann.entries.map((entry: ActionEntry) => html`<span class="marker-dot ${entry.type} ${entry.nodeId === this.selectedNodeId ? "selected-entry" : ""}" title="col ${entry.col}: ${entry.type} ${this.formatTime(entry.totalTime)}"></span>`) : ""}</td><td class="line-code" @click=${nodeSelect}>${lineText}</td><td class="line-stats" @click=${nodeSelect}>${ann ? this.renderLineStats(ann, hasBaseline) : ""}</td></tr>`;
+              return html`<tr class="source-line ${hasAction ? "has-action" : ""} ${isSelected ? "selected" : ""}" data-line="${lineNum}" style="background-color: ${bgColor}"><td class="line-bp" @click=${bpToggle}><span class="bp-indicator ${bpClass}"></span></td><td class="line-gutter" @click=${bpToggle}>${lineNum}</td><td class="line-markers" @click=${nodeSelect}>${ann ? ann.entries.map((entry: ActionEntry) => html`<span class="marker-dot ${entry.type} ${entry.nodeId === this.selectedNodeId ? "selected-entry" : ""}" title="col ${entry.col}: ${entry.type} ${this.#formatTime(entry.totalTime)}"></span>`) : ""}</td><td class="line-code" @click=${nodeSelect}>${lineText}</td><td class="line-stats" @click=${nodeSelect}>${ann ? this.#renderLineStats(ann, hasBaseline) : ""}</td></tr>`;
             })}
           </tbody>
         </table>
@@ -637,7 +637,7 @@ export class XSchedulerSource extends LitElement {
     `;
   }
 
-  private renderLineStats(
+  #renderLineStats(
     ann: LineAnnotation,
     hasBaseline: boolean,
   ): TemplateResult {
@@ -649,7 +649,7 @@ export class XSchedulerSource extends LitElement {
         `;
       }
       return html`
-        <span class="delta-time">+${this.formatTime(ann.deltaTime)}</span>
+        <span class="delta-time">+${this.#formatTime(ann.deltaTime)}</span>
         (${ann.deltaRuns}x)${ann.entries.length > 1
           ? html`
             <span class="entry-count">[${ann.entries.length}]</span>
@@ -659,7 +659,7 @@ export class XSchedulerSource extends LitElement {
     }
     // No baseline — show totals
     return html`
-      ${this.formatTime(ann.totalTime)} ${ann.runCount > 0
+      ${this.#formatTime(ann.totalTime)} ${ann.runCount > 0
         ? `(${ann.runCount}x)`
         : ""}${ann.entries.length > 1
         ? html`

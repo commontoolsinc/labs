@@ -1,10 +1,15 @@
 /**
  * Following a piece's source origin.
  *
- * One entry point, {@link SourceReconciler.reconcile}, runs when a user opens a
- * piece: it reads the origin the piece records, resolves it, and adopts the
- * source it names when that source has moved. Nothing reconciles a piece nobody
- * opened, and no kind of piece — a space root included — has a path of its own.
+ * {@link SourceReconciler.reconcile} runs when a piece is opened: it reads the
+ * origin the piece records, resolves it, and adopts the source it names when
+ * that source has moved. Nothing reconciles a piece nobody opened, and no kind
+ * of piece — a space root included — has a path of its own.
+ *
+ * A user opening a piece is what opens most of them. The runtime also opens the
+ * surfaces it instantiates for itself, and {@link SourceReconciler.open} is how:
+ * it supplies the origin such a piece is made from, so that piece records where
+ * its code came from and is followed from then on like any other.
  *
  * Whether a candidate has to prove itself first turns on one question: did
  * anything gate the release that produced it? A `system:` origin names source
@@ -32,6 +37,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 
 import type { Pattern } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
+import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import {
   classifyPieceOriginString,
   type PieceOriginKind,
@@ -83,8 +89,6 @@ const logger = getLogger("runner.source-reconcile", {
  * - `detached`: nothing supplies code for this piece — it records no origin,
  *   or it runs no pattern for an origin to replace.
  * - `unusable`: it records a string no resolver can follow.
- * - `unsupported`: it records a well-formed origin of a kind this runtime does
- *   not follow yet.
  * - `current`: the origin resolved to the source already running.
  * - `migrated`: the origin was rewritten into its canonical spelling; the
  *   pattern is unchanged.
@@ -98,7 +102,6 @@ const logger = getLogger("runner.source-reconcile", {
 export type ReconcileOutcome =
   | "detached"
   | "unusable"
-  | "unsupported"
   | "current"
   | "migrated"
   | "updated"
@@ -127,14 +130,13 @@ const RECORDED_OUTCOME: Record<
   // outcome, so a second kind of refusal has to say which one it is instead
   // of inheriting this one.
   incompatible: { outcome: "refused", reason: "incompatible-schema" },
-  unsupported: { outcome: "unsupported" },
   detached: undefined,
   unusable: undefined,
 };
 
 /** What a reconciliation's result leaves on the piece it ran for. */
 function reconciliationFor(
-  state: PieceState,
+  state: FollowedPieceState,
   outcome: ReconcileOutcome,
 ): PieceReconciliation | undefined {
   const recorded = RECORDED_OUTCOME[outcome];
@@ -175,11 +177,17 @@ type FabricFollower = {
   cancel: () => void;
 };
 
-/** The state one reconciliation reads once and guards every write against. */
+/**
+ * The state one reconciliation reads once and guards every write against.
+ *
+ * `storedSource` is absent only while a piece the runtime instantiates for
+ * itself claims the origin it has been running from; every other pass reads a
+ * piece that already records one.
+ */
 type PieceState = {
   space: MemorySpace;
   running: { identity: string; symbol: string };
-  storedSource: string;
+  storedSource: string | undefined;
   snapshot: PieceSourceSnapshot;
 
   /**
@@ -194,11 +202,30 @@ type PieceState = {
   detail?: string;
 };
 
+/** A piece that records an origin, which is every piece following one. */
+type FollowedPieceState = PieceState & { storedSource: string };
+
+/**
+ * The origin an adoption gives a piece that followed none, and the operation
+ * its revision records for doing so.
+ */
+type OriginClaim = {
+  operation: PieceSourceTransition["operation"];
+  origin: string;
+};
+
+/** One network pass, so teardown can abort it and wait for it to settle. */
+type SourcePass = {
+  abort: AbortController;
+  done: Promise<unknown>;
+};
+
 export class SourceReconciler {
   readonly #runtime: Runtime;
   readonly #pending = new Map<string, PendingReconcile>();
   readonly #fabricFollowers = new Map<string, FabricFollower>();
   readonly #stoppedFabricFollowers = new Set<string>();
+  readonly #passes = new Set<SourcePass>();
   #disposed = false;
 
   constructor(runtime: Runtime) {
@@ -218,17 +245,114 @@ export class SourceReconciler {
     return this.#singleFlight(resultCell);
   }
 
-  /** Resolve when the reconciliations currently in flight have settled. */
+  /**
+   * Open a piece this runtime instantiates for itself, and answer with the
+   * pattern that piece should now run.
+   *
+   * `suppliedOrigin` names where the runtime takes such a piece's code from.
+   * The wish builtin's profile and suggestion surfaces are the pieces this
+   * exists for: the runtime fetches their source, so nobody else is there to
+   * say what supplies them, and a surface that recorded nothing would be code
+   * the source lifecycle could not see — no origin to show, no revision to
+   * revert to, and nothing to follow when the deployment ships a new version.
+   *
+   * A piece that does not exist yet is answered with the source the origin
+   * currently names, and the caller's run records that origin with the piece's
+   * creation revision. A piece that exists follows the origin it records,
+   * exactly as {@link reconcile} makes it. The supplied origin is claimed only
+   * by a piece carrying none, because the runtime instantiating a piece from
+   * one place every time is a durable choice, while a piece whose owner has
+   * since repointed it records a choice of their own that this must not undo.
+   *
+   * Only a `system:` origin can be supplied: it names source this deployment
+   * serves, which is the one kind of code the runtime has of its own.
+   */
+  async open(
+    resultCell: Cell<unknown>,
+    suppliedOrigin: string,
+  ): Promise<Pattern | undefined> {
+    if (this.#disposed) return undefined;
+    try {
+      // Detached from the caller's transaction: what this reads decides whether
+      // the piece exists at all, and a caller's snapshot predates the run that
+      // created it.
+      let piece = await resultCell.withTx().sync();
+      // The supplied origin is settled once, before either path uses it, so
+      // that resolving one and recording one cannot disagree about what the
+      // runtime is allowed to supply.
+      const origin = classifyPieceOriginString(
+        suppliedOrigin,
+        this.#runtime.hostForSpace(piece.space).href,
+      );
+      if (origin.kind !== "system") {
+        logger.warn("unsupported-supplied-origin", () => [
+          "a piece was instantiated from an origin the runtime cannot supply",
+          piece.space,
+          suppliedOrigin,
+        ]);
+        return undefined;
+      }
+      const running = getPatternIdentityRef(piece);
+      if (running === undefined) {
+        return await this.#resolveSupplied(piece.space, origin);
+      }
+      if (getPatternSource(piece) === undefined) {
+        // A piece that records no origin claims the supplied one by retaining
+        // what it runs, which is the source closure THIS space holds for it.
+        // A pattern live in the runtime's index says nothing about that: the
+        // index is keyed by identity alone, so it answers for a pattern
+        // compiled into any space. A piece whose space holds no closure has
+        // nothing to retain, and nothing else ever moves it: it takes the
+        // origin's current source in the same transition that records the
+        // origin, and records the identity it displaced.
+        const retained = await this.#runtime.patternManager
+          .getPatternSourceProgramByIdentity(running.identity, piece.space);
+        const rescued = retained === undefined &&
+          await this.#rescueSupplied(piece, origin);
+        // Recording where a piece's code comes from is worth doing and worth
+        // saying when it fails, but it is not what the caller asked for: a
+        // surface whose provenance could not be written still runs.
+        try {
+          if (!rescued) await this.#claimSuppliedOrigin(piece, origin.ref);
+          piece = await piece.withTx().sync();
+        } catch (error) {
+          logger.warn("claim-origin-failed", () => [
+            "a piece the runtime supplies could not record its origin",
+            piece.space,
+            origin.ref,
+            error,
+          ]);
+        }
+      }
+      await this.reconcile(piece);
+      // Re-read: a transition commits through a transaction view of its own, so
+      // the pattern to run is the one the piece names after it, not before.
+      const current = getPatternIdentityRef(await piece.withTx().sync());
+      return current && await this.#loadPattern(current, piece.space);
+    } catch (error) {
+      logger.warn("open-failed", () => [
+        "opening a piece the runtime supplies failed",
+        resultCell.space,
+        suppliedOrigin,
+        error,
+      ]);
+      return undefined;
+    }
+  }
+
+  /** Resolve when the passes currently in flight have settled. */
   async idle(): Promise<void> {
-    await Promise.allSettled(
-      [...this.#pending.values()].map(({ promise }) => promise),
-    );
+    await Promise.allSettled([
+      ...[...this.#pending.values()].map(({ promise }) => promise),
+      ...[...this.#passes].map(({ done }) => done),
+    ]);
   }
 
   /** Abort network work and keep it away from storage teardown. */
   async dispose(): Promise<void> {
     this.#disposed = true;
     for (const { abort } of this.#pending.values()) abort.abort();
+    for (const { abort } of this.#passes) abort.abort();
     for (const { cancel } of this.#fabricFollowers.values()) cancel();
     this.#fabricFollowers.clear();
     await this.idle();
@@ -309,7 +433,7 @@ export class SourceReconciler {
       // have.
       return "detached";
     }
-    const state: PieceState = {
+    const state: FollowedPieceState = {
       space: resultCell.space,
       running,
       storedSource,
@@ -358,7 +482,7 @@ export class SourceReconciler {
    */
   async #record(
     resultCell: Cell<unknown>,
-    state: PieceState,
+    state: FollowedPieceState,
     outcome: ReconcileOutcome,
     signal: AbortSignal,
   ): Promise<void> {
@@ -376,7 +500,7 @@ export class SourceReconciler {
   /** Follow the origin the piece records, whichever kind it turns out to be. */
   async #dispatch(
     resultCell: Cell<unknown>,
-    state: PieceState,
+    state: FollowedPieceState,
     signal: AbortSignal,
   ): Promise<ReconcileOutcome> {
     const host = this.#runtime.hostForSpace(state.space).href;
@@ -393,7 +517,12 @@ export class SourceReconciler {
         this.#unwatchFabricSource(resultCell);
         return "unusable";
       }
-      const migrated = await this.#migrateOrigin(resultCell, state, origin.ref);
+      const migrated = await this.#recordOrigin(
+        resultCell,
+        state,
+        origin.ref,
+        "origin-update",
+      );
       if (migrated !== "migrated") return migrated;
       state.storedSource = origin.ref;
       state.snapshot = getPieceSourceSnapshot(resultCell)!;
@@ -412,7 +541,7 @@ export class SourceReconciler {
 
   #follow(
     resultCell: Cell<unknown>,
-    state: PieceState,
+    state: FollowedPieceState,
     origin: PieceOriginKind,
     signal: AbortSignal,
   ): Promise<ReconcileOutcome> {
@@ -436,11 +565,6 @@ export class SourceReconciler {
           origin,
           signal,
         );
-      case "web":
-        // An external program endpoint is a source outside this deployment
-        // entirely. Resolving one is specified and not built.
-        this.#unwatchFabricSource(resultCell);
-        return Promise.resolve("unsupported");
       case "legacy-path":
         // Rewritten before dispatch.
         return Promise.resolve("unusable");
@@ -457,24 +581,16 @@ export class SourceReconciler {
     state: PieceState,
     origin: Extract<PieceOriginKind, { kind: "system" }>,
     signal: AbortSignal,
+    claim?: OriginClaim,
   ): Promise<ReconcileOutcome> {
-    const target = new URL(
-      origin.route,
-      this.#runtime.hostForSpace(state.space),
-    );
     const fetch = this.#revalidatingFetch(signal);
-    const identityUrl = new URL(target);
-    identityUrl.searchParams.set("identity", "");
-    const response = await fetch(identityUrl);
-    if (!response.ok) {
-      state.detail = `the origin answered ${response.status}`;
+    const target = this.#systemSourceUrl(origin.route, state.space);
+    const answer = await this.#advertisedIdentity(target, fetch, signal);
+    if ("detail" in answer) {
+      state.detail = answer.detail;
       return "unavailable";
     }
-    const advertised = (await abortable(() => response.text(), signal)).trim();
-    if (advertised.length === 0) {
-      state.detail = "the origin did not say which version it is offering";
-      return "unavailable";
-    }
+    const advertised = answer.identity;
     state.offered = { identity: advertised, symbol: state.running.symbol };
     // The identity route settles whether the source moved. It says nothing
     // about whether this space still holds the compiled artifact for it, and a
@@ -483,7 +599,7 @@ export class SourceReconciler {
     // to compile the source again, which puts the artifact back.
     if (
       advertised === state.running.identity &&
-      await this.#runningPatternLoads(state)
+      await this.#loadPattern(state.running, state.space) !== undefined
     ) return "current";
 
     const resolved = await this.#runtime.harness.resolve(
@@ -496,20 +612,201 @@ export class SourceReconciler {
       origin,
       signal,
       advertised,
+      claim,
     );
   }
 
-  /** Whether this space can still load the pattern the piece is pinned to. */
-  async #runningPatternLoads(state: PieceState): Promise<boolean> {
+  /** Where the host serving `space` answers for a `system:` origin's route. */
+  #systemSourceUrl(route: string, space: MemorySpace): URL {
+    return new URL(route, this.#runtime.hostForSpace(space));
+  }
+
+  /**
+   * The identity the source at `target` currently compiles to, per the host
+   * serving it, or why that host did not say — which a caller with a piece to
+   * report on records as the reason it is not following its origin.
+   *
+   * A request that throws rather than answering is the commonest way an origin
+   * is out of reach, and it answers here like any other refusal rather than
+   * escaping: a runtime built with no patterns route behind its API address —
+   * a pattern test's, a tool's — reaches this on every open, where the origin
+   * being unavailable is the ordinary state rather than a fault worth
+   * reporting. What the throw said is kept as the reason. An abort still
+   * propagates, because teardown asking the pass to stop is not the origin
+   * failing to answer.
+   */
+  async #advertisedIdentity(
+    target: URL,
+    fetch: typeof globalThis.fetch,
+    signal: AbortSignal,
+  ): Promise<{ identity: string } | { detail: string }> {
+    const identityUrl = new URL(target);
+    identityUrl.searchParams.set("identity", "");
+    let response: Response;
+    try {
+      response = await fetch(identityUrl);
+    } catch (error) {
+      signal.throwIfAborted();
+      return { detail: reconciliationDetail(error) };
+    }
+    if (!response.ok) {
+      return { detail: `the origin answered ${response.status}` };
+    }
+    const advertised = (await abortable(() => response.text(), signal)).trim();
+    if (advertised.length === 0) {
+      return { detail: "the origin did not say which version it is offering" };
+    }
+    return { identity: advertised };
+  }
+
+  /** Whether this space can still load a pattern, without throwing to say no. */
+  async #loadPattern(
+    ref: { identity: string; symbol: string },
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
     try {
       return await this.#runtime.patternManager.loadPatternByIdentity(
-        state.running.identity,
-        state.running.symbol,
-        state.space,
-      ) !== undefined;
+        ref.identity,
+        ref.symbol,
+        space,
+      );
     } catch {
-      return false;
+      return undefined;
     }
+  }
+
+  /**
+   * The pattern a supplied origin currently names, for a piece that does not
+   * exist yet.
+   *
+   * The `?identity` route answers first here too. A space that already holds
+   * the artifact for what it advertises — another surface opened in this space,
+   * or this one in an earlier session — runs that pattern without downloading
+   * any source at all. Only a space that does not compiles the closure, and
+   * source that does not produce the identity its own host advertises is not
+   * the source that origin names.
+   */
+  async #resolveSupplied(
+    space: MemorySpace,
+    origin: Extract<PieceOriginKind, { kind: "system" }>,
+  ): Promise<Pattern | undefined> {
+    return await this.#track(async (signal) => {
+      const fetch = this.#revalidatingFetch(signal);
+      const target = this.#systemSourceUrl(origin.route, space);
+      const answer = await this.#advertisedIdentity(target, fetch, signal);
+      // Nothing here has a piece to report the reason on: the surface this is
+      // resolving for does not exist yet.
+      if ("detail" in answer) return undefined;
+      const advertised = answer.identity;
+      // Resolved and compiled even for an identity this runtime already holds
+      // in memory, rather than answered from that. What the caller needs is
+      // not a pattern object: it is this space holding the source closure
+      // behind it, which its creation revision retains and which a later
+      // cross-space child of the surface replicates out of. The in-memory
+      // artifact index is keyed by identity alone, so answering from it would
+      // hand back a pattern whose closure the space never received. Compiling
+      // is what puts it there, and for an identity already compiled elsewhere
+      // that is a cache hit plus the replication the hit fires.
+      await prepareSourceClosureVerification();
+
+      const resolved = await this.#runtime.harness.resolve(
+        new HttpProgramResolver(target.href, fetch),
+      );
+      // Compiling writes to this space's caches, so a pass that has been
+      // stopped stops here rather than paying for source nobody will run.
+      if (signal.aborted) return undefined;
+      const compiled = await this.#runtime.patternManager.compilePattern(
+        resolved,
+        { space },
+      );
+      const ref = this.#runtime.patternManager.getArtifactEntryRef(compiled);
+      if (ref?.identity !== advertised) {
+        logger.warn("advertised-identity-mismatch", () => [
+          "resolved source did not compile to the identity its origin advertises",
+          space,
+          advertised,
+          ref,
+        ]);
+        return undefined;
+      }
+      return compiled;
+    });
+  }
+
+  /**
+   * Record the origin the runtime has been instantiating a piece from, for one
+   * that carries none.
+   *
+   * The piece runs this source already, so nothing about what it runs changes;
+   * what changes is that the piece now says where that source came from, which
+   * is what puts it inside the lifecycle instead of beside it.
+   *
+   * Only reached for a piece that runs a pattern, which is what gives it a
+   * snapshot to guard the write against.
+   */
+  async #claimSuppliedOrigin(
+    resultCell: Cell<unknown>,
+    suppliedOrigin: string,
+  ): Promise<void> {
+    const state: PieceState = {
+      space: resultCell.space,
+      running: getPatternIdentityRef(resultCell)!,
+      storedSource: undefined,
+      snapshot: getPieceSourceSnapshot(resultCell)!,
+    };
+    await this.#recordOrigin(resultCell, state, suppliedOrigin, "follow");
+  }
+
+  /**
+   * Give a piece that records no origin, and runs a pattern this space cannot
+   * load, the supplied origin and the source it currently names — in one
+   * transition, so that the piece is never left recording an origin over a
+   * pattern nothing can start.
+   *
+   * Claiming an origin retains what the piece runs, and a pattern that will
+   * not load has nothing to retain. The history this transition begins starts
+   * at the adopted source, and the identity it displaced is recorded beside
+   * it. Answers whether the piece now records the origin and runs its
+   * source.
+   */
+  async #rescueSupplied(
+    piece: Cell<unknown>,
+    origin: Extract<PieceOriginKind, { kind: "system" }>,
+  ): Promise<boolean> {
+    const state: PieceState = {
+      space: piece.space,
+      running: getPatternIdentityRef(piece)!,
+      storedSource: undefined,
+      snapshot: getPieceSourceSnapshot(piece)!,
+    };
+    const outcome = await this.#track((signal) =>
+      this.#followSystem(piece, state, origin, signal, {
+        operation: "follow",
+        origin: origin.ref,
+      })
+    );
+    return outcome === "updated";
+  }
+
+  /** Run one aborting network pass, so teardown can stop and wait for it. */
+  #track<T>(
+    pass: (signal: AbortSignal) => Promise<T | undefined>,
+  ): Promise<T | undefined> {
+    const abort = new AbortController();
+    const done: Promise<T | undefined> = pass(abort.signal)
+      .catch((error) => {
+        logger.warn("source-pass-failed", () => [
+          "resolving supplied source failed",
+          error,
+        ]);
+        return undefined;
+      })
+      .finally(() => {
+        this.#passes.delete(entry);
+      });
+    const entry: SourcePass = { abort, done };
+    this.#passes.add(entry);
+    return done;
   }
 
   /**
@@ -530,7 +827,7 @@ export class SourceReconciler {
    */
   async #followFabric(
     resultCell: Cell<unknown>,
-    state: PieceState,
+    state: FollowedPieceState,
     origin: Extract<
       PieceOriginKind,
       { kind: "fabric-entity" | "fabric-pattern" }
@@ -626,6 +923,11 @@ export class SourceReconciler {
    * `advertisedIdentity`, where the origin supplied one, must equal what the
    * candidate compiles to. A source that does not produce the identity its own
    * origin advertises is not the source that origin names.
+   *
+   * The transition records the origin the piece already follows, as an
+   * update to it. A `claim` records a different one instead: the origin a
+   * piece that followed none is being given, with the adoption as the
+   * revision that gives it.
    */
   async #adopt(
     resultCell: Cell<unknown>,
@@ -634,6 +936,7 @@ export class SourceReconciler {
     origin: PieceOriginKind,
     signal: AbortSignal,
     advertisedIdentity?: string,
+    claim?: OriginClaim,
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     if (signal.aborted) return "unavailable";
@@ -694,8 +997,8 @@ export class SourceReconciler {
       revisionId: crypto.randomUUID(),
       baseline,
       timestamp: Date.now(),
-      operation: "origin-update",
-      origin: state.storedSource,
+      operation: claim?.operation ?? "origin-update",
+      origin: claim?.origin ?? state.storedSource ?? null,
       expected: state.snapshot,
     };
     // Setting up the candidate restages the piece's stored argument against
@@ -764,11 +1067,17 @@ export class SourceReconciler {
     return undefined;
   }
 
-  /** Rewrite a piece's origin into its canonical spelling, changing nothing else. */
-  async #migrateOrigin(
+  /**
+   * Change which origin a piece records, leaving the source it runs alone.
+   *
+   * `origin-update` rewrites a recorded origin into its canonical spelling.
+   * `follow` gives an origin to a piece that had none.
+   */
+  async #recordOrigin(
     resultCell: Cell<unknown>,
     state: PieceState,
     ref: string,
+    operation: "origin-update" | "follow",
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     const baseline = await preparePieceSourceTransitionBaseline(
@@ -781,7 +1090,7 @@ export class SourceReconciler {
       revisionId: crypto.randomUUID(),
       baseline,
       timestamp: Date.now(),
-      operation: "origin-update",
+      operation,
       origin: ref,
       expected: state.snapshot,
     };

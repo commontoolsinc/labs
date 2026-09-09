@@ -93,16 +93,21 @@ describe("piece-origin-kind", () => {
       ).toBe("unusable");
     });
 
-    it("returns web for an absolute program endpoint", () => {
+    it("returns unusable for an absolute external endpoint", () => {
       expect(classifyPieceOriginString("https://elsewhere.example/p.tsx"))
-        .toEqual({ kind: "web", url: "https://elsewhere.example/p.tsx" });
+        .toEqual({
+          kind: "unusable",
+          reason:
+            "https://elsewhere.example/p.tsx is an external endpoint, which " +
+            "is not a source origin",
+        });
     });
 
-    it("returns unusable for a non-web scheme", () => {
+    it("returns unusable for a scheme that serves no program", () => {
       const kind = classifyPieceOriginString("file:///tmp/p.tsx");
       expect(kind).toEqual({
         kind: "unusable",
-        reason: "file:///tmp/p.tsx is not a web URL",
+        reason: "file:///tmp/p.tsx names no program",
       });
     });
 
@@ -124,19 +129,21 @@ describe("piece-origin-kind", () => {
       });
     });
 
-    it("returns web for the same route on another host", () => {
+    it("returns unusable for the same route on another host", () => {
       const source = "https://other.example/api/patterns/system/home.tsx";
       expect(classifyPieceOriginString(source, HOST)).toEqual({
-        kind: "web",
-        url: source,
+        kind: "unusable",
+        reason:
+          `${source} is an external endpoint, which is not a source origin`,
       });
     });
 
-    it("returns web for the route spelled absolutely with no host to compare", () => {
+    it("returns unusable for the route spelled absolutely with no host to compare", () => {
       const source = `${HOST}/api/patterns/system/home.tsx`;
       expect(classifyPieceOriginString(source)).toEqual({
-        kind: "web",
-        url: source,
+        kind: "unusable",
+        reason:
+          `${source} is an external endpoint, which is not a source origin`,
       });
     });
   });

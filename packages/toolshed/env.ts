@@ -129,20 +129,6 @@ export const EnvSchema = z.object({
     { message: "DB_PATH must be an absolute path" },
   ).optional(),
   MEMORY_URL: z.string().default("http://localhost:8000"),
-  // Seconds an unresponsive memory websocket may miss its ping before the
-  // runtime closes it (Deno.upgradeWebSocket's idleTimeout; 0 disables).
-  // The memory server evaluates frames and flush passes synchronously on
-  // its event loop, so during a long evaluation stretch every connection's
-  // pong sits unprocessed — a deadline shorter than the longest legitimate
-  // stretch closes ALL of the process's connections at once when the loop
-  // yields, and the reconnecting clients then re-establish their watch
-  // sets against the same busy process. Size this above the worst
-  // single-loop stretch, not above a round-trip time.
-  MEMORY_WS_IDLE_TIMEOUT_SECONDS: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim() === "" ? undefined : value,
-    z.coerce.number().nonnegative().default(300),
-  ),
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
@@ -241,6 +227,24 @@ export const EnvSchema = z.object({
   // ACL state and fresh-space genesis violations still block. `enforce` also
   // denies access shortfalls. See packages/memory/v2/server.ts.
   MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("enforce"),
+
+  // Bounds for each space's decoded-document cache on the memory v2 server
+  // (packages/memory/v2/engine.ts, DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a
+  // byte budget in encoded bytes and an entry cap. Unset means the engine's
+  // defaults. Raise the budget when /api/health/stats `documentCaches` shows
+  // `evictions` climbing for a space that is being read repeatedly. (`int()`
+  // is a safe-integer check in zod 4, so a value past 2^53 fails here rather
+  // than in the memory server.)
+  MEMORY_DOCUMENT_CACHE_BUDGET_BYTES: z.coerce.number().int().positive()
+    .optional(),
+  MEMORY_DOCUMENT_CACHE_MAX_ENTRIES: z.coerce.number().int().positive()
+    .optional(),
+  // Bound across every space's document cache on the memory server this
+  // process hosts (default DOCUMENT_CACHE_TOTAL_BUDGET_BYTES in
+  // packages/memory/v2/server.ts; one memory server per toolshed process, so
+  // in deployment this is the process's bound).
+  MEMORY_DOCUMENT_CACHE_TOTAL_BUDGET_BYTES: z.coerce.number().int()
+    .positive().optional(),
 
   // Set ONLY when a trusted reverse proxy sits in front of this process and
   // overwrites X-Forwarded-For. Rate limiting keys on the real TCP peer by

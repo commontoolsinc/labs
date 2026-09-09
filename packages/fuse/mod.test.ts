@@ -16,6 +16,7 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import { finalizeCommittedSourceWrite } from "./source-write-finalize.ts";
 import { HandleMap } from "./handles.ts";
 import {
   closeKernelFileHandle,
@@ -183,6 +184,64 @@ Deno.test("source writeback retains attached data files", async () => {
   assert(
     sourceWriteback.includes("dataFiles: program.dataFiles"),
     "source writeback must pass the recovered data files to setPattern",
+  );
+});
+
+Deno.test("source writeback finalizes its receipt and persists every warning", async () => {
+  // Finalizing rebuilds `.src` and mints a fresh empty `error.log`, so the
+  // receipt goes into the operation performing that rebuild. The outer flush
+  // then persists the finalizer's complete diagnostic, which retains both
+  // failures when the running-piece refresh and the projection fail. Read from
+  // the source because driving the flush needs a mounted filesystem, in the
+  // same way as the two cases above.
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes(
+      "bridge.finalizeSourceWritePath(writeTarget.target, receipt)",
+    ),
+    "source writeback must hand the update receipt to the finalize",
+  );
+  assert(
+    sourceWriteback.includes(
+      "finalized.logWarning",
+    ),
+    "source writeback must persist the complete post-commit diagnostic",
+  );
+});
+
+Deno.test("source projection failures after commit become warnings, not rejected writes", async () => {
+  const receipt = {
+    status: "committed" as const,
+    ref: { identity: "A".repeat(43), symbol: "default" },
+    revisionId: "revision-committed-before-finalize",
+    detachedOrigin: null,
+    refresh: { status: "completed" as const },
+  };
+  const failure = new Error("projection rebuild failed");
+
+  const failed = await finalizeCommittedSourceWrite(receipt, () => {
+    throw failure;
+  });
+  assertEquals(failed, {
+    status: "failed",
+    warning:
+      `Source revision revision-committed-before-finalize committed as ` +
+      `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
+      `projection failed: projection rebuild failed`,
+    logWarning:
+      `Source revision revision-committed-before-finalize committed as ` +
+      `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
+      `projection failed: projection rebuild failed`,
+    error: failure,
+  });
+
+  assertEquals(
+    await finalizeCommittedSourceWrite(receipt, () => Promise.resolve()),
+    { status: "completed" },
   );
 });
 

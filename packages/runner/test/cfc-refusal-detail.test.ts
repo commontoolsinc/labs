@@ -16,7 +16,9 @@
  *   refusal leaves when the commit boundary decides it is retryable rather
  *   than terminal and so never puts it on the error channel at all.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -258,7 +260,6 @@ describe("refusal-detail", () => {
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         cfcFlowLabels: "persist",
         cfcSinkMaxConfidentiality: { fetchText: [], llm: [] },
         errorHandlers: [(error) => reported.push(error)],
@@ -417,7 +418,6 @@ describe("refusal-detail", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         cfcFlowLabels: "persist",
       });
       try {
@@ -474,7 +474,6 @@ describe("refusal-detail", () => {
       runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         cfcFlowLabels: "persist",
         cfcSinkMaxConfidentiality: { fetchText: [] },
       });

@@ -242,7 +242,10 @@ we were not looking."
 Section markers separate major portions of a file or class. They are not
 headers for individual functions and their helpers — doc comments already
 carry that structure, and a reader navigating by rendered documentation never
-sees the marker at all.
+sees the marker at all. They are not, as a rule, headers for individual test
+blocks either;
+[`unit-test-coding-style.md`](unit-test-coding-style.md#commenting-a-block)
+says where a comment about one of those goes.
 
 Where `//` comments can be used, mark a section of a file or a class with a
 `//` comment block that opens and closes with a line holding nothing but `//`.
@@ -261,6 +264,41 @@ after a blank line:
 
 export function fry(): void {}
 ```
+
+A blank line sets the frame off above as well as below. Without the one above,
+the marker runs into whatever comment precedes it and the two read as one
+comment; without the one below, the frame reads as a note on the declaration it
+touches rather than as a heading over what follows.
+
+Directly under an opening bracket there is nothing above to separate from, and
+`deno fmt` removes a blank line there in any case. A frame there takes no blank
+line above it, and reads as the first region of the block rather than as a note
+on it. Where the block opens with shared setup instead, the region's first
+marker goes after it.
+
+**A region has an end, and writing the marker is choosing it.** A marker opens
+a region that runs to the next marker at the same level, or to the end of the
+enclosing block or file. Read what sits between the marker and that point and
+check the title covers all of it. Where the material the title owns stops before
+the enclosing block does, put a marker there titling what follows. A file whose
+last marker does not head the file's last section has a region whose end nobody
+chose.
+
+**A title is a claim about everything in its region**, not an introduction to
+what comes next. The same words that pass as a label above the first of a run
+become false as a title over a region holding more than they name: "the two
+things that are not values" is a fact about a region with two of them in it.
+When a region grows, its title is read against it again.
+
+A title can be wrong by being too narrow as easily as too wide. Where the
+subject it names also appears outside its region, either the region is in the
+wrong place or the title names something smaller than its subject.
+
+**A region holds more than its blocks.** Everything between the marker and the
+region's end falls inside it: a helper function, a fixture constant, a
+`beforeEach()`. A helper that serves the whole file but happens to sit inside
+one region reads as belonging to that region, so shared setup goes above the
+first marker.
 
 **CSS takes a block comment.** CSS has no line comments, so a section marker in
 a `.css` file, a `css` template literal, or a `<style>` block is a `/* */`
@@ -424,7 +462,7 @@ defect. To title a region of a file or a class, use a section marker; see
 ### The blank line above
 
 A doc comment takes a blank line above it, except where it is the first thing
-in its file or bracketed block, and except in the two constructs `deno fmt`
+in its file or bracketed block, and except in the three constructs `deno fmt`
 will not keep one in.
 
 That blank line is what separates a documented declaration from whatever
@@ -432,7 +470,7 @@ precedes it, and within those bounds it holds uniformly: a function after
 another function, an interface property after another property, an array
 element after another element.
 
-Two positions have nothing above to separate from, and so take no blank line:
+Three positions have nothing above to separate from, and so take no blank line:
 
 - **The first line of a file**, where a file header opens the file. A shebang
   or a file-scoped pragma is something above, though, and takes the blank line
@@ -440,6 +478,11 @@ Two positions have nothing above to separate from, and so take no blank line:
 - **Directly under an opening bracket** — `{`, `(`, or `[` — where the doc
   comment belongs to the first member, parameter, or element of the block. The
   bracket is the separator.
+- **Directly under the `=` of a type alias**, where the doc comment belongs to
+  the first arm of the union or intersection that follows. The `=` opens the
+  declaration the way a bracket opens a block, and the arms after the first are
+  exempt under the formatter rule below. Note that `deno fmt` will keep a blank
+  line in this one position, so the convention is the whole of what holds it.
 
 The dense cases are the ones the rule is for. An interface whose properties
 each carry a one-line doc comment reads as an undifferentiated run of lines
@@ -462,10 +505,11 @@ export interface Donut {
 }
 ```
 
-Two constructs are exempt because the formatter overrules the rule there.
-`deno fmt` removes a blank line between two items of a parenthesized list, and
-between two arms of a union or intersection type, so a documented parameter
-list, argument list, or union runs unbroken:
+Three constructs are exempt because the formatter overrules the rule there.
+`deno fmt` removes a blank line between two items of a parenthesized list,
+between two items of a type parameter list, and between two arms of a union or
+intersection type, so a documented parameter list, argument list, type parameter
+list, or union runs unbroken:
 
 ```ts
 // Shown at module scope.
@@ -490,6 +534,68 @@ export type FryerState =
 
 Object types, tuple types, array literals, and class and interface bodies all
 keep their blank lines, so the rule holds in full there.
+
+### The blank line below
+
+A documented declaration takes a blank line after it as well. The rule above
+separates a doc comment from what precedes it; this one bounds what it covers.
+
+Without that blank line a doc comment reads as a header over everything down to
+the next one, and whatever sits under the declaration it was written for looks
+documented when it is not:
+
+```ts
+// Shown as alternative snippets.
+
+// Wrong: `humidity` reads as covered by the comment above `temperature`.
+
+interface Reading {
+  /** Fryer temperature, in Kelvin. */
+  readonly temperature: number;
+  readonly humidity: number;
+}
+```
+
+```ts
+// Shown as alternative snippets.
+
+// Right: the blank line ends the doc comment's reach.
+
+interface Reading {
+  /** Fryer temperature, in Kelvin. */
+  readonly temperature: number;
+
+  readonly humidity: number;
+}
+```
+
+Anything following takes the blank line, not only another declaration. A
+statement under a documented local is the same shape and gets the same
+treatment.
+
+The exemptions mirror the ones above. A declaration with nothing after it in
+its file or bracketed block takes no blank line: the closing bracket, or the
+end of the file, is the separator, exactly as the opening bracket is on the
+other side. And the three constructs `deno fmt` will not keep a blank line in
+are exempt here for the reason they are exempt there — the formatter strips one
+after a documented parameter, type parameter, or union arm just as it strips one
+before.
+
+The rule reaches documented declarations only. Two adjacent members carrying no
+doc comment between them leave no comment's scope in doubt, and stay as they
+are.
+
+For this rule an overload set is one declaration. Its signatures and the
+implementation carrying the code are a single thing to a caller and a single
+thing to the doc comment above them, so no blank line falls between one part of
+the set and the next; the one that closes the set goes after the implementation.
+The blank lines inside the implementation's own body are statement spacing and
+are not what this means.
+
+A set with no implementation to close it — in an interface, or in ambient
+`declare` form — is an overload set all the same, and closes after its last
+signature. `deno fmt` keeps a blank line between two signatures, so this is a
+convention no gate will raise.
 
 ### What gets one
 
@@ -593,7 +699,7 @@ nothing else. The blank line is load-bearing for that same reason: it is what
 keeps the header from being read as the doc comment of the first declaration
 under it.
 
-Every file gets one, except for the three kinds below.
+Every file gets one, except for the four kinds below.
 
 **A file that defines a single thing.** Where the whole content of a file is
 one declaration — one class, one function, one type — along with the imports
@@ -631,8 +737,33 @@ The exception ends where the file does. A second exported declaration, or
 module-level machinery that is not simply in service of the one, and the file
 has something to say about itself again.
 
-**A re-export barrel**, and **a test fixture whose content is the point**, are
-the other two.
+**A unit test file.** Its name says what it tests, and its one top-level
+`describe()` says it again, so the header a typical one could carry is either
+``Unit tests for `fryer.ts`.`` or a restatement of the contract that the code
+under test already documents. Neither is worth the slot, and a file whose
+header would be one of those has none.
+
+The exemption is narrower than its name, in two ways. It covers the unit test
+file itself, `.test.ts` or `.test.tsx`, and nothing beside it: a helper module
+under `test/` — shared setup, a fake, a builder for test values — is an
+ordinary file, and gets a header on the ordinary terms. A pattern test is a
+different form, as [`unit-test-coding-style.md`](unit-test-coding-style.md)
+says, and is not what this names. And it is a default rather than a bar. A test
+file that does something a reader would not guess from its name — walks a
+generated corpus, drives the code under test from a second runtime, checks two
+implementations against each other — has something to say about itself that no
+declaration in it says, and a header is where that goes.
+
+**A re-export barrel.** Its whole content is the list of what it re-exports,
+and each entry carries its own doc comment where it is declared. A header
+could only repeat the list, and would stop matching it at the next line added
+to the file.
+
+**A test fixture whose content is the point.** The file is an input a test
+feeds to the code under test, or an output it compares against, and what it
+is for is stated in the test that reads it. A header inside it would be part
+of the content, and where the fixture is source that a compiler or transformer
+takes in, part of what the test measures.
 
 Two placements look close enough to pass and are not. A `//` block is not an
 alternative form of a header: it reads as a note about the line beneath it,

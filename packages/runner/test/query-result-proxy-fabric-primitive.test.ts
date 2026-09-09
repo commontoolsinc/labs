@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { FabricPrimitive } from "@commonfabric/data-model";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { internCellLinkSchema } from "../src/cell.ts";

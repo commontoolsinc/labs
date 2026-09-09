@@ -86,7 +86,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./array_push.test.tsx", import.meta.url),
+      new URL("./array_push.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,

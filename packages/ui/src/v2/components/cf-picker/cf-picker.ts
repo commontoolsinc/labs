@@ -230,7 +230,10 @@ export class CFPicker extends BaseElement {
     },
   });
 
-  // Cell controller for items - handles subscription to load cell values
+  /**
+   * Cell controller for the items, which handles the subscription that loads
+   * cell values.
+   */
   private _itemsCellController = createArrayCellController<any>(this, {
     timing: { strategy: "immediate" },
   });

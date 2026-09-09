@@ -14,7 +14,7 @@ that pattern that holds real data — a specific notebook, a specific board.
 A **verb** is a named action a pattern offers to the outside world: `addItem`,
 `setLabel`, `archive`. Verbs are not the only way in — a caller with write
 permission can also set a piece's fields directly, as the UI's editing
-controls, `cf set`, and the filesystem mount all do. A piece's
+controls, `cf cell set`, and the filesystem mount all do. A piece's
 interface is its fields and its verbs together, the way an object's interface
 is its public fields and its methods. This document is about the verb half,
 where the design questions are; fields go through the same update gate, and
@@ -51,11 +51,12 @@ here is what it does to a verb's author:
 | Mark a verb `@deprecated` | allowed, and it disappears from listings |
 | Turn a verb into data, or data into a verb | refused |
 | Add an optional field to a verb's input | allowed |
-| Add a required field to a verb's input | allowed, **and breaks callers** |
+| Add a required field to a verb's input | refused, unless the field already carried a default |
+| Make a field of a verb's input optional | allowed |
 | Remove or retype a field of a verb's input | refused |
 | Change anything about a verb's **output** | allowed, and nothing checks it |
 
-Three rows are bad outcomes, and they pull in different directions.
+Two rows are bad outcomes, and they pull in opposite directions.
 
 **Ordinary changes are refused.** If a board keeps a list of notes and you
 add one new action to notes, updating the board is refused outright:
@@ -68,11 +69,14 @@ Nothing is wrong with that change — it adds an action and takes nothing
 away. It is refused because of how verbs are declared, not because of what
 the change does.
 
-**Some genuinely breaking changes pass.** Adding a newly required field to a
-verb's input passes the check, then fails every existing caller the moment
-they call. A straightforward defect — the one place the two rules above get
-applied the wrong way round — filed with its fix decided ([#5663]), and
-listed here because it shapes how much the gate can be trusted while open.
+**Required-ness of a verb's input is settled** ([#5663]). It reads as the
+argument side's rule, stated in the result comparison's direction, because a
+verb's event is an argument in every respect but where it is declared. Adding
+a newly required field is refused; the default that would rescue it has to be
+one the field already carried, since descending through a stream marker
+withdraws permission to introduce a default below it. Relaxing a field to
+optional is allowed for the same reason it is allowed of an argument: every
+call already written still sent it, so every one still validates.
 
 **A verb's output is not checked at all.** The shape records a verb's input
 and discards its output, so renaming a field of what a verb hands back
@@ -85,7 +89,7 @@ travels on `module.resultSchema`, a module field that enters no durable
 schema and that no baseline under `packages/patterns/baselines/` records,
 which is what made that road passable while the durable one was not; and it
 is resolvable per deployed piece, because `cf piece verbs` publishes it as a
-row's `outputSchema` and `cf call <verb> --help` publishes it for a
+row's `outputSchema` and `cf piece call <verb> --help` publishes it for a
 single verb (`listPieceCallables`, `declaredVerbResults` and
 `withDeclaredResult`, `packages/cli/lib/piece.ts`). What is still deferred is
 the durable record and the comparison it would feed: nothing holds one
@@ -126,7 +130,7 @@ required field to its own *result*, because the new code materializes it
 when it runs. A demand has no such escape — the piece it points at already
 exists.)
 
-Behind all three outcomes is the fact that makes this hard: **pieces
+Behind both outcomes is the fact that makes this hard: **pieces
 persist.** Each carries the interface it was created with while the code
 around it moves on. Sooner or later some caller holds a piece older than the
 interface it wants, and no declaration style makes that impossible.

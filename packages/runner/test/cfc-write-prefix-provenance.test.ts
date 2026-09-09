@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
@@ -84,13 +84,12 @@ const makeRuntime = (options: {
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: options.storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     ...(options.cfcTriggerReadGating !== undefined
       ? { cfcTriggerReadGating: options.cfcTriggerReadGating }
       : {}),
-    ...(options.cfcWriteFloor !== undefined
-      ? { cfcWriteFloor: options.cfcWriteFloor }
-      : {}),
+    // The subject here is prefix-provenance measurement, so unless an arm
+    // dials the floor itself it measures but does not decide.
+    cfcWriteFloor: options.cfcWriteFloor ?? "observe",
   });
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[]

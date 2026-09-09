@@ -185,7 +185,7 @@ recursing into the body. But the analyzer maintains a per-expression cache, and
 `JsxExpressionSiteRouterTransformer` / `LiftLoweringTransformer` can analyze
 expressions in the body before `ClosureTransformer` marks the callback.
 
-`TransformationContext.invalidateReactiveAnalysisCaches()` is called by each
+`TransformationContext.#invalidateReactiveAnalysisCaches()` is called by each
 `mark*` method on the context. It drops three things:
 
 - `#reactiveContextCache`

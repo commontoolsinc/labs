@@ -139,6 +139,36 @@ describe("XAppView named-space preparation", () => {
     }
   });
 
+  it("does not request the space root for a piece-focused view", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const space = "did:key:z6Mk-shell-piece-without-root" as DID;
+      let rootRequests = 0;
+      const view = new XAppView();
+      view.app = {
+        view: { spaceName: "notebook", pieceId: "of:piece" },
+      } as never;
+      view.space = space;
+      view.rt = {
+        signal: new AbortController().signal,
+        resolveSpaceName: () => Promise.resolve(space),
+        getSpaceRootPattern: () => {
+          rootRequests++;
+          return Promise.reject(new Error("space root must stay untouched"));
+        },
+      } as never;
+
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+
+      expect(view._spaceRootPattern.value).toBeUndefined();
+      expect(rootRequests).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
   it("reports a name that resolves to a space other than the one given", async () => {
     const { prepareNamedSpace } = await import("../src/lib/named-space.ts");
     const atlas = "did:key:z6Mk-shell-named-space-atlas" as DID;

@@ -12,7 +12,7 @@
  * charts on its /bench page.
  */
 
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 

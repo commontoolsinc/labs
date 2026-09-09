@@ -1,4 +1,8 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcConfClause,
+  CfcEnforcementMode,
+  CfcReadOnExceed,
+} from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcAbsenceBehavior,
   HarnessCfcSubstrateStatus,
@@ -16,7 +20,10 @@ import type { BuiltinToolId } from "./tool-descriptor.ts";
 export type HarnessCfcEnforcementModeSource =
   | "override"
   | "explicit-config"
+  /** Carried in from a run this one continues: a resumed run's own mode. */
   | "inherited"
+  /** Derived from the mode the run's fabric session enforces at. */
+  | "fabric-session"
   | "run-manifest"
   | "default";
 
@@ -38,6 +45,13 @@ export interface HarnessCfcPolicySnapshotRunManifestSummary {
   capabilityProfile?: string;
   cfcEnforcementMode?: CfcEnforcementMode;
   labelSource?: string;
+
+  /** The read ceiling the manifest declared for the run's fabric session. */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** Its `onExceed`, when the manifest declared one. */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
   promptSlotPresent?: boolean;
 }
 
@@ -141,6 +155,15 @@ export const createHarnessCfcPolicySnapshot = (
           : {}),
         ...(options.runManifest.cfc?.labelSource !== undefined
           ? { labelSource: options.runManifest.cfc.labelSource }
+          : {}),
+        ...(options.runManifest.cfc?.maxConfidentiality !== undefined
+          ? {
+            cfcReadMaxConfidentiality:
+              options.runManifest.cfc.maxConfidentiality,
+          }
+          : {}),
+        ...(options.runManifest.cfc?.onExceed !== undefined
+          ? { cfcReadOnExceed: options.runManifest.cfc.onExceed }
           : {}),
         promptSlotPresent: options.runManifest.promptSlot !== undefined,
       }

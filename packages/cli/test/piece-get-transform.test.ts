@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  boundReadValue,
   CellSelectionError,
   deriveSelectedValue,
   evaluateSelectionPredicate,
@@ -28,7 +29,7 @@ import {
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();
 
-describe("cf piece get transforms", () => {
+describe("cf cell get transforms", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -38,8 +39,6 @@ describe("cf piece get transforms", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
       errorHandlers: [
         (error) => runtimeErrors.push({ message: error.message }),
       ],
@@ -413,6 +412,30 @@ describe("cf piece get transforms", () => {
     });
     expect(Object.keys((selected as { properties: object }).properties))
       .toEqual(["visible"]);
+  });
+
+  it("drops a required entry named like a prototype member that the mask did not select", () => {
+    // `required` is filtered to the SELECTED properties. That test must ask
+    // whether the selection holds the key as its own: a `required` entry
+    // spelled `toString` is found on every object by `in`, and an unselected
+    // one used to survive into the selected schema's `required`.
+    const properties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    properties["toString"] = { type: "string" };
+    const source: JSONSchema = {
+      type: "object",
+      properties,
+      required: ["label", "toString"],
+    };
+    const selected = selectSourceSchema(source, {
+      type: "object",
+      properties: { label: true },
+      additionalProperties: false,
+    }) as { properties: object; required?: string[] };
+
+    expect(Object.keys(selected.properties)).toEqual(["label"]);
+    expect(selected.required).toEqual(["label"]);
   });
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
@@ -2020,7 +2043,7 @@ describe("cf piece get transforms", () => {
 
     await expect(deriveSelectedValue(runtime, space, source, {
       filter: parseSelectionFilter(".score > 1"),
-    })).rejects.toThrow("Could not apply piece get transform");
+    })).rejects.toThrow("Could not apply get transform");
   });
 
   it("reports transform transaction commit failures", async () => {
@@ -2048,125 +2071,338 @@ describe("cf piece get transforms", () => {
       await expect(deriveSelectedValue(runtime, space, source, {
         projection: await parseSelectionProjection("id"),
       })).rejects.toThrow(
-        "Could not apply piece get transform: forced commit failure",
+        "Could not apply get transform: forced commit failure",
       );
     } finally {
       (runtime as any).edit = originalEdit;
     }
   });
 
-  it("carries predicate labels on filtered membership like a pattern", async () => {
-    await seedLabeledDoc(runtime, "filter-element-a", {
-      id: 1,
-      status: "open",
-    }, "alice-secret");
-    await seedLabeledDoc(runtime, "filter-element-b", {
-      id: 2,
-      status: "closed",
-    }, "bob-secret");
-
-    const setup = runtime.edit();
-    const elementA = runtime.getCell(
-      space,
-      "filter-element-a",
-      undefined,
-      setup,
-    );
-    const elementB = runtime.getCell(
-      space,
-      "filter-element-b",
-      undefined,
-      setup,
-    );
-    const source = runtime.getCell(
-      space,
-      "labeled-filter-source",
-      { type: "array", items: { asCell: ["cell"] } },
-      setup,
-    );
-    source.set([elementA, elementB]);
-    expect((await setup.commit()).ok).toBeDefined();
-    const sourceRead = runtime.getCell(
-      space,
-      "labeled-filter-source",
-      { type: "array", items: { asCell: ["cell"] } },
-    );
-
-    let outputCell: Cell<unknown> | undefined;
-    const result = await deriveSelectedValue(runtime, space, sourceRead, {
-      filter: parseSelectionFilter('.status == "open"'),
-    }, {
-      onOutputCell: (cell) => outputCell = cell,
-    });
-    expect(result).toEqual([{ id: 1, status: "open" }]);
-
-    const probeTx = runtime.edit();
-    const kept = outputCell!.withTx(probeTx).get() as unknown[];
-    const probe = runtime.getCell(
-      space,
-      "filter-membership-probe",
-      undefined,
-      probeTx,
-    );
-    probe.set({ count: kept.length });
-    probeTx.prepareCfc();
-    expect((await probeTx.commit()).ok).toBeDefined();
-
-    const labels = derivedConfidentiality(
-      probe.getAsNormalizedFullLink().id,
-    );
-    expect(labels).toContain("alice-secret");
-    expect(labels).toContain("bob-secret");
-  });
-
-  it("derives projected field labels from source CFC metadata", async () => {
+  it("returns projection-ordered output without a storage-wide sync", async () => {
     const setup = runtime.edit();
     const source = runtime.getCell(
       space,
-      "static-label-projection-source",
+      "transform-output-readiness-source",
       {
         type: "array",
         items: {
           type: "object",
           properties: {
-            id: {
-              type: "number",
-              ifc: { confidentiality: ["source-secret"] },
-            },
+            id: { type: "number" },
+            label: { type: "string" },
             ignored: { type: "string" },
           },
         },
       },
       setup,
     );
-    source.set([{ id: 7, ignored: "not returned" }]);
+    source.set([
+      { id: 1, label: "first", ignored: "not selected" },
+      { id: 2, label: "second", ignored: "not selected" },
+    ]);
     expect((await setup.commit()).ok).toBeDefined();
 
-    let outputCell: Cell<unknown> | undefined;
-    const result = await deriveSelectedValue(runtime, space, source, {
-      projection: await parseSelectionProjection("id"),
-    }, {
-      onOutputCell: (cell) => outputCell = cell,
-    });
-    expect(result).toEqual([{ id: 7 }]);
+    const originalSynced = storageManager.synced.bind(storageManager);
+    let storageWideSyncs = 0;
+    storageManager.synced = () => {
+      storageWideSyncs++;
+      return originalSynced();
+    };
+    try {
+      const result = await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("label,id"),
+      });
+      expect(result).toEqual([
+        { label: "first", id: 1 },
+        { label: "second", id: 2 },
+      ]);
+      expect(JSON.stringify(result)).toBe(
+        '[{"label":"first","id":1},{"label":"second","id":2}]',
+      );
+      expect(storageWideSyncs).toBe(0);
+    } finally {
+      storageManager.synced = originalSynced;
+    }
+  });
 
-    const probeTx = runtime.edit();
-    const projectedId = outputCell!.key(0).key("id").withTx(
-      probeTx,
-    ).get();
-    const probe = runtime.getCell(
+  it("orders an open projection's declared keys first, then retained extras in value order", async () => {
+    const setup = runtime.edit();
+    // The `toString` entry is added by key: in an object literal TypeScript
+    // types a property of that name as `Object.prototype.toString` and
+    // refuses the schema.
+    const sourceProperties: Record<string, JSONSchema> = {
+      id: { type: "number" },
+      zeta: { type: "string" },
+      label: { type: "string" },
+      alpha: { type: "string" },
+    };
+    sourceProperties["toString"] = { type: "string" };
+    const source = runtime.getCell(
       space,
-      "projection-label-probe",
-      undefined,
-      probeTx,
+      "transform-open-projection-order-source",
+      { type: "object", properties: sourceProperties },
+      setup,
     );
-    probe.set({ projectedId });
-    probeTx.prepareCfc();
-    expect((await probeTx.commit()).ok).toBeDefined();
+    // Three extras beyond the declaration, one of them spelled like an
+    // `Object.prototype` member, which `in` would have mistaken for
+    // present-on-every-object and dropped.
+    source.set({
+      id: 1,
+      zeta: "z",
+      label: "first",
+      toString: "own",
+      alpha: "a",
+    });
+    expect((await setup.commit()).ok).toBeDefined();
 
-    expect(derivedConfidentiality(
-      probe.getAsNormalizedFullLink().id,
-    )).toContain("source-secret");
+    // Open (`additionalProperties: true`) and declaring `label` before `id`:
+    // the declaration orders the keys it names, and what the projection
+    // retains beyond it follows in the order the value holds them — which,
+    // after a storage round trip, is the canonical (sorted) order the
+    // materialized value arrives in, not the order `set()` was handed.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"type":"object","properties":{"label":true,"id":true},"additionalProperties":true}',
+      ),
+    });
+    expect(JSON.stringify(result)).toBe(
+      '{"label":"first","id":1,"alpha":"a","toString":"own","zeta":"z"}',
+    );
+  });
+
+  it("orders an open projection's declared keys first across an array of objects", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-open-projection-array-order-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            label: { type: "string" },
+            extra: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, label: "first", extra: "kept" },
+      { id: 2, label: "second", extra: "kept" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // The open × array combination: `projectValue` decomposes the array
+    // projection to its item schema, and each element renders its declared
+    // keys in schema order (label before id) with the retained extra after.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"type":"array","items":{"type":"object","properties":{"label":true,"id":true},"additionalProperties":true}}',
+      ),
+    });
+    expect(JSON.stringify(result)).toBe(
+      '[{"label":"first","id":1,"extra":"kept"},{"label":"second","id":2,"extra":"kept"}]',
+    );
+  });
+
+  it("a bound read composes no address for a marked position the value does not hold, prototype names included", async () => {
+    // A declared result whose recursion re-enters at a property spelled like
+    // an `Object.prototype` member: the cut marks that position, and the
+    // bound read composes an address for it only where the value holds the
+    // key as its own. `in` found `Object.prototype.toString` on a value
+    // without one and composed an address for a key the value never had.
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-bound-read-prototype-source",
+      { type: "object", properties: { label: { type: "string" } } },
+      setup,
+    );
+    source.set({ label: "held" });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const nodeProperties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    nodeProperties["toString"] = { $ref: "#/$defs/Node" };
+    const declared: JSONSchema = {
+      $defs: { Node: { type: "object", properties: nodeProperties } },
+      $ref: "#/$defs/Node",
+    };
+
+    const result = await boundReadValue(
+      source,
+      declared,
+      { label: "held" },
+      space,
+    ) as Record<string, unknown>;
+    expect(Object.keys(result)).toEqual(["label"]);
+    expect(Object.hasOwn(result, "toString")).toBe(false);
+  });
+
+  it("a closed projection emits only keys the value holds, prototype names included", async () => {
+    const setup = runtime.edit();
+    const sourceProperties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    sourceProperties["toString"] = { type: "string" };
+    const source = runtime.getCell(
+      space,
+      "transform-closed-projection-prototype-source",
+      { type: "object", properties: sourceProperties },
+      setup,
+    );
+    source.set({ label: "only" });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // `toString` is selected but absent from the value; `in` would have
+    // found `Object.prototype.toString` and emitted the native function.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: parseSelectProjection("label,toString"),
+    }) as Record<string, unknown>;
+    expect(Object.keys(result)).toEqual(["label"]);
+    expect(Object.hasOwn(result, "toString")).toBe(false);
+  });
+
+  describe("the labels a selection carries", () => {
+    // The two assertions here read a derived label component back out of
+    // storage through `derivedConfidentiality`. Persisting flow labels
+    // writes that component. It reaches a probe document that declares no
+    // ceiling of its own at the enforcement rungs where the writer-fit rule
+    // measures a written value's taint, which is every rung below
+    // `enforce-strict`.
+    let measuring: Runtime;
+
+    beforeEach(() => {
+      measuring = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "persist",
+      });
+    });
+
+    afterEach(async () => {
+      await measuring.dispose();
+    });
+
+    it("carries predicate labels on filtered membership like a pattern", async () => {
+      await seedLabeledDoc(measuring, "filter-element-a", {
+        id: 1,
+        status: "open",
+      }, "alice-secret");
+      await seedLabeledDoc(measuring, "filter-element-b", {
+        id: 2,
+        status: "closed",
+      }, "bob-secret");
+
+      const setup = measuring.edit();
+      const elementA = measuring.getCell(
+        space,
+        "filter-element-a",
+        undefined,
+        setup,
+      );
+      const elementB = measuring.getCell(
+        space,
+        "filter-element-b",
+        undefined,
+        setup,
+      );
+      const source = measuring.getCell(
+        space,
+        "labeled-filter-source",
+        { type: "array", items: { asCell: ["cell"] } },
+        setup,
+      );
+      source.set([elementA, elementB]);
+      setup.prepareCfc();
+      expect((await setup.commit()).ok).toBeDefined();
+      const sourceRead = measuring.getCell(
+        space,
+        "labeled-filter-source",
+        { type: "array", items: { asCell: ["cell"] } },
+      );
+
+      let outputCell: Cell<unknown> | undefined;
+      const result = await deriveSelectedValue(measuring, space, sourceRead, {
+        filter: parseSelectionFilter('.status == "open"'),
+      }, {
+        onOutputCell: (cell) => outputCell = cell,
+      });
+      expect(result).toEqual([{ id: 1, status: "open" }]);
+
+      const probeTx = measuring.edit();
+      const kept = outputCell!.withTx(probeTx).get() as unknown[];
+      const probe = measuring.getCell(
+        space,
+        "filter-membership-probe",
+        undefined,
+        probeTx,
+      );
+      probe.set({ count: kept.length });
+      probeTx.prepareCfc();
+      expect((await probeTx.commit()).ok).toBeDefined();
+
+      const labels = derivedConfidentiality(
+        probe.getAsNormalizedFullLink().id,
+      );
+      expect(labels).toContain("alice-secret");
+      expect(labels).toContain("bob-secret");
+    });
+
+    it("derives projected field labels from source CFC metadata", async () => {
+      const setup = measuring.edit();
+      const source = measuring.getCell(
+        space,
+        "static-label-projection-source",
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: {
+                type: "number",
+                ifc: { confidentiality: ["source-secret"] },
+              },
+              ignored: { type: "string" },
+            },
+          },
+        },
+        setup,
+      );
+      source.set([{ id: 7, ignored: "not returned" }]);
+      setup.prepareCfc();
+      expect((await setup.commit()).ok).toBeDefined();
+
+      let outputCell: Cell<unknown> | undefined;
+      const result = await deriveSelectedValue(measuring, space, source, {
+        projection: await parseSelectionProjection("id"),
+      }, {
+        onOutputCell: (cell) => outputCell = cell,
+      });
+      expect(result).toEqual([{ id: 7 }]);
+
+      const probeTx = measuring.edit();
+      const projectedId = outputCell!.key(0).key("id").withTx(
+        probeTx,
+      ).get();
+      const probe = measuring.getCell(
+        space,
+        "projection-label-probe",
+        undefined,
+        probeTx,
+      );
+      probe.set({ projectedId });
+      probeTx.prepareCfc();
+      expect((await probeTx.commit()).ok).toBeDefined();
+
+      expect(derivedConfidentiality(
+        probe.getAsNormalizedFullLink().id,
+      )).toContain("source-secret");
+    });
   });
 
   async function seedLabeledDoc(
@@ -3402,8 +3638,6 @@ describe("cf piece get transforms", () => {
       const second = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "observe",
-        cfcFlowLabels: "persist",
       });
       try {
         const sourceThere = second.getCell(

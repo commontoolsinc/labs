@@ -10,11 +10,6 @@
  * it goes under, the collections it derives, and text its rendered tree
  * carries. Where a demo has one headline action — the text swapper's swap, the
  * chat lobby's join — the test drives it and checks the state it moved.
- *
- * The record-icon module is here too. It is a record module rather than a
- * demo, but it sits at the top of the package like the rest of these, and what
- * is checked of it is the same thing: the name it publishes, before and after
- * an action sets its emoji.
  */
 import {
   action,
@@ -39,7 +34,6 @@ import LinkPreview from "./link-preview.tsx";
 import MobileAppDemo from "./mobile-app-demo.tsx";
 import NestedMapIfElseTest from "./nested-map-ifelse-test.tsx";
 import ProfileRosterLiveDemo from "./profile-roster-live-demo.tsx";
-import RecordIcon from "./record-icon.tsx";
 import RenderTest from "./render-test.tsx";
 import { hasText, textContent } from "./test/vnode-helpers.ts";
 import TextSwapper from "./text-swapper.tsx";
@@ -101,9 +95,6 @@ export default pattern(() => {
     currentSessionId,
   });
 
-  const chosenIcon = new Writable("");
-  const recordIcon = RecordIcon({ icon: chosenIcon });
-
   const mobileApp = MobileAppDemo({});
   const bookmarks = Bookmarks({});
   const chatbot = Chatbot({});
@@ -125,10 +116,6 @@ export default pattern(() => {
 
   const action_add_person = action(() => {
     people.push({ name: "Cy", email: "cy@example.com", role: "user" });
-  });
-
-  const action_choose_icon = action(() => {
-    chosenIcon.set("\u{1F419}");
   });
 
   // ==========================================================================
@@ -182,16 +169,6 @@ export default pattern(() => {
 
   const assert_room_named_for_me = assert(() => room.myName === "Ada");
 
-  // The icon module names itself for the emoji it carries, and reads `(auto)`
-  // while it carries none.
-  const assert_record_icon_starts_auto = assert(() =>
-    recordIcon[NAME] === "\u{1F3A8} Icon: (auto)"
-  );
-
-  const assert_record_icon_named_for_choice = assert(() =>
-    recordIcon[NAME] === "\u{1F3A8} Icon: \u{1F419}"
-  );
-
   // Every remaining demo builds a tree. Bookmarks is checked for a tree rather
   // than for text: it starts with an empty list and has no text of its own.
   const assert_demos_render = assert(() =>
@@ -215,16 +192,12 @@ export default pattern(() => {
       { assertion: assert_lobby_empty },
       { assertion: assert_room_named_for_me },
       { assertion: assert_demos_render },
-      { assertion: assert_record_icon_starts_auto },
 
       { action: action_swap_texts },
       { assertion: assert_swapper_swapped },
 
       { action: action_add_person },
       { assertion: assert_form_demo_grew },
-
-      { action: action_choose_icon },
-      { assertion: assert_record_icon_named_for_choice },
     ],
     swapper,
     formDemo,

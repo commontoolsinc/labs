@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
 
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 import { isNontrivialSchema } from "@/isNontrivialSchema.ts";
 
 describe("isNontrivialSchema()", () => {

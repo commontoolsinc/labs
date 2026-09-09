@@ -5,8 +5,9 @@
 // server: the admission-side observer (plane b) activates spaces, lease
 // writes ride the direct engine plane (plane c), and the serving
 // runtimes' storage sessions are in-process loopback connections with the
-// SAME signed session-open production clients present (plane a). OFF (the
-// default), nothing here runs and toolshed is byte-identical to today.
+// SAME signed session-open production clients present (plane a). OFF,
+// whether selected by the default or an explicit override, nothing here
+// runs and toolshed is byte-identical to the pre-v2 behavior.
 
 import {
   type EnvReader,
@@ -77,6 +78,7 @@ export function serverExecutionPolicyFromEnv(
    * prefixes of those). */
   const strictNonNegativeInt = (raw: string): number | undefined =>
     /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : undefined;
+
   const readRaw = (name: string): string | undefined => {
     const raw = envGet(name);
     return raw === undefined || raw === "" ? undefined : raw;
@@ -96,6 +98,7 @@ export function serverExecutionPolicyFromEnv(
     }
     return value;
   };
+
   const flushDeadlineMs = positiveOrDefault(
     "SERVER_EXECUTION_FLUSH_DEADLINE_MS",
   );
@@ -167,6 +170,7 @@ export function startServerExecutionHost(options: {
 
   /** The patterns/compile base — the serving runtimes' `apiUrl`. */
   apiUrl: URL;
+
   envGet?: EnvReader;
 }): ExecutorHost | undefined {
   const envGet = options.envGet ?? Deno.env.get;

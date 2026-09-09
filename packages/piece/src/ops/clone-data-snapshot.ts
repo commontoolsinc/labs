@@ -10,10 +10,7 @@ import {
   isCellResult,
   isStream,
 } from "@commonfabric/runner";
-import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
+import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
 import {
   assertCloneDataUnlabeled,
   assertNoCloneFabricInstance,

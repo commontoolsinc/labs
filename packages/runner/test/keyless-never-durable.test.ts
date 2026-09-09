@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
@@ -37,7 +38,7 @@ import {
  *   1. `Runner.setup()`'s durable `patternIdentity`/`patternSetupIdentity`
  *      stamps (`if (entryRef)` filters nothing — `entryRefForPattern`
  *      always mints);
- *   2. `Runner.substituteOpPatternRefs`' `$patternRef` sentinel for keyless
+ *   2. `Runner.#substituteOpPatternRefs`' `$patternRef` sentinel for keyless
  *      map/filter/flatMap ops (written into the node's durable inputs doc);
  *   3. the storage-boundary serializer itself (`patternToEncodableForm`):
  *      the mint sets the pattern's forward entry ref, so the designed
@@ -54,6 +55,11 @@ import {
 
 const signer = await Identity.fromPassphrase("keyless-never-durable");
 const space = signer.did();
+
+// Synthetic churn keys, declared as the keys the pointer table holds.
+type PointerKey = Parameters<
+  Runtime["runner"]["accessForTestingOnly"]["sessionPatternPointers"]["set"]
+>[0];
 
 // A minimal map-over-pattern program. Bare-evaluated (non-registering), its
 // op pattern carries no content-addressed entry ref, so node instantiation
@@ -331,7 +337,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       cell.withTx(repointTx).setMetaRaw("patternIdentity", {
         identity: unloadableIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       await repointTx.commit();
     }
     await runtime.idle();
@@ -391,7 +397,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       cell.withTx(repointTx).setMetaRaw("patternIdentity", {
         identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       await repointTx.commit();
     }
     await runtime.idle();
@@ -426,7 +432,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     cell.withTx(tx).setMetaRaw("patternIdentity", {
       identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
       symbol: "default",
-    });
+    }, rawMetaWriteAuthorization);
     await tx.commit();
     await runtime.idle();
 
@@ -517,7 +523,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
   });
 
   it("a fresh session replays a keyless piece's setup without restaging its stored argument", async () => {
-    // The cross-session `cf get` transform shape: session A sets up a
+    // The cross-session `cf cell get` transform shape: session A sets up a
     // keyless piece over a deterministic doc; session B (fresh runtime, no
     // durable pointer, no setup marker — the keyless piece's designed
     // durable verdict) re-runs the structurally same pattern on the same
@@ -726,7 +732,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
 
   it("an evicted session pointer does not masquerade as the zero-evidence state", async () => {
     // The session pointer map is BOUNDED: past its capacity a long-lived
-    // session (a server streaming keyless `cf get` transforms) evicts its
+    // session (a server streaming keyless `cf cell get` transforms) evicts its
     // oldest entries. An evicted piece then reads pointer-absent AND
     // marker-absent — byte-identical to the DESIGNED zero-evidence state (a
     // fresh session replaying a keyless piece) — so a DIFFERENT keyless
@@ -787,18 +793,14 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
 
     // Capacity-evict the piece's pointer with synthetic churn — the map's
     // REAL eviction path, just fed faster than a server would.
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
+    const pointers = runtime.runner.accessForTestingOnly.sessionPatternPointers;
     for (
       let i = 0;
       runtime.runner.sessionPatternPointerFor(cell) !== undefined;
       i++
     ) {
       if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`synthetic/${i}`, {
+      pointers.set(`synthetic/${i}` as PointerKey, {
         identity: `keyless:churn-${i}`,
         symbol: "default",
       });
@@ -877,18 +879,14 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     runtime.runner.stop(cell);
 
     // Capacity-evict the pointer (same churn as above).
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
+    const pointers = runtime.runner.accessForTestingOnly.sessionPatternPointers;
     for (
       let i = 0;
       runtime.runner.sessionPatternPointerFor(cell) !== undefined;
       i++
     ) {
       if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`same-synthetic/${i}`, {
+      pointers.set(`same-synthetic/${i}` as PointerKey, {
         identity: `keyless:churn-${i}`,
         symbol: "default",
       });
@@ -981,18 +979,14 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     void rerun;
     // …then a capacity wave evicts the STAGED pointer inside its own
     // staging window…
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
+    const pointers = runtime.runner.accessForTestingOnly.sessionPatternPointers;
     for (
       let i = 0;
       runtime.runner.sessionPatternPointerFor(cell) !== undefined;
       i++
     ) {
       if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`uncommitted-synthetic/${i}`, {
+      pointers.set(`uncommitted-synthetic/${i}` as PointerKey, {
         identity: `keyless:churn-${i}`,
         symbol: "default",
       });
@@ -1109,18 +1103,15 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       // deno-lint-ignore no-explicit-any
       runtime.run(tx2, handBuiltPattern() as any, undefined, cell2);
       expect(runtime.runner.sessionPatternPointerFor(cell2)).toBeDefined();
-      const pointers = (runtime.runner as unknown as {
-        sessionPatternPointers: {
-          set(key: string, value: { identity: string; symbol: string }): void;
-        };
-      }).sessionPatternPointers;
+      const pointers =
+        runtime.runner.accessForTestingOnly.sessionPatternPointers;
       for (
         let i = 0;
         runtime.runner.sessionPatternPointerFor(cell2) !== undefined;
         i++
       ) {
         if (i > 100_000) throw new Error("the pointer never evicted");
-        pointers.set(`first-staging-synthetic/${i}`, {
+        pointers.set(`first-staging-synthetic/${i}` as PointerKey, {
           identity: `keyless:churn-${i}`,
           symbol: "default",
         });
@@ -1195,7 +1186,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
         cell.withTx(tx).setMetaRaw("patternIdentity", {
           identity: orphan,
           symbol: "default",
-        });
+        }, rawMetaWriteAuthorization);
         await tx.commit();
         await runtime.idle();
         expect(await runtime.runner.start(cell)).toBe(false);
@@ -1234,7 +1225,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
           cell.withTx(repointTx).setMetaRaw("patternIdentity", {
             identity: orphan,
             symbol: "default",
-          });
+          }, rawMetaWriteAuthorization);
           await repointTx.commit();
         }
         await runtime.idle();
@@ -1267,7 +1258,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
           cell.withTx(repointTx).setMetaRaw("patternIdentity", {
             identity: unloadableIdentity,
             symbol: "default",
-          });
+          }, rawMetaWriteAuthorization);
           await repointTx.commit();
         }
         await runtime.idle();

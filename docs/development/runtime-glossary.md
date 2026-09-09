@@ -43,6 +43,32 @@ entity while retaining the history that state was reached through.
 New information accretes through commits, whose optimistic concurrency is
 described under [confirmed and pending](#confirmed-and-pending) below.
 
+## Link
+
+A reference from one place in stored data to another. There is one link form,
+the sigil link `{ "/": { "link@1": { … } } }`, and it always addresses a
+document that exists: it carries the document's identifier, and a read or a
+write through it lands there. A link whose payload sets `overwrite: "redirect"`
+is a **write redirect**, meaning a write through it lands at the target rather
+than replacing the link.
+
+[Identity and References](../specs/space-model/3-identity-and-references.md)
+specifies the format; `runner/src/link-types.ts` defines it.
+
+## `$alias` Binding
+
+A record of the form `{ "$alias": { … } }`, found inside a saved pattern node
+graph. Despite the resemblance to a write redirect, this is **not a link**, and
+none of the link predicates match it: an `$alias` record sitting in ordinary
+data is ordinary data.
+
+A binding carries no document identifier. It names a position that acquires a
+document only when the pattern graph is instantiated — by role
+(`cell: "argument"`, `cell: "result"`), by derivation (`partialCause`), or at a
+nesting level not yet reached (`defer`). Instantiation resolves it into an
+ordinary write-redirect link. `runner/src/alias-binding.ts` defines the form
+and says why it stays separate from the link model.
+
 ## Commit
 
 A batch of operations submitted together, carrying the operations themselves,

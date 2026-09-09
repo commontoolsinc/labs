@@ -46,7 +46,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./sqlite-cfc-commit-eval.test.tsx", import.meta.url),
+      new URL("./sqlite-cfc-commit-eval.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,

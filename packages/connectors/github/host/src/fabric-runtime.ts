@@ -1,7 +1,7 @@
 import { GithubFabricTarget } from "@commonfabric/github-connector/fabric";
 import { createSession, Identity, isDID } from "@commonfabric/identity";
 import {
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   type MemorySpace,
   Runtime,
   runtimePresets,
@@ -35,6 +35,17 @@ export async function openGithubFabricRuntime(options: {
     await (isDID(options.space)
       ? createSession({ identity, spaceDid: options.space })
       : createSession({ identity, spaceName: options.space }));
+  // The deployment's posture, with this host's explicit EXPERIMENTAL_* still
+  // winning per flag: the GitHub host is installed separately from the
+  // toolshed it talks to (docs/development/EXPERIMENTAL_OPTIONS.md), so an
+  // unset flag must adopt what the server runs rather than fall to this
+  // build's own default — the same resolution the agents host, the pieces
+  // controller, and cast-admin perform. Resolved before anything is
+  // allocated; this startup carries no cancellation signal to thread.
+  const experimental = await experimentalOptionsForDeployedClient({
+    apiUrl,
+    env: (key) => Deno.env.get(key),
+  });
   const storageManager = StorageManager.open({
     as: session.as,
     memoryHost: apiUrl,
@@ -43,7 +54,7 @@ export async function openGithubFabricRuntime(options: {
   const runtime = new Runtime(runtimePresets.remoteClient({
     apiUrl,
     storageManager,
-    experimental: experimentalOptionsFromEnv((key) => Deno.env.get(key)),
+    experimental,
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

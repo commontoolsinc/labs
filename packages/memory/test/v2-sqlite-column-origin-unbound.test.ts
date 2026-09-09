@@ -15,6 +15,7 @@ Deno.test("columnOrigins throws before the FFI is bound", () => {
   // Runs first, while nothing has bound the FFI and no reason has been
   // recorded: columnOrigins must refuse rather than read through a null library
   // handle, and the message names the call the caller skipped.
+
   assertThrows(
     () => columnOrigins(null, 1),
     Error,
@@ -27,11 +28,13 @@ Deno.test("columnOrigins throws before the FFI is bound", () => {
   );
 });
 
-// Point @db/sqlite's own loader at a file that is not a library — the shape of a
-// libsqlite3 built without SQLITE_ENABLE_COLUMN_METADATA, which loads for
-// @db/sqlite but exposes no column-origin symbols. ensureColumnOriginAvailable
-// must resolve false, record why, and make a later labeled read throw the reason.
 Deno.test("a bind failure is recorded and surfaces in the reason and the throw", async () => {
+  // Point @db/sqlite's own loader at a file that is not a library — the shape
+  // of a libsqlite3 built without SQLITE_ENABLE_COLUMN_METADATA, which loads
+  // for @db/sqlite but exposes no column-origin symbols.
+  // ensureColumnOriginAvailable must resolve false, record why, and make a
+  // later labeled read throw the reason.
+
   const notALibrary = Deno.makeTempFileSync({ suffix: ".dylib" });
   Deno.writeTextFileSync(notALibrary, "not a library");
   const previous = Deno.env.get("DENO_SQLITE_PATH");

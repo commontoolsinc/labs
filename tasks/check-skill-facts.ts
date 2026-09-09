@@ -236,6 +236,7 @@ function resolvesExport(exports: unknown, key: string): boolean {
 export interface SkillDoc {
   /** Repo-relative path, e.g. "skills/cf-review/SKILL.md". */
   path: string;
+
   text: string;
 }
 
@@ -246,6 +247,7 @@ export interface Drift {
 
   /** 1-based line within that doc. */
   line: number;
+
   message: string;
 }
 
@@ -277,6 +279,7 @@ export function skillDirOf(docPath: string): string {
  * PascalCase and dots (e.g. data-model/SchemaAndHash).
  */
 const SPECIFIER_RE = /(@commonfabric\/[a-z0-9-]+)((?:\/[\w.-]+)*)/g;
+
 const BACKTICKED_RE = /`([^`\n]+)`/g;
 
 /**

@@ -21,7 +21,7 @@ import type {
 import type { DID } from "@commonfabric/identity";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { MetaField } from "@commonfabric/api";
+import type { MetaField } from "@commonfabric/runner";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
 
 /**
@@ -48,6 +48,7 @@ export type CommonfabricDebugState =
     viewSettled?: () => Promise<void>;
     vdom?: ReturnType<typeof createVDomDebugHelpers>;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+
     /** Changes memory-message compression for live and later connections. */
     setMemoryMessageCompression?: (enabled: boolean) => Promise<void>;
   };

@@ -13,6 +13,7 @@ interface FakeStream extends UpdateStream {
 interface Fixture {
   /** Every stream the page has opened, oldest first. */
   opened: FakeStream[];
+
   current(): FakeStream;
   heard(now: number): void;
   lost(): void;

@@ -56,8 +56,10 @@ import {
   type CommitClass,
   resolveScopeKey,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
+  type SessionSync,
 } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -70,24 +72,11 @@ import {
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
 import { readWatermarkSeq as readWatermark } from "../src/executor/watermark.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("arrival gate space");
 const space = spaceSigner.did() as MemorySpace;
 const aliceSigner = await Identity.fromPassphrase("arrival gate alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** A per-user derivation: `echo` reads a PerUser draft, so its output
  * narrows into the reader's user instance — exactly the shape whose
@@ -471,6 +460,10 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: writer,
+          // These doubles hand-build the ops they seal, so the mark has
+          // nothing to shape; it is present because the seal refuses a
+          // transaction that cannot take it.
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,
@@ -712,6 +705,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     const tx = {
       tx: {
         sourceAction: { name: "writer" },
+        markWholeDocumentWrites: () => {},
         sealInto: (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
@@ -824,6 +818,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: { name: "handler" },
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,
@@ -1010,6 +1005,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: { name: "witness-writer" },
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,
@@ -1148,12 +1144,15 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     scripted.destination.close();
   });
 
-  // The class THREADING (the predicate's plumbing): the replica records
-  // the covering commit's class on its confirmed record — from the
-  // frame's `coverClass` on integrate, preserved across a same-seq
-  // re-upsert without one, dropped when the seq moves without one, and
-  // `authored` for an own commit's promotion — and
+  //
+  // The class THREADING (the predicate's plumbing)
+  //
+  // The replica records the covering commit's class on its confirmed record
+  // — from the frame's `coverClass` on integrate,
+  // preserved across a same-seq re-upsert without one, dropped when the seq
+  // moves without one, and `authored` for an own commit's promotion — and
   // `speculationRetirementView` surfaces it to the sweep.
+  //
 
   it("class threading: applySessionSync records the frame's coverClass on the confirmed record, preserves it across a same-seq re-upsert without one, and drops it when the seq moves without one; the retirement view surfaces it", async () => {
     const manager = StorageManager.emulate({ as: aliceSigner });
@@ -1163,36 +1162,22 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       experimental: { serverExecution: true },
     });
     try {
-      const replica = runtime.storageManager.open(space).replica as unknown as {
-        applySessionSync(
-          sync: {
-            type: "sync";
-            fromSeq: number;
-            toSeq: number;
-            upserts: Array<Record<string, unknown>>;
-            removes: Array<Record<string, unknown>>;
-          },
-          type: "pull" | "integrate",
-        ): void;
-        speculationRetirementView(
-          id: string,
-          scope?: string,
-        ): { confirmedSeq: number; coverClass?: CommitClass };
-      };
+      const replica = runtime.storageManager.open(space)
+        .replica as SpaceReplica;
       const upsert = (
         seq: number,
         coverClass?: CommitClass,
       ) => ({
         branch: "",
         id: "of:threading-doc",
-        scope: "space",
+        scope: "space" as const,
         seq,
         doc: { value: { n: seq } },
         ...(coverClass === undefined ? {} : { coverClass }),
       });
       const view = () =>
         replica.speculationRetirementView("of:threading-doc", "space");
-      replica.applySessionSync({
+      replica.accessForTestingOnly.applySessionSync({
         type: "sync",
         fromSeq: 0,
         toSeq: 5,
@@ -1203,7 +1188,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       // A same-seq re-upsert WITHOUT a class (a watch-refresh replay, an
       // OFF-arm or pre-predicate frame echo) preserves the known class —
       // the cover is the same commit.
-      replica.applySessionSync({
+      replica.accessForTestingOnly.applySessionSync({
         type: "sync",
         fromSeq: 5,
         toSeq: 5,
@@ -1213,7 +1198,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       expect(view()).toMatchObject({ confirmedSeq: 5, coverClass: "derived" });
       // A FORWARD move without a class is a different commit: the stale
       // class must not survive onto it.
-      replica.applySessionSync({
+      replica.accessForTestingOnly.applySessionSync({
         type: "sync",
         fromSeq: 5,
         toSeq: 6,
@@ -1237,31 +1222,18 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       experimental: { serverExecution: true },
     });
     try {
-      const replica = runtime.storageManager.open(space).replica as unknown as {
-        applySessionSync(
-          sync: {
-            type: "sync";
-            fromSeq: number;
-            toSeq: number;
-            upserts: Array<Record<string, unknown>>;
-            removes: Array<Record<string, unknown>>;
-          },
-          type: "pull" | "integrate",
-        ): void;
-        speculationArrivalObserver:
-          | ((docs: Array<{ id: string; scope?: string }>) => void)
-          | undefined;
-      };
+      const replica = runtime.storageManager.open(space)
+        .replica as SpaceReplica;
       const upsert = (seq: number, coverClass?: CommitClass) => ({
         branch: "",
         id: "of:wake-doc",
-        scope: "space",
+        scope: "space" as const,
         seq,
         doc: { value: { n: seq } },
         ...(coverClass === undefined ? {} : { coverClass }),
       });
-      const sync = (up: Record<string, unknown>) =>
-        replica.applySessionSync({
+      const sync = (up: SessionSync["upserts"][number]) =>
+        replica.accessForTestingOnly.applySessionSync({
           type: "sync",
           fromSeq: 0,
           toSeq: 5,
@@ -1272,7 +1244,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       // mixed window: a pre-predicate frame, or one from before this
       // client learned the class).
       sync(upsert(5));
-      const wakes: Array<Array<{ id: string; scope?: string }>> = [];
+      const wakes: Array<readonly { id: string; scope?: string }[]> = [];
       replica.speculationArrivalObserver = (docs) => wakes.push(docs);
       // A same-seq echo still without a class: nothing changed, no wake.
       sync(upsert(5));
@@ -1317,6 +1289,14 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     expect(view.confirmedSeq).toBeGreaterThan(0);
     expect(view.coverClass).toBe("authored");
   });
+
+  //
+  // Content-addressed writes (#6304)
+  //
+  // Both of these turn on a `cid:` document's identity rather than on a cover
+  // class: the scripted case witnesses arrival by identity, and the
+  // real-replica case decides what a retiring stored-cid speculation renders.
+  //
 
   it("a content-addressed write witnesses arrival by identity (#6304, scripted): a stored `cid:` doc's frozen cover below the floor does not hold the entry — coverage retires it and its array patch stops replaying; a cid doc with NO confirmed cover still holds it (mutation: identity witness removed → the entry stands forever and fabricates a fourth row)", async () => {
     // The #6304 shape: a speculative derivation re-sets an already-stored
@@ -1387,6 +1367,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const tx = {
         tx: {
           sourceAction: { name: "pivot" },
+          markWholeDocumentWrites: () => {},
           sealInto: (collector: {
             sealSpaceCommit: (
               space: MemorySpace,

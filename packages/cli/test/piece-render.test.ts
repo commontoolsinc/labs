@@ -10,10 +10,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { type Cell, Runtime } from "@commonfabric/runner";
+import type { PiecesController } from "@commonfabric/piece/ops";
+import { type Cell, Runtime, UI } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
-import { renderVDomToHtml } from "../lib/piece-render.ts";
+import { renderPiece, renderVDomToHtml } from "../lib/piece-render.ts";
+import type { PieceConfig } from "../lib/piece.ts";
 
 const signer = await Identity.fromPassphrase("cli piece render test");
 const space = signer.did();
@@ -267,6 +269,92 @@ describe("piece-render", () => {
           await runtime.dispose();
         }
       });
+    });
+  });
+
+  describe("renderPiece()", () => {
+    // The connection is a parameter, so the piece around the cell is a stub
+    // and only the runtime under it is real: what is asserted is the tree the
+    // render read off the piece the caller's connection holds.
+
+    const config: PieceConfig = {
+      apiUrl: "http://localhost:8000",
+      space,
+      identity: "/nonexistent/keyfile",
+      piece: "fid1:render-piece",
+    };
+
+    /** A controller over `cell`, collecting the arguments of every `get`. */
+    function stubController(
+      runtime: Runtime,
+      cell: Cell<unknown>,
+      gets: unknown[][] = [],
+    ): PiecesController {
+      return {
+        runtime,
+        get: (...args: unknown[]) => {
+          gets.push(args);
+          return Promise.resolve({ getCell: () => cell });
+        },
+      } as unknown as PiecesController;
+    }
+
+    it("returns the piece's UI as HTML", async () => {
+      const runtime = makeRuntime();
+      try {
+        const cell = await cellHolding(runtime, "render-piece-ui", {
+          [UI]: vnode("div", { id: "hello" }, [vnode("p", {}, ["Hi"])]),
+        });
+
+        const html = await renderPiece(config, {}, {
+          loadPieces: () => Promise.resolve(stubController(runtime, cell)),
+        });
+
+        expect(html).toBe('<div id="hello"><p>Hi</p></div>');
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("throws naming a piece that publishes no UI", async () => {
+      const runtime = makeRuntime();
+      try {
+        const cell = await cellHolding(runtime, "render-piece-bare", {
+          title: "Notes",
+        });
+
+        await expect(
+          renderPiece(config, {}, {
+            loadPieces: () => Promise.resolve(stubController(runtime, cell)),
+          }),
+        ).rejects.toThrow(`Piece ${config.piece} has no UI`);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("starts the piece unless `start` says otherwise", async () => {
+      // Computed state is only fresh while the pattern runs, so a render
+      // starts the piece by default and reads stored state when told not to.
+
+      const runtime = makeRuntime();
+      try {
+        const cell = await cellHolding(runtime, "render-piece-start", {
+          [UI]: vnode("div", {}, []),
+        });
+        const gets: unknown[][] = [];
+        const deps = {
+          loadPieces: () =>
+            Promise.resolve(stubController(runtime, cell, gets)),
+        };
+
+        await renderPiece(config, {}, deps);
+        await renderPiece(config, { start: false }, deps);
+
+        expect(gets.map((args) => args[1])).toEqual([true, false]);
+      } finally {
+        await runtime.dispose();
+      }
     });
   });
 });

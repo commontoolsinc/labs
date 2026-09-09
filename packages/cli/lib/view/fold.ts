@@ -16,18 +16,31 @@ export interface DiffFileRange {
   /** 0-based index in document order — the stable key for the fold set. */
   readonly index: number;
 
-  /** First and last (inclusive) diff-text line of the file (header … last
-   * hunk line). */
+  /** First diff-text line of the file, which is its header line. */
   readonly headerLine: number;
+
+  /** Last such line, inclusive — the file's last hunk line. */
   readonly endLine: number;
 
   /** The path used for file-category detection (new side, else old side). */
   readonly path: string;
+
+  /** Path on the diff's removed side, when it has one. */
+  readonly oldPath?: string;
+
+  /** Path on the diff's added side, when it has one. */
+  readonly newPath?: string;
+
+  /** Whether Git reports binary content instead of line changes. */
+  readonly binary: boolean;
+
   readonly isTest: boolean;
   readonly isMarkdown: boolean;
 
-  /** Added and removed line counts within the file's range. */
+  /** Added line count within the file's range. */
   readonly adds: number;
+
+  /** Removed line count over the same range. */
   readonly dels: number;
 
   /** The one-line summary shown when the file is collapsed. */
@@ -54,6 +67,9 @@ export function diffFiles(text: string): DiffFileRange[] {
       headerLine: file.headerLine,
       endLine: file.endLine,
       path,
+      oldPath: file.oldPath,
+      newPath: file.newPath,
+      binary,
       isTest: isTestPath(path),
       isMarkdown: isMarkdownPath(path),
       adds,
@@ -66,6 +82,21 @@ export function diffFiles(text: string): DiffFileRange[] {
         binary,
       }),
     };
+  });
+}
+
+/** Builds a file's collapsed summary with replacement line counts. */
+export function diffFileSummary(
+  file: DiffFileRange,
+  adds = file.adds,
+  dels = file.dels,
+): Line {
+  return summaryLine({
+    oldPath: file.oldPath,
+    newPath: file.newPath,
+    adds,
+    dels,
+    binary: file.binary,
   });
 }
 

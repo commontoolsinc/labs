@@ -6,8 +6,8 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isSigilLink } from "../src/link-utils.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { type SigilLink } from "../src/sigil-types.ts";
@@ -85,12 +85,12 @@ describe("getAsLink method", () => {
     expect(linkRefPayload(link).path).toEqual(["nested", "value"]);
   });
 
-  it("should render as the link it names in a debug string", () => {
-    // `toCompactDebugString` honors the JSON protocol, and pattern-test
-    // assertion diagnostics render their operands with it. Without the member,
-    // rendering a value holding a cell walks the cell's own members into the
-    // runtime, so the rendering carries per-process detail -- the runtime's id
-    // among it -- and reports differently each run.
+  it("should render as the link it names, under its class tag, in a debug string", () => {
+    // `toCompactDebugString` honors the JSON protocol of an instance, and
+    // pattern-test assertion diagnostics render their operands with it.
+    // Without the member, rendering a value holding a cell walks the cell's
+    // own members into the runtime, so the rendering carries per-process
+    // detail -- the runtime's id among it -- and reports differently each run.
     const cell = runtime.getCell<{ value: number }>(
       space,
       "cell-debug-render-test",
@@ -100,8 +100,9 @@ describe("getAsLink method", () => {
     cell.set({ value: 42 });
 
     const link = toCompactDebugString(cell.toSigilLinkOrNull());
-    expect(toCompactDebugString(cell)).toBe(link);
-    expect(toCompactDebugString({ held: cell })).toBe(`{"held":${link}}`);
+    const rendered = `/CellImpl(${link.slice(1, -1)})`;
+    expect(toCompactDebugString(cell)).toBe(rendered);
+    expect(toCompactDebugString({ held: cell })).toBe(`{held:${rendered}}`);
   });
 
   it("should return sigil format for both getAsLink and toSigilLinkOrNull", () => {

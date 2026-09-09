@@ -5,7 +5,7 @@ import type { Runtime } from "../runtime.ts";
 
 /**
  * The session-hint key for a list-builtin node's immutable inputs doc — the
- * address `Runner.instantiateRawNode` registers a KEYLESS op's in-session
+ * address `Runner.#instantiateRawNode` registers a KEYLESS op's in-session
  * resolution under (`PatternManager.registerKeylessOpResolution`).
  */
 export function opInputsDocKey(inputsCell: Cell<unknown>): string {
@@ -19,7 +19,7 @@ export function opInputsDocKey(inputsCell: Cell<unknown>): string {
  * `map`/`filter`/`flatMap` nodes.
  *
  * The runner substitutes this sentinel for the serialized op graph at node
- * instantiation (see `Runner.substituteOpPatternRefs`), once the op pattern's
+ * instantiation (see `Runner.#substituteOpPatternRefs`), once the op pattern's
  * entry ref is known. Because it is plain data (no symbol keys), it survives the
  * `getImmutableCell` JSON round-trip that strips the in-memory
  * derivation backref — so the builtin reads it back intact and
@@ -61,7 +61,7 @@ export function isPatternRefSentinel(
  *   `keyless:` identity must never land in the durable inputs doc — L3(a),
  *   RULED 2026-08-27), but the instantiating session registered its pristine
  *   artifact under the inputs doc's address
- *   (`Runner.instantiateRawNode` → `registerKeylessOpResolution`), so pass
+ *   (`Runner.#instantiateRawNode` → `registerKeylessOpResolution`), so pass
  *   `inputsCell` and the hint resolves it without touching the embedded
  *   graph — the CT-1812 defer corruption never engages in-session.
  * - Otherwise `op` is an embedded pattern graph, used as-is: a graph

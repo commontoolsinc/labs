@@ -39,7 +39,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./sqlite-db-query-decode.test.tsx", import.meta.url),
+      new URL("./sqlite-db-query-decode.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,

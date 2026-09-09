@@ -3,7 +3,7 @@
 // contexts to visualize or log events inside the runtime.
 
 import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 
 import { IMemoryChange } from "./storage/interface.ts";
 
@@ -36,6 +36,13 @@ export type SchedulerGraphNode = {
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
   preview?: string; // First ~200 chars of function body for hover tooltips
+  // Where the action's implementation was authored, as
+  // `cf:module/<identity>/<path>:<line>:<col>`. The transformer records the
+  // line and column of each hoisted builder call, so this names the `lift`,
+  // `computed` or `handler` site itself rather than the module. Present for an
+  // implementation the engine verified; absent for the builtins and for host
+  // and dynamic builders, which have no authored site.
+  src?: string;
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
   shallowReads?: string[]; // non-recursive reads used for structural invalidation
@@ -155,6 +162,80 @@ export type RuntimeTelemetryMarker = {
   actionInfo?: SchedulerActionInfo;
   durationMs: number;
   error?: string;
+} | {
+  // Emitted as the runner begins installing a piece's registration under
+  // `key`, BEFORE the registration is set: a listener reads the registry as
+  // it stood when the install began.
+  type: "runner.piece.install";
+  key: string;
+} | {
+  // Emitted as a commit-gated start for the result under `key` enters the
+  // runner's pending index, where a stop arriving before the commit finds it.
+  // One marker per entry into the index: a key can hold several attempts at
+  // once, and an attempt that recovers from a refused commit re-enters.
+  type: "runner.deferred-start.pending";
+  key: string;
+} | {
+  // Emitted as a pending commit-gated start leaves the index: `installed`
+  // once the attempt has installed its registration, which happens before
+  // its own transaction commits, and `cancelled` when the attempt ended
+  // before installing one. Pairs one-to-one with
+  // `runner.deferred-start.pending` for the same entry.
+  type: "runner.deferred-start.settled";
+  key: string;
+  outcome: "installed" | "cancelled";
+} | {
+  // Emitted as the runner memoizes which pattern the result doc under `key`
+  // holds for the scope instance `scopeKey`, the memo that lets the next run
+  // of the same computation skip materializing its child again.
+  type: "runner.result-pattern.memoize";
+  key: string;
+  scopeKey: string;
+} | {
+  // Emitted as a result-pattern memo leaves the runner: for every instance of
+  // the doc under `key` when a storage notification names that doc or resets
+  // the space holding it (no `scopeKey`), and for one instance when the
+  // commit that wrote its child is rejected. The sweep in `stopAll()` drops
+  // the whole memo without one.
+  type: "runner.result-pattern.evict";
+  key: string;
+  scopeKey?: string;
+} | {
+  // Emitted as the engine records a verified module's implementation under
+  // its content-addressed `{ identity, symbol }`, with the binding path of
+  // the module-scope declaration it was bound to when the transformer
+  // annotated one. A host-trusted value registers without one.
+  type: "harness.implementation.register";
+  identity: string;
+  symbol: string;
+  bindingPath?: string[];
+} | {
+  // Emitted as the pattern manager begins a tracked compile-cache write-back
+  // into `space` for the closure rooted at `entryIdentity`: a closure
+  // persistence or a source write-back, the writes replication waits on
+  // before reading its origin space.
+  type: "pattern.cache-write-back.start";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted as a tracked compile-cache write-back settles, whichever way it
+  // settled. Pairs one-to-one with `pattern.cache-write-back.start`.
+  type: "pattern.cache-write-back.complete";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted each time the scheduler decides an action's materializer
+  // registration, on subscribe and on resubscribe. `writes` are the compacted
+  // write envelopes the action is registered under, as `space/id/path`
+  // strings; an action registered under none is not a materializer.
+  type: "scheduler.materializer.register";
+  actionId: string;
+  writes: string[];
+} | {
+  // Emitted as diagnosis mode switches on, whether by an explicit run or by
+  // the non-settling auto-trigger, with the window it will capture for.
+  type: "scheduler.diagnosis.start";
+  durationMs: number;
 } | {
   // Emitted once per settle pass, unconditionally (unlike SettleStats, which
   // is opt-in): the user-facing "event → stable graph" number.

@@ -28,6 +28,12 @@ export interface PatternIndexSignals {
   score: number;
 }
 
+/** Whether a published argument schema classifies a hit as reusable or whole. */
+export type PatternIndexPatternKind = "part" | "app";
+
+/** Evidence tier the deployed index computed from recorded run outcomes. */
+export type PatternIndexQuality = "penalized" | "unproven" | "proven";
+
 /** One hit from `searchPatterns`. Carries metadata and never source. */
 export interface PatternIndexSearchResult {
   patternId: string;
@@ -38,12 +44,19 @@ export interface PatternIndexSearchResult {
   dependencies: readonly string[];
   signals?: PatternIndexSignals;
 
+  /** Whether the published argument schema classifies this as a part or app. */
+  kind: PatternIndexPatternKind;
+
+  /** Evidence tier computed by the index from recorded run outcomes. */
+  quality: PatternIndexQuality;
+
   /**
-   * With a text query: how many of its terms this hit carries, out of
+   * With a text query: how many stopword-free terms this hit carries, out of
    * `queryTerms`. Text matching is disjunctive and ranked, so a hit is not a
    * claim that everything matched — the ratio is what says how close.
    */
   matchedTerms?: number;
+
   queryTerms?: number;
 }
 
@@ -110,6 +123,7 @@ export interface PatternIndexListedPattern {
 
   /** Event type to how many times it was recorded against this pattern. */
   events: Readonly<Record<string, number>>;
+
   score: number;
 }
 
@@ -135,6 +149,7 @@ export interface PatternIndexEvent {
 
   /** `null` for an event the index holds no timestamp for. */
   ts: string | null;
+
   note?: string;
 }
 
@@ -190,13 +205,14 @@ export interface PatternIndexPublishRequest {
   dependencies?: readonly string[];
   priorPatternId?: string;
 
+  /** Explicitly offers this entry to search on publication. */
+  discoverable?: true;
+
   /**
    * Set to keep this entry out of search. The pattern is recorded in full
    * either way — `getPattern` answers for it, a `cf:pattern:` import resolves
    * it, and events record against it — so this decides discovery and nothing
-   * else. Absent means the entry is offered to search, which is what every
-   * publication did before the render gate existed, and the request then
-   * carries neither field.
+   * else. Absent means the server applies its recorded-only default.
    *
    * The reason travels with the flag rather than beside it because the index
    * refuses one without the other: a hidden entry nobody recorded a reason
@@ -417,6 +433,8 @@ export class PatternIndexClient {
           discoverable: false,
           discoverabilityReason: request.nonDiscoverable.reason,
         }
+        : request.discoverable === true
+        ? { discoverable: true }
         : {}),
       ...(request.priorPatternId !== undefined
         ? { priorPatternId: request.priorPatternId }

@@ -17,10 +17,7 @@ import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
 } from "../src/cfc/label-view.ts";
-import {
-  redactSigilCfcLabelViewsForDisplay,
-  stripSigilCfcLabelViews,
-} from "../src/cfc/link-label-view.ts";
+import { stripSigilCfcLabelViews } from "../src/cfc/link-label-view.ts";
 import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -234,7 +231,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -271,8 +267,15 @@ describe("CFC label view helpers", () => {
         undefined,
         tx,
       );
-      target.set(source);
-      await tx.commit();
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: [],
+      }, { value: source.getAsLink() });
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).ok).toBeDefined();
 
       expect(cfcLabelViewForCell(target)).toBeUndefined();
     } finally {
@@ -289,7 +292,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -356,6 +358,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       expect(cfcLabelViewForCell(target.key("detail"))).toEqual({
@@ -398,7 +401,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -415,25 +417,29 @@ describe("CFC label view helpers", () => {
         undefined,
         tx,
       );
-      target.set({ inner: source } as never);
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
+      // The link and its label map are seeded in one whole-envelope write.
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
-        path: ["cfc"],
+        path: [],
       }, {
-        version: 1,
-        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-        labelMap: {
+        value: { inner: source.getAsLink() },
+        cfc: {
           version: 1,
-          entries: [{
-            path: ["inner"],
-            label: { confidentiality: ["link-slot-only"] },
-          }],
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["inner"],
+              label: { confidentiality: ["link-slot-only"] },
+            }],
+          },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       // Both resolutions run on ONE transaction, so the second is the repeat.
@@ -471,7 +477,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const view = {
@@ -507,7 +512,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -575,6 +579,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const storedLinkField = cfcLabelViewFromMetadata(
@@ -677,7 +682,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -736,6 +740,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const value = target.get();
@@ -766,7 +771,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -829,6 +833,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = target.get();
@@ -858,7 +863,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -905,7 +909,14 @@ describe("CFC label view helpers", () => {
         },
         tx,
       );
-      target.set(source);
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: [],
+      }, { value: source.getAsLink() });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = target.get() as { a: unknown; b: unknown };
@@ -937,7 +948,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -1006,6 +1016,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = target.get() as { item: unknown };
@@ -1035,7 +1046,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -1111,6 +1121,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = (list.get() as unknown[]).map((item) =>
@@ -1154,7 +1165,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -1216,6 +1226,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = (list.get() as unknown[]).map((item) =>
@@ -1262,21 +1273,22 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
-      const tx = runtime.edit();
+      // The items are seeded in their own transaction, committed before the
+      // pattern runs.
+      const seedTx = runtime.edit();
       const first = runtime.getCell(
         signer.did(),
         "cfc-label-view-pattern-first",
         undefined,
-        tx,
+        seedTx,
       );
       const second = runtime.getCell(
         signer.did(),
         "cfc-label-view-pattern-second",
         undefined,
-        tx,
+        seedTx,
       );
       for (
         const [cell, value, integrity] of [
@@ -1285,8 +1297,8 @@ describe("CFC label view helpers", () => {
         ] as const
       ) {
         const link = parseLink(cell.getAsLink());
-        writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        writeSeedEnvelopeDoc(seedTx, signer.did());
+        seedTx.writeOrThrow({
           space: signer.did(),
           id: link.id!,
           type: "application/json",
@@ -1306,7 +1318,10 @@ describe("CFC label view helpers", () => {
           },
         });
       }
+      runtime.prepareTxForCommit(seedTx);
+      await seedTx.commit();
 
+      const tx = runtime.edit();
       const { commonfabric } = createTrustedBuilder(runtime);
       const { pattern } = commonfabric;
       const renderLabels = pattern<{ items: unknown[] }>(({ items }) => {
@@ -1335,9 +1350,10 @@ describe("CFC label view helpers", () => {
       const result = runtime.run(
         tx,
         renderLabels,
-        { items: [first, second] },
+        { items: [first.withTx(tx), second.withTx(tx)] },
         resultCell,
       );
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
       await result.pull();
 
@@ -1356,20 +1372,24 @@ describe("CFC label view helpers", () => {
         .key("value")
         .resolveAsCell();
 
-      expect(cfcLabelViewForCell(firstValue)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["item-integrity-first"] },
-        }],
-      });
-      expect(cfcLabelViewForCell(secondValue)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["item-integrity-second"] },
-        }],
-      });
+      // The view of a mapped output carries a second entry describing the
+      // link the slot holds, and that entry's atoms name the reference. The
+      // set below holds every named integrity atom at the root path, so it
+      // covers the item's own label and any other item's that reached it.
+      const rootIntegrityAtoms = (cell: unknown) =>
+        new Set(
+          (cfcLabelViewForCell(cell)?.entries ?? [])
+            .filter((entry) => entry.path.length === 0)
+            .flatMap((entry) => entry.label.integrity ?? [])
+            .filter((atom) => typeof atom === "string"),
+        );
+
+      expect(rootIntegrityAtoms(firstValue)).toEqual(
+        new Set(["item-integrity-first"]),
+      );
+      expect(rootIntegrityAtoms(secondValue)).toEqual(
+        new Set(["item-integrity-second"]),
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1421,6 +1441,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       target.setRawUntyped([source.getAsLink()]);
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const schemaLessEntry = runtime.getCellFromLink({
@@ -1506,7 +1527,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const cell = runtime.getCell<{ body: string }>(
@@ -1534,6 +1554,7 @@ describe("CFC label view helpers", () => {
             },
           },
         });
+        runtime.prepareTxForCommit(tx);
         return tx.commit();
       };
 
@@ -1568,10 +1589,10 @@ describe("CFC label view helpers", () => {
   });
 });
 
-describe("redactSigilCfcLabelViewsForDisplay", () => {
-  // Inv-12 Stage 0: the display redaction that already covers the top-level
-  // cfcLabel at the IPC response sites, extended to the cfcLabelView copies
-  // riding sigil links inside response values.
+describe("stripSigilCfcLabelViews", () => {
+  // Inv-12: a view arriving from the main thread is an untrusted display
+  // artifact, and the ingress removes it from every sigil link in a value
+  // rather than letting it become worker label state.
 
   const caveat = {
     type: "https://commonfabric.org/cfc/atom/Caveat",
@@ -1595,55 +1616,7 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     },
   });
 
-  it("redacts Caveat.source on views nested anywhere in the value", () => {
-    const value = {
-      items: [linkWithView("of:a"), { deep: linkWithView("of:b") }],
-      plain: "text",
-    };
-    const redacted = redactSigilCfcLabelViewsForDisplay(value) as typeof value;
-    for (
-      const payload of [
-        redacted.items[0] as ReturnType<typeof linkWithView>,
-        (redacted.items[1] as { deep: ReturnType<typeof linkWithView> }).deep,
-      ]
-    ) {
-      const atom = payload["/"][LINK_V1_TAG].cfcLabelView
-        .entries[0].label.confidentiality[0] as Record<string, unknown>;
-      expect(atom.type).toBe(caveat.type);
-      expect(atom.kind).toBe("derived-from");
-      expect("source" in atom).toBe(false);
-    }
-    // Non-view content is untouched.
-    expect(redacted.plain).toBe("text");
-    // The input is not mutated (frozen response values).
-    const original = (value.items[0] as ReturnType<typeof linkWithView>)["/"][
-      LINK_V1_TAG
-    ].cfcLabelView.entries[0].label.confidentiality[0] as Record<
-      string,
-      unknown
-    >;
-    expect(original.source).toBe("did:key:alice");
-  });
-
-  it("returns unchanged subtrees by reference (copy-on-write)", () => {
-    const viewless = {
-      nested: { list: [1, 2, 3] },
-      link: {
-        "/": { [LINK_V1_TAG]: { id: "of:c", space: "did:key:test", path: [] } },
-      },
-    };
-    expect(redactSigilCfcLabelViewsForDisplay(viewless)).toBe(viewless);
-
-    const mixed = { untouched: viewless.nested, tagged: linkWithView("of:d") };
-    const redacted = redactSigilCfcLabelViewsForDisplay(mixed) as typeof mixed;
-    expect(redacted).not.toBe(mixed);
-    expect(redacted.untouched).toBe(viewless.nested);
-    expect(redacted.tagged).not.toBe(mixed.tagged);
-  });
-
-  // The inbound sibling: rather than redacting the view, ingress strips it
-  // entirely (main-thread views must not become worker label state).
-  it("stripSigilCfcLabelViews removes views and keeps addressing intact", () => {
+  it("removes views and keeps addressing intact", () => {
     const value = {
       items: [linkWithView("of:strip-a")],
       plain: 7,
@@ -1656,8 +1629,8 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     expect(payload.id).toBe("of:strip-a");
     expect("cfcLabelView" in payload).toBe(false);
     expect(stripped.plain).toBe(7);
-    // Copy-on-write here too: a viewless tree passes through by reference,
-    // and the input is not mutated.
+    // Copy-on-write: a viewless tree passes through by reference, and the
+    // input is not mutated.
     const viewless = { link: { "/": { [LINK_V1_TAG]: { id: "of:e" } } } };
     expect(stripSigilCfcLabelViews(viewless)).toBe(viewless);
     expect(
@@ -1666,13 +1639,20 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     ).toBeDefined();
   });
 
-  // A `FabricSpecialObject` is `isObjectOrArray`, so it reaches the record branch
-  // rather than the leaf return. What keeps it whole is the copy-on-write
-  // gate: such a value has zero enumerable own properties, so no member can
-  // come back changed, `changed` stays false, and the original goes back by
-  // identity. That is a real guarantee resting on nothing but the
-  // zero-property fact, so these pin it -- give a special object an enumerable
-  // property and this walk starts flattening values on the ingress path.
+  //
+  // A `FabricSpecialObject` on the strip path
+  //
+  // A `FabricSpecialObject` is `isObjectOrArray`, so it reaches the record
+  // branch rather than the leaf return. What keeps it whole is the
+  // copy-on-write gate: such a value has zero enumerable own properties, so no
+  // member can come back changed, `changed` stays false, and the original goes
+  // back by identity. That is a real guarantee resting on nothing but the
+  // zero-property fact -- give a special object an enumerable property and
+  // this walk starts flattening values on the ingress path. Where the walk
+  // cannot make that guarantee it refuses instead, rather than leaving a view
+  // in place.
+  //
+
   it("keeps a `FabricBytes` whole while stripping a sibling's view", () => {
     const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
     const value = { bytes, tagged: linkWithView("of:strip-bytes") };
@@ -1702,7 +1682,34 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     const failure = FabricError.fromNativeError(new Error("boom"));
     expect(() => stripSigilCfcLabelViews({ failure })).toThrow(
       "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
-        "transforming sigil CFC label views.",
+        "stripping sigil CFC label views.",
     );
+  });
+
+  //
+  // Cycles and sharing
+  //
+
+  it("throws for a value that contains itself, naming the path where the cycle closes", () => {
+    const items: unknown[] = [linkWithView("of:cycle")];
+    const value = { items };
+    items.push(value);
+
+    expect(() => stripSigilCfcLabelViews(value)).toThrow(
+      "Cannot strip sigil CFC label views from a value with a cycle; " +
+        "the cycle closes at path `items.1`.",
+    );
+  });
+
+  it("strips a subtree reachable from two positions at each, rather than taking it for a cycle", () => {
+    const shared = { tagged: linkWithView("of:shared") };
+
+    const stripped = stripSigilCfcLabelViews({ a: shared, b: shared }) as {
+      a: { tagged: { "/": Record<string, Record<string, unknown>> } };
+      b: { tagged: { "/": Record<string, Record<string, unknown>> } };
+    };
+
+    expect("cfcLabelView" in stripped.a.tagged["/"][LINK_V1_TAG]).toBe(false);
+    expect("cfcLabelView" in stripped.b.tagged["/"][LINK_V1_TAG]).toBe(false);
   });
 });

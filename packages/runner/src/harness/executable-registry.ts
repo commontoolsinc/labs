@@ -15,35 +15,41 @@ import type { HarnessedFunction } from "./types.ts";
  * pseudo-modules below.)
  */
 export class ExecutableRegistry {
-  // Content-addressed implementation index: module identity → symbol → the
-  // implementation function recorded by `Engine.recordModuleProvenance` during
-  // a verified evaluation (and by `trustHostValue` for host pseudo-modules).
-  // Deliberately STRONG and session-unbounded: a serialized module carries
-  // ONLY `$implRef` (no body when the writer proved this index admits the
-  // ref), so resolution must never lose an implementation whose module
-  // evaluated this session. Retention is bounded by the set of DISTINCT
-  // verified implementations evaluated per session.
-  private readonly verifiedImplementationsByEntryRef = new Map<
+  /**
+   * Content-addressed implementation index: module identity → symbol → the
+   * implementation function recorded by `Engine.#recordModuleProvenance()`
+   * during a verified evaluation (and by `trustHostValue()` for host
+   * pseudo-modules). Deliberately _strong_ and session-unbounded: a serialized
+   * module carries _only_ `$implRef` (no body when the writer proved this index
+   * admits the ref), so resolution must never lose an implementation whose
+   * module evaluated this session. Retention is bounded by the set of
+   * _distinct_ verified implementations evaluated per session.
+   */
+  readonly #verifiedImplementationsByEntryRef = new Map<
     string,
     Map<string, HarnessedFunction>
   >();
-  // Host pseudo-modules (identity E5, design §5): each `trustHostValue` call
-  // mints a UNIQUE `host:<n>` identity — uniqueness over content-derivation,
-  // deliberately: host functions are closure-bearing, so two with identical
-  // bytes are NOT interchangeable. Host values are in-session only (a live
-  // closure never survives a session), so a session-scoped counter is exactly
-  // the right lifetime, and the session-lifetime index above is exactly the
-  // right resolution home.
-  private nextHostModuleId = 0;
-  private readonly hostRegisteredFunctions = new WeakSet<HarnessedFunction>();
+
+  /**
+   * Counter for host pseudo-module identities: each `trustHostValue()` call
+   * mints a _unique_ `host:<n>` identity — uniqueness over content-derivation,
+   * deliberately: host functions are closure-bearing, so two with identical
+   * bytes are _not_ interchangeable. Host values are in-session only (a live
+   * closure never survives a session), so a session-scoped counter is exactly
+   * the right lifetime, and the session-lifetime index above is exactly the
+   * right resolution home.
+   */
+  #nextHostModuleId = 0;
+
+  readonly #hostRegisteredFunctions = new WeakSet<HarnessedFunction>();
 
   clear(): void {
-    this.verifiedImplementationsByEntryRef.clear();
-    this.nextHostModuleId = 0;
-    // hostRegisteredFunctions is a WeakSet (uniterable); entries age out with
-    // their functions. Stale membership after clear() is harmless: it only
-    // suppresses a re-registration, and the entry-ref the function already
-    // carries stays valid for the life of the object.
+    this.#verifiedImplementationsByEntryRef.clear();
+    this.#nextHostModuleId = 0;
+    // `#hostRegisteredFunctions` is a WeakSet (uniterable); entries age out
+    // with their functions. Stale membership after clear() is harmless: it
+    // only suppresses a re-registration, and the entry-ref the function
+    // already carries stays valid for the life of the object.
   }
 
   /**
@@ -58,10 +64,10 @@ export class ExecutableRegistry {
     symbol: string,
     implementation: HarnessedFunction,
   ): void {
-    let bucket = this.verifiedImplementationsByEntryRef.get(identity);
+    let bucket = this.#verifiedImplementationsByEntryRef.get(identity);
     if (!bucket) {
       bucket = new Map();
-      this.verifiedImplementationsByEntryRef.set(identity, bucket);
+      this.#verifiedImplementationsByEntryRef.set(identity, bucket);
     }
     bucket.set(symbol, implementation);
   }
@@ -70,7 +76,7 @@ export class ExecutableRegistry {
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
-    return this.verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
+    return this.#verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
   }
 
   /**
@@ -95,12 +101,12 @@ export class ExecutableRegistry {
       throw new Error("unsafe host trust requires a non-empty reason");
     }
     const functions: HarnessedFunction[] = [];
-    this.collectHostFunctions(value, functions, new Set());
+    this.#collectHostFunctions(value, functions, new Set());
     const fresh = functions.filter((fn) =>
-      !this.hostRegisteredFunctions.has(fn)
+      !this.#hostRegisteredFunctions.has(fn)
     );
     if (fresh.length === 0) return;
-    const identity = `host:${this.nextHostModuleId++}`;
+    const identity = `host:${this.#nextHostModuleId++}`;
     fresh.forEach((implementation, index) => {
       const symbol = `fn${index}`;
       hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
@@ -109,11 +115,11 @@ export class ExecutableRegistry {
       // serialized ref stable; the WeakSet below prevents re-registration
       // under a second identity in the first place.
       setArtifactEntryRef(implementation, { identity, symbol });
-      this.hostRegisteredFunctions.add(implementation);
+      this.#hostRegisteredFunctions.add(implementation);
     });
   }
 
-  private collectHostFunctions(
+  #collectHostFunctions(
     value: unknown,
     functions: HarnessedFunction[],
     seen: Set<unknown>,
@@ -141,7 +147,7 @@ export class ExecutableRegistry {
     }
 
     for (const child of verifiedWalkChildValues(value as object)) {
-      this.collectHostFunctions(child, functions, seen);
+      this.#collectHostFunctions(child, functions, seen);
     }
   }
 }
@@ -149,7 +155,7 @@ export class ExecutableRegistry {
 /**
  * Yield the child values to recurse into when walking a verified value graph
  * (used by {@link ExecutableRegistry.trustHostValue}'s
- * `collectHostFunctions`).
+ * `#collectHostFunctions`).
  *
  * Data properties — the CommonJS shape (`exports.x = …`) — expose their value
  * directly. SES module-namespace exports are live-binding ACCESSOR properties

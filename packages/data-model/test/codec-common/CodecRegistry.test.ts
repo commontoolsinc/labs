@@ -229,6 +229,7 @@ describe("CodecRegistry", () => {
       // Spec §9 makes a bare `/` key an encoding error whatever follows it,
       // and the decoder reports it as one. A codec registered under it could
       // encode a value that this same system would then refuse to read back.
+
       const codec = new TestCodec("", FabricRegExp);
       const registry = new CodecRegistry(TEST_FORMAT);
 
@@ -241,6 +242,7 @@ describe("CodecRegistry", () => {
       // The register-time counterpart of the decoder's check: `hole` is a
       // meta-tag rather than a type, so a decoder refuses it, and a codec
       // indexed under it would emit exactly what the decoder refuses.
+
       const codec = new TestCodec("hole", FabricRegExp);
       const registry = new CodecRegistry(TEST_FORMAT);
 
@@ -252,6 +254,7 @@ describe("CodecRegistry", () => {
     it("registers a codec whose recognized tag is `undefined`", () => {
       // Not a tag, and not an error: it marks a codec whose tag is read from
       // each value rather than fixed.
+
       const codec = new TestCodec(undefined, FabricRegExp);
       const registry = new CodecRegistry(TEST_FORMAT);
 
@@ -296,6 +299,7 @@ describe("CodecRegistry", () => {
       // A registry holds its format and reads the symbol on every class
       // registration, so a mutable one could change what a class supplies
       // partway through the registry being built.
+
       const unfrozen: WireFormat<string> = { codecSymbol: TEST_CODEC };
 
       expect(() => new CodecRegistry(unfrozen)).toThrow(
@@ -337,6 +341,7 @@ describe("CodecRegistry", () => {
       it("prefers `[CODEC]` over the format's symbol when a class binds both", () => {
         // The format-neutral codec is the one that serves every format, so it
         // wins wherever a class offers a choice.
+
         const neutral = new TestCodec("Neutral@1", FabricRegExp);
         const formatted = new TestTerminalCodec("Formatted@1", FabricRegExp);
         class Both {
@@ -367,6 +372,7 @@ describe("CodecRegistry", () => {
       it("ignores a codec bound under some other format's symbol", () => {
         // Two formats' symbols on one class is the arrangement this exists to
         // serve; a registry reads only its own.
+
         const other: unique symbol = Symbol("other.codec");
         const codec = new TestTerminalCodec("Other@1", FabricRegExp);
         class OtherFormatOnly {
@@ -567,6 +573,7 @@ describe("CodecRegistry", () => {
   describe("frozen instances", () => {
     // `Object.freeze()` cannot reach a private `Map` or `Set`, so each mutator
     // has to refuse on its own; these cases pin that each one does.
+
     describe("register()", () => {
       it("throws", () => {
         const registry = Object.freeze(new CodecRegistry(TEST_FORMAT));

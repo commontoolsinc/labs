@@ -84,6 +84,7 @@ export interface ResumeRepublisherOptions {
    * lazily on each republish rather than captured once.
    */
   getResult: () => Cell<any[]> | undefined;
+
   inputsCell: Cell<any>;
   inputSchema: JSONSchema;
   resultSchema: JSONSchema;

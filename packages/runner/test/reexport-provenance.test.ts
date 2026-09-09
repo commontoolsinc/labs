@@ -70,7 +70,6 @@ describe("re-export provenance", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const pattern = await runtime.patternManager.compilePattern(

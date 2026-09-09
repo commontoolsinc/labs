@@ -43,7 +43,9 @@ Required only if you're running the toolshed.
 
 A provider's models are **only registered when its env var is set**. See
 [`packages/toolshed/routes/ai/llm/models.ts`](../../packages/toolshed/routes/ai/llm/models.ts)
-for the registration logic.
+for the registration logic — that file is the whole provider abstraction, and
+[`docs/features/llm-provider-boundary.md`](../features/llm-provider-boundary.md)
+explains why it lives in the toolshed rather than in `@commonfabric/llm`.
 
 | Var | Provider |
 |---|---|
@@ -148,21 +150,27 @@ The toolshed-embedded memory service has two modes:
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
 | `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
-| `MEMORY_WS_IDLE_TIMEOUT_SECONDS` | `300` | Pong deadline for memory WebSockets, in seconds. Set to `0` to disable it. Size it above the longest legitimate synchronous memory-server stretch, not as a network round-trip timeout. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
+| `MEMORY_DOCUMENT_CACHE_BUDGET_BYTES` | _(engine default, 128 MiB)_ | Byte budget of each space's decoded-document cache on the memory server, in encoded UTF-8 bytes of the documents as stored (expect a few times that in heap per active space; a Topics-board page load retains ~18 MB across ~13,300 documents). Least-recently-read eviction under a budget smaller than a corpus's working set serves nothing, so lower it only with `/api/health/stats` → `documentCaches` in view: `evictions` climbing for a space being read repeatedly means it no longer fits. |
+| `MEMORY_DOCUMENT_CACHE_MAX_ENTRIES` | _(engine default, 65536)_ | Entry cap of the same cache — the cardinality backstop beside the byte budget, kept well above any real working set (a Topics-board page load is ~13,300 documents). |
+| `MEMORY_DOCUMENT_CACHE_TOTAL_BUDGET_BYTES` | _(server default, 256 MiB)_ | Bound across every space's document cache on the memory server this process hosts, held as documents are cached, least-recently-used space first. The per-space budget decides what one corpus may keep; this decides what the server keeps in total (one memory server per toolshed process, so in deployment: the process). `documentCaches.totalBudgetEvictions` on `/api/health/stats` counts what holding it has cost. |
 | `RATE_LIMIT_TRUST_FORWARDED_FOR` | `false` | Set to `true` ONLY when a trusted reverse proxy that overwrites `X-Forwarded-For` sits in front of toolshed. Control-plane rate limiting keys on the real TCP peer by default. Enabling it without such a proxy makes the header client-controlled and the limiter a no-op; leaving it off behind a proxy collapses every caller onto one bucket. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
+| `CF_MEMORY_FRAME_LOG` | _(unset)_ | Read by the memory **client** (`packages/memory/v2/client.ts`), in every Deno process that opens one — `cf` is the usual one — and never in a browser. Path of a file it appends one JSON line per wire frame to, in both directions: the frame's type and uncompressed UTF-8 size; for a watch mutation, its roots and their selectors, each distinct selector written once as a separate `dir: "selector"` line and named by its hash after; for a commit, its operations and the shape of its read set, including how many reads assert a document absent; for a response or pushed sync, every document delivered with its size and its first twelve top-level keys — a key past that limit is not recorded, so its absence from the record says nothing about the document. It answers what a request carried and what came back, which neither the timing statistics nor the server's slow-query buffer record. [`debugging/profiling.md`](./debugging/profiling.md#what-the-client-sent-and-what-came-back) says how to read the file. |
+| `CF_SLOW_QUERY_THRESHOLD_MS` | `100` | Operations slower than this land in `slowQueries` on `/api/health/stats`, with the per-operation root, read and upsert counts described in [`debugging/profiling.md`](./debugging/profiling.md#read-apihealthstats). A local investigation on a fast machine sets it lower — `0` records every operation — since the default leaves a 90 ms watch that delivered ten thousand documents invisible. The buffer holds the last hundred either way. |
 
 With ACL policy active, a fresh space is read-only until its space identity or a
 configured service DID writes a valid ACL with a concrete OWNER. A populated
 space that has never had an ACL remains authenticated-public READ/WRITE as a
 temporary pre-launch compatibility rule; public access never includes OWNER.
 Retracted, malformed, and ownerless ACLs fail closed.
-Normal fresh named-space bootstrap currently creates
-`{ [activeUser]: "OWNER", "*": "WRITE" }` so new non-home spaces are public
-read/write until ACL management has a UI. Home bootstrap remains owner-only.
-The wildcard is a default, not a fixture: the space's owner can narrow it today
-with `cf acl remove ANYONE` (see
+Normal fresh named-space bootstrap writes the genesis document the caller
+registered beside the space key (`registerSpaceIdentity(identity,
+{ genesisAcl })`), else the fallback `{ [activeUser]: "OWNER", "*": "WRITE" }`,
+so new non-home spaces that asked for nothing are public read/write until ACL
+management has a UI. Home bootstrap remains owner-only. The wildcard is a
+default, not a fixture: a caller can supply its own document at genesis, and
+the space's owner can narrow it afterwards with `cf acl remove ANYONE` (see
 [tutorial chapter 10](../tutorial/10-identity-and-security.md#reading-and-changing-a-spaces-acl)).
 Whatever writes the ACL must send it as a single whole-document replacement —
 the server's admission rules for ACL commits are INV-12 and INV-13 in
@@ -312,9 +320,10 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for the server-touching commands — `piece`, the top-level `get`/`set`/`call`, `wish`, `acl`, `exec` — against a remote toolshed. |
+| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for the server-touching commands — `cell`, `piece`, `space recreate-root`/`set-home`, `wish`, `acl`, `exec` — against a remote toolshed. |
 | `CF_API_URL` | _(none)_ | Toolshed URL. Required for the same commands as above. |
-| `CF_INVOCATION_SESSION` | _(none)_ | Invocation session `cf call` scopes an invocation id to. Mint one per agent run with `cf invocation-session new`. Carried here rather than as `--invocation-session <id>` because the session is what makes a call's outcome unguessable, and an argument is readable in a process listing. |
+| `CF_SPACE` | _(none)_ | The space a command acts on, when `--space` is absent. Read by `cell`, `piece`, `space recreate-root`, `wish`, `acl` and `deps`. `check`, `fuse` and `ingest` take a space and do not read it, and neither does `space set-home`, which acts on the identity's own home space and declares the option only through the shared target flags. `--space` overrides it, and a written `--space` beside `--url` is still refused where an ambient one yields to the space the URL carries. A command that writes names the space it wrote to on stderr, which is what makes an ambient default safe to leave set. |
+| `CF_INVOCATION_SESSION` | _(none)_ | Invocation session `cf piece call` scopes an invocation id to. Mint one per agent run with `cf invocation-session new`. Carried here rather than as `--invocation-session <id>` because the session is what makes a call's outcome unguessable, and an argument is readable in a process listing. |
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
@@ -371,13 +380,13 @@ states the invariants.
 | Var | Default | Notes |
 |---|---|---|
 | `CF_HARNESS_PRINCIPAL` | _(generated)_ | Declares the label naming this machine. Generated on first use and kept in `$CF_HARNESS_HOME/principal` otherwise. |
-| `CF_HARNESS_INTEGRATION` | _(unset)_ | Set to `1` by the package's `test:integration` task. Gates the environment-dependent integration tests, and marks the invoker as `integration-test`. |
+| `CF_HARNESS_INTEGRATION` | _(unset)_ | Set to `1` to report the invoker as `integration-test`. Nothing else reads it. |
 
-The invoker is read from the environment rather than declared:
-`CF_HARNESS_INTEGRATION` marks the integration suite, `ENV=test` the unit
-suite, `GITHUB_ACTIONS` or `CI` a continuous-integration run,
-`OTEL_SERVICE_NAME` a service, and a Loom run manifest a Loom dispatch. A test
-run keeps no principal, so it never writes to the harness home.
+The invoker is read from the environment rather than declared: `ENV=test`
+marks the unit suite, `GITHUB_ACTIONS` or `CI` a continuous-integration run,
+`OTEL_SERVICE_NAME` a service, and a Loom run manifest a Loom dispatch.
+`CF_HARNESS_INTEGRATION` is the exception, declared by hand. A test run keeps
+no principal, so it never writes to the harness home.
 
 The harness also reads variables it does not define: `OTEL_SERVICE_NAME` for
 the service that launched it, `ENV=test` to recognize the unit suite,

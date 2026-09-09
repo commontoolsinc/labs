@@ -3,12 +3,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseAliasBinding } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// Benchmarks using Deno.bench
 Deno.bench("followWriteRedirects with simple alias", () => {
   const storageManager = StorageManager.emulate({
     as: signer,
@@ -26,14 +24,15 @@ Deno.bench("followWriteRedirects with simple alias", () => {
     tx,
   );
   testCell.set({ value: 42 });
-  // `$alias` is a Pattern binding, not a link, so parse it against the base
-  // full link via parseAliasBinding; `cell` satisfies the AliasBinding shape.
-  const binding = { $alias: { cell: "result" as const, path: ["value"] } };
 
   resolveLink(
     runtime,
     tx,
-    parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
+    {
+      ...testCell.getAsNormalizedFullLink(),
+      path: ["value"],
+      overwrite: "redirect",
+    },
     "writeRedirect",
   );
 
@@ -73,11 +72,14 @@ Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
     });
   }
 
-  const binding = { $alias: { cell: "result" as const, path: ["next"] } };
   resolveLink(
     runtime,
     tx,
-    parseAliasBinding(binding, cells[0].getAsNormalizedFullLink()),
+    {
+      ...cells[0].getAsNormalizedFullLink(),
+      path: ["next"],
+      overwrite: "redirect",
+    },
     "writeRedirect",
   );
 
@@ -225,12 +227,17 @@ Deno.bench("array element resolution in circular structures", () => {
   storageManager.close();
 });
 
+//
+// Reactive-list scans
+//
 // A list scanned through the reactive proxy: what a lift does when it reads a
 // collection of linked entries, and the shape the transaction-scoped memo
-// exists for. `elements per pass` is the per-element cost; `whole array` is
-// one pass over the whole thing. The unmemoized cost of both is linear in the
-// number of resolutions, so a scan that touches each element more than once
-// pays it again per touch.
+// exists for. `one element read` is the per-element cost; `whole array read per
+// element` is a full pass for each element. The unmemoized cost of both is
+// linear in the number of resolutions, so a scan that touches each element more
+// than once pays it again per touch.
+//
+
 const LIST_LENGTH = 50;
 
 const listBoardSetup = () => {
@@ -287,6 +294,10 @@ Deno.bench("reactive list: whole array read per element", () => {
   runtime.dispose();
   storageManager.close();
 });
+
+//
+// A path that never stops growing
+//
 
 Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   const storageManager = StorageManager.emulate({

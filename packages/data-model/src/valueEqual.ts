@@ -1,141 +1,180 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
-import { isDeepFrozen } from "./deep-freeze.ts";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
+
+import { codecOf } from "@/codec-common/codecOf.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import {
   type FabricArray,
+  FabricInstance,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
-} from "./interface.ts";
-import { hashStringOf } from "./value-hash.ts";
-import { toCompactDebugString } from "./value-debug.ts";
+} from "@/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
+import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
 
 /**
- * Compares two `FabricValue`s for logical (content) equality.
+ * Compares `FabricValue`s by logical content, preserving signed zero, sparse
+ * holes, explicit `undefined`, and the codec-defined state of special values.
  *
- * This is the `data-model`-aware equality the storage layer's no-op /
- * change-detection gates need, and the fix for what `deepEqual()` gets wrong:
- * any `FabricSpecialObject` (`FabricPrimitive` leaves like `FabricBytes` /
- * `FabricRegExp` / `FabricEpoch*` / `FabricHash`, and `FabricInstance`
- * wrappers) keeps its state in private `#fields` with zero enumerable
- * own-properties, so `deepEqual()` conflates every distinct same-class instance
- * as equal (the CT-1770 bug). Here object equality is decided by canonical
- * content hash (`hashStringOf()`), which feeds special objects, plain objects,
- * and arrays alike — including the distinctions a naive walk misses (sparse
- * array holes vs a stored `undefined`, a present `undefined` vs an absent key)
- * — so a special object nested arbitrarily deep is still compared by content.
+ * Identical descendants and available immutable hashes need no traversal.
+ * Other containers are compared once per object pair with an explicit work
+ * stack, so shared references and cycles do not expand into repeated trees.
+ * Sharing itself is not content: a repeated object may equal separate copies,
+ * and cycles compare by the contents reached through their corresponding
+ * edges. A mismatch reachable after a back edge still makes the values unequal.
  *
- * (Unlike `deepEqual()` it does not handle non-`Fabric` class instances or
- * non-index properties on arrays: those are not representable as
- * `FabricValue`s.)
+ * Primitive arguments use `Object.is()`. Containers preserve canonical hash
+ * semantics, including UTF-8 replacement of lone surrogates in nested strings,
+ * symbol registry keys, and property names. Primitive special values use
+ * canonical hashes; instances expose their contents through their codecs.
+ * Non-Fabric classes are unsupported, and non-index properties on arrays are
+ * ignored, as they are by content hashing.
  */
 export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   if (Object.is(a, b)) return true;
-
-  switch (typeof a) {
-    case "object": {
-      // `null` is the one `object`-typed value that isn't a container; with
-      // `Object.is()` already ruled out, `a === null` can't equal `b`.
-      if (a === null) return false;
-      break;
-    }
-
-    case "function": {
-      // Not a `FabricValue`; reachable only via an unsound cast.
+  if (
+    a === null || b === null ||
+    typeof a !== "object" || typeof b !== "object"
+  ) {
+    if (typeof a === "function" || typeof b === "function") {
       throw new Error("Cannot compare a function value.");
     }
-
-    default: {
-      // Any other type is a primitive that `Object.is()` already settled as
-      // unequal above.
-      return false;
-    }
-  }
-
-  // `a` is a non-`null` object. Classify `b` the same way, so invalid input
-  // fails identically regardless of argument order: only another non-`null`
-  // object can be equal to `a`.
-  switch (typeof b) {
-    case "object": {
-      // A non-`null` object can't equal `null`; otherwise compare below.
-      if (b === null) return false;
-      break;
-    }
-
-    case "function": {
-      // Not a `FabricValue`; reachable only via an unsound cast.
-      throw new Error("Cannot compare a function value.");
-    }
-
-    default: {
-      // `b` is a primitive, which can't equal the object `a`.
-      return false;
-    }
-  }
-
-  // The canonical content hash is the general object comparator, but it's worth
-  // a few cheap checks first.
-
-  if (isDeepFrozen(a) && isDeepFrozen(b)) {
-    // Both sides are deep-frozen, the hash is cacheable (frozen ~==
-    // non-ephemeral), so hashing can be reasonably assumed to pay for itself.
-    return hashStringOf(a) === hashStringOf(b);
-  }
-
-  // Otherwise, short-circuit the mismatched subtypes that can never be equal,
-  // without paying for a hash.
-
-  const subtype = objectSubtypeOf(a);
-  const bSubtype = objectSubtypeOf(b);
-
-  if (subtype !== bSubtype) {
-    // Different subtypes can't possibly be equal.
     return false;
   }
+  const pending: [FabricValue, FabricValue][] = [[a, b]];
+  const compared = new WeakMap<object, WeakSet<object>>();
 
-  switch (subtype) {
-    case "array": {
-      // Alas, casts are required because TS doesn't know the correspondence
-      // between subtype names and type restrictions.
-      const aArray = a as FabricArray;
-      const bArray = b as FabricArray;
-      if (aArray.length !== bArray.length) {
-        // Arrays can't possibly be equal if lengths are different.
-        return false;
+  while (pending.length > 0) {
+    const [left, right] = pending.pop()!;
+    if (Object.is(left, right)) continue;
+    if (typeof left === "function" || typeof right === "function") {
+      throw new Error("Cannot compare a function value.");
+    }
+    if (
+      left === null || right === null ||
+      typeof left !== "object" || typeof right !== "object"
+    ) {
+      // Container hashes encode strings as UTF-8, replacing lone surrogates.
+      // Preserve that equivalence for nested strings and symbol registry keys.
+      if (
+        typeof left === "string" && typeof right === "string" &&
+        left.toWellFormed() === right.toWellFormed()
+      ) continue;
+      if (typeof left === "symbol" && typeof right === "symbol") {
+        const leftKey = Symbol.keyFor(left);
+        const rightKey = Symbol.keyFor(right);
+        if (
+          leftKey !== undefined && rightKey !== undefined &&
+          leftKey.toWellFormed() === rightKey.toWellFormed()
+        ) continue;
       }
-      break;
+      return false;
     }
 
-    case "plain": {
-      // Alas, casts are required because TS doesn't know the correspondence
-      // between subtype names and type restrictions.
-      const aObject = a as FabricPlainObject;
-      const bObject = b as FabricPlainObject;
-      if (Object.keys(aObject).length !== Object.keys(bObject).length) {
-        // Plain objects can't possibly be equal if they have different numbers
-        // of properties.
-        return false;
-      }
-      break;
+    const leftHash = cachedHashStringOf(left);
+    const rightHash = cachedHashStringOf(right);
+    if (leftHash !== undefined && rightHash !== undefined) {
+      if (leftHash !== rightHash) return false;
+      continue;
     }
 
-    case "special": {
-      if (a.constructor !== b.constructor) {
-        // `FabricSpecialObject`s (instances in general, really) can't possibly
-        // be equal if they are of different concrete classes.
-        return false;
+    let counterparts = compared.get(left);
+    if (counterparts?.has(right)) continue;
+    if (counterparts === undefined) {
+      counterparts = new WeakSet();
+      compared.set(left, counterparts);
+    }
+    counterparts.add(right);
+
+    const subtype = objectSubtypeOf(left);
+    if (subtype !== objectSubtypeOf(right)) return false;
+    switch (subtype) {
+      case "array": {
+        const leftArray = left as FabricArray;
+        const rightArray = right as FabricArray;
+        if (leftArray.length !== rightArray.length) return false;
+        for (let index = 0; index < leftArray.length; index++) {
+          const present = index in leftArray;
+          if (present !== (index in rightArray)) return false;
+          if (present) {
+            const leftItem = leftArray[index];
+            const rightItem = rightArray[index];
+            if (!Object.is(leftItem, rightItem)) {
+              pending.push([leftItem, rightItem]);
+            }
+          }
+        }
+        break;
       }
-      break;
+      case "plain": {
+        const leftObject = left as FabricPlainObject;
+        const rightObject = right as FabricPlainObject;
+        const keys = Object.keys(leftObject);
+        if (keys.length !== Object.keys(rightObject).length) return false;
+        if (
+          keys.every((key) =>
+            Object.prototype.propertyIsEnumerable.call(rightObject, key)
+          )
+        ) {
+          for (const key of keys) {
+            const leftItem = leftObject[key];
+            const rightItem = rightObject[key];
+            if (!Object.is(leftItem, rightItem)) {
+              pending.push([leftItem, rightItem]);
+            }
+          }
+        } else {
+          // Different JS keys can encode to the same UTF-8 bytes. Match their
+          // positions in the canonical hash stream, including repeated names
+          // after replacement; sorting normalized keys changes that stream.
+          const leftKeys = utf8SortedKeysOf(leftObject);
+          const rightKeys = utf8SortedKeysOf(rightObject);
+          for (let index = 0; index < leftKeys.length; index++) {
+            const leftKey = leftKeys[index]!;
+            const rightKey = rightKeys[index]!;
+            if (leftKey.toWellFormed() !== rightKey.toWellFormed()) {
+              return false;
+            }
+            const leftItem = leftObject[leftKey];
+            const rightItem = rightObject[rightKey];
+            if (!Object.is(leftItem, rightItem)) {
+              pending.push([leftItem, rightItem]);
+            }
+          }
+        }
+        break;
+      }
+      case "special": {
+        if (left instanceof FabricInstance && right instanceof FabricInstance) {
+          const leftCodec = codecOf(left);
+          const rightCodec = codecOf(right);
+          if (
+            leftCodec.tagForValue(left).toWellFormed() !==
+              rightCodec.tagForValue(right).toWellFormed()
+          ) {
+            return false;
+          }
+          pending.push([
+            leftCodec.encode(left, NULL_LIVE_ENVIRONMENT),
+            rightCodec.encode(right, NULL_LIVE_ENVIRONMENT),
+          ]);
+        } else if (
+          left.constructor !== right.constructor ||
+          hashStringOf(left) !== hashStringOf(right)
+        ) {
+          return false;
+        }
+        break;
+      }
     }
   }
-
-  // No quick check managed to disqualify full-scale comparison. So it goes.
-  return hashStringOf(a) === hashStringOf(b);
+  return true;
 }
 
 /**
- * Helper for {@link #valueEqual}, which classifies object subtypes. This
- * `throw`s given an object that shouldn't have been passed as a `FabricValue`.
+ * Helper for {@link valueEqual}, which classifies supported object subtypes.
+ * Throws for classes whose contents are not represented by Fabric codecs.
  */
 function objectSubtypeOf(
   value: FabricPlainObject | FabricArray | FabricSpecialObject,
@@ -148,7 +187,9 @@ function objectSubtypeOf(
     return "plain";
   } else {
     throw new Error(
-      `Cannot compare value ${backtickQuote(toCompactDebugString(value))}`,
+      `Cannot compare value ${
+        toCompactDebugString(value, { backtickQuote: true })
+      }`,
     );
   }
 }

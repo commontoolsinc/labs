@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { CellScope } from "@commonfabric/api";
 import { $conn, CellHandle, RequestType } from "@commonfabric/runtime-client";
 import type {
   CellRef,
@@ -20,7 +21,7 @@ import {
   describeOrigin,
   describeSourceFailure,
   formatTimestamp,
-  shortIdentity,
+  patternRefLabel,
 } from "./origin-view.ts";
 import {
   clearPieceBoundary,
@@ -260,7 +261,10 @@ const SOURCE: PieceSourceView = {
   pieceId: "of:fid1:piece",
   name: "Recipe",
   pattern: { identity: "pattern-identity-value", symbol: "default" },
-  origin: { url: "https://example.test/recipe.tsx", kind: "web" },
+  origin: {
+    url: "https://toolshed.test/api/patterns/recipe.tsx",
+    kind: "system",
+  },
   entry: "/main.tsx",
   files: [
     { name: "/main.tsx", contents: "the main file" },
@@ -274,9 +278,14 @@ const SOURCE: PieceSourceView = {
  * does, so a test can resolve it, reject it, or leave it pending.
  */
 function pieceCell(
-  read: () => Promise<PieceSourceView> = () => Promise.resolve(SOURCE),
+  read: (
+    pieceId?: string,
+    space?: typeof SPACE,
+    scope?: CellScope,
+  ) => Promise<PieceSourceView> = () => Promise.resolve(SOURCE),
   {
     aborted = false,
+    scope = "space",
     readRevision = () =>
       Promise.resolve({ pattern: SOURCE.pattern!, files: SOURCE.files }),
     update = () => Promise.resolve({ source: SOURCE }),
@@ -285,10 +294,12 @@ function pieceCell(
     removeAccess = () => Promise.resolve(OWNER_ACCESS),
   }: {
     aborted?: boolean | (() => boolean);
+    scope?: CellScope;
     readRevision?: (
       pieceId: string,
       space: typeof SPACE,
       revisionId: string,
+      scope?: CellScope,
     ) => Promise<PieceSourceRevisionSourceView>;
     update?: (
       pieceId: string,
@@ -329,6 +340,7 @@ function pieceCell(
   return {
     id: () => "of:fid1:piece",
     space: () => SPACE,
+    ref: () => ({ id: "of:fid1:piece", space: SPACE, scope, path: [] }),
     runtime: () => runtime,
     equals(other: unknown) {
       return other === this;
@@ -352,6 +364,106 @@ function openMenu(cell: CellHandle = pieceCell()): CFPieceMenu {
   const menu = newMenu();
   menu.open({ cell, x: 40, y: 60 });
   return menu;
+}
+
+/** The runtime a fake piece is reached through, on its own. */
+function spaceRuntime(
+  options: Parameters<typeof pieceCell>[1] = {},
+): RuntimeClient {
+  return (pieceCell(undefined, options) as unknown as {
+    runtime(): RuntimeClient;
+  }).runtime();
+}
+
+/** A menu opened over a space with no piece, as a failed load leaves one. */
+function openSpaceMenu(
+  options: Parameters<typeof pieceCell>[1] = {},
+): CFPieceMenu {
+  const menu = newMenu();
+  menu.open({ space: SPACE, runtime: spaceRuntime(options), x: 40, y: 60 });
+  return menu;
+}
+
+/**
+ * The rendered entry carrying `testId`, as the template that holds it. Both
+ * the id and the disabled state are interpolated values rather than literal
+ * markup, so a caller reads them out of the template rather than out of text.
+ */
+function entryTemplate(
+  menu: CFPieceMenu,
+  testId: string,
+): { strings: readonly string[]; values: unknown[]; at: number } {
+  let found:
+    | { strings: readonly string[]; values: unknown[]; at: number }
+    | undefined;
+  const visit = (node: unknown): void => {
+    if (found) return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return;
+    const at = template.strings.findIndex((part, index) =>
+      part.endsWith('test-id="') && template.values![index] === testId
+    );
+    if (at >= 0) {
+      found = { strings: template.strings, values: template.values, at };
+      return;
+    }
+    for (const child of template.values) visit(child);
+  };
+  visit((menu as unknown as { render(): unknown }).render());
+  if (!found) throw new Error(`no rendered entry carries test-id ${testId}`);
+  return found;
+}
+
+/** Whether the entry carrying `testId` renders as disabled. */
+function isDisabled(menu: CFPieceMenu, testId: string): boolean {
+  const { strings, values, at } = entryTemplate(menu, testId);
+  for (let index = at + 1; index < values.length; index++) {
+    if (strings[index].includes('?disabled="')) return Boolean(values[index]);
+    if (strings[index].includes('@click="')) break;
+  }
+  return false;
+}
+
+/**
+ * The subject line of the open panel, which names what the panel is about. It
+ * is an interpolated value, so a caller reads it out of the template.
+ */
+function subjectOf(menu: CFPieceMenu): unknown {
+  const visit = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = visit(child);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    }
+    if (node === null || typeof node !== "object") return undefined;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return undefined;
+    const at = template.strings.findIndex((part) =>
+      part.endsWith('<span class="subject">')
+    );
+    if (at >= 0) return template.values[at];
+    for (const child of template.values) {
+      const found = visit(child);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  const found = visit((menu as unknown as { render(): unknown }).render());
+  if (found === undefined) throw new Error("no panel renders a subject line");
+  return found;
 }
 
 /** An element stub that records the attributes the menu changes. */
@@ -448,15 +560,6 @@ describe("the menu a right-click opens", () => {
     expect(shows(menu)).toContain("View source");
     menu.close();
     expect(shows(menu)).toBe("");
-  });
-
-  it("keeps itself inside the viewport", () => {
-    const menu = newMenu();
-    menu.open({ cell: pieceCell(), x: 1_000_000, y: 1_000_000 });
-    const placement = shows(menu);
-    // Clamped rather than drawn off-screen, wherever the click landed.
-    expect(placement).toContain("left: ");
-    expect(placement).not.toContain("left: 1000000px");
   });
 
   it("moves the highlight to the addressed piece and removes it on close", () => {
@@ -711,7 +814,7 @@ describe("the menu a right-click opens", () => {
         pieceId: "of:fid1:piece",
         sourceSpace: SPACE,
         destinationSpace: SPACE,
-        options: { copyData: false },
+        options: { copyData: false, scope: "space" },
       },
     ]);
     expect(navigations).toEqual([{
@@ -931,7 +1034,7 @@ describe("the menu a right-click opens", () => {
 
     await clickTestId(menu, "piece-menu-clone-copy-data");
 
-    expect(calls).toEqual([{ copyData: true }]);
+    expect(calls).toEqual([{ copyData: true, scope: "space" }]);
     expect(shows(menu)).toContain("Clone piece and copy data");
     expect(shows(menu)).not.toContain("piece-menu-clone-copy-data");
   });
@@ -950,6 +1053,359 @@ describe("the menu a right-click opens", () => {
     expect(shows(menu)).toContain(
       "The clone was canceled because the runtime stopped.",
     );
+  });
+});
+
+describe("addressing a piece in a narrower scope", () => {
+  // A piece reached through a link into a narrower scope is addressed by its
+  // id and that scope together, and the id alone names a different document.
+  // The menu holds both on the cell it was opened over, so every request it
+  // makes about the piece carries both.
+
+  /** A source view with one retained revision to open. */
+  const SCOPED_SOURCE: PieceSourceView = {
+    ...SOURCE,
+    origin: undefined,
+    currentRevisionId: "current",
+    history: [
+      {
+        revisionId: "older",
+        timestamp: 1,
+        pattern: SOURCE.pattern!,
+        origin: SOURCE.origin,
+        operation: "baseline",
+      },
+      {
+        revisionId: "current",
+        timestamp: 2,
+        pattern: SOURCE.pattern!,
+        operation: "detach",
+      },
+    ],
+  };
+
+  it("reads the source in the scope the cell was reached through", async () => {
+    const reads: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      (pieceId, space, scope) => {
+        reads.push({ pieceId, space, scope });
+        return Promise.resolve(SOURCE);
+      },
+      { scope: "user" },
+    ));
+
+    await menu.showPanel("source");
+
+    expect(reads).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      scope: "user",
+    }]);
+  });
+
+  it("reads a retained revision in that scope", async () => {
+    const reads: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SCOPED_SOURCE),
+      {
+        scope: "user",
+        readRevision: (pieceId, space, revisionId, scope) => {
+          reads.push({ pieceId, space, revisionId, scope });
+          return Promise.resolve({
+            pattern: SOURCE.pattern!,
+            files: [{ name: "/main.tsx", contents: "the older source" }],
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(reads).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      revisionId: "older",
+      scope: "user",
+    }]);
+  });
+
+  it("changes the source in that scope", async () => {
+    const changes: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SCOPED_SOURCE),
+      {
+        scope: "user",
+        update: (pieceId, space, action, options) => {
+          changes.push({ pieceId, space, action, options });
+          return Promise.resolve({ source: SCOPED_SOURCE });
+        },
+      },
+    ));
+
+    await menu.changeSource({ kind: "detach" });
+
+    expect(changes).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      action: { kind: "detach" },
+      options: { scope: "user" },
+    }]);
+  });
+
+  it("re-reads the source in that scope after a change that failed", async () => {
+    const reads: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      (pieceId, space, scope) => {
+        reads.push({ pieceId, space, scope });
+        return Promise.resolve(SCOPED_SOURCE);
+      },
+      {
+        scope: "user",
+        update: () => Promise.reject(new Error("the change did not land")),
+      },
+    ));
+
+    await menu.changeSource({ kind: "detach" });
+
+    // Opening the menu reads eagerly, so the read this pins is the last one:
+    // the one the failed change triggers. The count is what says it happened
+    // at all.
+    expect(reads.length).toBe(2);
+    expect(reads.at(-1)).toEqual({
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      scope: "user",
+    });
+  });
+
+  it("clones from that scope", async () => {
+    const clones: unknown[] = [];
+    const cell = pieceCell(undefined, { scope: "user" });
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(
+        pieceId: string,
+        sourceSpace: typeof SPACE,
+        destinationSpace: typeof SPACE,
+        options: { copyData?: boolean; scope?: CellScope },
+      ): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = (pieceId, sourceSpace, destinationSpace, options) => {
+      clones.push({ pieceId, sourceSpace, destinationSpace, options });
+      return Promise.resolve({ id: () => "fid1:clone" });
+    };
+    const menu = openMenu(cell);
+
+    await menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
+
+    expect(clones).toEqual([{
+      pieceId: "of:fid1:piece",
+      sourceSpace: SPACE,
+      destinationSpace: SPACE,
+      options: { copyData: false, scope: "user" },
+    }]);
+  });
+
+  it("reads the piece's own state in that scope", async () => {
+    const piece = statefulPiece({ scope: "user" });
+    const menu = openMenu(piece.cell);
+
+    await menu.showPanel("data");
+
+    expect(piece.getPieceCalls).toEqual([[
+      "of:fid1:piece",
+      SPACE,
+      true,
+      "user",
+    ]]);
+  });
+});
+
+describe("the menu over a space with no piece", () => {
+  it("names the space and says the piece is unavailable", () => {
+    const rendered = shows(openSpaceMenu());
+    expect(rendered).toContain("Piece unavailable");
+    expect(rendered).toContain(`Space ${SPACE}`);
+  });
+
+  it("disables every entry that needs a piece", () => {
+    const menu = openSpaceMenu();
+    for (const entry of pieceMenuEntries()) {
+      expect(isDisabled(menu, entry.testId)).toBe(true);
+    }
+  });
+
+  it("leaves the space entry available", () => {
+    expect(isDisabled(openSpaceMenu(), "piece-menu-space-access")).toBe(false);
+  });
+
+  it("reads the space ACL with no piece to read it through", async () => {
+    const menu = openSpaceMenu();
+    await menu.showPanel("access");
+    const rendered = shows(menu);
+    expect(rendered).toContain("Space access rights");
+    expect(rendered).toContain(OWNER);
+  });
+
+  it("names the space in the access panel's subject line", async () => {
+    const menu = openSpaceMenu();
+    await menu.showPanel("access");
+    expect(subjectOf(menu)).toBe(SPACE);
+  });
+
+  it("disables the space entry when no runtime came with the space", () => {
+    const menu = newMenu();
+    menu.open({ space: SPACE, x: 40, y: 60 });
+    expect(isDisabled(menu, "piece-menu-space-access")).toBe(true);
+  });
+
+  it("reads no access rights it has no runtime to read them through", async () => {
+    // The entry that opens this panel is disabled without a runtime, so a
+    // caller reaching the panel anyway finds it still waiting rather than
+    // reporting a failure it never attempted.
+    const menu = newMenu();
+    menu.open({ space: SPACE, x: 40, y: 60 });
+
+    await menu.showPanel("access");
+
+    expect(shows(menu)).toContain("Reading access rights…");
+  });
+
+  it("stays down when it is opened over neither a piece nor a space", () => {
+    const menu = newMenu();
+    menu.open({ x: 40, y: 60 });
+    expect(shows(menu)).toBe("");
+    // The host covers the viewport, so a menu showing nothing has to be
+    // hidden rather than left over the page catching its clicks.
+    expect(menu.hidden).toBe(true);
+  });
+
+  it("takes the highlight off the piece a previous opening marked", () => {
+    const menu = newMenu();
+    const piece = highlightProbe();
+
+    menu.open({
+      cell: pieceCell(),
+      x: 0,
+      y: 0,
+      highlightedPiece: piece.element,
+    });
+    expect(piece.has("data-cf-piece-menu-open")).toBe(true);
+
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x: 40, y: 60 });
+    expect(piece.has("data-cf-piece-menu-open")).toBe(false);
+  });
+});
+
+describe("placing the menu", () => {
+  /**
+   * Where `#placeMenu` puts a menu whose box is `width` by `height`, opened at
+   * (`x`, `y`) in a viewport of `viewport`. The element standing in for the
+   * rendered menu reports that box however it is positioned, which is what the
+   * corner measurement buys: the size does not change under the clamp.
+   */
+  function placement(
+    { x, y, width, height, viewport }: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      viewport: { width: number; height: number };
+    },
+  ): { left: string; top: string } {
+    const style = { left: "", top: "" };
+    const element = {
+      style,
+      getBoundingClientRect: () => ({ width, height }),
+    };
+    const menu = newMenu();
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x, y });
+    Object.defineProperty(menu, "shadowRoot", {
+      configurable: true,
+      value: {
+        querySelector: (selector: string) =>
+          selector === ".menu" ? element : null,
+      },
+    });
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const priorWidth = globals.innerWidth;
+    const priorHeight = globals.innerHeight;
+    globals.innerWidth = viewport.width;
+    globals.innerHeight = viewport.height;
+    try {
+      (menu as unknown as { updated(changed: Map<string, unknown>): void })
+        .updated(new Map());
+    } finally {
+      globals.innerWidth = priorWidth;
+      globals.innerHeight = priorHeight;
+    }
+    return style;
+  }
+
+  const VIEWPORT = { width: 1000, height: 800 };
+
+  it("leaves the menu at the click when it fits there", () => {
+    expect(
+      placement({ x: 40, y: 60, width: 240, height: 300, viewport: VIEWPORT }),
+    ).toEqual({ left: "40px", top: "60px" });
+  });
+
+  it("pulls a menu clicked near the far corner back inside the viewport", () => {
+    expect(
+      placement({
+        x: 990,
+        y: 790,
+        width: 240,
+        height: 300,
+        viewport: VIEWPORT,
+      }),
+    ).toEqual({ left: "756px", top: "496px" });
+  });
+
+  it("holds a menu too big for the viewport against the near edges", () => {
+    expect(
+      placement({
+        x: 500,
+        y: 500,
+        width: 1200,
+        height: 900,
+        viewport: VIEWPORT,
+      }),
+    ).toEqual({ left: "4px", top: "4px" });
+  });
+
+  it("places nothing while a panel is open in the menu's place", () => {
+    const menu = newMenu();
+    menu.open({ space: SPACE, runtime: spaceRuntime(), x: 40, y: 60 });
+    Object.defineProperty(menu, "shadowRoot", {
+      configurable: true,
+      value: { querySelector: () => null },
+    });
+    expect(() =>
+      (menu as unknown as { updated(changed: Map<string, unknown>): void })
+        .updated(new Map())
+    ).not.toThrow();
+  });
+});
+
+describe("the menu over a piece", () => {
+  it("names the space the piece belongs to", () => {
+    expect(shows(openMenu())).toContain(`Space ${SPACE}`);
+  });
+
+  it("names the space in the access panel's subject line", async () => {
+    const menu = openMenu();
+    await menu.showPanel("access");
+    expect(subjectOf(menu)).toBe(SPACE);
+  });
+
+  it("keeps every piece entry live", () => {
+    const menu = openMenu();
+    for (const entry of pieceMenuEntries()) {
+      expect(isDisabled(menu, entry.testId)).toBe(false);
+    }
   });
 });
 
@@ -1339,9 +1795,16 @@ describe("the origin and history panel", () => {
     await menu.showPanel("origin");
 
     const rendered = shows(menu);
-    expect(rendered).toContain("External web URL");
-    expect(rendered).toContain("https://example.test/recipe.tsx");
-    expect(rendered).toContain(shortIdentity("pattern-identity-value"));
+    expect(rendered).toContain("Deployment pattern");
+    expect(rendered).toContain(
+      "https://toolshed.test/api/patterns/recipe.tsx",
+    );
+    expect(rendered).toContain(
+      patternRefLabel({
+        identity: "pattern-identity-value",
+        symbol: "default",
+      }),
+    );
     expect(rendered).toContain("/main.tsx");
     expect(rendered).toContain("of:fid1:piece");
     expect(rendered).toContain(SPACE);
@@ -1561,7 +2024,9 @@ describe("the origin and history panel", () => {
     expect(rendered).toContain(formatTimestamp(at));
     expect(rendered).toContain("Reason:");
     expect(rendered).toContain("inputs or outputs do not match");
-    expect(rendered).toContain(shortIdentity("offered-identity"));
+    expect(rendered).toContain(
+      patternRefLabel({ identity: "offered-identity", symbol: "default" }),
+    );
     expect(rendered).toContain("Update from the origin now");
     expect(rendered).toContain("Update, ignoring the compatibility check");
   });
@@ -1687,10 +2152,10 @@ describe("the origin and history panel", () => {
     await settled();
 
     expect(calls).toEqual([
-      { action: { kind: "adopt" }, options: {} },
+      { action: { kind: "adopt" }, options: { scope: "space" } },
       {
         action: { kind: "adopt" },
-        options: { confirmationToken: "token-1" },
+        options: { confirmationToken: "token-1", scope: "space" },
       },
     ]);
     // The warning is spent rather than left on the panel to answer again.
@@ -1734,7 +2199,9 @@ describe("the origin and history panel", () => {
     const rendered = shows(menu);
     expect(rendered).not.toContain("piece-source-warning");
     expect(rendered).toContain("piece-panel-origin");
-    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+    expect(calls).toEqual([
+      { action: { kind: "adopt" }, options: { scope: "space" } },
+    ]);
   });
 
   it("does not offer to ignore a check that is not what refused it", async () => {
@@ -1935,11 +2402,11 @@ describe("the origin and history panel", () => {
     expect(calls).toEqual([
       {
         action: { kind: "repoint", url: "https://example.test/other.tsx" },
-        options: {},
+        options: { scope: "space" },
       },
       {
         action: { kind: "repoint", url: "https://example.test/other.tsx" },
-        options: { confirmationToken: "token-1" },
+        options: { confirmationToken: "token-1", scope: "space" },
       },
     ]);
     expect(shows(menu)).not.toContain("piece-origin-entry");
@@ -2009,7 +2476,9 @@ describe("the origin and history panel", () => {
 
     // The origin was resolved again and what it offers now is compatible, so
     // there is no warning to confirm and the one attempt is the whole of it.
-    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+    expect(calls).toEqual([
+      { action: { kind: "adopt" }, options: { scope: "space" } },
+    ]);
   });
 
   it("abandons a failed attempt rather than passing it to the panel", async () => {
@@ -2085,7 +2554,7 @@ describe("the origin and history panel", () => {
           ...SOURCE,
           origin: {
             url: "https://toolshed.test/api/patterns/system/home.tsx",
-            kind: "web",
+            kind: "system",
             recorded: "/api/patterns/system/home.tsx",
           },
         })
@@ -2235,7 +2704,7 @@ describe("the origin and history panel", () => {
       pieceId: "of:fid1:piece",
       space: SPACE,
       action: { kind: "detach" },
-      options: {},
+      options: { scope: "space" },
     }]);
     expect(shows(menu)).toContain("Detached");
     expect(shows(menu)).toContain("Stopped following source · Current");
@@ -2364,10 +2833,10 @@ describe("the origin and history panel", () => {
 
     await menu.changeSource(action, "confirm-older");
     expect(calls).toEqual([
-      { requested: action, options: {} },
+      { requested: action, options: { scope: "space" } },
       {
         requested: action,
-        options: { confirmationToken: "confirm-older" },
+        options: { confirmationToken: "confirm-older", scope: "space" },
       },
     ]);
     expect(shows(menu)).not.toContain("result schema narrowed");
@@ -2681,6 +3150,97 @@ describe("source history actions", () => {
     expect(shows(menu)).toBe("");
   });
 
+  it("keeps a history origin as recorded and links to where it resolves", async () => {
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [{
+          revisionId: "system",
+          timestamp: 1,
+          pattern: SOURCE.pattern!,
+          origin: {
+            url: "https://toolshed.test/api/patterns/system/home.tsx",
+            kind: "system",
+            recorded: "system:system/home.tsx",
+          },
+          operation: "baseline",
+        }],
+      })
+    ));
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("<code>system:system/home.tsx</code>");
+    expect(rendered).toContain(
+      'href="https://toolshed.test/api/patterns/system/home.tsx"',
+    );
+    expect(rendered).toContain(">open</a>");
+  });
+
+  it("offers the route only where it is not already the string on show", async () => {
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [
+          {
+            revisionId: "recorded",
+            timestamp: 1,
+            pattern: SOURCE.pattern!,
+            origin: {
+              url: "https://toolshed.test/api/patterns/system/home.tsx",
+              kind: "system" as const,
+              recorded: "system:system/home.tsx",
+            },
+            operation: "baseline" as const,
+          },
+          {
+            revisionId: "canonical",
+            timestamp: 2,
+            pattern: SOURCE.pattern!,
+            origin: SOURCE.origin,
+            operation: "repoint" as const,
+          },
+        ],
+      })
+    ));
+    await menu.showPanel("origin");
+
+    // Both entries name their origin; only the one whose recorded form differs
+    // from the route it resolves to carries a link to that route.
+    const rendered = shows(menu);
+    expect(rendered).toContain("<code>system:system/home.tsx</code>");
+    expect(rendered).toContain(
+      "<code>https://toolshed.test/api/patterns/recipe.tsx</code>",
+    );
+    expect(rendered.split(">open</a>").length - 1).toBe(1);
+  });
+
+  it("offers no route for an origin resolving to a fabric reference", async () => {
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [{
+          revisionId: "pinned",
+          timestamp: 1,
+          pattern: SOURCE.pattern!,
+          origin: {
+            url: `cf:pattern:${"A".repeat(43)}`,
+            kind: "fabric-pattern" as const,
+            recorded: "cf:pattern:an-earlier-spelling",
+          },
+          operation: "baseline" as const,
+        }],
+      })
+    ));
+    await menu.showPanel("origin");
+
+    // Nothing a browser can open resolves from a fabric reference, so the
+    // entry names what the piece recorded and stops there.
+    const rendered = shows(menu);
+    expect(rendered).toContain("<code>cf:pattern:an-earlier-spelling</code>");
+    expect(rendered).not.toContain(">open</a>");
+  });
+
   it("shows the exact retained source for a history entry", async () => {
     const requests: unknown[] = [];
     const menu = openMenu(pieceCell(
@@ -2716,6 +3276,34 @@ describe("source history actions", () => {
     }]);
     expect(shows(menu)).toContain("the older source");
     expect(shows(menu)).not.toContain("the main file");
+  });
+
+  it("names the revision's pattern whole in the panel subject", async () => {
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...historySource,
+          history: [{
+            revisionId: "older",
+            timestamp: 1,
+            pattern: SOURCE.pattern!,
+            operation: "baseline",
+          }],
+        }),
+      {
+        readRevision: () =>
+          Promise.resolve({
+            pattern: SOURCE.pattern!,
+            files: [{ name: "/main.tsx", contents: "the older source" }],
+          }),
+      },
+    ));
+    await menu.showPanel("origin");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(shows(menu)).toContain(
+      'Pattern pattern-identity-value (export symbol "default")',
+    );
   });
 
   it("starts one revision read for rapid repeated activations", async () => {
@@ -2885,20 +3473,26 @@ function statefulPiece(
     result = {},
     argument: initialArgument = {} as unknown,
     argumentRef,
-    getPageFails = false,
-    deferGetPage = false,
+    getPieceFails = false,
+    deferGetPiece = false,
     sendFails = false,
+    scope = "space",
     pieceSchema = { type: "object" } as Record<string, unknown>,
   }: {
     result?: Record<string, unknown>;
     argument?: unknown;
 
+    /** The scope the piece's own cell was reached through. */
+    scope?: CellScope;
+
     /** When set, the argument read also returns this schema-bearing ref. */
     argumentRef?: CellRef;
-    getPageFails?: boolean;
 
-    /** When true, getPage stays pending until `resolveGetPage()` is called. */
-    deferGetPage?: boolean;
+    getPieceFails?: boolean;
+
+    /** When true, getPiece stays pending until `resolveGetPiece()` is called. */
+    deferGetPiece?: boolean;
+
     sendFails?: boolean;
     pieceSchema?: Record<string, unknown>;
   } = {},
@@ -2935,35 +3529,38 @@ function statefulPiece(
     },
     signal: { aborted: false },
   };
-  const pendingPages: Array<() => void> = [];
+  const pendingPieces: Array<() => void> = [];
+  const getPieceCalls: unknown[][] = [];
   const rt = {
     [$conn]: () => conn,
     signal: { aborted: false },
     getPieceSource: () => Promise.resolve(SOURCE),
-    getPage: (..._args: unknown[]) => {
-      if (getPageFails) {
-        return Promise.reject(new Error("no page for this piece"));
+    getPiece: (...args: unknown[]) => {
+      getPieceCalls.push(args);
+      if (getPieceFails) {
+        return Promise.reject(new Error("no piece handle for this piece"));
       }
-      if (deferGetPage) {
+      if (deferGetPiece) {
         return new Promise((resolve) => {
-          pendingPages.push(() => resolve(page));
+          pendingPieces.push(() => resolve(pieceHandle));
         });
       }
-      return Promise.resolve(page);
+      return Promise.resolve(pieceHandle);
     },
   } as unknown as RuntimeClient;
 
   const pieceRef: CellRef = {
     id: "of:fid1:piece",
     space: SPACE,
+    scope,
     path: [],
     schema: pieceSchema,
   } as unknown as CellRef;
   const cell = new CellHandle(rt, pieceRef, result);
-  const page = { cell: () => cell };
+  const pieceHandle = { cell: () => cell };
 
-  /** Resolve the oldest still-pending deferred getPage call. */
-  const resolveGetPage = () => pendingPages.shift()?.();
+  /** Resolve the oldest still-pending deferred getPiece call. */
+  const resolveGetPiece = () => pendingPieces.shift()?.();
 
   /** A nested handler stream whose own ref schema carries the stream tag. */
   const streamHandle = (name: string): CellHandle =>
@@ -2991,9 +3588,10 @@ function statefulPiece(
     cell,
     requests,
     counters,
+    getPieceCalls,
     streamHandle,
     handlerHandle,
-    resolveGetPage,
+    resolveGetPiece,
     rt,
   };
 }
@@ -3045,11 +3643,11 @@ describe("the data panel", () => {
   });
 
   it("reports a data read that failed", async () => {
-    const piece = statefulPiece({ getPageFails: true });
+    const piece = statefulPiece({ getPieceFails: true });
     const menu = openMenu(piece.cell);
     await menu.showPanel("data");
 
-    expect(shows(menu)).toContain("no page for this piece");
+    expect(shows(menu)).toContain("no piece handle for this piece");
   });
 });
 
@@ -3272,7 +3870,7 @@ describe("the actions panel", () => {
 
 describe("piece-state read lifecycle", () => {
   it("a refresh during a pending read drops the older read entirely", async () => {
-    const piece = statefulPiece({ deferGetPage: true });
+    const piece = statefulPiece({ deferGetPiece: true });
     await piece.cell.set({ value: "current" });
     const menu = openMenu(piece.cell);
 
@@ -3280,9 +3878,9 @@ describe("piece-state read lifecycle", () => {
     menu.refreshData();
     // The OLDER read resolves after the refresh started a newer one; it must
     // not install a second subscription or overwrite anything.
-    piece.resolveGetPage();
+    piece.resolveGetPiece();
     await first;
-    piece.resolveGetPage();
+    piece.resolveGetPiece();
     await Promise.resolve();
 
     expect(piece.counters.subscribes).toBe(1);
@@ -3291,12 +3889,12 @@ describe("piece-state read lifecycle", () => {
   });
 
   it("a read resolving after disconnect installs nothing", async () => {
-    const piece = statefulPiece({ deferGetPage: true });
+    const piece = statefulPiece({ deferGetPiece: true });
     const menu = openMenu(piece.cell);
 
     const pending = menu.showPanel("data");
     menu.disconnectedCallback();
-    piece.resolveGetPage();
+    piece.resolveGetPiece();
     await pending;
 
     expect(piece.counters.subscribes).toBe(0);
@@ -3550,23 +4148,41 @@ describe("describeOrigin", () => {
       describeOrigin({ url: "cf:pattern:x", kind: "fabric-pattern" }).label,
     ).toBe("Exact pattern");
     expect(
-      describeOrigin({ url: "https://example.test/p.tsx", kind: "web" }).label,
-    ).toBe("External web URL");
+      describeOrigin({
+        url: "https://t.test/api/patterns/p.tsx",
+        kind: "system",
+      })
+        .label,
+    ).toBe("Deployment pattern");
   });
 
   it("says what each kind of origin can do", () => {
-    expect(describeOrigin({ url: "https://e.test/p.tsx", kind: "web" }).detail)
-      .toContain("can return new source later");
+    expect(
+      describeOrigin({
+        url: "https://t.test/api/patterns/p.tsx",
+        kind: "system",
+      })
+        .detail,
+    ).toContain("a new release of the deployment can replace it");
     expect(
       describeOrigin({ url: "cf:pattern:x", kind: "fabric-pattern" }).detail,
     ).toContain("always resolves to");
   });
 });
 
-describe("shortIdentity", () => {
-  it("abbreviates a content identity but keeps short values whole", () => {
-    expect(shortIdentity("abcdefghijklmnopqrstuvwxyz")).toBe("abcdefghijkl…");
-    expect(shortIdentity("abcdef")).toBe("abcdef");
+describe("patternRefLabel", () => {
+  it("names the export as an identifier rather than as prose", () => {
+    expect(patternRefLabel({ identity: "short", symbol: "default" })).toBe(
+      'short (export symbol "default")',
+    );
+  });
+
+  it("abbreviates the identity unless the whole value is asked for", () => {
+    const ref = { identity: "abcdefghijklmnopqrstuvwxyz", symbol: "main" };
+    expect(patternRefLabel(ref)).toBe('abcdefghijkl… (export symbol "main")');
+    expect(patternRefLabel(ref, { whole: true })).toBe(
+      'abcdefghijklmnopqrstuvwxyz (export symbol "main")',
+    );
   });
 });
 
@@ -3709,22 +4325,7 @@ describe("describeFollowState", () => {
     expect(refusal("argument-mismatch").canForce).toBe(false);
   });
 
-  it("separates an origin nothing follows from one nothing has looked at", () => {
-    const unsupported = describeFollowState({
-      ...SOURCE,
-      reconciliation: {
-        outcome: "unsupported",
-        at: 1,
-        origin: SOURCE.origin!.url,
-      },
-    });
-    expect(unsupported.state).toBe("unsupported");
-    expect(unsupported.summary).toContain("Nothing follows this kind");
-    // Asking by hand is the only thing that resolves such an origin, so it
-    // is offered; there is no check that failed for an override to ignore.
-    expect(unsupported.canUpdate).toBe(true);
-    expect(unsupported.canForce).toBe(false);
-
+  it("reports a piece nothing has looked at as unknown", () => {
     expect(describeFollowState(SOURCE).state).toBe("unknown");
   });
 
@@ -3762,14 +4363,6 @@ describe("what the source-updates box offers", () => {
       },
     }, { box: false, update: false, force: false }],
     ["unknown", SOURCE, { box: true, update: true, force: false }],
-    ["an origin whose kind nothing follows", {
-      ...SOURCE,
-      reconciliation: {
-        outcome: "unsupported",
-        at: 1,
-        origin: SOURCE.origin!.url,
-      },
-    }, { box: true, update: true, force: false }],
     ["unreachable", {
       ...SOURCE,
       reconciliation: {

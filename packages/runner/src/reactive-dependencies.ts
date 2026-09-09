@@ -1,8 +1,5 @@
 import { isObjectOrArray, isPlainContainer } from "@commonfabric/utils/types";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";

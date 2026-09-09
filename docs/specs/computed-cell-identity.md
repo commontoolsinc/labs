@@ -194,7 +194,7 @@ Rules:
   key subscriptions or caches on scheme-stripped ids. `toURI(value, kind)`
   throws when handed a kind alongside an already-schemed string — an
   existing identity is never re-schemed. The one sanctioned stripped form
-  is `PageHandle.id()` (runtime-client): a piece-root ROUTING/DISPLAY
+  is `PieceHandle.id()` (runtime-client): a piece-root ROUTING/DISPLAY
   accessor whose consumers are shell URLs, `cf-piece` lookups, and
   favorites equality against URL-derived bare pieceIds. It strips `of:`
   only (a `computed:` scheme stays visible), and piece roots are minted
@@ -585,7 +585,7 @@ changes here:
   analysis (`capability-analysis.ts`) is the natural place to detect the
   calls, including through module-scope helpers via its interprocedural
   summaries.
-- Deferred tooling gap: `SchedulerGraphView.extractEntityId` (shell) groups
+- Deferred tooling gap: `XSchedulerGraph.#extractEntityId` (shell) groups
   graph nodes by scheme-stripped entity id, so an `of:` doc and a
   `computed:` doc minted from the same cause would be conflated into one
   group in the debug graph. This is more than cosmetic debt: the scheduler

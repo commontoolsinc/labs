@@ -1,11 +1,14 @@
 import {
   Default,
   type FabricBytes,
+  handler,
   NAME,
   pattern,
   type PerSpace,
+  type Stream,
   UI,
   type VNode,
+  Writable,
 } from "commonfabric";
 
 /**
@@ -17,6 +20,16 @@ import {
  * boundary and nothing the pattern did to the value.
  */
 
+export interface SetWeirdEvent {
+  weird?: number;
+}
+
+const setWeird = handler<SetWeirdEvent, {
+  weird: Writable<Default<number, 0>>;
+}>(({ weird: next }, { weird }) => {
+  if (typeof next === "number") weird.set(next);
+});
+
 export interface FabricValueEchoInput {
   bytes?: PerSpace<FabricBytes | undefined>;
   weird?: PerSpace<Default<number, 0>>;
@@ -27,6 +40,9 @@ export interface FabricValueEchoOutput {
   [UI]: VNode;
   bytes?: PerSpace<FabricBytes | undefined>;
   weird: PerSpace<Default<number, 0>>;
+
+  /** A stream, which a result schema declares a cell. */
+  setWeird: Stream<SetWeirdEvent>;
 }
 
 export default pattern<FabricValueEchoInput, FabricValueEchoOutput>(
@@ -39,5 +55,6 @@ export default pattern<FabricValueEchoInput, FabricValueEchoOutput>(
     ),
     bytes,
     weird,
+    setWeird: setWeird({ weird }),
   }),
 );

@@ -20,7 +20,6 @@ import {
   commitGanttUrl,
   labsCiDuration,
   loomCiDuration,
-  median,
   renderGantt,
   renderGanttRoute,
 } from "./ci-duration.ts";
@@ -828,15 +827,3 @@ Deno.test("ci-duration measures from landing through completion", async () => {
   assertEquals(view.value, "15m");
 });
 
-Deno.test("ci-duration: an even window takes the mean of the two middle runs", () => {
-  // The default window is 20 runs, so even is the normal case. Taking the upper
-  // middle alone reports a duration no run had, and always the higher of the pair.
-  assertEquals(median([2, 4, 6, 8]), 5);
-  assertEquals(median([2, 4, 6, 10]), 5);
-  assertEquals(median([1, 2, 3]), 2); // odd is the middle run itself
-  assertEquals(median([7]), 7);
-  assertEquals(median([]), 0);
-  // The shape that made this matter: 20 runs where the two middle values differ.
-  const twenty = Array.from({ length: 20 }, (_, i) => i + 1); // 1..20
-  assertEquals(median(twenty), 10.5); // not 11
-});

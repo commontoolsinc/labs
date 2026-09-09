@@ -1,7 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { listObjects, parseReportGroups, readObject } from "./store-reader.ts";
+import {
+  listObjects,
+  listObjectSizes,
+  parseReportGroups,
+  readObject,
+} from "./store-reader.ts";
 import { buildObjectBody, type RunContext, type TestRecord } from "./schema.ts";
 
 const RECORD: TestRecord = {
@@ -57,6 +62,21 @@ describe("store-reader", () => {
       expect(urls[1]).toContain("pageToken=t2");
     });
 
+    it("skips a listing item that names no object", async () => {
+      const names = await listObjects({
+        bucket: "cf-ci-metadata",
+        prefix: "labs/test-records/",
+        fetch: (() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({ items: [{ name: "a" }, {}, { name: "b" }] }),
+              { status: 200 },
+            ),
+          )) as typeof fetch,
+      });
+      expect(names).toEqual(["a", "b"]);
+    });
+
     it("throws for an error status", async () => {
       await expect(listObjects({
         bucket: "b",
@@ -66,6 +86,37 @@ describe("store-reader", () => {
             new Response("nope", { status: 500 }),
           )) as typeof fetch,
       })).rejects.toThrow("HTTP 500");
+    });
+  });
+
+  describe("listObjectSizes()", () => {
+    const listing = (items: unknown[]): typeof fetch =>
+      (() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ items }), { status: 200 }),
+        )) as typeof fetch;
+
+    it("gives each object's stored size, sorted by name", async () => {
+      const listed = await listObjectSizes({
+        bucket: "cf-ci-metadata",
+        prefix: "labs/test-records/",
+        fetch: listing([
+          { name: "b", size: "4096" },
+          { name: "a", size: "17" },
+        ]),
+      });
+      expect(listed).toEqual([
+        { name: "a", size: 17 },
+        { name: "b", size: 4096 },
+      ]);
+    });
+
+    it("throws for an object the listing gave no size for", async () => {
+      await expect(listObjectSizes({
+        bucket: "cf-ci-metadata",
+        prefix: "labs/test-records/",
+        fetch: listing([{ name: "a", size: "17" }, { name: "b" }]),
+      })).rejects.toThrow("gave no size for b");
     });
   });
 

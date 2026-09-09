@@ -1,15 +1,16 @@
 import {
+  type DebugValueOptions,
+  type FabricPlainObject,
+  type FabricValue,
+  toCompactDebugString,
+  valueEqual,
+} from "@commonfabric/data-model";
+import {
   extractDataUriPayloadText,
   isDataUriMediaType,
   isFabricDataUri,
   valueFromDataUriPayloadText,
-} from "@commonfabric/data-model/data-uri-codec";
-import {
-  type FabricPlainObject,
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+} from "@commonfabric/data-model/codec-data-uri";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -371,6 +372,18 @@ export const TypeMismatchError = (
   },
 });
 
+/**
+ * Rendering options for the two values an inconsistency message compares:
+ * arrays, objects, and strings whole, so that a change past the renderer's
+ * default limits shows as a difference rather than as two identical
+ * renderings.
+ */
+const INCONSISTENCY_RENDER_OPTIONS: DebugValueOptions = {
+  maxArrayLength: Infinity,
+  maxProperties: Infinity,
+  maxStringLines: Infinity,
+};
+
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
   expected?: FabricValue;
@@ -384,9 +397,9 @@ export const StateInconsistency = (source: {
     }"`,
     space ? ` in space "${space}"` : "",
     ` hash changed. Previously it used to be:\n `,
-    toCompactDebugString(expected),
+    toCompactDebugString(expected, INCONSISTENCY_RENDER_OPTIONS),
     "\n and currently it is:\n ",
-    toCompactDebugString(actual),
+    toCompactDebugString(actual, INCONSISTENCY_RENDER_OPTIONS),
   ].join("");
 
   return {

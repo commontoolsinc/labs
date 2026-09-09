@@ -141,6 +141,86 @@ describe("executePieceCallable", () => {
     ).rejects.toThrow('Callable "missing" not found');
   });
 
+  it("bootstraps the space root before resolving, help page included", async () => {
+    // The dispatch arm of `loadPieceForCallables`, pinned from the outside:
+    // a verb that creates a piece registers it through the root's `addPiece`
+    // stream, so dispatch starts the root that `verbs`/`describe` skip. A
+    // help page rides the same path because resolution precedes parsing.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+    });
+    const order: string[] = [];
+    const manager = {
+      ...harness.pieces,
+      ensureDefaultPattern: () => {
+        order.push("ensureDefaultPattern");
+        return Promise.resolve();
+      },
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve(harness.piece);
+      },
+    };
+
+    const executed = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      ["--help"],
+      { loadPieces: () => Promise.resolve(manager as never) },
+    );
+
+    expect(order).toEqual(["ensureDefaultPattern", "get:fid1:piece-123:true"]);
+    expect(executed.helpText).toContain("refresh");
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
+  it("reports a bootstrap that would not run through the sink a caller supplied", async () => {
+    // The one warning on the dispatch path that no other seam carries: the
+    // root's bootstrap failed and the call goes on anyway. A caller drawing
+    // its own screen takes it here rather than finding it written behind the
+    // frame, and a caller that names no sink still gets it on the process's
+    // own stream.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+    });
+    const reported: string[] = [];
+    const manager = {
+      ...harness.pieces,
+      ensureDefaultPattern: () => Promise.reject(new Error("no root")),
+      get: () => Promise.resolve(harness.piece),
+    };
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      ["--help"],
+      {
+        loadPieces: () => Promise.resolve(manager as never),
+        report: (message) => {
+          reported.push(message);
+        },
+      },
+    );
+
+    expect(reported).toEqual([
+      "Warning: Could not ensure default pattern: no root",
+    ]);
+  });
+
   it("preserves plain-text mode while resolving a callable", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -299,14 +379,15 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  // The schema below is the deployed shape a stream's event is routinely
-  // written in: a top-level local $ref with the stream marker. The arg
-  // parser reads the definition's fields, so absence is refused where the
-  // caller can act on it — naming the type to supply — rather than deeper in
-  // at the payload gate. Either way nothing dispatches; what this pins is
-  // that the id survives a refusal, so the retry that does send a payload
-  // can still use it.
   it("refuses an absent payload against a verb that provably cannot run without one", async () => {
+    // The schema below is the deployed shape a stream's event is routinely
+    // written in: a top-level local $ref with the stream marker. The arg
+    // parser reads the definition's fields, so absence is refused where the
+    // caller can act on it — naming the type to supply — rather than deeper in
+    // at the payload gate. Either way nothing dispatches; what this pins is
+    // that the id survives a refusal, so the retry that does send a payload
+    // can still use it.
+
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "recordMessage",
@@ -352,13 +433,14 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  // A $ref-carrying stream shape declares its fields in the definition, and
-  // the arg parser reads them there — so a bare call takes the same
-  // implicit-pipe path as the identical verb written without the
-  // indirection ("infers piped stdin for object handlers", below). Piped
-  // bytes reach a verb through this shape; how the schema spells its event
-  // is not something a caller should have to know to pipe into it.
   it("infers piped stdin for a bare $ref-stream verb call", async () => {
+    // A $ref-carrying stream shape declares its fields in the definition, and
+    // the arg parser reads them there — so a bare call takes the same
+    // implicit-pipe path as the identical verb written without the
+    // indirection ("infers piped stdin for object handlers", below). Piped
+    // bytes reach a verb through this shape; how the schema spells its event
+    // is not something a caller should have to know to pipe into it.
+
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "recordMessage",
@@ -938,6 +1020,50 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
+  it("reads the words past the marker as a projection whatever the verb declares", async () => {
+    // `record` declares a `select` field and the read step owns `--select`,
+    // and the two vocabularies stay independent: past the marker the word is
+    // the read step's, so the line carries no verb input and the ordinary
+    // parse says so. Nothing here weighs the two readings against each other.
+    const declaring = () =>
+      createPieceCallableHarness({
+        callableKind: "handler",
+        cellKey: "record",
+        inputSchema: {
+          type: "object",
+          properties: { select: { type: "string" } },
+          required: ["select"],
+        },
+      });
+    const config = {
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      piece: "fid1:piece-123",
+      space: "home",
+    };
+
+    const bare = declaring();
+    await expect(executePieceCallable(config, "record", [], {
+      loadPieces: () => Promise.resolve(bare.pieces),
+      loadPiece: () => Promise.resolve(bare.piece),
+      isStdinTerminal: () => true,
+    })).rejects.toThrow(/Handler requires input/);
+    expect(bare.tracker.handlerWrites).toStrictEqual([]);
+
+    // And a pipe is input, so the same line dispatches: the projection was
+    // never the verb's to read, and stdin fills the section it left empty.
+    const piped = declaring();
+    await executePieceCallable(config, "record", [], {
+      loadPieces: () => Promise.resolve(piped.pieces),
+      loadPiece: () => Promise.resolve(piped.piece),
+      isStdinTerminal: () => false,
+      readTextInput: () => Promise.resolve('{"select":"input"}'),
+    });
+    expect(piped.tracker.handlerWrites).toStrictEqual([
+      { cellProp: "result", path: ["record"], value: { select: "input" } },
+    ]);
+  });
+
   it("renders help under the canonical spelling when no mount names itself", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
@@ -979,25 +1105,25 @@ describe("executePieceCallable", () => {
     // mount to name must not teach the deprecated one. Each mount passes its
     // own spelling as helpCommandPrefix.
     expect(result.helpText).toContain(
-      "cf call ... search --help",
+      "cf piece call ... search --help",
     );
     expect(result.helpText).toContain(
-      "cf call ... search -- [run] --query <string>",
+      "cf piece call ... search [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
     );
     expect(result.helpText).toContain(
-      "cf call ... search --json [<json>]",
+      "cf piece call ... search --json [<json>]",
     );
     expect(result.helpText).toContain("query: string");
-    expect(result.helpText).toContain("Flags after `--`:");
+    expect(result.helpText).toContain("Flags:");
     expect(result.helpText).not.toContain(
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "cf call ... search -- [run] --help",
+      "cf piece call ... search [run] --help",
     );
     expect(result.helpText).not.toContain("cf exec");
   });
@@ -1449,6 +1575,7 @@ function createPieceCallableHarness(options: {
    * nothing reaches the runtime error log: the reason on the transaction is
    * the whole signal. */
   abortedWithReason?: string;
+
   callableScope?: "space" | "user" | "session";
 
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
@@ -1664,6 +1791,9 @@ function createPieceCallableHarness(options: {
       },
       edit: () => ({
         commit: async () => {},
+        // The real transaction reports one, and the write receipt reads it
+        // rather than treating a resolved `commit()` as proof of a write.
+        status: () => ({ status: "done", journal: { novelty: () => [] } }),
       }),
       prepareTxForCommit: () => {},
       settled: () => Promise.resolve(),
@@ -1917,30 +2047,30 @@ describe("forced-stream fallback dispatch", () => {
   });
 });
 
-describe("piece call stdin payloads", () => {
+describe("call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(
-      pieceCallInvocation(["--json", '{"query":"milk"}'], []),
+      pieceCallInvocation(["--json", '{"query":"milk"}']),
     ).toEqual({
       rawArgs: ["--json", '{"query":"milk"}'],
       jsonOutput: true,
     });
     expect(
-      pieceCallInvocation([], ["--json-file", "/tmp/input.json"]),
+      pieceCallInvocation(["--json-file", "/tmp/input.json"]),
     ).toEqual({
       rawArgs: ["--json-file", "/tmp/input.json"],
       jsonOutput: true,
     });
-    expect(pieceCallInvocation([], ["run", "--json", "{}"])).toEqual({
+    expect(pieceCallInvocation(["run", "--json", "{}"])).toEqual({
       rawArgs: ["run", "--json", "{}"],
       jsonOutput: true,
     });
-    expect(pieceCallInvocation([], ["--query", "--json"])).toEqual({
+    expect(pieceCallInvocation(["--query", "--json"])).toEqual({
       rawArgs: ["--query", "--json"],
       jsonOutput: false,
     });
     expect(
-      pieceCallInvocation([], ["invoke", "--query", "--json"]),
+      pieceCallInvocation(["invoke", "--query", "--json"]),
     ).toEqual({
       rawArgs: ["invoke", "--query", "--json"],
       jsonOutput: false,
@@ -2390,40 +2520,53 @@ describe("piece call stdin payloads", () => {
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {
-    expect(pieceCallRawArgs(["-"], [])).toEqual(["--json-file", "-"]);
-  });
-
-  it("forwards explicit two-token stdin sentinels instead of rejecting them", () => {
-    // `cf piece call h --json-file -` (and the --value-file / --json variants)
-    // should read stdin, matching `cf exec` and the bare "-" form, rather than
-    // hitting the multi-argument rejection.
-    expect(pieceCallRawArgs(["--json-file", "-"], [])).toEqual([
+    expect(pieceCallRawArgs(["-"])).toEqual(["--json-file", "-"]);
+    // Behind the verb keyword the payload is still the one positional it is,
+    // and the keyword stays where the caller wrote it.
+    expect(pieceCallRawArgs(["invoke", "-"])).toEqual([
+      "invoke",
       "--json-file",
       "-",
     ]);
-    expect(pieceCallRawArgs(["--value-file", "-"], [])).toEqual([
+  });
+
+  it("forwards the callable's own flags to its parser untranslated", () => {
+    // The verb opened the section, so everything in it is the verb's
+    // vocabulary and reaches its parser as written — including the file paths
+    // and stdin sentinels that used to need a marker in front of them.
+    expect(pieceCallRawArgs(["--json-file", "-"])).toEqual([
+      "--json-file",
+      "-",
+    ]);
+    expect(pieceCallRawArgs(["--value-file", "-"])).toEqual([
       "--value-file",
       "-",
     ]);
-    expect(pieceCallRawArgs(["--json", "-"], [])).toEqual(["--json", "-"]);
-    // A file path (not "-") still requires "--"; it is not a stdin sentinel.
-    expect(() => pieceCallRawArgs(["--json-file", "/p.json"], [])).toThrow(
-      /single inline JSON argument or "--"/,
-    );
+    expect(pieceCallRawArgs(["--json", "-"])).toEqual(["--json", "-"]);
+    expect(pieceCallRawArgs(["--json-file", "/p.json"])).toEqual([
+      "--json-file",
+      "/p.json",
+    ]);
+    expect(pieceCallRawArgs(["--query", "milk", "--limit", "5"])).toEqual([
+      "--query",
+      "milk",
+      "--limit",
+      "5",
+    ]);
   });
 
-  it("rejects a payload token combined with post-`--` flags instead of dropping it", () => {
-    // `cf piece call h - -- --query milk` → tail=["-"], literalArgs=["--query",
-    // "milk"]. The "-" used to be silently ignored (post-`--` flags win); now
-    // the conflict is loud.
-    expect(() => pieceCallRawArgs(["-"], ["--query", "milk"])).toThrow(
-      /payload argument .* or .* schema-derived flags after/,
-    );
-    expect(() => pieceCallRawArgs(['{"x":1}'], ["--query", "milk"])).toThrow(
-      /not both/,
-    );
-    // The legit "flags after -- only" shape (tail empty) still passes through.
-    expect(pieceCallRawArgs([], ["--query", "milk"])).toEqual([
+  it("forwards a payload written beside flags rather than translating it", () => {
+    // `cf piece call ... search '{"x":1}' --query milk` names its input twice. The
+    // verb's own parser owns both spellings, so it is the door that refuses
+    // them together — this one does not translate the payload and so does not
+    // hide the second spelling from it.
+    expect(pieceCallRawArgs(['{"x":1}', "--query", "milk"])).toEqual([
+      '{"x":1}',
+      "--query",
+      "milk",
+    ]);
+    expect(pieceCallRawArgs(["-", "--query", "milk"])).toEqual([
+      "-",
       "--query",
       "milk",
     ]);
@@ -2541,7 +2684,7 @@ describe("piece call stdin payloads", () => {
   });
 });
 
-describe("piece call wait control", () => {
+describe("call wait control", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3137,6 +3280,7 @@ describe("collectInvocationResultLinks", () => {
 
   /** The space the call targeted: an address in it carries no `@did`. */
   const contextSpace = "did:key:test-home" as MemorySpace;
+
   const receiptRef = "/of:receipt-1";
 
   it("yields just the receipt for a plain-JSON-only result", () => {
@@ -3402,7 +3546,7 @@ describe("collectInvocationResultLinks", () => {
   });
 });
 
-describe("piece call --show-links", () => {
+describe("call --show-links", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3618,7 +3762,7 @@ function recordingSelector(answer: unknown) {
   return { calls, derive };
 }
 
-describe("piece call selection", () => {
+describe("call selection", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3639,7 +3783,7 @@ describe("piece call selection", () => {
   };
 
   it("points the shared selection step at the receipt the result came from", async () => {
-    // The whole of C2: a call reaches the same step `cf piece get` reads
+    // The whole of C2: a call reaches the same step `cf cell get` reads
     // through, pointed at the cell the value was read from — so the shaped
     // answer carries the source's own links rather than a copy of a copy.
     const receiptCell = {
@@ -3900,7 +4044,7 @@ describe("piece call selection", () => {
       ).toBeDefined();
     });
 
-    it("parses through the same grammar `cf piece get` reads", async () => {
+    it("parses through the same grammar `cf cell get` reads", async () => {
       expect(await parsePieceCallSelection({})).toBeUndefined();
       const selection = await parsePieceCallSelection({
         filter: ".done == false",
@@ -3916,10 +4060,10 @@ describe("piece call selection", () => {
 
     it("reports a malformed selection without naming an invocation to retry", async () => {
       const { code, stderr } = await cf(
-        "piece call " +
+        "call " +
           "--identity ./definitely-missing-piece-call-review.key " +
           "--api-url https://cf.dev --space common-knowledge " +
-          "--piece fid1:piece-123 --select a..b addTopic",
+          "--piece fid1:piece-123 addTopic -- --select a..b",
       );
       const errors = stripAnsi(stderr.join("\n"));
       expect(code).toBe(1);
@@ -3938,7 +4082,7 @@ const selectionSigner = await Identity.fromPassphrase(
   "cf-piece-call-selection",
 );
 
-describe("piece call over a live runtime", () => {
+describe("call over a live runtime", () => {
   const signer = selectionSigner;
   const space = signer.did();
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -3950,8 +4094,6 @@ describe("piece call over a live runtime", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
       errorHandlers: [
         (error) => runtimeErrors.push({ message: error.message }),
       ],
@@ -3992,7 +4134,7 @@ describe("piece call over a live runtime", () => {
           onCommit?: (tx: unknown) => void,
         ) =>
           onCommit?.({
-            status: () => ({ status: "done" }),
+            status: () => ({ status: "done", journal: { novelty: () => [] } }),
             handlingReceiptLink,
           }),
       } as unknown as Cell<any>,
@@ -4065,8 +4207,9 @@ describe("piece call over a live runtime", () => {
 
   it("returns the address of what a verb returned, in place of its contents", async () => {
     // The `$link` marker reaches a call through the same step, which is what
-    // makes `cf piece call --schema '{"properties":{"topic":{"$link":true}}}'`
-    // — the command's own example — an address a later call can use.
+    // makes `cf piece call ... addTopic <json> -- --schema
+    // '{"properties":{"topic":{"$link":true}}}'` — the command's own example
+    // — an address a later call can use.
     const tx = runtime.edit();
     const topic = runtime.getCell(space, "created-topic", undefined, tx);
     topic.set({ title: "Ship it", body: "the initial document" });
@@ -4142,7 +4285,7 @@ describe("piece call over a live runtime", () => {
     // Resolve the published address through the reference intake `--piece`
     // runs it through — the published form IS that intake's form — and read
     // the cell it names. This covers the address and the intake; it stops
-    // short of the whole `cf piece get` route, which also runs slug
+    // short of the whole `cf cell get` route, which also runs slug
     // resolution and the read-path guards before reaching the same cell.
     const published = parseLink(executed.invocation!.receipt!, { space });
     const collected = runtime.getCellFromEntityId(
@@ -4156,7 +4299,7 @@ describe("piece call over a live runtime", () => {
   });
 });
 
-describe("piece get data errors", () => {
+describe("get data errors", () => {
   it("classifies unresolved-path failures as data errors, not usage errors", () => {
     expect(
       isPieceGetDataError(
@@ -4240,7 +4383,7 @@ describe("piece get data errors", () => {
     // "Path resolves to a handler; use invoke() instead." — so no extra hint
     // rides along (the --input tip would be a wrong remedy for a verb).
     expect(report?.message).toBe(
-      "Path resolves to a verb; use 'cf call --piece fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf piece call --cell fid1:piece-123 addTopic' instead.",
     );
     expect(report?.hint).toBeUndefined();
 
@@ -4253,9 +4396,9 @@ describe("piece get data errors", () => {
     );
     expect(nestedReport?.message).toMatch(/not directly callable/);
     expect(nestedReport?.message).toMatch(
-      /cf piece verbs --piece fid1:piece-123/,
+      /cf piece verbs --cell fid1:piece-123/,
     );
-    expect(nestedReport?.message).not.toContain("cf call");
+    expect(nestedReport?.message).not.toContain("cf piece call");
     expect(nestedReport?.hint).toBeUndefined();
 
     // Threaded through the shared data-error exit: stderr message, exit 1.
@@ -4272,7 +4415,7 @@ describe("piece get data errors", () => {
       })
     ).toThrow("exit-sentinel");
     expect(printed).toEqual([
-      "Path resolves to a verb; use 'cf call --piece fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf piece call --cell fid1:piece-123 addTopic' instead.",
     ]);
     expect(exited).toEqual([1]);
   });
@@ -4305,7 +4448,7 @@ describe("piece link data errors", () => {
   });
 });
 
-describe("piece call input errors", () => {
+describe("call input errors", () => {
   it("reports the rejection with a pointer at the verb listing", () => {
     const report = verbInputErrorReport(
       new VerbInputValidationError(
@@ -4376,11 +4519,12 @@ describe("verbInputSchemaError", () => {
       .toBeUndefined();
   });
 
-  // `{}` rather than a misspelling, so this reaches the schema validation
-  // rather than the undeclared-field refusal that now precedes it — a
-  // misspelled required property is BOTH, and it is refused as the undeclared
-  // field it is (verb-undeclared-field.test.ts).
   it("rejects a missing required property", () => {
+    // `{}` rather than a misspelling, so this reaches the schema validation
+    // rather than the undeclared-field refusal that now precedes it — a
+    // misspelled required property is BOTH, and it is refused as the undeclared
+    // field it is (verb-undeclared-field.test.ts).
+
     expect(verbInputSchemaError({}, objectSchema)).toMatch(/message/);
   });
 
@@ -4398,13 +4542,14 @@ describe("verbInputSchemaError", () => {
     expect(verbInputSchemaError({ anything: 1 }, true)).toBeUndefined();
   });
 
-  // The runtime injects a property's default when the payload omits it, so
-  // requiring it here would refuse a call the verb would have accepted. This
-  // pins that the gate APPLIES the relaxation; the relaxation's own semantics
-  // ($ref chains, combinators, cycles, the `definitions` refusal) are pinned
-  // where the helpers live (runner `cfc-defaulted-required-relaxation.test.ts`
-  // — verb contract D6).
   it("treats a defaulted property as satisfied when omitted", () => {
+    // The runtime injects a property's default when the payload omits it, so
+    // requiring it here would refuse a call the verb would have accepted. This
+    // pins that the gate APPLIES the relaxation; the relaxation's own semantics
+    // ($ref chains, combinators, cycles, the `definitions` refusal) are pinned
+    // where the helpers live (runner
+    // `cfc-defaulted-required-relaxation.test.ts` — verb contract D6).
+
     expect(verbInputSchemaError({}, {
       type: "object",
       properties: { mode: { type: "string", default: "fast" } },
@@ -4473,10 +4618,11 @@ describe("normalizeAbsentVerbPayload", () => {
     expect(normalizeAbsentVerbPayload(undefined, true)).toBeUndefined();
   });
 
-  // An absent payload must keep passing a `false` schema — a supplied one is
-  // already refused by the validator ("schema rejects all values"), and
-  // normalizing here would convert every call into that refusal.
   it("leaves absence alone against a boolean false schema", () => {
+    // An absent payload must keep passing a `false` schema — a supplied one is
+    // already refused by the validator ("schema rejects all values"), and
+    // normalizing here would convert every call into that refusal.
+
     expect(normalizeAbsentVerbPayload(undefined, false)).toBeUndefined();
   });
 
@@ -4489,9 +4635,10 @@ describe("normalizeAbsentVerbPayload", () => {
     })).toBeUndefined();
   });
 
-  // Refuse only on proof: a $ref nobody can resolve proves nothing about the
-  // event being an object, so absence keeps today's pass-through behavior.
   it("leaves absence alone when the top-level $ref cannot be resolved", () => {
+    // Refuse only on proof: a $ref nobody can resolve proves nothing about the
+    // event being an object, so absence keeps today's pass-through behavior.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       $ref: "#/$defs/Absent",
       asCell: ["stream"],
@@ -4499,10 +4646,11 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
-  // A boolean definition is a resolvable target that still proves nothing
-  // about the event being an object — absence passes through, like any other
-  // non-object target.
   it("leaves absence alone when the top-level $ref names a boolean def", () => {
+    // A boolean definition is a resolvable target that still proves nothing
+    // about the event being an object — absence passes through, like any other
+    // non-object target.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       $ref: "#/$defs/Anything",
       asCell: ["stream"],
@@ -4510,12 +4658,13 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
-  // An allOf conjunction with an object-schema branch IS an object schema —
-  // no branch choice is involved, so `{}` is exactly as meaningful as for a
-  // direct object root, and the gate then judges it the same way (refused
-  // when non-defaulted required survives relaxation, dispatched with defaults
-  // engaging when it does not).
   it("normalizes absence to {} against an allOf of object schemas", () => {
+    // An allOf conjunction with an object-schema branch IS an object schema —
+    // no branch choice is involved, so `{}` is exactly as meaningful as for a
+    // direct object root, and the gate then judges it the same way (refused
+    // when non-defaulted required survives relaxation, dispatched with defaults
+    // engaging when it does not).
+
     expect(normalizeAbsentVerbPayload(undefined, {
       allOf: [
         {
@@ -4539,10 +4688,11 @@ describe("normalizeAbsentVerbPayload", () => {
     } as unknown as JSONSchema)).toEqual({});
   });
 
-  // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
-  // boundary): normalizing `{}` against anyOf/oneOf would pick among
-  // alternatives on the caller's behalf.
   it("leaves absence alone against anyOf/oneOf roots", () => {
+    // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
+    // boundary): normalizing `{}` against anyOf/oneOf would pick among
+    // alternatives on the caller's behalf.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       anyOf: [{ type: "object", properties: {} }],
     } as unknown as JSONSchema)).toBeUndefined();
@@ -4551,10 +4701,11 @@ describe("normalizeAbsentVerbPayload", () => {
     } as unknown as JSONSchema)).toBeUndefined();
   });
 
-  // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
-  // type and no properties) is not an object schema; `{}` means nothing
-  // there.
   it("leaves absence alone against a schema-less stream marker", () => {
+    // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
+    // type and no properties) is not an object schema; `{}` means nothing
+    // there.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       asCell: ["stream"],
     } as JSONSchema)).toBeUndefined();
@@ -4613,10 +4764,11 @@ describe("reportVerbInputErrorOrRethrow", () => {
     expect(printed[1]).toMatch(/<piece>/);
   });
 
-  // Anything that is not an input rejection has to keep traveling: a network
-  // failure reported as a payload problem would send an agent to fix a payload
-  // that was fine.
   it("re-throws an unrelated failure untouched", () => {
+    // Anything that is not an input rejection has to keep traveling: a network
+    // failure reported as a payload problem would send an agent to fix a
+    // payload that was fine.
+
     const { printed, exited, deps } = sink();
     const original = new Error("network unreachable");
 
@@ -4680,10 +4832,11 @@ describe("the pre-dispatch gate on the forced-stream path", () => {
 });
 
 describe("runtimeErrorLog", () => {
-  // Pinned directly rather than left to incidental coverage: which execution
-  // paths hand this a non-object runtime varies by run and sharding, and the
-  // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
   it("returns [] for non-object runtimes and runtimes without a log", () => {
+    // Pinned directly rather than left to incidental coverage: which execution
+    // paths hand this a non-object runtime varies by run and sharding, and the
+    // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
+
     expect(runtimeErrorLog(undefined)).toEqual([]);
     expect(runtimeErrorLog("not a runtime")).toEqual([]);
     expect(runtimeErrorLog({})).toEqual([]);
@@ -4703,6 +4856,7 @@ describe("schemaIsObjectShaped", () => {
   // defensive boolean-target guard is unreachable through it, and the
   // combinator boundary this function encodes (allOf conjunctions count,
   // disjunctions never) deserves its own record.
+
   it("rejects boolean schemas and accepts object shapes", () => {
     expect(schemaIsObjectShaped(true, true)).toBe(false);
     expect(schemaIsObjectShaped(false, false)).toBe(false);
@@ -4792,7 +4946,7 @@ describe("renderPieceCallOutcome", () => {
     // bare because the readback runs under the same configured space as the
     // call; `cf exec`, whose space comes from the mount instead, prints the
     // space-carrying canonical form for the same cell.
-    assertStringIncludes(hinted[0], "cf get --piece of:x");
+    assertStringIncludes(hinted[0], "cf cell get --cell of:x");
     expect(hinted[0]).not.toContain("(space did:key:s");
   });
 
@@ -4814,7 +4968,7 @@ describe("renderPieceCallOutcome", () => {
     // space-scoped instance, which is a different cell — so the suffix rides
     // the address rather than sitting in a parenthetical the way the prose
     // form's did.
-    assertStringIncludes(hinted[0], "cf get --piece of:x@user");
+    assertStringIncludes(hinted[0], "cf cell get --cell of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {
@@ -4860,7 +5014,7 @@ describe("renderPieceCallOutcome", () => {
     // address unguessable, and an argument is readable in a process listing.
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf call",
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
     // And it says what the replay costs: the receipt witnesses the commit,
@@ -4891,7 +5045,7 @@ describe("renderPieceCallOutcome", () => {
     assertStringIncludes(hinted[0], "executes and commits AGAIN");
     // And no dangling alternative: there is nothing for an "Or" to be or to.
     expect(hinted[0]).not.toContain("Or replay");
-    assertStringIncludes(hinted[0], "cf get --piece fid1:piece");
+    assertStringIncludes(hinted[0], "cf cell get --cell fid1:piece");
   });
 
   it("leads the detached next steps with the address it published", () => {
@@ -4915,12 +5069,12 @@ describe("renderPieceCallOutcome", () => {
     // Collecting the outcome is a read of the address this call published,
     // and it comes first because it does not run the verb again. The replay
     // stays on offer below it, for a caller that lost the address.
-    assertStringIncludes(hinted[0], "cf get --piece /of:receipt-1");
+    assertStringIncludes(hinted[0], "cf cell get --cell /of:receipt-1");
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf call",
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
     );
-    expect(hinted[0].indexOf("cf get --piece /of:receipt-1"))
+    expect(hinted[0].indexOf("cf cell get --cell /of:receipt-1"))
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
   });
 
@@ -4949,7 +5103,7 @@ describe("renderPieceCallOutcome", () => {
     );
     assertStringIncludes(
       hinted[0],
-      "cf get --piece /of:receipt-1@session",
+      "cf cell get --cell /of:receipt-1@session",
     );
   });
 

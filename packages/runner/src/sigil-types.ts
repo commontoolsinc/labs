@@ -1,9 +1,4 @@
-import type {
-  CellScope,
-  JSONSchema,
-  JSONValue,
-  LinkScope,
-} from "@commonfabric/api";
+import type { JSONSchema, LinkScope } from "@commonfabric/api";
 import {
   LINK_V1_TAG,
   type LinkRef,
@@ -120,54 +115,10 @@ export type SigilLink<P extends CellLinkRefPayload = CellLinkRefPayload> =
   LinkRef<P>;
 
 /**
- * A {@link SigilLink} whose payload is a write redirect (an alias) — its
- * `overwrite` is fixed to `"redirect"`.
+ * A {@link SigilLink} whose payload is a write redirect — its `overwrite` is
+ * fixed to `"redirect"`, so a write through it lands at the target rather
+ * than replacing the link.
  */
 export type SigilWriteRedirectLink = LinkRef<
   CellLinkRefPayload & { overwrite: "redirect" }
 >;
-
-/**
- * `$alias` Pattern binding.
- *
- * These are used in intermediate bindings at runtime and are persisted in
- * saved patterns, like the map op. They are not links: in data, an `$alias`
- * record is a plain value.
- */
-type AliasBindingBase = {
-  path: readonly string[];
-  schema?: JSONSchema;
-};
-
-// Named-cell aliases carry no scope: the referenced argument/result cell's
-// own link determines the scope when the binding is unwrapped.
-type AliasBindingNamedCell = AliasBindingBase & {
-  cell: "result" | "argument";
-  partialCause?: never;
-  scope?: never;
-  defer?: number;
-};
-
-/**
- * These are partial bindings that may not be applicable to the current
- * pattern. We track the defer count, and each time we unwrap bindings,
- * we decrement that. Once it's 0, we know that it's associated with the
- * current pattern, and we can generate real cells based ont the combination
- * of the pattern's result (parent) and the partialCause.
- *
- * `scope` names where the derived internal cell is minted. It is a concrete
- * `CellScope`: "inherit" is never generated (the builder's `cell.export()`
- * filters non-cell scopes), and would mean the same as omitting it.
- */
-type AliasBindingPartialCause = AliasBindingBase & {
-  cell?: never;
-  partialCause: JSONValue;
-  scope?: CellScope;
-  defer?: number;
-};
-
-export type AliasBinding = {
-  $alias:
-    | AliasBindingNamedCell
-    | AliasBindingPartialCause;
-};

@@ -31,6 +31,7 @@ import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
+  type ACL,
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -47,7 +48,6 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
-import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import type { Immutable } from "@commonfabric/utils/types";
 
 import { Cell } from "../cell.ts";
@@ -71,11 +71,24 @@ import type {
   ConsultedPolicyManifest,
   ImplementationIdentity,
   PostCommitSideEffect,
+  RuntimeWritePolicyAuthorization,
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
+import { RAW_META_WRITE } from "../meta-seam.ts";
+import { BaseMemoryAddress } from "../traverse.ts";
+export type {
+  ACL,
+  DID,
+  MediaType,
+  MemorySpace,
+  Result,
+  Signer,
+  State,
+  Unit,
+  URI,
+};
 export type ChangeGroup = unknown;
 
 /**
@@ -267,8 +280,25 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * and names the ACTING user OWNER — the serving identity appears nowhere
    * in the ACL). Absent, the genesis owner is the manager's own signer —
    * the active user on a client, byte-identical to the pre-OW31 shape.
+   *
+   * `options.genesisAcl` is the exact document a fresh space is born with
+   * (its first and only commit; no intermediate default is ever written),
+   * validated by the memory server's genesis admission rather than here.
+   * It is a demand: the open proceeds only if the space is fresh or is
+   * already owned exactly as the document says (grants below OWNER are the
+   * owner's to evolve), and is refused otherwise — never silently entered
+   * under someone else's ACL. It never reaches the home arm.
+   * The signer that will open the space must be granted at least READ by
+   * it. Supplying it together with `owner` in one registration is refused;
+   * a later registration for the same space replaces an earlier one, but
+   * not once the space's first mount has begun. A manager that cannot
+   * bootstrap an ACL refuses it rather than accept a document it would
+   * never write.
    */
-  registerSpaceIdentity?(identity: Signer, options?: { owner?: string }): void;
+  registerSpaceIdentity?(
+    identity: Signer,
+    options?: { owner?: string; genesisAcl?: ACL },
+  ): void;
 
   /**
    * Force `space`'s provider session — and with it any fresh-space ACL
@@ -592,6 +622,27 @@ export interface IStorageProvider {
    */
   synced(): Promise<void>;
 
+  /**
+   * Load the documents `source` read as absent without this replica ever
+   * having examined them (no local record; session-scoped instances
+   * excluded, since a fresh session instance cannot exist server-side), and
+   * resolve with how many turned out to exist.
+   *
+   * An unexamined absence becomes a `seq: 0` confirmed read in the
+   * transaction's commit — the claim that no such document exists — which
+   * the server rejects whenever one does. `Runtime.editWithRetry` consults
+   * this before committing: a non-zero count means the transaction's reads
+   * ran against documents it did not hold, so the attempt is re-run locally
+   * against the now-loaded documents instead of being rejected on the wire.
+   * Returns `0` synchronously when the transaction holds no unexamined
+   * absences, so commit paths that are synchronous stay synchronous.
+   * Optional: a provider without it simply leaves that convergence to the
+   * server's rejection and the retry gate, exactly as before.
+   */
+  loadUnexaminedAbsences?(
+    source: IStorageTransaction | undefined,
+  ): number | Promise<number>;
+
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
    * processing — the serving loop's wave-settle barrier. Both exclusions
@@ -909,6 +960,13 @@ export interface IWriteOptions {
    * from absent. A root-path delete retracts the document.
    */
   delete?: boolean;
+
+  /**
+   * Marks the write as one the runtime makes on a document's meta seam. See
+   * {@link RAW_META_WRITE}: the write chokepoint accepts a write that reaches
+   * a meta field on this mark and refuses one that arrives without it.
+   */
+  readonly [RAW_META_WRITE]?: true;
 }
 
 export interface ITransactionWriteRequest {
@@ -1069,6 +1127,7 @@ export interface IStorageTransaction {
    * transactions.
    */
   setReadOnly?(reason?: string): void;
+
   clearReadOnly?(): void;
   isReadOnly?(): boolean;
 
@@ -1101,6 +1160,7 @@ export interface IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void;
+
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
@@ -1118,8 +1178,10 @@ export interface IStorageTransaction {
    * Make this transaction's writes AUTHORITATIVE: every value write is
    * recorded and committed even when it equals the currently-visible
    * state, instead of being elided as a no-op (deletes of absent slots
-   * stay no-ops — there is nothing to assert). One-way; there is no
-   * un-mark.
+   * stay no-ops — there is nothing to assert). Implies
+   * {@link markWholeDocumentWrites}, so the writes also commit as
+   * whole-document set/delete and the mergeable intents they recorded are
+   * abandoned. One-way; there is no un-mark.
    *
    * Exists for effect-COMPLETION writebacks under the serving posture
    * (server-execution v2 stage G, serving-loop.md §4): the ordinary
@@ -1142,6 +1204,30 @@ export interface IStorageTransaction {
    * (`normalizeAndDiff`), whose equal-leaf elision sits ABOVE the
    * transaction layer and must yield for the same reason. */
   isAuthoritativeWrites?(): boolean;
+
+  /**
+   * Emit this transaction's document writes as WHOLE-DOCUMENT set/delete
+   * operations rather than as patches or mergeable collection ops, while
+   * leaving the no-op elision alone. Recorded mergeable intents are
+   * abandoned with the ops they would have produced, so the reads
+   * incidental to those ops stay in the commit's read set — the
+   * whole-document write is the value the run computed from what it read.
+   * One-way; there is no un-mark. {@link markAuthoritativeWrites} implies
+   * this and additionally disables the elision.
+   *
+   * Exists for the client speculation overlay (server-execution v2 Phase 2,
+   * speculation.md §1): an overlay entry's operations are layered above the
+   * confirmed value and materialized over it on every read. A patch is
+   * relative to the layer beneath it, and that layer moves — the space's
+   * serving runtime commits the authoritative derivation for the same
+   * document, and it arrives before the entry's watermark coverage retires
+   * the entry. A positional array splice re-applied over an array that
+   * already carries what it inserts duplicates that element; one that
+   * removed elements drops one, and a mergeable append double-applies. A
+   * whole-document set says what the run computed, so the entry renders
+   * that value over whatever lies beneath it.
+   */
+  markWholeDocumentWrites?(): void;
 
   /**
    * Record one mergeable-write delta against the document at `address` (see
@@ -1533,6 +1619,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
+
   tx: IStorageTransaction;
 
   /**
@@ -1596,6 +1683,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void;
+
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
@@ -1700,6 +1788,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * threading metadata through intermediate APIs.
    */
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
+
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
@@ -1723,6 +1812,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * after the transaction it was made against has finished.
    */
   markLazyMaterialize(enabled?: boolean): void;
+
   isLazyMaterialize(): boolean;
 
   /**
@@ -1758,6 +1848,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * of the run the same way either way.
    */
   noteSchemaRefusal(refusal: unknown): void;
+
   takeSchemaRefusal(): unknown;
 
   /**
@@ -1849,7 +1940,67 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * contract and to enable the within-sort tiebreaker cache in
    * `compareWritePolicyInput`.
    */
-  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+  recordCfcWritePolicyInput(
+    input: WritePolicyInput,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void;
+
+  /**
+   * Whether `input` was recorded by the runtime, under
+   * `runtimeWritePolicyAuthorization`.
+   *
+   * `recordCfcWritePolicyInput` is on this interface, and pattern-authored
+   * code reaches the transaction its cells are bound to, so an input's own
+   * fields say only what its recorder wrote. A gate that ACTS on an input
+   * asks this; a gate that measures one does not need to.
+   */
+  isRuntimeWritePolicyInput(input: WritePolicyInput): boolean;
+
+  /**
+   * Enroll `target` as a store this runtime owns for `owner`'s piece — a
+   * document it materializes to hold that piece's machinery rather than data
+   * an author named — for as long as that piece's nodes run, rather than for
+   * this transaction alone.
+   *
+   * Enrollment is what a store written outside the transaction that minted it
+   * needs: the runtime instantiates a piece's nodes, and mints a builtin's
+   * state stores, before the reactive updates, event handlers and settled
+   * requests that fill them run. A store minted and filled in one transaction
+   * wants only the write-policy marker.
+   *
+   * `owner` is a `runtimeOwnedStoreOwnerKey` value — per scope instance, since
+   * two scope instances of one causal piece start and stop separately, and
+   * absent for a store outside the owner's own space. A store several pieces
+   * enroll leaves when the last of them releases it.
+   *
+   * Ignored without `runtimeWritePolicyAuthorization`, and ignored for an
+   * address carrying a path: ownership is a claim about a whole store.
+   */
+  enrollRuntimeOwnedStore(
+    target: CfcAddress,
+    owner: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): void;
+
+  /**
+   * Whether the runtime owns the store at `id` in `space` — named by an
+   * authorized whole-document
+   * `CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE` marker on this
+   * transaction, or enrolled by a previous {@link enrollRuntimeOwnedStore}.
+   *
+   * Scope is not an argument — every scoped instance of one causal id is an
+   * instance of the same cell.
+   *
+   * Takes the runtime's mark, like the recorders do: it answers about the
+   * whole runtime rather than this transaction, and every id it knows is
+   * derivable from a piece's cause, so an ungated answer would tell
+   * pattern-authored code whether a given piece is running here.
+   */
+  isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean;
 
   /**
    * Records a grant document consulted by policyState-guarded boundary
@@ -2317,6 +2468,7 @@ export interface INotFoundError extends IStorageError {
 
   /** Path to the non-existent key, or `[]` if the document doesn't exist. */
   readonly path: readonly MemoryAddressPathComponent[];
+
   from(space: MemorySpace): INotFoundError;
 }
 
@@ -2467,6 +2619,7 @@ export type EventAppendRequest = {
   /** Client-minted append order within this session; allocated by the
    * queue when absent. */
   clientSeq?: number;
+
   runtimeInjectedEventKeys?: string[];
 
   /** The runtime's attestation that the sent event was renderer-trusted
@@ -2513,8 +2666,9 @@ export interface ISpaceReplica extends ISpace {
    * on (RULED 2026-08-21; verification-coverage.md OW47, second
    * producer): the verifier verifies the durable policy state the
    * server will enforce against — a speculation layer never reaches
-   * the wire — and the value read here matches the basis `buildReads`
-   * names for such reads (speculative layers excluded). Optional:
+   * the wire — and the value read here matches the basis
+   * `SpaceReplica.#buildReads` names for such reads (speculative layers
+   * excluded). Optional:
    * implementations without a speculation overlay may omit it, and
    * readers fall back to {@link getDocument}, whose view is then
    * identical.
@@ -2738,7 +2892,16 @@ export interface ISpaceReplica extends ISpace {
  */
 export type SealedCommitVerdict =
   | { committed: { seq: number } }
-  | { withdrawn: { message: string; superseded?: true } };
+  | {
+    withdrawn: {
+      message: string;
+      superseded?: true;
+      /** Structured withdrawal classification for consumers that must not
+       * parse diagnostic prose. A contribution drop is retryable in place;
+       * an explicit wave abandon is expected enclosing-lifecycle teardown. */
+      cause?: "contribution-dropped" | "wave-abandoned";
+    };
+  };
 
 /** A replica's handle for one sealed native commit. */
 export interface SealedNativeCommit {

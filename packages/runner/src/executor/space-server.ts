@@ -35,6 +35,7 @@
 // seal; the durable outbound-append rows deliver and retire through
 // the outbox; `memo.*`/`outbox.*` counters are live.
 
+import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   type AdmittedCommitNotice,
   type Server as MemoryServer,
@@ -75,6 +76,7 @@ const EVENT_DEFERRAL_REARM_MS = 250;
  * creation path, while the cost of NO bound is a wedged tenure that
  * keeps its lease. */
 const DEFAULT_ROOT_ENSURE_DEADLINE_MS = 30_000;
+
 import {
   markRuntimeInjectedEventKeys,
   sanitizeRuntimeInjectedEventKeys,
@@ -225,6 +227,7 @@ export type SpaceServerPolicy = {
 
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
+
   renewIntervalMs?: number;
 
   /** OW54's owner-ratified cumulative confirmed failed-state budget. */
@@ -254,6 +257,7 @@ export type SpaceServerPolicy = {
    * a bounded rate instead of once per admission. A successfully
    * committed wave clears the streak. */
   failureParkBackoffBaseMs?: number;
+
   failureParkBackoffMaxMs?: number;
 };
 
@@ -293,6 +297,7 @@ export type SpaceServerOptions = {
    * DEFERRED by the same ruling — this is a whole-instance switch,
    * never a policy about which spaces deserve roots. */
   ensureSpaceRoots?: boolean;
+
   policy?: SpaceServerPolicy;
   onParked?: (reason: string) => void;
 
@@ -437,14 +442,18 @@ export class SpaceServer implements TransactionSealDestination {
    * the LT1 in-process cascade copy (no streamEntry) is a different
    * producer and is deliberately NOT tracked here. */
   readonly #drainInFlight = new Map<string, "queued" | "marked">();
+
   #currentWave: WaveAccumulator | undefined;
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
   #feedArrived: PromiseWithResolvers<void> | undefined;
-  // A shadow flip that fired while no input waiter was installed
-  // (r3739416418): consumed by the next #waitForInput so the wake is
-  // never dropped between cycles.
+
+  /**
+   * Whether a shadow flip fired while no input waiter was installed; consumed
+   * by the next `#waitForInput()` so the wake is never dropped between cycles.
+   */
   #pendingShadowFlipWake = false;
+
   #inputHead = 0;
 
   /** Highest NON-self-echo seq drained — the watermark's advance
@@ -458,6 +467,7 @@ export class SpaceServer implements TransactionSealDestination {
    * quiescence transition — armed only by CONTENT-carrying wave
    * commits, never by its own bookkeeping-only commit. */
   #coverageHead = 0;
+
   #watermark = 0;
 
   /** S1 (RULED 2026-08-19): this loop's own committed wave seqs still
@@ -477,6 +487,7 @@ export class SpaceServer implements TransactionSealDestination {
    * healthy space the prune-at-advance keeps the set near-empty and
    * the bound is never reached. */
   readonly #ownWaveSeqs = new Set<number>();
+
   static readonly #MAX_OWN_WAVE_SEQS = 4096;
 
   /** S1's once-per-quiescence-transition latch: armed when a wave with
@@ -487,6 +498,7 @@ export class SpaceServer implements TransactionSealDestination {
    * #coverageHead comment's commit-storm class stays structurally
    * unreachable. */
   #settleAdvanceOwed = false;
+
   #active = false;
   #loopRunning = false;
   #parkRequested = false;
@@ -556,15 +568,19 @@ export class SpaceServer implements TransactionSealDestination {
    * changed (or a session opened) and the grace elapsed; consumed by the
    * next #waitForInput. */
   #pendingDemandWake = false;
-  // MINOR-1: a monotonic demand-note generation, bumped on every
-  // `noteDemandChanged` (watch OR push-growth). A pass snapshots it at its
-  // row read; if a note lands AFTER that snapshot but while the pass is
-  // still in flight (a straddling pass — the note's change is invisible to
-  // the rows this pass already read), the pass's `.finally` re-latches
-  // `#pendingDemandWake` so the NEXT wait runs a FRESH pass instead of
-  // sleeping out the idle window. Bounded: only a note arriving mid-pass
-  // costs one extra pass; steady state (no notes) never re-latches.
+
+  /**
+   * A monotonic demand-note generation, bumped on every `noteDemandChanged()`
+   * (watch or push-growth). A pass snapshots it at its row read; if a note
+   * lands _after_ that snapshot but while the pass is still in flight (a
+   * straddling pass — the note's change is invisible to the rows this pass
+   * already read), the pass's `.finally` re-latches `#pendingDemandWake` so the
+   * _next_ wait runs a _fresh_ pass instead of sleeping out the idle window.
+   * Bounded: only a note arriving mid-pass costs one extra pass; steady state
+   * (no notes) never re-latches.
+   */
   #demandNoteGeneration = 0;
+
   #passDemandNoteGen = 0;
 
   /** The demand wake's grace timer (see noteDemandChanged). */
@@ -587,22 +603,34 @@ export class SpaceServer implements TransactionSealDestination {
     string,
     { id: string; scopeKey: string }
   >();
-  // (d′) — server-settle instrumentation (design §6 W4's
-  // metric; §2.8 (c)). Per authored input: admission (the feed notice's
-  // arrival, `enqueueCommit`) → COVERAGE (the wave commit whose
-  // derivedThrough ≥ seq = the value-only settle) → and, when a
-  // push-growth demand wake fires after coverage (the one-push-late
-  // structural-growth path, §2.3), the NEXT derived commit = the
-  // structural-growth landing. Attribution of a growth wake to an input
-  // is by adjacency (the most recently covered input), stated as such.
+
+  /**
+   * Count of push-growth demand wakes, bumped once per
+   * `noteDemandChanged("push-growth")`, snapshotted into each settle record at
+   * admission and differenced at coverage.
+   *
+   * It is part of the server-settle instrumentation (design §6 W4's metric;
+   * §2.8 (c)). Per authored input: admission (the feed notice's arrival,
+   * `enqueueCommit()`) → _coverage_ (the wave commit whose `derivedThrough` ≥
+   * seq = the value-only settle) → and, when a push-growth demand wake fires
+   * after coverage (the one-push-late structural-growth path, §2.3), the _next_
+   * derived commit = the structural-growth landing. Attribution of a growth
+   * wake to an input is by adjacency (the most recently covered input), stated
+   * as such.
+   */
   #growthWakeCounter = 0;
-  // MINOR-2 / obligation (iii): the last-folded demand-root enter/leave
-  // counter values, so the space-lived accumulators fold the FULL delta
-  // since the last fold (capturing between-pass hook transitions), not a
-  // pass-start snapshot. Reset to 0 when the runtime is replaced (its
-  // counters zero on a fresh runtime).
+
+  /**
+   * The last-folded demand-root enter counter value, so the space-lived
+   * accumulators fold the _full_ delta since the last fold (capturing
+   * between-pass hook transitions), not a pass-start snapshot. Reset to 0 when
+   * the runtime is replaced (its counters zero on a fresh runtime).
+   */
   #lastFoldedDemandEnters = 0;
+
+  /** Like `#lastFoldedDemandEnters`, for the leave counter. */
   #lastFoldedDemandLeaves = 0;
+
   #cycleCounter = 0;
   #wavesCommitted = 0;
   readonly #pendingSettles = new Map<number, {
@@ -613,10 +641,13 @@ export class SpaceServer implements TransactionSealDestination {
     growthAtAdmit: number;
     eventAppend: boolean;
   }>();
-  // NIT-1: the internal growth bookkeeping (`growthWakeAt`,
-  // `wavesAtCoverage`) lives on this WRAPPER, not on the series entry, so
-  // it never leaks into the stats JSON; `entry` is the (clean) series row
-  // that `#recordGrowthLanding` promotes in place.
+
+  /**
+   * The most recently covered input. The internal growth bookkeeping
+   * (`growthWakeAt`, `wavesAtCoverage`) lives on this _wrapper_, not on the
+   * series entry, so it never leaks into the stats JSON; `entry` is the (clean)
+   * series row that `#recordGrowthLanding()` promotes in place.
+   */
   #lastCovered:
     | {
       entry: ServingLoopStats["settle"]["series"][number];
@@ -624,6 +655,7 @@ export class SpaceServer implements TransactionSealDestination {
       wavesAtCoverage: number;
     }
     | undefined;
+
   #growthAwaitingLanding = false;
 
   /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a
@@ -650,6 +682,7 @@ export class SpaceServer implements TransactionSealDestination {
    * drained seqs, insertion-ordered, pruned at a bound that far
    * exceeds any realistic in-process reorder window. */
   readonly #drainedLateWindow = new Set<number>();
+
   // (d′): `#demandSinks` (the per-key demand WALK effects,
   // `demand-walk:<space>/<root>`) is DELETED — demand is the tracked-ids
   // closure and its writers are standing demand roots (design §2.7).
@@ -759,6 +792,7 @@ export class SpaceServer implements TransactionSealDestination {
   /** Lease-local mirrors of durable OW54 processing checkpoints. A mirror is
    * installed only from stored state or after a wave confirms its write. */
   readonly #deliveryCheckpoints = new Map<string, DeliveryDeferral>();
+
   readonly #pendingDeliveryCheckpointWrites = new Map<string, {
     sidecarId: string;
     index: number;
@@ -781,13 +815,16 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #deliveryRecoveryAttempts = new Set<string>();
   readonly #deliveryCheckpointWriteBlocked = new Set<string>();
   readonly #attentionSealWriteBlocked = new Set<string>();
+
   /** Input frontier at which a processing-state write failed. Only a newer
    * admitted input may serve as the generic storage/input wake. */
   readonly #deliveryWriteBlockedAt = new Map<string, number>();
+
   /** Failed boundary associated with a checkpoint write that did not commit.
    * This is wake correlation only, never an age/checkpoint authority: a retry
    * re-observes the failure and starts from durable state. */
   readonly #uncommittedDeliveryFailureEpochs = new Map<string, string>();
+
   readonly #deliveryLoadRecoveries = new Map<string, string>();
 
   /** The deferral backstop timer (see EVENT_DEFERRAL_REARM_MS): armed
@@ -3046,7 +3083,9 @@ export class SpaceServer implements TransactionSealDestination {
           if (viewEntry?.eventId !== entry.eventId) {
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
-              `${JSON.stringify(viewEntry)} at index ${index}; ` +
+              `${
+                toCompactDebugString(viewEntry, { maxLength: 200 })
+              } at index ${index}; ` +
               "later-arrived events wait behind it",
             ]);
             // The same barrier as above: the deferred entry's
@@ -4103,6 +4142,7 @@ export class SpaceServer implements TransactionSealDestination {
    * is a lookup instead of a full key scan per action run (with the
    * closure as keys the scan would be O(closure) twice per pass). */
   readonly #keysByRootId = new Map<string, Set<string>>();
+
   readonly #keysByResolvedRoot = new Map<string, Set<string>>();
 
   #indexDemandKey(key: string, id: string): void {

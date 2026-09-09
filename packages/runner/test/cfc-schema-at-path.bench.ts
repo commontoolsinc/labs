@@ -9,7 +9,7 @@
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import { rendererVDOMSchema } from "../src/schemas.ts";
 

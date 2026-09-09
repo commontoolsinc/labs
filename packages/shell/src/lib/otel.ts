@@ -27,6 +27,7 @@ const SERVICE_VERSION = "1.0.0";
 export interface InitBrowserOtelOptions {
   /** Same-origin (by default) toolshed API base; the OTLP proxy lives under it. */
   apiUrl: URL | string;
+
   userDid: string;
   spaceDid: string;
   environment: string;

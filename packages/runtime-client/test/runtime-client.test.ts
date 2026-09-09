@@ -2,7 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import { RuntimeClient } from "@/runtime-client.ts";
+import { attachOptionsFrom, RuntimeClient } from "@/runtime-client.ts";
+import { findKeyMaterial } from "@/shared/key-material.ts";
 import {
   type CellRef,
   NotificationType,
@@ -49,7 +50,7 @@ describe("RuntimeClient", () => {
       const conn = { on: () => {}, signal } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       expect(client.signal).toBe(signal);
     });
   });
@@ -64,9 +65,11 @@ describe("RuntimeClient", () => {
 
     function clientWith(identity?: Identity): RuntimeClient {
       const conn = { on: () => {} } as unknown as never;
+      // The constructor takes the acting principal itself, an attaching
+      // client having only a DID to give it.
       return new (RuntimeClient as unknown as {
-        new (conn: never, options: unknown): RuntimeClient;
-      })(conn, identity === undefined ? {} : { identity });
+        new (conn: never, principal: unknown): RuntimeClient;
+      })(conn, identity?.did());
     }
 
     it("identifies space, user, and session instances at their scopes", async () => {
@@ -117,7 +120,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       return { client, requests };
     }
 
@@ -150,7 +153,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       await client.setMemoryMessageCompression(false);
 
@@ -158,6 +161,345 @@ describe("RuntimeClient", () => {
         type: RequestType.SetMemoryMessageCompression,
         enabled: false,
       }]);
+    });
+  });
+
+  describe("getPiece", () => {
+    it("sends the scope alongside the id, an id alone naming no document", async () => {
+      const space = "did:key:z6Mk-runtime-client-piece";
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:mine", space, scope: "user", path: [] },
+            },
+          });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // A piece in a narrower scope is addressed by its id AND that scope;
+      // the worker builds the cell from both, so a scope left behind here
+      // reaches a document that does not exist.
+      const piece = await client.getPiece(
+        "fid1:mine",
+        space as never,
+        true,
+        "user",
+      );
+
+      expect(requests).toEqual([{
+        type: RequestType.PieceGet,
+        pieceId: "fid1:mine",
+        runIt: true,
+        space,
+        scope: "user",
+      }]);
+      expect(piece?.id()).toBe("fid1:mine");
+    });
+
+    it("leaves the scope out when the caller names none", async () => {
+      const space = "did:key:z6Mk-runtime-client-piece";
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:ours", space, scope: "space", path: [] },
+            },
+          });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await client.getPiece("fid1:ours", space as never);
+
+      expect(requests).toEqual([{
+        type: RequestType.PieceGet,
+        pieceId: "fid1:ours",
+        runIt: undefined,
+        space,
+        scope: undefined,
+      }]);
+    });
+
+    it("returns null where the worker answers with no piece", async () => {
+      const space = "did:key:z6Mk-runtime-client-piece";
+      const conn = {
+        on: () => {},
+        request: () => Promise.resolve(null),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await expect(client.getPiece("fid1:gone", space as never)).resolves
+        .toBeNull();
+    });
+  });
+
+  describe("piece-addressed requests", () => {
+    it("carries a narrower scope on every request naming a piece by id", async () => {
+      // The id alone names a different document in every other scope, so a
+      // method that takes a scope and drops it reaches the wrong piece
+      // rather than failing.
+
+      const space = "did:key:z6Mk-runtime-client-scoped";
+      const requests: Array<Record<string, unknown>> = [];
+      const cell = { id: "of:fid1:mine", space, scope: "user", path: [] };
+      const conn = {
+        on: () => {},
+        request: (message: Record<string, unknown>) => {
+          requests.push(message);
+          switch (message.type) {
+            case RequestType.PieceGetSlug:
+              return Promise.resolve({ slug: "mine" });
+            case RequestType.PieceRemove:
+              return Promise.resolve({ value: true });
+            case RequestType.PieceClone:
+              return Promise.resolve({ piece: { cell } });
+            default:
+              return Promise.resolve({ source: { files: [], history: [] } });
+          }
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await client.getPieceSlug("fid1:mine", space as never, "user");
+      await client.removePiece("fid1:mine", space as never, "user");
+      await client.getPieceSource("fid1:mine", space as never, "user");
+      await client.getPieceSourceRevision(
+        "fid1:mine",
+        space as never,
+        "revision-1",
+        "user",
+      );
+      await client.clonePiece(
+        "fid1:mine",
+        space as never,
+        space as never,
+        { scope: "user" },
+      );
+      await client.updatePieceSource(
+        "fid1:mine",
+        space as never,
+        { kind: "detach" },
+        { scope: "user" },
+      );
+
+      expect(requests.map((request) => request.scope)).toEqual([
+        "user",
+        "user",
+        "user",
+        "user",
+        "user",
+        "user",
+      ]);
+      expect(requests.map((request) => request.type)).toEqual([
+        RequestType.PieceGetSlug,
+        RequestType.PieceRemove,
+        RequestType.PieceGetSource,
+        RequestType.PieceGetSourceRevision,
+        RequestType.PieceClone,
+        RequestType.PieceUpdateSource,
+      ]);
+    });
+  });
+
+  describe("resolveSlug", () => {
+    it("asks the worker where a slug reference lands", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const piece = {
+        cell: { id: "of:fid1:member", space, scope: "space", path: [] },
+      };
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({ piece, pathAfter: [] });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      const landed = await client.resolveSlug("top", space as never, "42");
+      if (landed.refusal) throw new Error("the worker answered with a piece");
+
+      // The slug, the space and the member cross in the fields the worker
+      // reads them from. This method takes them in a different order than it
+      // sends them, so which value lands in which field is the thing to hold.
+      expect(requests).toEqual([{
+        type: RequestType.SlugResolve,
+        slug: "top",
+        member: "42",
+        space,
+      }]);
+      // The piece comes back as a handle over the ref the worker answered
+      // with, in the routing form of its id.
+      expect(landed.piece.id()).toBe("fid1:member");
+      expect(landed.pathAfter).toEqual([]);
+    });
+
+    it("asks for no member where the reference stops at the slug", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:board", space, scope: "space", path: [] },
+            },
+            pathAfter: [],
+          });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      const landed = await client.resolveSlug("top", space as never);
+
+      expect(requests).toEqual([{
+        type: RequestType.SlugResolve,
+        slug: "top",
+        member: undefined,
+        space,
+      }]);
+      // What came back matters as much as what went out: a board reached
+      // with a member still to spend is a different answer than a board
+      // reached with none.
+      if (landed.refusal) throw new Error("the worker answered with a piece");
+      expect(landed.piece.id()).toBe("fid1:board");
+      expect(landed.pathAfter).toEqual([]);
+    });
+
+    it("carries back a member the walk did not spend", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:plain", space, scope: "space", path: [] },
+            },
+            pathAfter: ["42"],
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // The leftover is what tells a caller the segment named nothing, so it
+      // has to survive this hop rather than being read off the piece.
+      const landed = await client.resolveSlug("plain", space as never, "42");
+      if (landed.refusal) throw new Error("the worker answered with a piece");
+      expect(landed.piece.id()).toBe("fid1:plain");
+      expect(landed.pathAfter).toEqual(["42"]);
+    });
+
+    it("returns a refusal as an answer rather than throwing it", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            refusal: {
+              code: "missing-member",
+              message: "no member 999 in top",
+            },
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // A name nobody bound is what the caller asked about. Throwing it would
+      // make it indistinguishable from a transport that dropped, and the two
+      // want opposite responses: report the one, retry the other.
+      const landed = await client.resolveSlug("top", space as never, "999");
+      expect(landed.refusal).toEqual({
+        code: "missing-member",
+        message: "no member 999 in top",
+      });
+      expect(landed.piece).toBeUndefined();
+    });
+
+    it("refuses an answer carrying both a piece and a refusal", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:board", space, scope: "space", path: [] },
+            },
+            pathAfter: [],
+            refusal: { code: "missing-member", message: "no member 9 in top" },
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // The type cannot express this; a message off the wire can. Reading the
+      // refusal first would report a protocol fault as a name that is not
+      // bound, and the caller would tell a reader so.
+      await expect(client.resolveSlug("top", space as never)).rejects.toThrow(
+        "both a piece and a refusal",
+      );
+    });
+
+    it("refuses a landing that carries no path", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:board", space, scope: "space", path: [] },
+            },
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // Defaulting the missing path to `[]` would say the member was spent,
+      // which is the fact the citation is offered on.
+      await expect(client.resolveSlug("top", space as never, "42")).rejects
+        .toThrow("a piece and no path");
+    });
+
+    it("refuses an answer that is neither a piece nor a refusal", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () => Promise.resolve({}),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // Silently reporting "no piece" for a malformed answer would read as a
+      // name that does not resolve, which is a different fact entirely.
+      await expect(client.resolveSlug("top", space as never)).rejects.toThrow(
+        "neither a piece nor a refusal",
+      );
     });
   });
 
@@ -179,7 +521,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       const result = await client.getPieceSource(
         "of:fid1:piece",
@@ -212,7 +554,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       const result = await client.getPieceSourceRevision(
         "of:fid1:piece",
@@ -248,7 +590,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       const response = await client.updatePieceSource(
         "of:fid1:piece",
@@ -286,7 +628,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const space = access.space as never;
 
       expect(await client.getSpaceAcl(space)).toBe(access);
@@ -331,7 +673,7 @@ describe("RuntimeClient", () => {
         request: (message: unknown) => {
           requests.push(message);
           return Promise.resolve({
-            page: {
+            piece: {
               cell: {
                 id: "of:fid1:clone",
                 space: destinationSpace,
@@ -343,7 +685,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const clone = await client.clonePiece(
         "of:fid1:piece",
         sourceSpace as never,
@@ -368,7 +710,7 @@ describe("RuntimeClient", () => {
         request: (message: unknown) => {
           requests.push(message);
           return Promise.resolve({
-            page: {
+            piece: {
               cell: {
                 id: "of:fid1:clone",
                 space: destinationSpace,
@@ -380,7 +722,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       await client.clonePiece(
         "of:fid1:piece",
@@ -412,7 +754,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       expect(await client.resolveSpaceName("notebook")).toBe(space);
       expect(requests).toEqual([{
@@ -437,7 +779,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       return { client, handlers };
     }
 
@@ -500,7 +842,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
 
       expect(await client.listEventAttention(notice.space)).toEqual([notice]);
       expect(await client.resolveEventAttention(notice, "retry")).toEqual({
@@ -529,7 +871,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const observed: unknown[] = [];
       client.on("eventneedsattention", (value) => observed.push(value));
 
@@ -558,7 +900,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       return { client, requests };
     }
 
@@ -579,9 +921,11 @@ describe("RuntimeClient", () => {
   });
 
   describe("boot-window diagnostics", () => {
-    // Both getters are main-thread snapshots forwarded straight from the
-    // connection (no worker round-trip), so a connection stub pins the wiring.
     it("exposes pending-request and request-timeline snapshots", () => {
+      // Both getters are main-thread snapshots forwarded straight from the
+      // connection (no worker round-trip), so a connection stub pins the
+      // wiring.
+
       const pending = [{ msgId: 7, type: RequestType.Idle, ageMs: 12 }];
       const timeline = [
         { msgId: 7, type: RequestType.Idle, sentAtMs: 3, doneAtMs: 8 },
@@ -593,7 +937,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       expect(client.getPendingRequests()).toEqual(pending);
       expect(client.getRequestTimeline()).toEqual(timeline);
     });
@@ -611,7 +955,7 @@ describe("RuntimeClient", () => {
       } as unknown as never;
       const client = new (RuntimeClient as unknown as {
         new (conn: never, options: unknown): RuntimeClient;
-      })(conn, {});
+      })(conn, undefined);
       const body = new Uint8Array([1, 2, 3]);
 
       const upload = client.uploadBlob({
@@ -645,5 +989,51 @@ describe("RuntimeClient", () => {
       expect(request.body).toBeInstanceOf(FabricBytes);
       expect(request.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
+  });
+});
+
+describe("attachOptionsFrom()", () => {
+  // What it drops is the point: a document that attaches holds no signer, so
+  // neither `Identity` survives the mapping. `findKeyMaterial` refuses a frame
+  // holding one; this is what keeps one from being built.
+
+  it("returns the acting principal as a DID and keeps no `Identity`", async () => {
+    const identity = await Identity.fromPassphrase("attach-options-signer");
+    const spaceIdentity = await Identity.fromPassphrase("attach-options-space");
+    const attach = attachOptionsFrom({
+      apiUrl: new URL("http://backend.test/"),
+      identity,
+      spaceIdentity,
+      spaceDid: identity.did(),
+    });
+
+    expect(attach.identity).toBe(identity.did());
+    expect(Object.values(attach)).not.toContain(identity);
+    expect(Object.values(attach)).not.toContain(spaceIdentity);
+    expect("spaceIdentity" in attach).toBe(false);
+    expect(findKeyMaterial(attach)).toBeUndefined();
+  });
+
+  it("carries the posture fields an attach asserts", async () => {
+    const identity = await Identity.fromPassphrase("attach-options-posture");
+    const attach = attachOptionsFrom({
+      apiUrl: new URL("http://backend.test/"),
+      identity,
+      spaceDid: identity.did(),
+      spaceHostMap: { [identity.did()]: "http://memory.test/" },
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+      cfcReadMaxConfidentiality: [identity.did()],
+      cfcReadOnExceed: "skip",
+    });
+
+    expect(attach.apiUrl.toString()).toBe("http://backend.test/");
+    expect(attach.spaceHostMap).toEqual({
+      [identity.did()]: "http://memory.test/",
+    });
+    expect(attach.cfcEnforcementMode).toBe("observe");
+    expect(attach.cfcFlowLabels).toBe("persist");
+    expect(attach.cfcReadMaxConfidentiality).toEqual([identity.did()]);
+    expect(attach.cfcReadOnExceed).toBe("skip");
   });
 });

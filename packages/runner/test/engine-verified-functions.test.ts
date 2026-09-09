@@ -31,8 +31,7 @@ describe("Engine verified implementation index", () => {
   });
 
   function getExecutableRegistry() {
-    // deno-lint-ignore no-explicit-any
-    return (engine as any).executableRegistry;
+    return engine.accessForTestingOnly.executableRegistry;
   }
 
   it("admits registered implementations by { identity, symbol }", () => {

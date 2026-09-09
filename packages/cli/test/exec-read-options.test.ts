@@ -19,7 +19,7 @@ import {
   type CellSelection,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
-import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
+import { cf, relevantStderr } from "./utils.ts";
 
 /**
  * `cf exec`'s read options and the shape it emits.
@@ -120,7 +120,10 @@ describe("cf exec read options", () => {
       runtime: {
         [CF_RUNTIME_ERROR_LOG]: [] as Array<{ message: string }>,
         storageManager: { synced: () => Promise.resolve() },
-        edit: () => ({ commit: () => Promise.resolve() }),
+        edit: () => ({
+          commit: () => Promise.resolve(),
+          status: () => ({ status: "done", journal: { novelty: () => [] } }),
+        }),
         prepareTxForCommit: () => {},
         getCell: () => resultCell,
         getCellFromLink: () => receiptCell,
@@ -177,7 +180,7 @@ describe("cf exec read options", () => {
       asSchemaFromLinks: () => cell,
       send: (_value: unknown, onCommit?: (tx: unknown) => void) => {
         onCommit?.({
-          status: () => ({ status: "done" }),
+          status: () => ({ status: "done", journal: { novelty: () => [] } }),
           handlingReceiptLink: {
             id: "of:receipt-cell",
             space: "did:key:test-home",
@@ -378,7 +381,7 @@ describe("cf exec read options", () => {
     // command name no `--space` at all.
     expect(err[0]).not.toContain("--space");
     expect(err[0]).toContain(
-      "cf get --piece /@did:key:test-home/of:tool-result@user",
+      "cf cell get /@did:key:test-home/of:tool-result@user",
     );
   });
 
@@ -398,7 +401,7 @@ describe("cf exec read options", () => {
     );
 
     expect(err[0]).toContain(
-      "cf get --piece /@did:key:test-home/of:tool-result`)",
+      "cf cell get /@did:key:test-home/of:tool-result`)",
     );
     expect(err[0]).not.toContain("@space");
   });
@@ -512,8 +515,8 @@ describe("cf exec read options", () => {
     const { code, stderr } = await cf(
       `exec --select id ${missing} --query milk`,
     );
-    const relevant = stderr.filter((line) =>
-      !line.includes("deno run ") && !isIgnorableDenoWarningLine(line)
+    const relevant = relevantStderr(stderr).filter((line) =>
+      !line.includes("deno run ")
     ).join("\n");
 
     expect(code).not.toBe(0);
@@ -538,8 +541,8 @@ describe("cf exec read options", () => {
     );
 
     expect(code).not.toBe(0);
-    const relevant = stderr.filter((line) =>
-      !line.includes("deno run ") && !isIgnorableDenoWarningLine(line)
+    const relevant = relevantStderr(stderr).filter((line) =>
+      !line.includes("deno run ")
     );
     expect(relevant.join("\n")).toContain("--schema");
     expect(relevant.join("\n")).toContain("--select");

@@ -22,6 +22,8 @@ async function runCfPieceNewWithSlug(options: {
   sourcePath: string;
   identityPath: string;
   slug: string;
+  /** Take a name that already points somewhere, which `cf` refuses without. */
+  force?: boolean;
 }): Promise<string> {
   const command = new Deno.Command(Deno.execPath(), {
     cwd: REPO_ROOT,
@@ -40,6 +42,7 @@ async function runCfPieceNewWithSlug(options: {
       SPACE_NAME,
       "--slug",
       options.slug,
+      ...(options.force ? ["--force"] : []),
     ],
     env: {
       CF_LOG_LEVEL: "error",
@@ -94,16 +97,14 @@ async function waitForSpaceRootPattern(
     const rootView = document.querySelector("x-root-view");
     const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
       | {
-        _patterns?: {
+        _spaceRootPattern?: {
           value?: {
-            spaceRootPattern?: {
-              id(): string;
-            };
+            id(): string;
           };
         };
       }
       | null;
-    return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
+    return !!appView?._spaceRootPattern?.value?.id?.();
   });
 }
 
@@ -113,11 +114,12 @@ describe("shell piece tests", () => {
 
   it("can view and interact with a piece", async () => {
     const page = shell.page();
-    const { identity, path: identityPath } = await writeTempIdentity({
+    await using tempIdentity = await writeTempIdentity({
       implementation: "noble",
     });
+    const { identity, path: identityPath } = tempIdentity;
     // Initialized as the first step inside the try below, so a failure there
-    // still runs the finally that removes the keyfile.
+    // still runs the finally that tears the runtimes down.
     let cc: PiecesController | undefined;
     let piece: PieceController | undefined;
     const logDebugSnapshot = async (label: string) => {
@@ -130,11 +132,13 @@ describe("shell piece tests", () => {
           const rootView = document.querySelector("x-root-view");
           const typedRootView = rootView as
             | {
-              _rt?: {
-                status?: unknown;
-                value?: unknown;
-                error?: {
-                  message?: string;
+              accessForTestingOnly?: {
+                rt?: {
+                  status?: unknown;
+                  value?: unknown;
+                  error?: {
+                    message?: string;
+                  };
                 };
               };
               app?: {
@@ -173,9 +177,11 @@ describe("shell piece tests", () => {
             href: globalThis.location.href,
             hasRuntime: !!globalThis.commonfabric?.rt,
             hasRootView: !!rootView,
-            rootRuntimeStatus: typedRootView?._rt?.status,
-            hasRootRuntimeValue: !!typedRootView?._rt?.value,
-            rootRuntimeError: typedRootView?._rt?.error?.message,
+            rootRuntimeStatus: typedRootView?.accessForTestingOnly?.rt?.status,
+            hasRootRuntimeValue: !!typedRootView?.accessForTestingOnly?.rt
+              ?.value,
+            rootRuntimeError: typedRootView?.accessForTestingOnly?.rt?.error
+              ?.message,
             rootHasIdentity: !!typedRootView?.app?.identity,
             hasAppView: !!appView,
             patternsStatus: appView?._patterns?.status,
@@ -357,20 +363,20 @@ describe("shell piece tests", () => {
     } finally {
       // Both disposals are awaited to completion: disposeRuntime() awaits the
       // browser runtime's teardown (worker Dispose round trip and transport
-      // close), and cc.dispose() awaits the in-process runtime's. The keyfile
-      // is only ever read by the already-exited `cf piece new` subprocess, so
-      // nothing outstanding touches it once those return.
+      // close), and cc.dispose() awaits the in-process runtime's. Both
+      // finish before the keyfile goes, since `await using` removes it when
+      // the test's own scope ends.
       await shell.disposeRuntime();
       await cc?.dispose();
-      await Deno.remove(identityPath).catch(() => {});
     }
   });
 
   it("loads a slug piece and reloads when cf piece new repoints the slug", async () => {
     const slug = `slug-repoint-${crypto.randomUUID()}`;
-    const { identity, path: identityPath } = await writeTempIdentity({
+    await using tempIdentity = await writeTempIdentity({
       implementation: "noble",
     });
+    const { identity, path: identityPath } = tempIdentity;
     const firstSource = join(
       import.meta.dirname!,
       "fixtures",
@@ -382,115 +388,115 @@ describe("shell piece tests", () => {
       "slug-piece-v2.tsx",
     );
 
-    try {
-      const firstPieceId = await runCfPieceNewWithSlug({
-        sourcePath: firstSource,
-        identityPath,
-        slug,
-      });
+    const firstPieceId = await runCfPieceNewWithSlug({
+      sourcePath: firstSource,
+      identityPath,
+      slug,
+    });
 
-      await shell.goto({
-        frontendUrl: FRONTEND_URL,
-        view: {
-          spaceName: SPACE_NAME,
-          pieceSlug: slug,
-        },
-        identity,
-      });
-      await waitForSlugPieceMarker(shell, "slug piece v1");
-      await shell.waitForState({
-        view: {
-          spaceName: SPACE_NAME,
-          pieceSlug: slug,
-        },
-        identity,
-      });
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceSlug: slug,
+      },
+      identity,
+    });
+    await waitForSlugPieceMarker(shell, "slug piece v1");
+    await shell.waitForState({
+      view: {
+        spaceName: SPACE_NAME,
+        pieceSlug: slug,
+      },
+      identity,
+    });
 
-      const secondPieceId = await runCfPieceNewWithSlug({
-        sourcePath: secondSource,
-        identityPath,
-        slug,
-      });
-      expect(secondPieceId).not.toBe(firstPieceId);
+    // Repointing is what this test is about, and taking a name that already
+    // points somewhere is what `--force` is for.
+    const secondPieceId = await runCfPieceNewWithSlug({
+      sourcePath: secondSource,
+      identityPath,
+      slug,
+      force: true,
+    });
+    expect(secondPieceId).not.toBe(firstPieceId);
 
-      await waitForSlugPieceMarker(shell, "slug piece v2");
-      const href = await shell.page().evaluate(() => globalThis.location.href);
-      expect(href).toContain(`/${SPACE_NAME}/${slug}`);
-    } finally {
-      await Deno.remove(identityPath).catch(() => {});
-    }
+    await waitForSlugPieceMarker(shell, "slug piece v2");
+    const href = await shell.page().evaluate(() => globalThis.location.href);
+    expect(href).toContain(`/${SPACE_NAME}/${slug}`);
   });
 
   it("tears the runtime down cleanly on logout while a piece is rendered", async () => {
     const slug = `logout-teardown-${crypto.randomUUID()}`;
-    const { identity, path: identityPath } = await writeTempIdentity({
+    await using tempIdentity = await writeTempIdentity({
       implementation: "noble",
     });
+    const { identity, path: identityPath } = tempIdentity;
     const source = join(
       import.meta.dirname!,
       "fixtures",
       "slug-piece-v1.tsx",
     );
 
-    try {
-      await runCfPieceNewWithSlug({ sourcePath: source, identityPath, slug });
+    await runCfPieceNewWithSlug({ sourcePath: source, identityPath, slug });
 
-      await shell.goto({
-        frontendUrl: FRONTEND_URL,
-        view: { spaceName: SPACE_NAME, pieceSlug: slug },
-        identity,
-      });
-      // The piece is rendered: the renderer, the favorites subscription, and
-      // the slug-target poll are all live.
-      await waitForSlugPieceMarker(shell, "slug piece v1");
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: SPACE_NAME, pieceSlug: slug },
+      identity,
+    });
+    // The piece is rendered: the renderer, the favorites subscription, and
+    // the slug-target poll are all live.
+    await waitForSlugPieceMarker(shell, "slug piece v1");
 
-      // In-app logout clears the identity, which disposes the runtime via the
-      // RootView swap while those consumers are still active. Proactive
-      // cancellation must tear them all down without recording a console error
-      // — the harness afterEach fails the test on any (no allowlist).
-      //
-      // The RootView task disposes the previous RuntimeInternals fire-and-forget
-      // and drops the promise, so there is nothing to await after the swap. Wrap
-      // dispose() before triggering logout to hold onto the exact promise the
-      // swap starts; awaiting it below settles all disposal-raced async work
-      // (the abort's synchronous consumer teardowns, the worker Dispose round
-      // trip, and the transport close) on a real completion instead of a timer.
-      await shell.page().evaluate(async () => {
-        const rootView = document.querySelector("x-root-view") as
-          | { _rt?: { value?: { dispose(): Promise<void> } } }
-          | null;
-        const internals = rootView?._rt?.value;
-        if (!internals) {
-          throw new Error(
-            "Runtime internals not available to observe disposal",
-          );
+    // In-app logout clears the identity, which disposes the runtime via the
+    // RootView swap while those consumers are still active. Proactive
+    // cancellation must tear them all down without recording a console error
+    // — the harness afterEach fails the test on any (no allowlist).
+    //
+    // The RootView task disposes the previous RuntimeInternals fire-and-forget
+    // and drops the promise, so there is nothing to await after the swap. Wrap
+    // dispose() before triggering logout to hold onto the exact promise the
+    // swap starts; awaiting it below settles all disposal-raced async work
+    // (the abort's synchronous consumer teardowns, the worker Dispose round
+    // trip, and the transport close) on a real completion instead of a timer.
+    await shell.page().evaluate(async () => {
+      const rootView = document.querySelector("x-root-view") as
+        | {
+          accessForTestingOnly?: {
+            rt?: { value?: { dispose(): Promise<void> } };
+          };
         }
-        const global = globalThis as unknown as {
-          __ctRuntimeDisposed?: Promise<void>;
-        };
-        global.__ctRuntimeDisposed = undefined;
-        const disposeInternals = internals.dispose.bind(internals);
-        internals.dispose = () => {
-          global.__ctRuntimeDisposed = disposeInternals();
-          return global.__ctRuntimeDisposed;
-        };
-        await globalThis.app.setIdentity(undefined);
-      });
-      // The swap clears the global only after it has called the wrapped
-      // dispose(), so once the runtime is gone the disposal promise is stashed.
-      await waitForCondition(
-        shell.page(),
-        () => !globalThis.commonfabric?.rt,
-      );
-      // Await the disposal the swap started, so all disposal-raced async work
-      // has settled before afterEach inspects the recorded console errors.
-      await shell.page().evaluate(async () => {
-        await (globalThis as unknown as {
-          __ctRuntimeDisposed?: Promise<void>;
-        }).__ctRuntimeDisposed;
-      });
-    } finally {
-      await Deno.remove(identityPath).catch(() => {});
-    }
+        | null;
+      const internals = rootView?.accessForTestingOnly?.rt?.value;
+      if (!internals) {
+        throw new Error(
+          "Runtime internals not available to observe disposal",
+        );
+      }
+      const global = globalThis as unknown as {
+        __ctRuntimeDisposed?: Promise<void>;
+      };
+      global.__ctRuntimeDisposed = undefined;
+      const disposeInternals = internals.dispose.bind(internals);
+      internals.dispose = () => {
+        global.__ctRuntimeDisposed = disposeInternals();
+        return global.__ctRuntimeDisposed;
+      };
+      await globalThis.app.setIdentity(undefined);
+    });
+    // The swap clears the global only after it has called the wrapped
+    // dispose(), so once the runtime is gone the disposal promise is stashed.
+    await waitForCondition(
+      shell.page(),
+      () => !globalThis.commonfabric?.rt,
+    );
+    // Await the disposal the swap started, so all disposal-raced async work
+    // has settled before afterEach inspects the recorded console errors.
+    await shell.page().evaluate(async () => {
+      await (globalThis as unknown as {
+        __ctRuntimeDisposed?: Promise<void>;
+      }).__ctRuntimeDisposed;
+    });
   });
 });

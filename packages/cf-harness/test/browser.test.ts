@@ -4,7 +4,9 @@
  * and the invocation path where a bound handle becomes a value trusted-side
  * and stays out of everything the model reads afterwards.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -349,7 +351,6 @@ describe("browser", () => {
       new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `browser-tool-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         processRunner,
         workspaceHostPath: "/tmp/cf-harness-workspace",
         browserAccess: BROWSER_LEASE,
@@ -421,6 +422,39 @@ describe("browser", () => {
       ]);
       const output = result.output as BrowserToolSuccessOutput;
       expect(output.status).toBe("ok");
+    });
+
+    it("refuses a skill-context handle before browser materialization", async () => {
+      const ref = await seedRef("external-skill", "secret instructions");
+      const runner = new FakeProcessRunner([
+        pageAt(`${ALLOWED_ORIGIN}/login`),
+      ]);
+      const engine = createEngine(runner);
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(engine.getRunState().runId),
+        ref,
+        { capability: "skill-context" },
+      );
+      await engine.recordHandleTable(minted.table);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: minted.token,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toBe(
+        "browser valueHandle cannot consume a skill-context handle; only delegate_task skillHandle can",
+      );
+      expect(runner.calls).toHaveLength(1);
+      expect(runner.calls[0]?.args).toEqual([
+        "--cdp",
+        "http://localhost:9362",
+        "get",
+        "url",
+      ]);
     });
 
     it("navigates to the URL behind a urlHandle", async () => {

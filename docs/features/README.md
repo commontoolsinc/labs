@@ -82,18 +82,24 @@ Add a line for each new document to the index below.
   request to the LLM gateway says which workload produced it, what a value is
   allowed to contain given that it reaches the provider, and why the machine
   label is drawn at random and the codebase declared
+- [`llm-provider-boundary.md`](llm-provider-boundary.md) — which side of the
+  language-model boundary owns the model catalog and the provider
+  credentials, why the caller's package cannot hold either, and how a model
+  name is resolved to a provider
 
 ## Patterns, components, and hosts
 
-- [`canonical-base-patterns.md`](canonical-base-patterns.md) — the design for
-  a set of base patterns built from a container, minimal interface types, and
-  record-level upgrade
 - [`invoking-handlers-outside-a-pattern.md`](invoking-handlers-outside-a-pattern.md)
   — calling a handler stream from `RuntimeProcessor`, or from anywhere else
   outside a pattern body
 - [`host-embedding.md`](host-embedding.md) — the seams a host that is not the
   labs shell may bind to when it mounts our components and patterns, each one
   pinned by a test that goes red if the contract changes
+- [`multi-document-runtime-attachment.md`](multi-document-runtime-attachment.md)
+  — one worker serving several documents: what each of them owns separately,
+  what all of them share, why an attach asserting a different security context
+  is refused rather than merged, and which traffic still reaches only the
+  document that stood the runtime up
 - [`piece-bulk-operations.md`](piece-bulk-operations.md) — retargeting,
   repairing, and reversing many pieces in one space as one reviewable,
   resumable operation: what a plan row means, what each write proves first,

@@ -283,13 +283,110 @@ The boundary is the interesting part, and the file states it plainly:
 > load-bearing for cross-space integrity: carry the link, not the
 > extracted bytes.
 
+## Release is a decision, not a write
+
+Labels only tighten. Join two labeled values and the result carries
+both sets of rules, and a system that could only do that would soon be
+unable to send anything anywhere — the summary of your mail could not
+go to your accountant, because the mail could not. So the runtime has
+one way to relax a rule, and it is not an edit to stored data. From
+`packages/patterns/cfc-exchange-rules/direct-release.tsx`, the rule,
+and the field that names it as its own release path:
+
+```tsx
+export const releaseToSpaceReader = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: {
+    addAlternatives: [cfcPattern.user(v("reader"))],
+  },
+});
+```
+
+```tsx
+message: Confidential<
+  string,
+  readonly [PolicyOf<typeof directReleaseRules>]
+>;
+```
+
+The release path travels with the value rather than with the program
+reading it. The rule may rewrite only the clause that names it; sibling
+clauses, and anything derived from other inputs, stay conjunctive and
+untouched
+(`packages/runner/test/cfc-module-policy-eval.test.ts`):
+
+```ts
+it("keeps wrong-subject evidence closed and sibling clauses untouched", () => {
+```
+
+And it fires on evidence — a membership fact the runtime minted, not a
+string the pattern supplied — which is the same integrity axis the mint
+gate above protects. Two switches govern this, and both are built:
+`cfcPolicyEvaluation`, which decides whether rules are evaluated at all,
+is off in the core preset and on in the maximum-enforcement bundle; the
+render ceiling, which mints that membership fact
+(`packages/runner/src/cfc/render-ceiling.ts`), is complete and ships as
+a browser toggle. Where the bundle is on, the rule above is consulted;
+in the core preset it is carried.
+
+The stored label never loosens. Under `cfcDeclaredMonotonicity: "enforce"`
+a re-mint that drops a clause is refused, naming the document, the path
+and the direction
+(`packages/runner/test/cfc-declared-monotonicity.test.ts`):
+
+```ts
+expect(message).toContain("declared-monotonicity confidentiality");
+expect(message).toContain(result.docId);
+expect(message).toContain("at /out");
+```
+
+The one seam that can widen a stored label requires a builtin identity;
+the same file shows pattern and handler code failing closed against it,
+with or without a verified identity of its own. That dial is off in the
+core preset and pinned to `enforce` in the `MAX_ENFORCEMENT_CFC_OPTIONS`
+bundle (`packages/runner/src/runtime-presets.ts`).
+
+A durable release — this value, to that person, until revoked — is a
+grant: a content-addressed record at a reserved address, written only
+through `writeCfcGrant` and consulted when a rule is evaluated, so
+revoking it is an edit to the grant rather than to the data. An
+unprivileged write into that namespace fails closed at prepare
+(`packages/runner/src/storage/interface.ts`). A grant can be single-use,
+in which case the release and its receipt commit together
+(`packages/runner/test/cfc-single-use-grants.test.ts`):
+
+```ts
+// The receipt write is staged in the SAME transaction (atomic).
+expect(stagedReceiptWrite(first.tx, receiptId)).toBe(true);
+...
+// Second evaluation: the receipt exists → the rule no longer fires →
+// fail closed, exactly like revoked/expired.
+```
+
+The receipt rides on the commit-preconditions flag, which is on by
+default with a rollback override; with it off, a single-use grant is
+unsatisfiable rather than silently multi-use (same file). So every
+relaxation is either a rule the data itself named, or a record. Who may write the rule, and at which boundary, is where the real
+design difficulty lives, and it is the part of this system most worth
+arguing with.
+
 ## The exits
 
 A pattern runs in a compartment whose globals are installed deliberately
-(`packages/runner/src/sandbox/compartment-globals.ts`). Covert channels
-that do not leave through a named exit are handled elsewhere and this
-document does not cover them: `packages/utils/src/sandbox-contract.ts`
-withholds globals with the channel each one closes recorded beside it,
+(`packages/runner/src/sandbox/compartment-globals.ts`), because the
+checker only sees writes: a timer or shared memory is a channel through
+which a program can signal what it knows without ever writing it down,
+so those are absent, and the clock and the random source are coarsened.
+Covert channels that do not leave through a named exit are handled
+elsewhere and this document does not cover them:
+`packages/utils/src/sandbox-contract.ts` lists the withheld globals,
+recording beside each the channel it closes or that nothing has
+supplied it,
 and `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md` tables every
 real-time-correlated signal a pattern can reach with its status, its
 mitigation, and the test pinning it.
@@ -334,7 +431,10 @@ the model chose. The claim is not that the model resists injection — the
 model is the attacker's to choose, and here it does exactly what the
 attacker asked. The claim is that the routing field is refused anyway,
 and the refusal returns to the model as a tool error rather than being
-silently swallowed.
+silently swallowed. The design never bets that models are untrustworthy,
+and never bets that they are trustworthy either; it needs only that a
+model's output is data carrying a record of where it came from.
+Indifference is more durable than either bet.
 
 That test drives a recorded model fixture rather than a live endpoint,
 and it isolates the integrity axis; confidentiality is out of its scope.
@@ -354,28 +454,46 @@ check the flow, not the author.
 ## What runs this
 
 Every pattern in the repository is compiled, transformed and
-SES-verified on every pull request — 413 authored entry files across four
-CI shards (`deno task cfcheck`). A second gate replays each pattern
-against 112 recorded contract baselines, because the updater performs no
-structural check before swapping a pattern onto a running piece. Pattern
-tests run at `enforce-explicit`, the same mode the servers run, rather
-than in an observe mode that would let violations pass. That is the
-runtime's default and both server hosts are pinned to it
-(`packages/runner/src/runtime.ts`, `runtime-presets.ts`). A grep will
-also turn up `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in
-`cfc/types.ts`, which is the transaction-level default, not this one.
+SES-verified on every pull request — 444 authored entry files
+(`deno task cfcheck`). A second gate replays each pattern against 455
+recorded contract baselines across 122 patterns, because the updater
+performs no structural check before swapping a pattern onto a running
+piece. Pattern tests run at `enforce-explicit`, the same mode the servers
+run, rather than in an observe mode that would let violations pass. That
+is the runtime's default, no flag sets it, and both server hosts are
+pinned to it (`packages/runner/src/runtime.ts`, `runtime-presets.ts`).
+The two-readers test at the top of this document runs at that plain
+default. A grep will also turn up
+`DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in `cfc/types.ts`, which is
+the transaction-level default, not this one.
+
+The flow-control layer is `packages/runner/src/cfc/`: 45 modules, about
+24,000 lines, with 133 test files beside them in `packages/runner/test`.
+Every dial it exposes is implemented; what differs between hosts is
+which are switched on. The browser shell — the product surface — runs
+label propagation at `persist`, so a value derived from labeled data is
+written with its derived label rather than laundering it away
+(`packages/lib-shell/src/runtime.ts`). Access control on spaces defaults
+to `enforce` on the production server (`packages/toolshed/env.ts`). The
+harness that dogfoods the runtime turns the whole
+`MAX_ENFORCEMENT_CFC_OPTIONS` bundle on by default
+(`packages/cf-harness/console/server.ts`), and its committed run ledgers
+record real refusals. A property suite runs on every pull request with
+labels persisted, because at the default rung "the properties below
+would pass by finding nothing"
+(`packages/cf-harness/test/cfc-properties/support/episode.ts`).
 
 ## What is not here yet
 
-The semantics are built; most of the dials are not on. Label propagation
-defaults to `off` and the default sink ceiling is empty, so the machinery
-above is exercised by tests and by patterns that opt in rather than
-gating egress in a default deployment. The render ceiling is off too, and
-that boundary is held by the label and contract layer rather than by DOM
-sanitization, which has an open gap.
-`docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial and where
-it is headed. Turning them on without wedging the patterns already
-running on them is the work.
+The remaining work is mostly wiring: deciding which host turns which
+dial on, and turning it on without wedging the patterns already running.
+In the core preset, label propagation, policy evaluation, the write
+floor and the monotonicity gate are off, and the default sink ceiling is
+empty; the shell and the harness are ahead of it, as above. The render
+ceiling is a toggle rather than a default, and that boundary is held by
+the label and contract layer rather than by DOM sanitization, which has
+an open gap. `docs/development/EXPERIMENTAL_OPTIONS.md` carries every
+dial, its status, and where it is headed.
 
 Attestation — what would let a machine prove which runtime it is running
 before your data arrives — is specified rather than built.
@@ -383,7 +501,12 @@ before your data arrives — is specified rather than built.
 append-only log, and the trust profiles a verifier uses to say how much
 of a claim it will take on evidence. That is a larger shape than this
 document covers, including receipts that leave the fabric as claims other
-systems can check. The hardware pipeline lives outside this repository.
+systems can check. Two adjacent pieces do exist: confidential hardware
+is provisioned in the infrastructure repository, and every binary built
+on main carries signed build provenance, verified in the same job
+(`.github/workflows/deno.yml`, `attest-binaries`). What is missing is
+the path between them — nothing yet publishes a machine's measurement or
+refuses a peer that cannot show one.
 
 [Why](./why.md) is the argument in prose;
 [the overview](./inverting-the-physics-of-trust.md) is the long form.

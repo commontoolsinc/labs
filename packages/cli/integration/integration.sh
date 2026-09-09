@@ -96,6 +96,36 @@ new_invocation_id() {
   fi
 }
 
+# The server-execution arm this run's `cf` resolves (server-execution v2,
+# testing.md §2), decided the way the cf binary itself decides: an explicit
+# EXPERIMENTAL_SERVER_EXECUTION wins, else the deployment's own posture —
+# probed off /api/health/stats (`servingLoop` present = the toolshed
+# serves, and cf adopts the published ON posture). In the default CI lane
+# this follows the first-party constant (the registry states its current
+# value); an explicitly-ON toolshed resolves ON. Verb receipts are
+# DELIBERATELY not written
+# under ON (events.md §4: exactly-once is the stream's eventWatermark, so
+# the receipt create-only mechanism must not coexist with it), which is
+# why the dedup asserts below branch on this: the `deduplicated` key is
+# the OFF arm's receipt-collision witness, and the ON arm's witness is
+# BEHAVIORAL — same invocation echoed, exit 0, and exactly one message
+# (which still fails if --invocation were ignored outright).
+#
+# The probe carries connect and total deadlines. A toolshed that ACCEPTS the
+# connection and then stalls would otherwise hold this helper — and with it
+# the whole retry suite, which calls it per assertion — for as long as the
+# server stays silent, with no output and no step-level diagnosis. A stats
+# endpoint that cannot answer within seconds is a dead deployment; the arm
+# then reads OFF and the assertion that follows fails loudly.
+server_execution_on() {
+  case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
+}
+
 # The session this run's invocation ids are chosen within. `cf piece call`
 # takes it from CF_INVOCATION_SESSION, and an id addresses an outcome only
 # within its session — so every retry below has to name the session its
@@ -124,7 +154,7 @@ kill_process_tree() {
 message_count() {
   local piece_id="$1"
   local raw
-  raw=$(cf get $SPACE_ARGS --piece "$piece_id" messages 2>/dev/null || true)
+  raw=$(cf cell get $SPACE_ARGS --piece "$piece_id" messages 2>/dev/null || true)
   if [ -z "$raw" ]; then
     printf '0\n'
     return 0
@@ -176,8 +206,8 @@ test_value() {
   local expected="$4"
   local flags="$5"
 
-  echo "$value" | cf set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
-  local result=$(cf get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+  echo "$value" | cf cell set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
+  local result=$(cf cell get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
@@ -190,7 +220,7 @@ read_piece_value_or_default() {
   local fallback="$3"
   local actual
 
-  actual=$(cf get $SPACE_ARGS --piece "$piece_id" "$path" 2>/dev/null || true)
+  actual=$(cf cell get $SPACE_ARGS --piece "$piece_id" "$path" 2>/dev/null || true)
   if [ -z "$actual" ]; then
     printf '%s\n' "$fallback"
     return 0
@@ -210,8 +240,8 @@ test_json_value() {
   local value="$3"
   local flags="$4"
 
-  echo "$value" | cf set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
-  local result=$(cf get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+  echo "$value" | cf cell set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
+  local result=$(cf cell get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   assert_json_eq "$result" "$value" "$test_name failed. Expected: $value, Got: $result"
 }
@@ -222,7 +252,7 @@ test_get_only() {
   local expected="$3"
   local flags="$4"
 
-  local result=$(cf get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+  local result=$(cf cell get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
@@ -236,10 +266,10 @@ create_stepped_counter_piece() {
   echo "Created source piece: $PIECE_ID"
 
   printf '{"value":%s}\n' "$value" | cf piece apply $SPACE_ARGS --piece $PIECE_ID
-  echo "$value" | cf set $SPACE_ARGS --piece $PIECE_ID value
+  echo "$value" | cf cell set $SPACE_ARGS --piece $PIECE_ID value
   cf piece step $SPACE_ARGS --piece $PIECE_ID
 
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID value)
   if [ "$RESULT" != "$value" ]; then
     error "Source piece value should be $value before linking, got: $RESULT"
   fi
@@ -339,7 +369,7 @@ run_piece_values() {
   if [ "$schema_identity_after_override" = "$schema_identity_before" ]; then
     error "Dangerously authorized setsrc did not change the piece source."
   fi
-  schema_value=$(cf get $SPACE_ARGS --piece "$schema_piece_id" value)
+  schema_value=$(cf cell get $SPACE_ARGS --piece "$schema_piece_id" value)
   if [ "$schema_value" != "5" ]; then
     error "Dangerously authorized setsrc did not preserve the valid result."
   fi
@@ -350,10 +380,10 @@ run_piece_values() {
   echo '{"value":5}' | cf piece apply $SPACE_ARGS --piece $PIECE_ID
 
   # get, set and then re-get a value from the piece
-  echo '10' | cf set $SPACE_ARGS --piece $PIECE_ID value
+  echo '10' | cf cell set $SPACE_ARGS --piece $PIECE_ID value
 
   # Verify the get returned what we expect
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID value)
   assert_json_eq "$RESULT" '10' "Get operation did not return expected value. Expected: 10, Got: $RESULT"
 
   echo "Testing different data types and nested paths..."
@@ -385,7 +415,7 @@ run_piece_values() {
     "--input"
 
   echo '"piece-search-result-value-9146"' |
-    cf set $SPACE_ARGS --piece $PIECE_ID stringField
+    cf cell set $SPACE_ARGS --piece $PIECE_ID stringField
   SEARCH_INPUT=$(cf piece search $SPACE_ARGS --json "INPUT-VALUE-7301")
   echo "$SEARCH_INPUT" | jq -e --arg id "$PIECE_ID" \
     'length == 1 and .[0].id == $id' > /dev/null ||
@@ -424,11 +454,11 @@ run_piece_links() {
 
   cf piece set-slug $SPACE_ARGS counter-alias $PIECE_ID
 
-  cf get $SPACE_ARGS --piece counter-alias value > /dev/null
+  cf cell get $SPACE_ARGS --piece counter-alias value > /dev/null
 
   cf piece set-slug $SPACE_ARGS resolved-counter counter-alias --resolve-before-linking
 
-  cf get $SPACE_ARGS --piece resolved-counter value > /dev/null
+  cf cell get $SPACE_ARGS --piece resolved-counter value > /dev/null
 
   # The slug index: both names just assigned are enumerable, and each resolves
   # to a piece. Names are compared exactly; the resolved ids are only checked
@@ -447,11 +477,11 @@ run_piece_links() {
   echo "Created second piece: $PIECE_ID2"
 
   # Initialize piece2 with value 0 and step so output is computed
-  echo '0' | cf set $SPACE_ARGS --piece $PIECE_ID2 value --input
+  echo '0' | cf cell set $SPACE_ARGS --piece $PIECE_ID2 value --input
   cf piece step $SPACE_ARGS --piece $PIECE_ID2
 
   # Verify piece2 starts with value 0
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID2 value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID2 value)
   if [ "$RESULT" != "0" ]; then
     error "Piece2 value should be 0 before linking, got: $RESULT"
   fi
@@ -476,7 +506,7 @@ run_piece_links() {
   fi
 
   # Read back piece2's input value - should be piece1's output value (10)
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID2 value --input)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID2 value --input)
   if [ "$RESULT" != "10" ]; then
     error "After linking, piece2's input value should be 10 (from piece1), got: $RESULT"
   fi
@@ -485,17 +515,17 @@ run_piece_links() {
   cf piece step $SPACE_ARGS --piece $PIECE_ID2
 
   # Verify piece2's output value is now 10 (from piece1 via link)
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID2 value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID2 value)
   if [ "$RESULT" != "10" ]; then
     error "After linking and stepping, piece2's output value should be 10, got: $RESULT"
   fi
 
   # Call increment handler on piece2; since its value is linked to piece1's
   # output cell, this should update piece1's value too.
-  cf call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
+  cf piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
 
   # Verify piece1's value is now 11 (was 10, incremented via piece2's handler)
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID value)
   if [ "$RESULT" != "11" ]; then
     error "After calling increment on piece2, piece1's value should be 11, got: $RESULT"
   fi
@@ -506,7 +536,7 @@ run_piece_links() {
   INVENTED_ID="fid1:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
 
   # Write a value to the invented piece
-  echo '42' | cf set $SPACE_ARGS --piece $INVENTED_ID value
+  echo '42' | cf cell set $SPACE_ARGS --piece $INVENTED_ID value
 
   # Create a third piece and link the invented piece's value to its input
   PIECE_ID3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
@@ -535,7 +565,7 @@ run_piece_links() {
   cf piece link $SPACE_ARGS --allow-non-existing $INVENTED_ID/value $PIECE_ID3/value
 
   # Read back piece3's input value - should be 42 from the invented piece
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID3 value --input)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID3 value --input)
   if [ "$RESULT" != "42" ]; then
     error "After linking invented piece, piece3's input value should be 42, got: $RESULT"
   fi
@@ -544,15 +574,15 @@ run_piece_links() {
   cf piece step $SPACE_ARGS --piece $PIECE_ID3
 
   # Verify piece3's output value is 42
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID3 value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $PIECE_ID3 value)
   if [ "$RESULT" != "42" ]; then
     error "After stepping piece3 with invented link, output value should be 42, got: $RESULT"
   fi
 
   # Call increment on piece3 and verify the invented piece's value updates
-  cf call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
+  cf piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
 
-  RESULT=$(cf get $SPACE_ARGS --piece $INVENTED_ID value)
+  RESULT=$(cf cell get $SPACE_ARGS --piece $INVENTED_ID value)
   if [ "$RESULT" != "43" ]; then
     error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
   fi
@@ -569,46 +599,46 @@ run_piece_call() {
   CALLABLE_PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $CALLABLE_PATTERN_SRC)
   echo "Created callable piece: $CALLABLE_PIECE_ID"
 
-  CALL_HELP=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
+  CALL_HELP=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
   # These greps assert cf's output: the help page names the mount that was
   # invoked, and the invocation above is the top-level spelling.
-  echo "$CALL_HELP" | grep -q "cf call ... search --help" ||
+  echo "$CALL_HELP" | grep -q "cf piece call ... search --help" ||
     error "Top-level callable help should work without the delimiter"
-  echo "$CALL_HELP" | grep -q "cf call ... search <json>" ||
+  echo "$CALL_HELP" | grep -q "cf piece call ... search <json>" ||
     error "Piece-call help should describe JSON input without --json"
-  echo "$CALL_HELP" | grep -q "cf call ... search --json \[<json>\]" ||
+  echo "$CALL_HELP" | grep -q "cf piece call ... search --json \[<json>\]" ||
     error "Piece-call help should describe explicit --json input"
 
-  CALL_HELP_JSON=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
+  CALL_HELP_JSON=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
   echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
     error "Top-level --help --json should return the machine-readable schema"
 
-  JSON_TOOL_RESULT=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json '{"query":"json-input"}')
+  JSON_TOOL_RESULT=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json '{"query":"json-input"}')
   assert_json_eq \
     "$JSON_TOOL_RESULT" \
     '{"query":"json-input","help":"","source":"bound-source","summary":"bound-source:json-input:"}' \
     "Explicit inline --json should pass the complete tool input"
 
-  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
-  RESULT=$(cf get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
+  cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage --message "piece-flags"
+  RESULT=$(cf cell get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
   if [ "$RESULT" != '"piece-flags"' ]; then
     error "Flag-based handler call should update lastMessage, got: $RESULT"
   fi
 
   LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "$CALLABLE_PIECE_ID" "legacyCount" "0")
-  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
-  RESULT=$(cf get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+  cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
+  RESULT=$(cf cell get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
   if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 1))" ]; then
     error "Bare no-arg handler call should increment legacyCount, got: $RESULT"
   fi
 
-  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
-  RESULT=$(cf get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+  cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite invoke
+  RESULT=$(cf cell get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
   if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 2))" ]; then
     error "Explicit invoke should still call an empty-object handler, got legacyCount=$RESULT"
   fi
 
-  TOOL_RESULT=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search -- --query tea)
+  TOOL_RESULT=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --query tea)
   assert_json_eq \
     "$TOOL_RESULT" \
     '{"query":"tea","help":"","source":"bound-source","summary":"bound-source:tea:"}' \
@@ -634,9 +664,9 @@ run_piece_call_retry() {
   # happened and no invocation id was ever announced to retry with. The
   # caller's correct move is a fresh id, and that must yield exactly one.
   set +e
-  cf call --api-url="http://127.0.0.1:1" --identity="$IDENTITY" --space="$SPACE" \
+  cf piece call --api-url="http://127.0.0.1:1" --identity="$IDENTITY" --space="$SPACE" \
     --piece "$RETRY_PIECE_ID" --invocation "never-dispatched" \
-    recordMessage -- --message "pre-dispatch" > /dev/null 2>&1
+    recordMessage --message "pre-dispatch" > /dev/null 2>&1
   PRE_DISPATCH_STATUS=$?
   set -e
   if [ "$PRE_DISPATCH_STATUS" -eq 0 ]; then
@@ -645,8 +675,8 @@ run_piece_call_retry() {
   assert_message_count "$RETRY_PIECE_ID" 0 \
     "A pre-dispatch failure must not record a message"
 
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_ID" --invocation "$(new_invocation_id)" \
-    recordMessage -- --message "pre-dispatch" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_ID" --invocation "$(new_invocation_id)" \
+    recordMessage --message "pre-dispatch" > /dev/null
   assert_message_count "$RETRY_PIECE_ID" 1 \
     "A fresh-id retry after a pre-dispatch failure should record exactly one message"
 
@@ -661,8 +691,8 @@ run_piece_call_retry() {
   ANNOUNCE_FIFO=$(mktemp -u)
   mkfifo "$ANNOUNCE_FIFO"
   set +e
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
-    recordMessage -- --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
   CALL_PID=$!
   set -e
   # Blocking read on the pipe — no poll, no deadline. If the process exits
@@ -679,7 +709,7 @@ run_piece_call_retry() {
   kill_process_tree "$CALL_PID"
   rm -f "$ANNOUNCE_FIFO"
   if [ -z "$ANNOUNCED" ]; then
-    error "cf call should announce its invocation id at dispatch"
+    error "cf piece call should announce its invocation id at dispatch"
   fi
 
   # Whether the killed call got its commit in is genuinely racy, and both
@@ -690,15 +720,27 @@ run_piece_call_retry() {
   # --invocation ignored entirely, whenever the first commit failed to land.
   COMMITTED_BEFORE_KILL=$(message_count "$RETRY_PIECE_2")
   set +e
-  RETRY_2=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
-    recordMessage -- --message "dispatched-then-killed" 2>/dev/null)
+  RETRY_2=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage --message "dispatched-then-killed" 2>/dev/null)
   RETRY_2_STATUS=$?
   set -e
   if [ "$RETRY_2_STATUS" -ne 0 ]; then
     error "Retrying a killed-after-dispatch call should exit 0, got $RETRY_2_STATUS"
   fi
   echo "killed-after-dispatch: committed before kill = $COMMITTED_BEFORE_KILL"
-  if [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
+  if server_execution_on; then
+    # ON: no receipt PRECONDITION exists (events.md §4 subsumption — the
+    # SERVING side writes the receipt itself, the ruled result carriage,
+    # 2026-08-29), so there is no `deduplicated` key to assert either
+    # way; the dedupe-horizon skip's witness is the message count below —
+    # with the committed-before-kill value recorded above, "exactly one"
+    # is the strong assert in BOTH sub-cases (a retry that ignored
+    # --invocation would append a second message; an uncommitted first
+    # attempt retried cleanly leaves one).
+    if echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt precondition exists under server execution, so the retry cannot claim receipt-level dedup, got: $RETRY_2"
+    fi
+  elif [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
     echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null ||
       error "The killed call had committed, so its retry must deduplicate, got: $RETRY_2"
   elif echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
@@ -714,19 +756,29 @@ run_piece_call_retry() {
   # rather than as an error, and says so with deduplicated.
   RETRY_PIECE_3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_3=$(new_invocation_id)
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
-    recordMessage -- --message "lost-response" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage --message "lost-response" > /dev/null
 
   set +e
-  REPLAY=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
-    recordMessage -- --message "lost-response" 2>/dev/null)
+  REPLAY=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage --message "lost-response" 2>/dev/null)
   REPLAY_STATUS=$?
   set -e
   if [ "$REPLAY_STATUS" -ne 0 ]; then
     error "A same-id retry should exit 0, got status $REPLAY_STATUS"
   fi
-  echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
-    error "A same-id retry should report deduplicated, got: $REPLAY"
+  if server_execution_on; then
+    # ON: receipt-level dedup REPORTING does not exist (the receipt is
+    # written by the SERVING side, without the create-only precondition —
+    # the ruled result carriage, 2026-08-29); the behavioral witness is
+    # the count assert below plus the id echo here.
+    if echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt precondition exists under server execution, so the replay cannot claim receipt-level dedup, got: $REPLAY"
+    fi
+  else
+    echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
+      error "A same-id retry should report deduplicated, got: $REPLAY"
+  fi
   echo "$REPLAY" | jq -e --arg id "$INVOCATION_3" '.invocation == $id' > /dev/null ||
     error "A same-id retry should echo the caller's invocation id, got: $REPLAY"
   assert_message_count "$RETRY_PIECE_3" 1 \
@@ -738,13 +790,13 @@ run_piece_call_retry() {
   # call reports the first one's outcome rather than applying its own.
   RETRY_PIECE_4=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_4=$(new_invocation_id)
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
-    recordMessage -- --message "original-payload" > /dev/null
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
-    recordMessage -- --message "second-payload" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage --message "original-payload" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage --message "second-payload" > /dev/null
   assert_message_count "$RETRY_PIECE_4" 1 \
     "Reusing a settled id with a different payload should leave exactly one message"
-  LAST=$(cf get $SPACE_ARGS --piece "$RETRY_PIECE_4" lastMessage)
+  LAST=$(cf cell get $SPACE_ARGS --piece "$RETRY_PIECE_4" lastMessage)
   if [ "$LAST" != '"original-payload"' ]; then
     error "The settled invocation's outcome should stand, got lastMessage: $LAST"
   fi
@@ -757,8 +809,8 @@ run_piece_call_retry() {
   RETRY_PIECE_5=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_5=$(new_invocation_id)
   set +e
-  BAD_PAYLOAD=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
-    recordMessage -- --json '{"mesage":"typo"}' 2>&1)
+  BAD_PAYLOAD=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage --json '{"mesage":"typo"}' 2>&1)
   BAD_STATUS=$?
   set -e
   if [ "$BAD_STATUS" -eq 0 ]; then
@@ -771,11 +823,11 @@ run_piece_call_retry() {
   assert_message_count "$RETRY_PIECE_5" 0 \
     "A refused payload must not record a message"
 
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
-    recordMessage -- --message "corrected" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage --message "corrected" > /dev/null
   assert_message_count "$RETRY_PIECE_5" 1 \
     "A refused call never spent its id, so the corrected retry should record one"
-  LAST_5=$(cf get $SPACE_ARGS --piece "$RETRY_PIECE_5" lastMessage)
+  LAST_5=$(cf cell get $SPACE_ARGS --piece "$RETRY_PIECE_5" lastMessage)
   if [ "$LAST_5" != '"corrected"' ]; then
     error "The corrected retry's payload should stand, got lastMessage: $LAST_5"
   fi
@@ -794,8 +846,8 @@ run_piece_call_retry() {
   RETRY_PIECE_6=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_6=$(new_invocation_id)
   set +e
-  ABSENT_OUT=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
-    recordNote -- invoke 2>&1)
+  ABSENT_OUT=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
+    recordNote invoke 2>&1)
   ABSENT_STATUS=$?
   set -e
   if [ "$ABSENT_STATUS" -eq 0 ]; then
@@ -808,11 +860,11 @@ run_piece_call_retry() {
   assert_message_count "$RETRY_PIECE_6" 0 \
     "A refused absent-payload call must not record a message"
 
-  cf call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
-    recordNote -- --json '{"note":"corrected"}' > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
+    recordNote --json '{"note":"corrected"}' > /dev/null
   assert_message_count "$RETRY_PIECE_6" 1 \
     "The refused call never spent its id, so the corrected retry should record one"
-  LAST_6=$(cf get $SPACE_ARGS --piece "$RETRY_PIECE_6" lastMessage)
+  LAST_6=$(cf cell get $SPACE_ARGS --piece "$RETRY_PIECE_6" lastMessage)
   if [ "$LAST_6" != '"corrected"' ]; then
     error "The corrected retry's payload should stand, got lastMessage: $LAST_6"
   fi
@@ -858,8 +910,8 @@ run_three_topic_fixture() {
   # --- 1. Create the umbrella; its declared result is the child reference. --
   INV_UMBRELLA=$(new_invocation_id)
   UMBRELLA_PAYLOAD='{"title":"Umbrella","body":"Tracks the D4 fixture family.","agentName":"fable-d4"}'
-  UMBRELLA_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_UMBRELLA" createTopic -- --json "$UMBRELLA_PAYLOAD" 2>/dev/null)
+  UMBRELLA_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_UMBRELLA" createTopic --json "$UMBRELLA_PAYLOAD" 2>/dev/null)
   echo "$UMBRELLA_JSON" | jq -e --arg id "$INV_UMBRELLA" \
     '.invocation == $id and .status == "settled"' > /dev/null ||
     error "The umbrella create should settle under the caller's id, got: $UMBRELLA_JSON"
@@ -868,7 +920,7 @@ run_three_topic_fixture() {
   UMBRELLA_PATH=$(echo "$UMBRELLA_JSON" | jq -re '.result.topic.path')
   # The returned reference addresses the canonical child directly — no list
   # scan, no correlation by index.
-  UMBRELLA_ENTRY=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$UMBRELLA_PATH")
+  UMBRELLA_ENTRY=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$UMBRELLA_PATH")
   echo "$UMBRELLA_ENTRY" | jq -e --arg id "$UMBRELLA_ID" \
     '.id == $id and .title == "Umbrella" and
      .body == "Tracks the D4 fixture family." and .createdBy == "fable-d4"' > /dev/null ||
@@ -881,8 +933,8 @@ run_three_topic_fixture() {
   CHILD_A_PAYLOAD=$(jq -cn --arg u "$UMBRELLA_ID" \
     '{title: "Child A", body: ("Refines " + $u + "."), agentName: "fable-d4",
       references: [$u]}')
-  CHILD_A_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_CHILD_A" createTopic -- --json "$CHILD_A_PAYLOAD" 2>/dev/null)
+  CHILD_A_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_CHILD_A" createTopic --json "$CHILD_A_PAYLOAD" 2>/dev/null)
   CHILD_A_ID=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.id') ||
     error "Child A's Invocation JSON should carry its declared result, got: $CHILD_A_JSON"
   CHILD_A_PATH=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.path')
@@ -908,8 +960,8 @@ run_three_topic_fixture() {
   # exact rather than ±1 on the kill race.
   CF_CLI_INTEGRATION_TIMINGS_FILE="$D4_TIMINGS.killed" \
   CF_TEST_ANNOUNCE_INVOCATION_PHASES=1 \
-    cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" --invocation "$INV_CHILD_B" \
-    createTopic -- --json "$CHILD_B_PAYLOAD" > /dev/null 2> "$ANNOUNCE_FIFO" &
+    cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" --invocation "$INV_CHILD_B" \
+    createTopic --json "$CHILD_B_PAYLOAD" > /dev/null 2> "$ANNOUNCE_FIFO" &
   CALL_PID=$!
   set -e
   COMMIT_ANNOUNCED=""
@@ -930,23 +982,35 @@ run_three_topic_fixture() {
   # The kill landed only after the durable commit, so the create MUST be
   # visible — a hard assertion, not a recorded race branch. If the kill ever
   # lands pre-commit, the scenario fails here.
-  TOPICS_AFTER_KILL=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics 2>/dev/null | jq 'length')
+  TOPICS_AFTER_KILL=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics 2>/dev/null | jq 'length')
   if [ "$TOPICS_AFTER_KILL" != "3" ]; then
     error "The dropped create committed before the kill, so three topics must exist, got: $TOPICS_AFTER_KILL"
   fi
 
   set +e
-  CHILD_B_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_CHILD_B" createTopic -- --json "$CHILD_B_PAYLOAD" 2>/dev/null)
+  CHILD_B_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_CHILD_B" createTopic --json "$CHILD_B_PAYLOAD" 2>/dev/null)
   CHILD_B_STATUS=$?
   set -e
   if [ "$CHILD_B_STATUS" -ne 0 ]; then
     error "Retrying the dropped create under the same id should exit 0, got $CHILD_B_STATUS"
   fi
-  # The commit provably preceded the kill, so the retry MUST collide on the
-  # create-only receipt and settle as the ORIGINAL handling — every run.
-  echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
-    error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
+  # The commit provably preceded the kill, so the retry MUST settle as the
+  # ORIGINAL handling — every run. The mechanism is arm-specific: OFF, the
+  # retry collides on the create-only receipt and says so (`deduplicated`);
+  # ON, no receipt precondition exists (events.md §4's subsumption) — the
+  # duplicate is skipped at the dedupe horizon, and the retry's readback
+  # resolves the SAME cause-derived receipt the SERVING side wrote for the
+  # original handling (the ruled result carriage, 2026-08-29). The
+  # original-result readback below is the witness in both arms.
+  if server_execution_on; then
+    if echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt precondition exists under server execution, so the retry cannot claim receipt-level dedup, got: $CHILD_B_JSON"
+    fi
+  else
+    echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+      error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
+  fi
   # The retry's Invocation JSON carries the settled handling's result — the
   # readback the caller acts on after losing a response.
   CHILD_B_ID=$(echo "$CHILD_B_JSON" | jq -re '.result.topic.id') ||
@@ -959,15 +1023,27 @@ run_three_topic_fixture() {
   # silence, and not anything derived from the imposter payload.
   IMPOSTER_PAYLOAD='{"title":"Child B imposter","body":"Must not exist.","agentName":"impostor"}'
   set +e
-  REPLAY_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_CHILD_B" createTopic -- --json "$IMPOSTER_PAYLOAD" 2>/dev/null)
+  REPLAY_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_CHILD_B" createTopic --json "$IMPOSTER_PAYLOAD" 2>/dev/null)
   REPLAY_STATUS=$?
   set -e
   if [ "$REPLAY_STATUS" -ne 0 ]; then
     error "A same-id replay should exit 0, got $REPLAY_STATUS"
   fi
-  echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null ||
-    error "A same-id replay should deduplicate, got: $REPLAY_JSON"
+  # Same arm split as step 3: the `deduplicated` key is the OFF arm's
+  # receipt-precondition witness. The D3 semantic itself — the replay hands
+  # back the ORIGINAL result, nothing derived from the imposter payload —
+  # is the assert_json_eq below, and it holds in BOTH arms (ON: the
+  # readback address derives from the invocation id, so the replay reads
+  # the original handling's serving-side receipt).
+  if server_execution_on; then
+    if echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt precondition exists under server execution, so the replay cannot claim receipt-level dedup, got: $REPLAY_JSON"
+    fi
+  else
+    echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+      error "A same-id replay should deduplicate, got: $REPLAY_JSON"
+  fi
   assert_json_eq \
     "$(echo "$REPLAY_JSON" | jq '.result')" \
     "$(echo "$CHILD_B_JSON" | jq '.result')" \
@@ -978,8 +1054,8 @@ run_three_topic_fixture() {
   REVISE_PAYLOAD=$(jq -cn --arg u "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
     '{id: $u, body: ("Umbrella over " + $a + " and " + $b + "."),
       agentName: "fable-d4-editor", references: [$a, $b]}')
-  REVISE_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_REVISE" reviseBody -- --json "$REVISE_PAYLOAD" 2>/dev/null)
+  REVISE_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_REVISE" reviseBody --json "$REVISE_PAYLOAD" 2>/dev/null)
   echo "$REVISE_JSON" | jq -e --arg id "$UMBRELLA_ID" --arg path "$UMBRELLA_PATH" \
     '.status == "settled" and .result.topic.id == $id and .result.topic.path == $path' > /dev/null ||
     error "reviseBody should return the umbrella's own reference, got: $REVISE_JSON"
@@ -990,11 +1066,11 @@ run_three_topic_fixture() {
   # calls above deliberately never waited for derived recomputation.
   cf piece step $SPACE_ARGS --piece "$TOPIC_PIECE_ID"
 
-  COUNT=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topicCount)
+  COUNT=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topicCount)
   if [ "$COUNT" != "3" ]; then
     error "Exactly three topics should exist, got topicCount: $COUNT"
   fi
-  TOPICS_LEN=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics | jq 'length')
+  TOPICS_LEN=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics | jq 'length')
   if [ "$TOPICS_LEN" != "3" ]; then
     error "Exactly three topics should exist, got topics length: $TOPICS_LEN"
   fi
@@ -1003,19 +1079,19 @@ run_three_topic_fixture() {
   # attributions on the umbrella; create-time state and the umbrella edge on
   # each child. Child B must be the dropped create's payload — the imposter
   # payload must not have applied.
-  UMBRELLA_FINAL=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$UMBRELLA_PATH")
+  UMBRELLA_FINAL=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$UMBRELLA_PATH")
   echo "$UMBRELLA_FINAL" | jq -e \
     --arg id "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
     '.id == $id and .createdBy == "fable-d4" and .bodyUpdatedBy == "fable-d4-editor" and
      .body == ("Umbrella over " + $a + " and " + $b + ".") and
      .references == [$a, $b]' > /dev/null ||
     error "The revised umbrella should carry both child references and revision attribution, got: $UMBRELLA_FINAL"
-  CHILD_A_FINAL=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$CHILD_A_PATH")
+  CHILD_A_FINAL=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$CHILD_A_PATH")
   echo "$CHILD_A_FINAL" | jq -e --arg id "$CHILD_A_ID" --arg u "$UMBRELLA_ID" \
     '.id == $id and .title == "Child A" and .createdBy == "fable-d4" and
      .bodyUpdatedBy == "" and .references == [$u]' > /dev/null ||
     error "Child A's returned reference should open the canonical child, got: $CHILD_A_FINAL"
-  CHILD_B_FINAL=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$CHILD_B_PATH")
+  CHILD_B_FINAL=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$CHILD_B_PATH")
   echo "$CHILD_B_FINAL" | jq -e --arg id "$CHILD_B_ID" --arg u "$UMBRELLA_ID" \
     '.id == $id and .title == "Child B" and .createdBy == "fable-d4" and
      .references == [$u]' > /dev/null ||
@@ -1023,7 +1099,7 @@ run_three_topic_fixture() {
 
   # The reciprocal derived references: children point up at the umbrella, the
   # revised umbrella points down at both children, derived — never persisted.
-  RECIPROCAL=$(cf get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)
+  RECIPROCAL=$(cf cell get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)
   echo "$RECIPROCAL" | jq -e \
     --arg u "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
     '.[$u] == [$a, $b] and .[$a] == [$u] and .[$b] == [$u]' > /dev/null ||
@@ -1165,66 +1241,22 @@ run_bulk_survey_drill() {
   echo "Successfully ran the bulk-survey drill for ${API_URL}."
 }
 
-# The top-level spellings are the same commands as their `cf piece`
-# counterparts (docs/plans/cli-surface-shape.md, step 5). The unit guard
-# (test/piece-data-spellings.test.ts) proves the two mounts share one
-# surface and refuse identically; what it cannot do is complete an
-# operation. This section is the successful-path half: each spelling
-# performs a real write, read, and dispatch against a live space, and every
-# assertion crosses spellings, so "identical surface" is backed by
-# "identical outcome" rather than by two green paths that never met.
-run_spelling_parity() {
-  setup_space
-
-  # Reads and writes: the stepped counter fixture, whose result cell exists
-  # and accepts a value write.
-  create_stepped_counter_piece 7
-
-  # Write through the new spelling, read back through the old.
-  echo '5' | cf set $SPACE_ARGS --piece $PIECE_ID value
-  RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
-  [ "$RESULT" = '5' ] ||
-    error "cf piece get should read what cf set wrote, got: $RESULT"
-
-  # Write through the old spelling, read back through the new — once by
-  # flag, once through the positional canonical address, the composed form
-  # the surface arc exists for.
-  echo '9' | cf piece set $SPACE_ARGS --piece $PIECE_ID value
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID value)
-  [ "$RESULT" = '9' ] ||
-    error "cf get should read what cf piece set wrote, got: $RESULT"
-  RESULT=$(cf get $SPACE_ARGS "/of:$PIECE_ID/value")
-  [ "$RESULT" = '9' ] ||
-    error "cf get with a positional address should read the same cell, got: $RESULT"
-
-  # Dispatch: the callable fixture. The same tool through both spellings
-  # answers identically.
-  PARITY_CALLABLE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
-  echo "Created parity callable piece: $PARITY_CALLABLE_ID"
-  OLD_CALL=$(cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search -- --query parity)
-  NEW_CALL=$(cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search -- --query parity)
-  assert_json_eq "$NEW_CALL" "$OLD_CALL" \
-    "cf call and cf piece call should return the same tool result"
-
-  # A handler dispatched through the new spelling commits like the old one.
-  LEGACY_BEFORE=$(read_piece_value_or_default "$PARITY_CALLABLE_ID" "legacyCount" "0")
-  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyWrite
-  RESULT=$(cf piece get $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyCount)
-  [ "$RESULT" = "$((LEGACY_BEFORE + 1))" ] ||
-    error "A handler dispatched via cf call should commit once, got legacyCount=$RESULT"
-
-  # The one place the two mounts deliberately differ: each verb help page
-  # names the mount that was invoked. Asserted from both ends here, in the
-  # section that dies with the piece-mounted spellings, so "the page names
-  # what you typed" cannot regress on either branch while both exist.
-  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
-    grep -q "cf call ... search --help" ||
-    error "cf call's verb help should name the top-level mount"
-  cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
-    grep -q "cf piece call ... search --help" ||
-    error "cf piece call's verb help should name the piece mount"
-
-  echo "Successfully ran CLI spelling parity tests for ${API_URL}/${SPACE}."
+# The interactive shell against a real fabric, on a real terminal. Same
+# delegation rationale as the walkthroughs above; it deploys its own fixture
+# and takes its own space.
+#
+# It is the only thing anywhere that runs `cf sh`. The shell's unit suite
+# drives every module with nothing behind it — no server, no piece, and no
+# terminal — so what no case there can see is the composition: whether a place
+# the fabric holds is the one a `cd` adopted, and whether the reference a
+# listing printed is the one the next line takes. It needs a pseudo-terminal
+# because the shell refuses to start without one, and python3 is what allocates
+# it, which this suite already depends on for its own timing helper.
+run_shuttle_walkthrough() {
+  echo "Running the shuttle walkthrough..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/shuttle-over-a-terminal.sh" ||
+    error "The shuttle walkthrough failed."
+  echo "Successfully ran the shuttle walkthrough for ${API_URL}."
 }
 
 run_wish() {
@@ -1271,14 +1303,14 @@ run_piece_data_files() {
     "$data_pattern")
   echo "Created data-file piece: $DATA_PIECE_ID"
 
-  CITIES=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
+  CITIES=$(cf cell get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
   assert_json_eq "$CITIES" '["Oslo", "Lima"]' \
     "Pattern should read the attached data file, got: $CITIES"
 
   # The bytes reaching the runtime must be the authored bytes, not a reserialized
   # form. The fixture's spacing is deliberately not what a formatter would
   # produce, so a re-serialization anywhere in the path shows up here.
-  RAW=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID raw)
+  RAW=$(cf cell get $SPACE_ARGS --piece $DATA_PIECE_ID raw)
   EXPECTED_RAW=$(jq -Rs . < "$data_file")
   assert_json_eq "$RAW" "$EXPECTED_RAW" \
     "Attached data file should reach the pattern verbatim, got: $RAW"
@@ -1303,7 +1335,7 @@ run_piece_data_files() {
     "$data_dir/data-reader.tsx"
   cf piece step $SPACE_ARGS --piece $DATA_PIECE_ID
 
-  UPDATED=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
+  UPDATED=$(cf cell get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
   assert_json_eq "$UPDATED" '["Oslo", "Lima", "Accra"]' \
     "Pattern should read the updated data file, got: $UPDATED"
 
@@ -1339,6 +1371,17 @@ run_piece_data_files() {
 # Each step records as its own test, named "integration.sh <step>"; the begin
 # markers close the previous step's record and the exit trap closes the last
 # one, so a failing step is recorded with the failure.
+#
+# `all` runs every step, and every step also runs under one of the sections CI
+# dispatches: piece-values, piece-call, and piece-links. Both hold in
+# packages/cli/test/integration-sections.test.ts, which reads this table and
+# the cli-integration-test matrix in .github/workflows/deno.yml.
+#
+# Two kinds of arm live here. A **step arm** runs exactly one step, and
+# every step has one, so any step can be run and scheduled on its own. A
+# **group arm** runs several, for a person running the script by hand and
+# for the continuous-integration legs. Where a group arm and a step arm
+# would share a name, the step arm takes an `-only` suffix.
 case "$SECTION" in
   all)
     cf_test_step_begin piece-values
@@ -1353,8 +1396,18 @@ case "$SECTION" in
     run_piece_call_retry
     cf_test_step_begin three-topic-fixture
     run_three_topic_fixture
-    cf_test_step_begin spelling-parity
-    run_spelling_parity
+    cf_test_step_begin verbs-walkthrough
+    run_verbs_walkthrough
+    cf_test_step_begin verb-session-gaps
+    run_verb_session_gaps
+    cf_test_step_begin completion-walkthrough
+    run_completion_walkthrough
+    cf_test_step_begin topics-restore-drill
+    run_topics_restore_drill
+    cf_test_step_begin bulk-survey-drill
+    run_bulk_survey_drill
+    cf_test_step_begin shuttle-walkthrough
+    run_shuttle_walkthrough
     cf_test_step_begin wish
     run_wish
     ;;
@@ -1369,14 +1422,22 @@ case "$SECTION" in
     run_piece_values
     cf_test_step_begin piece-data-files
     run_piece_data_files
-    cf_test_step_begin spelling-parity
-    run_spelling_parity
     ;;
-  spelling-parity)
-    cf_test_step_begin spelling-parity
-    run_spelling_parity
+  piece-values-only)
+    cf_test_step_begin piece-values
+    run_piece_values
+    ;;
+  piece-data-files)
+    cf_test_step_begin piece-data-files
+    run_piece_data_files
     ;;
   piece-links)
+    cf_test_step_begin piece-links
+    run_piece_links
+    cf_test_step_begin wish
+    run_wish
+    ;;
+  piece-links-only)
     cf_test_step_begin piece-links
     run_piece_links
     ;;
@@ -1397,6 +1458,12 @@ case "$SECTION" in
     run_topics_restore_drill
     cf_test_step_begin bulk-survey-drill
     run_bulk_survey_drill
+    cf_test_step_begin shuttle-walkthrough
+    run_shuttle_walkthrough
+    ;;
+  piece-call-only)
+    cf_test_step_begin piece-call
+    run_piece_call
     ;;
   piece-call-retry)
     cf_test_step_begin piece-call-retry
@@ -1429,6 +1496,10 @@ case "$SECTION" in
   bulk-survey-drill)
     cf_test_step_begin bulk-survey-drill
     run_bulk_survey_drill
+    ;;
+  shuttle)
+    cf_test_step_begin shuttle-walkthrough
+    run_shuttle_walkthrough
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"

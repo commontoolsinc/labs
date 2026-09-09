@@ -16,6 +16,11 @@ import { expect } from "@std/expect";
 import ts from "typescript";
 
 import { transformFiles, transformSource, validateSource } from "./utils.ts";
+import {
+  callsMatching,
+  hasKeyPathRead,
+  parseModule,
+} from "./transformed-ast.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { normalizeDataFlows } from "../src/ast/normalize.ts";
@@ -201,6 +206,93 @@ describe("transparent wrapper consistency", () => {
         expect(await patternContextErrors(source)).toEqual([]);
       });
     }
+  });
+
+  describe("capture shrinking", () => {
+    // A lift captures the fields its body actually reads. The dedup that
+    // decides this asks each data flow for its root identifier, so a spelling
+    // whose root goes unrecognized is not simply skipped — the free-identifier
+    // pass adds that root as its own capture, and a whole-object capture
+    // subsumes the narrower paths beside it. The lift then re-runs for any
+    // field of the object rather than for the one field it reads.
+    //
+    // The assertion spellings parenthesize the whole wrapper and assert it to
+    // the receiver's own type. `(obj) as S` would not do: appending `.b` to it
+    // parses as the qualified type name `S.b`, not a read of the cast value.
+    const RECEIVERS: Readonly<Record<string, string>> = {
+      bare: "obj",
+      parenthesized: "(obj)",
+      "non-null": "obj!",
+      "as-cast": "(obj as S)",
+      satisfies: "(obj satisfies S)",
+      stacked: "((obj satisfies S) as S)!",
+    };
+
+    const source = (receiver: string) =>
+      `      import { pattern } from "commonfabric";
+      interface S { a: number; b: number; }
+      export default pattern<{ obj: S }, { x: number; y: number }>(({ obj }) => ({
+        x: obj.a * 2,
+        y: ${receiver}.b + 1,
+      }));
+    `;
+
+    /** The value each emitted lift captures under `obj`, queried from the
+     *  parsed output rather than matched against printed text, per this
+     *  directory's "assert on structure, not printed text" convention. Both
+     *  lifts in the source capture `obj` — the `a` projection for `x`, and
+     *  the value under test for `y` — so two entries come back. */
+    const objCaptureValues = (root: ts.SourceFile): ts.Expression[] => {
+      const values: ts.Expression[] = [];
+      for (const call of callsMatching(root, /^__cfLift_\d+$/)) {
+        const captures = call.arguments[0];
+        if (!captures || !ts.isObjectLiteralExpression(captures)) continue;
+        for (const property of captures.properties) {
+          if (
+            ts.isShorthandPropertyAssignment(property) &&
+            property.name.text === "obj"
+          ) {
+            values.push(property.name);
+          }
+          if (
+            ts.isPropertyAssignment(property) &&
+            ts.isIdentifier(property.name) && property.name.text === "obj"
+          ) {
+            values.push(property.initializer);
+          }
+        }
+      }
+      return values;
+    };
+
+    for (const [name, receiver] of Object.entries(RECEIVERS)) {
+      it(`captures only the field read behind a ${name} receiver`, async () => {
+        const root = parseModule(
+          await transformSource(source(receiver), {
+            types: COMMONFABRIC_TYPES,
+          }),
+        );
+        const values = objCaptureValues(root);
+
+        expect(values.length).toBeGreaterThan(0);
+        // The bug shape: the whole object captured as a bare identifier.
+        expect(values.some((value) => ts.isIdentifier(value))).toBe(false);
+        // The shrunk shape: a capture projects `b` off `obj` with `.key("b")`.
+        expect(hasKeyPathRead(root, "b", "obj")).toBe(true);
+      });
+    }
+
+    it("captures only the field read behind an angle-bracket assertion", async () => {
+      const output = await transformFiles({
+        "/m.ts": source("(<S>obj)"),
+      }, { types: COMMONFABRIC_TYPES });
+      const root = parseModule(output["/m.ts"]!, ts.ScriptKind.TS);
+      const values = objCaptureValues(root);
+
+      expect(values.length).toBeGreaterThan(0);
+      expect(values.some((value) => ts.isIdentifier(value))).toBe(false);
+      expect(hasKeyPathRead(root, "b", "obj")).toBe(true);
+    });
   });
 
   describe("normalizeDataFlows()", () => {

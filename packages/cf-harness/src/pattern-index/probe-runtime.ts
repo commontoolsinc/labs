@@ -1,4 +1,8 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcConfClause,
+  CfcEnforcementMode,
+  CfcReadOnExceed,
+} from "@commonfabric/runner/cfc";
 import type { Identity } from "@commonfabric/identity";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -52,6 +56,15 @@ export const openProbeRuntime = async (
   identity: Identity | undefined,
   apiUrl: URL,
   cfcEnforcementMode: CfcEnforcementMode,
+  /**
+   * The read ceiling the session's runtime is bounded by, which the probe's
+   * runtime is bounded by too: a probe reads the same space the session
+   * does, so it reads under the same posture.
+   */
+  readCeiling: {
+    cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+    cfcReadOnExceed?: CfcReadOnExceed;
+  } = {},
 ): Promise<ProbeRuntime | undefined> => {
   if (identity === undefined) return undefined;
   // Imported here rather than at module scope on purpose. `cache.deno` reaches
@@ -75,7 +88,17 @@ export const openProbeRuntime = async (
     // is only written under an enforcing mode, so a probe in a default-mode
     // runtime cannot resolve a composed import at all and every composed
     // pattern would quietly come back with no verdict.
-    runtime = new Runtime({ apiUrl, storageManager, cfcEnforcementMode });
+    runtime = new Runtime({
+      apiUrl,
+      storageManager,
+      cfcEnforcementMode,
+      ...(readCeiling.cfcReadMaxConfidentiality !== undefined
+        ? { cfcReadMaxConfidentiality: readCeiling.cfcReadMaxConfidentiality }
+        : {}),
+      ...(readCeiling.cfcReadOnExceed !== undefined
+        ? { cfcReadOnExceed: readCeiling.cfcReadOnExceed }
+        : {}),
+    });
     const pieces = new PiecesController(
       await createSession({
         identity,

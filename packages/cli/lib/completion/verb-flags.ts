@@ -12,12 +12,11 @@
  * every Tab and this module is resolved only where a verb's flags are being
  * offered, which is what the inline imports there buy everywhere else.
  *
- * Which slot receives these candidates is not settled here. Step 10 of
- * [CLI surface shape](../../../../docs/plans/cli-surface-shape.md) decides
- * whether a verb's fields are written before the `--` marker or after it, and
- * routing them to today's position would teach a spelling that step retires.
- * The candidates are the same function either way, which is why they are built
- * ahead of it.
+ * The slot they belong to is the `tail` argument: the verb opens the callable's
+ * section, so its fields are written directly after the verb name and `--`
+ * closes that section rather than opening it. Routing them there is item 4 of
+ * [CLI completion coverage](../../../../docs/plans/cli-completion-coverage.md);
+ * this module is the half that does not depend on the wiring.
  */
 
 import type { JSONSchema } from "@commonfabric/api";

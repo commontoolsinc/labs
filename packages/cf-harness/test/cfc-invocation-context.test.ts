@@ -5,6 +5,7 @@ import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import {
   CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
   createHarnessCfcInvocationContext,
+  summarizeCfcInvocationRunManifest,
   summarizeCfcInvocationSequence,
   summarizeCfcInvocationText,
 } from "../src/contracts/cfc-invocation-context.ts";
@@ -307,4 +308,31 @@ Deno.test("createHarnessCfcInvocationContext merges explicit trusted labels with
       },
     }],
   });
+});
+
+Deno.test("summarizeCfcInvocationRunManifest carries the manifest's read ceiling", () => {
+  assertEquals(
+    summarizeCfcInvocationRunManifest(
+      {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        wishId: "W-2201",
+        cfc: {
+          maxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+          onExceed: "skip",
+        },
+      },
+      "/runs/W-2201/manifest.json",
+    ),
+    {
+      present: true,
+      path: "/runs/W-2201/manifest.json",
+      source: "loom",
+      wishId: "W-2201",
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip",
+      promptSlotPresent: false,
+    },
+  );
 });

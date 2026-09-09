@@ -405,6 +405,7 @@ describe("sqlite-served-identity", () => {
       );
       return { builtin: b, result: () => cell! };
     };
+
     return { builtin, result: () => resultCell!, makeBuiltin };
   };
 

@@ -31,7 +31,9 @@
  * never meets a refusal does not re-run on a metadata change either — so it
  * is documented here rather than pinned as a test.
  */
+
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -64,10 +66,9 @@ const seedSource = async () => {
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    // The shipped shell posture; the action's own transaction escalates to
-    // `enforce-strict` per-tx, the same seam cfc-writer-fit uses. A
-    // runtime-wide strict would put the SEED under strict too.
-    cfcEnforcementMode: "enforce-explicit",
+    // Persisting flow labels puts the source's confidentiality on the
+    // copy the action writes. That carried label is what
+    // `expect(out.get()?.copied).toBeUndefined()` needs refused.
     cfcFlowLabels: "persist",
   });
   const space = signer.did();
@@ -86,7 +87,10 @@ const seedSource = async () => {
   return { storageManager, runtime, space, source };
 };
 
-/** Subscribes an action whose own transaction runs at enforce-strict. */
+/**
+ * Subscribes an action whose own transaction runs at enforce-strict, the rung
+ * at which a writer-fit misfit refuses the commit rather than flagging it.
+ */
 const subscribeRefusedCopy = (
   runtime: Runtime,
   space: MemorySpace,
@@ -158,9 +162,14 @@ describe("cfc prepared-state drift", () => {
     const { storageManager, runtime, space, source } = await seedSource();
     try {
       const tx = runtime.edit();
+      // The transaction reads the source, so what it writes here carries
+      // the source's confidentiality. The schema declares that
+      // confidentiality, leaving the drift invalidation as the only
+      // thing that refuses this commit.
       const out = runtime.getCell<{ n?: number }>(space, "drift-out", {
         type: "object",
         properties: { n: { type: "number" } },
+        ifc: { confidentiality: ["secret"] },
       }, tx);
       out.set({ n: 1 });
       // The labeled read makes the transaction CFC-relevant, so prepare

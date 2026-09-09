@@ -53,9 +53,10 @@ for (const createFunc of createFuncs) {
     let testId = -1;
     let oneLength = 10; // For multi-byte variety; updated pseudorandomly.
 
-    // A caller-supplied encoding name reaches the message, so a name holding
-    // a backtick must not break the span around it.
     it("quotes an unknown encoding name safely, backticks and all", () => {
+      // A caller-supplied encoding name reaches the message, so a name holding
+      // a backtick must not break the span around it.
+
       const hasher = createFunc();
       hasher.update(new Uint8Array([1, 2, 3]));
       expect(() => hasher.digest("a`b" as "base64url"))
@@ -65,9 +66,11 @@ for (const createFunc of createFuncs) {
     describe("after `digest()`", () => {
       const alreadyDone = /`digest\(\)` already done/;
 
-      // A small update is the interesting case: implementations that buffer
-      // small writes can satisfy one without consulting the underlying hasher.
       it("throws given a small `update()`", () => {
+        // A small update is the interesting case: implementations that buffer
+        // small writes can satisfy one without consulting the underlying
+        // hasher.
+
         const hasher = createFunc();
         hasher.update(new Uint8Array([1, 2, 3]));
         hasher.digest();

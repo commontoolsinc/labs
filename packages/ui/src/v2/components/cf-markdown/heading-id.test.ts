@@ -5,11 +5,12 @@ import { Lexer, type Tokens } from "marked";
 
 import { HeadingIds } from "./heading-id.ts";
 
-// marked generated these ids itself until version 5, under a `headerIds`
-// option that defaulted to on, and dropped them in a later major. The expected
-// ids below are the ones marked 4 produced, because fragment links written
-// against the old output point at them.
 describe("heading-id", () => {
+  // marked generated these ids itself until version 5, under a `headerIds`
+  // option that defaulted to on, and dropped them in a later major. The
+  // expected ids below are the ones marked 4 produced, because fragment links
+  // written against the old output point at them.
+
   const idsOf = (markdown: string): string[] => {
     const ids = new HeadingIds();
     return Lexer.lex(markdown, { breaks: true, gfm: true })

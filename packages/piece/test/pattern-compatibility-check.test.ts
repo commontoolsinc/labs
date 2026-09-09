@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { spy } from "@std/testing/mock";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  type Cell,
   getPatternIdentityRef,
   Runtime,
   type RuntimeProgram,
@@ -37,14 +39,22 @@ import { PiecesController } from "../src/ops/pieces-controller.ts";
 const signer = await Identity.fromPassphrase("pattern compatibility check");
 
 /** The piece's current source: one optional input, one output. */
-function baseProgram(): RuntimeProgram {
+function baseProgram(includeRetainedGraph = false): RuntimeProgram {
+  const argumentsType = includeRetainedGraph
+    ? "{ seed?: string; extra?: RetainedNode }"
+    : "{ seed?: string }";
   return {
     main: "/main.tsx",
     files: [{
       name: "/main.tsx",
       contents: [
         "import { NAME, pattern } from 'commonfabric';",
-        "export default pattern<{ seed?: string }, { label: string }>(",
+        ...(includeRetainedGraph
+          ? [
+            "type RetainedNode = { left?: RetainedNode; right?: RetainedNode; label?: string };",
+          ]
+          : []),
+        `export default pattern<${argumentsType}, { label: string }>(`,
         "  ({ seed }) => ({",
         "    [NAME]: 'Compatibility check',",
         "    label: seed ?? 'unset',",
@@ -271,6 +281,73 @@ describe("setsrc compatibility preflight", () => {
     // revision was cleared.
     expect(report.candidate.identity).toBeDefined();
   });
+
+  for (const modeled of [false, true]) {
+    it(`checks a piece with a ${modeled ? "modeled" : "unmodeled"} shared graph without expanding every path`, async () => {
+      const program = baseProgram(modeled);
+      const piece = await pieces.create(program, { input: { seed: "hello" } });
+      const graphIds = new Set<string>();
+      const depth = 12;
+      const tx = runtime.edit();
+      try {
+        let next: Cell<unknown> = runtime.getCell(
+          pieces.getSpace(),
+          "retained-leaf",
+          undefined,
+          tx,
+        );
+        next.set({ label: "leaf" });
+        graphIds.add(next.getAsNormalizedFullLink().id);
+        for (let index = 0; index < depth; index++) {
+          const node = runtime.getCell(
+            pieces.getSpace(),
+            `retained-node-${index}`,
+            undefined,
+            tx,
+          );
+          node.set({ left: next, right: next });
+          graphIds.add(node.getAsNormalizedFullLink().id);
+          next = node;
+        }
+        pieces.getArgument(piece.getCell()).withTx(tx).asSchema(undefined)
+          .set({ seed: "hello", extra: next });
+        const committed = await tx.commit();
+        expect(committed.error).toBeUndefined();
+      } finally {
+        if (tx.status().status === "ready") tx.abort();
+      }
+      await runtime.idle();
+      const argumentBefore = pieces.getArgument(piece.getCell()).getRaw();
+      const identityBefore = getPatternIdentityRef(piece.getCell());
+
+      using reads = spy(runtime, "readTx");
+      const compatible = await piece.checkPattern(program);
+      const incompatible = await piece.checkPattern(incompatibleProgram());
+
+      expect(compatible.compatible).toBe(true);
+      expect(compatible.issues).toEqual({});
+      expect(incompatible.compatible).toBe(false);
+      expect(incompatible.issues.argument).toContain("required");
+      expect(pieces.getArgument(piece.getCell()).getRaw()).toEqual(
+        argumentBefore,
+      );
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(identityBefore);
+
+      const transactions = new Set(reads.calls.map((call) => call.returned));
+      let totalReads = 0;
+      let graphReads = 0;
+      for (const transaction of transactions) {
+        for (const read of transaction?.getReadActivities?.() ?? []) {
+          totalReads++;
+          if (graphIds.has(read.id)) graphReads++;
+        }
+      }
+      // Bound actual storage reads, independent of CPU speed or heap limits.
+      // The fixture stays small enough for a regression to fail without OOM.
+      expect(totalReads).toBeGreaterThan(0);
+      expect(graphReads).toBeLessThan(100 * graphIds.size);
+    });
+  }
 
   it("refuses a source whose contract the stored argument cannot satisfy", async () => {
     const piece = await livePiece();
@@ -499,13 +576,7 @@ describe("setsrc compatibility preflight", () => {
     const server = (storageManager as unknown as {
       server(): MemoryV2Server.Server;
     }).server();
-    const engine = await (server as unknown as {
-      openEngine(space: string): Promise<{
-        database: {
-          prepare(sql: string): { run(params: Record<string, unknown>): void };
-        };
-      }>;
-    }).openEngine(link.space);
+    const engine = await server.engineForSpace(link.space);
     const forged = encodeMemoryBoundary({ value: { type: "string" } });
     engine.database.prepare(
       `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
@@ -569,16 +640,7 @@ describe("setsrc compatibility preflight", () => {
     const server = (storageManager as unknown as {
       server(): MemoryV2Server.Server;
     }).server();
-    const engine = await (server as unknown as {
-      openEngine(space: string): Promise<{
-        database: {
-          prepare(sql: string): {
-            run(params: Record<string, unknown>): void;
-            get(params: Record<string, unknown>): { data?: string } | undefined;
-          };
-        };
-      }>;
-    }).openEngine(link.space);
+    const engine = await server.engineForSpace(link.space);
     const row = engine.database.prepare(
       `SELECT data FROM revision WHERE id = :id`,
     ).get({ id: link.id });

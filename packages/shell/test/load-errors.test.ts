@@ -89,6 +89,33 @@ function templateText(value: unknown): string {
   return text;
 }
 
+/**
+ * The value bound right after a template part ending in `marker`, which is how
+ * an event handler is reached without a DOM to dispatch into.
+ */
+function findBinding(value: unknown, marker: string): unknown {
+  if (value == null || typeof value !== "object") return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findBinding(item, marker);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const template = value as {
+    strings?: readonly string[];
+    values?: readonly unknown[];
+  };
+  if (!template.strings || !template.values) return undefined;
+  const at = template.strings.findIndex((part) => part.endsWith(marker));
+  if (at >= 0) return template.values[at];
+  for (const item of template.values) {
+    const found = findBinding(item, marker);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** Find the load-error value passed through a nested Lit template. */
 function findLoadError(value: unknown): unknown {
   if (value == null || typeof value !== "object") return undefined;
@@ -171,12 +198,7 @@ describe("load-errors", () => {
               ...view.app,
               identity: await Identity.generate({ implementation: "noble" }),
             };
-            const task = (view as unknown as {
-              _rt: {
-                run(args: [typeof view.app]): void;
-                taskComplete: Promise<unknown>;
-              };
-            })._rt;
+            const task = view.accessForTestingOnly.rt;
 
             task.run([view.app]);
             await task.taskComplete.catch(() => undefined);
@@ -188,6 +210,92 @@ describe("load-errors", () => {
           } finally {
             RuntimeInternals.create = originalCreate;
             console.error = originalError;
+            restore();
+          }
+        });
+      });
+    });
+  });
+
+  describe("XBodyView", () => {
+    describe("instance members", () => {
+      describe("render()", () => {
+        it("opens the piece menu over the surface a piece failed to load into", async () => {
+          const openings: unknown[] = [];
+          const panel = {
+            isConnected: false,
+            style: { setProperty() {}, removeProperty() {} },
+            open(opening: unknown) {
+              openings.push(opening);
+            },
+          };
+          const restore = installBrowserGlobals({
+            getComputedStyle: () => ({ getPropertyValue: () => "" }),
+          });
+          // The menu mounts itself, so stand in for the document it mounts on.
+          const document = globalThis.document as unknown as Record<
+            string,
+            unknown
+          >;
+          document.createElement = () => panel;
+          document.body = {
+            appendChild(node: { isConnected: boolean }) {
+              node.isConnected = true;
+            },
+          };
+          try {
+            const { XBodyView } = await import("../src/views/BodyView.ts");
+            const space = "did:key:z6Mk-shell-body-space" as DID;
+            const runtime = { name: "runtime-client" };
+            const view = new XBodyView();
+            view.space = space;
+            view.rt = { runtime: () => runtime } as never;
+            view.loadError = { kind: "piece", error: new Error("no piece") };
+
+            let prevented = false;
+            const handler = findBinding(view.render(), '@contextmenu="') as (
+              event: MouseEvent,
+            ) => void;
+            handler(
+              {
+                preventDefault: () => {
+                  prevented = true;
+                },
+                clientX: 12,
+                clientY: 34,
+              } as unknown as MouseEvent,
+            );
+
+            expect(prevented).toBe(true);
+            expect(openings).toEqual([{
+              cell: undefined,
+              space,
+              runtime,
+              x: 12,
+              y: 34,
+              highlightedPiece: undefined,
+              highlightTarget: undefined,
+            }]);
+
+            // Shift is how the browser's own menu is reached over piece
+            // content, and the error text under this surface is copied
+            // through it.
+            let shiftPrevented = false;
+            handler(
+              {
+                preventDefault: () => {
+                  shiftPrevented = true;
+                },
+                shiftKey: true,
+                clientX: 12,
+                clientY: 34,
+              } as unknown as MouseEvent,
+            );
+
+            expect(shiftPrevented).toBe(false);
+            expect(openings).toHaveLength(1);
+          } finally {
+            panel.isConnected = false;
             restore();
           }
         });
@@ -373,12 +481,15 @@ describe("load-errors", () => {
           }
         });
 
-        it("resolves a slug target before starting its piece", async () => {
+        it("resolves a slug reference before starting the piece it names", async () => {
           const restore = installBrowserGlobals();
           try {
             const { XAppView } = await import("../src/views/AppView.ts");
             const space = "did:key:z6Mk-shell-slug-target-error" as DID;
-            const calls: unknown[][] = [];
+            // One log, so the ORDER the name claims is what is checked;
+            // two arrays would prove both calls happened and nothing about
+            // which came first.
+            const calls: Array<{ call: string; args: unknown[] }> = [];
             const view = new XAppView();
             view.app = {
               identity: {},
@@ -388,8 +499,16 @@ describe("load-errors", () => {
             view.space = space;
             view.rt = {
               signal: new AbortController().signal,
+              resolveSlug: (...args: unknown[]) => {
+                calls.push({ call: "resolveSlug", args });
+                return Promise.resolve({
+                  pieceId: "fid1:slug-target",
+                  pathAfter: [],
+                  scope: "space",
+                });
+              },
               getPattern: (...args: unknown[]) => {
-                calls.push(args);
+                calls.push({ call: "getPattern", args });
                 return Promise.resolve({ id: () => "fid1:slug-target" });
               },
             } as never;
@@ -397,9 +516,16 @@ describe("load-errors", () => {
             view._selectedPattern.run();
             await view._selectedPattern.taskComplete;
 
-            expect(calls).toHaveLength(2);
-            expect(calls[0]?.[2]).toEqual({ start: false });
-            expect(calls[1]?.[2]).toBeUndefined();
+            expect(calls).toEqual([
+              {
+                call: "resolveSlug",
+                args: [space, "broken-piece", undefined],
+              },
+              {
+                call: "getPattern",
+                args: [space, "fid1:slug-target", { scope: "space" }],
+              },
+            ]);
           } finally {
             restore();
           }

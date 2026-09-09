@@ -16,6 +16,7 @@ export interface DenoCheckWithTemporaryConfigOptions {
    * Compiler options may differ for the check.
    */
   config: unknown;
+
   files: string[];
   tempConfigPrefix: string;
 }

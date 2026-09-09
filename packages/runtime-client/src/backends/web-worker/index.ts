@@ -8,50 +8,16 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
-import { isObjectNotArray } from "@commonfabric/utils/types";
 
-import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
-  IPCClientMessage,
-  IPCRemoteResponse,
-  isIPCClientMessage,
-  isIPCClientNotification,
-  NotificationType,
-  RequestType,
-  RuntimeErrorCode,
   TransportNotificationType,
   WORKER_CONSOLE_LEVELS,
   WorkerConsoleLevel,
 } from "@/protocol/mod.ts";
-import { RuntimeProcessor } from "@/backends/mod.ts";
+import { RuntimeClients } from "@/backends/client-registry.ts";
 import { postToClient } from "@/backends/post-to-client.ts";
-import { describeFailure } from "@/shared/utils.ts";
-
-// Count-only ledger of request traffic as seen by the worker: one
-// `received/<type>` per request that reached this message handler and one
-// `responded/<type>` (or `responded-error/<type>`) per reply posted back.
-// Counts increment even while the logger is disabled and the lazy args are
-// never evaluated, so this costs ~nothing per request. Read back through
-// `getLoggerCounts()`, and paired with the main thread's pending-request
-// table it classifies a stuck request: absent from `received` means delivery
-// starved; received without a matching `responded` means the handler never
-// returned; both present means the response was lost in transit.
-const ipcLogger = getLogger("runtime-worker.ipc", { enabled: false });
-
-// Worker-side request decomposition, recorded into timing stats (they record
-// even while the logger is disabled) under a `runner.`-prefixed logger so the
-// integration-test load summaries pick them up:
-//   runner.ipc/delivery/<type> — postMessage send → this handler running,
-//     i.e. how long the request sat in the worker's macrotask queue. Uses the
-//     envelope's `sentEpochMs` (timeOrigin-based, comparable across threads).
-//   runner.ipc/handle/<type>   — handleRequest start → settled.
-// A slow client round-trip decomposes as delivery (worker starved) vs handle
-// (handler awaited something slow) vs the residue (response return path).
-const ipcTimingLogger = getLogger("runner.ipc", { enabled: false });
 
 // Worker event-loop lag probe (`runner.loop/workerLag`): each tick records how
 // far past schedule the timer fired — long synchronous stretches (compile,
@@ -74,9 +40,6 @@ const loopLagLogger = getLogger("runner.loop", { enabled: false });
     expected = now + LOOP_LAG_SAMPLE_MS;
   }, LOOP_LAG_SAMPLE_MS));
 }
-
-let worker: RuntimeProcessor | undefined;
-let workerInitialization: Promise<RuntimeProcessor> | undefined;
 
 type ConsoleMethod = (...args: unknown[]) => void;
 
@@ -147,175 +110,15 @@ function setWorkerConsoleBridge(enabled: boolean): void {
   else uninstallWorkerConsoleBridge();
 }
 
-/**
- * How much of an unreadable request to render in the report about it. Enough
- * to recognize which message it was, short enough that a hostile payload
- * cannot flood the channel it is being reported on.
- */
-const MAX_INVALID_REQUEST_RENDER = 512;
+// One runtime per worker, served to every client that reaches it. The owner
+// speaks over the global this listener is installed on; a further client
+// arrives as a port the owner transfers, and the same loop serves it.
+const clients = new RuntimeClients({
+  setConsoleBridge: setWorkerConsoleBridge,
+});
 
-/**
- * Posts one reply and records it in the ledger by what actually went. An
- * encoding failure substitutes an error reply, and counting that as a
- * response would say the request succeeded.
- */
-function postReply(payload: IPCRemoteResponse, type: RequestType): void {
-  const delivered = postToClient(payload);
-  ipcLogger.debug(
-    `${delivered ? "responded" : "responded-error"}/${type}`,
-    () => [],
-  );
-}
-
-self.addEventListener("message", async (event: MessageEvent) => {
-  // Decoded whole, so what arrives is what was sent rather than whatever
-  // structured cloning preserved of it. The encoding end is
-  // `WebWorkerRuntimeTransport.send()`.
-  //
-  // What a decode returns is deep-frozen, so a handler owns what its request
-  // carries and may cede it, but does not edit it -- which is what
-  // `BaseRequest` states as one contract.
-  //
-  // Typed as a request rather than as the `FabricValue` a decode returns: the
-  // guards below are what actually vet it, and every use here is behind one
-  // of them or inside the `catch`, which wants the id of whatever failed.
-  let message: IPCClientMessage;
-
-  try {
-    message = fabricFromRealmValue(event.data) as IPCClientMessage;
-  } catch (error) {
-    // Defense in depth, as at the other end. Nothing undecodable should reach
-    // here, and if something does there is no `msgId` to answer under -- so
-    // this reports rather than replies, and the request it belonged to is left
-    // to time out. Throwing instead would surface as an unhandled rejection
-    // out of this async listener, which is the quiet failure to avoid.
-    postToClient({
-      type: NotificationType.ErrorReport,
-      message: `Undecodable message from the client: ${describeFailure(error)}`,
-    });
-    return;
-  }
-
-  // One-way notifications carry no msgId and get no response. Drop them once
-  // the worker is gone or disposed; in teardown the main thread may still be
-  // flushing fire-and-forget signals.
-  if (isIPCClientNotification(message)) {
-    try {
-      if (worker && !worker.isDisposed()) {
-        worker.handleNotification(message);
-      }
-    } catch (error) {
-      console.error("[RuntimeWorker] Notification error:", error);
-    }
-    return;
-  }
-
-  try {
-    if (!isIPCClientMessage(message)) {
-      // Rendered by `value-debug` rather than `JSON.stringify`, which is
-      // wrong for exactly what the decode above admits: it throws on a
-      // `bigint` anywhere in the tree -- replacing this report with one that
-      // names nothing -- and renders a `FabricPrimitive` as `{}`.
-      throw new Error(
-        `Invalid IPC request: ${
-          toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
-        }`,
-      );
-    }
-    const { msgId, data: request } = message;
-    ipcLogger.debug(`received/${request.type}`, () => []);
-    const receivedAt = performance.now();
-    const sentEpochMs = (message as { sentEpochMs?: number }).sentEpochMs;
-    if (typeof sentEpochMs === "number") {
-      const deliveryMs = performance.timeOrigin + receivedAt - sentEpochMs;
-      if (deliveryMs > 0) {
-        ipcTimingLogger.time(
-          receivedAt - deliveryMs,
-          receivedAt,
-          "delivery",
-          request.type,
-        );
-      }
-    }
-
-    if (request.type === RequestType.Initialize) {
-      if (workerInitialization) {
-        throw new Error("Initialization of WorkerRuntime already attempted.");
-      }
-      setWorkerConsoleBridge(request.data.forwardWorkerConsole === true);
-      workerInitialization = RuntimeProcessor.initialize(
-        request.data,
-      );
-      worker = await workerInitialization;
-      postReply({ msgId: message.msgId }, request.type);
-      return;
-    }
-
-    // Toggling console forwarding is handled here, not in the RuntimeProcessor,
-    // because the console patch lives in this worker entry. It is independent
-    // of runtime initialization, so it is answered before the init check.
-    if (request.type === RequestType.SetForwardWorkerConsole) {
-      setWorkerConsoleBridge(request.enabled);
-      postReply({ msgId }, request.type);
-      return;
-    }
-
-    if (!worker) {
-      throw new Error("WorkerRuntime not initialized.");
-    }
-    if (worker.isDisposed()) {
-      // After disposal, silently ack any late-arriving requests.
-      // Components may still be unsubscribing or finishing in-flight
-      // operations during teardown — no point erroring on these.
-      postReply({ msgId }, request.type);
-      return;
-    }
-
-    const handleStart = performance.now();
-    let response;
-    try {
-      response = await worker.handleRequest(request);
-    } finally {
-      // Record handling latency whether or not the request threw, so
-      // error-heavy periods do not silently underreport it.
-      ipcTimingLogger.time(handleStart, "handle", request.type);
-    }
-    const payload: IPCRemoteResponse = response !== undefined
-      ? { msgId, data: response }
-      : { msgId };
-    postReply(payload, request.type);
-  } catch (error) {
-    console.error("[RuntimeWorker] Error:", error);
-    const type = isIPCClientMessage(message) ? message.data.type : "invalid";
-    ipcLogger.debug(`responded-error/${type}`, () => []);
-    const code = error instanceof CompilerStackLoadError
-      ? RuntimeErrorCode.CompilerStackLoadFailed
-      : undefined;
-
-    // A reply is addressed by `msgId`, and what reaches here need not have
-    // one: the decode above admits every `FabricValue`, `undefined` and a
-    // `bigint` among them, and `Invalid IPC request` is thrown precisely for
-    // what is no message at all. Reading `msgId` off that would throw from
-    // inside this `catch`, which is the one place a throw has nowhere to go --
-    // out of an async listener it surfaces as an unhandled rejection, taking
-    // with it the report it was in the middle of making.
-    const msgId = isObjectNotArray(message) && typeof message.msgId === "number"
-      ? message.msgId
-      : undefined;
-    if (msgId === undefined) {
-      postToClient({
-        type: NotificationType.ErrorReport,
-        message: `Malformed message from the client: ${describeFailure(error)}`,
-      });
-      return;
-    }
-
-    postToClient({
-      msgId,
-      error: describeFailure(error),
-      ...(code ? { code } : {}),
-    });
-  }
+self.addEventListener("message", (event: MessageEvent) => {
+  void clients.handleMessage(clients.owner, event);
 });
 
 // `postMessage` is absent from a main-thread global, where a test importing

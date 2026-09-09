@@ -42,7 +42,6 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     // Seed a source doc whose STORED cfc metadata is the authoritative label
@@ -251,7 +250,6 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const sourceId = parseLink(

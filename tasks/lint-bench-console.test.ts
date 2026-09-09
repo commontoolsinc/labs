@@ -15,8 +15,10 @@ function diagnose(source: string, fileName = "sample.bench.ts"): string[] {
   return Deno.lint.runPlugin(plugin, fileName, source).map((d) => d.message);
 }
 
-/** The distinguishing phrase of each of the rule's two messages. */
+/** Distinguishing phrase of the message for a write that never lands. */
 const LOST = "never reaches stderr";
+
+/** Distinguishing phrase of the message for a disallowed `console` method. */
 const STDOUT = "may use only the `console` methods that write to stderr";
 
 describe("lint-bench-console", () => {

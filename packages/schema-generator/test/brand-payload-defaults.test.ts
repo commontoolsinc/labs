@@ -193,17 +193,18 @@ describe("brand-payload recovery on the expanded path (no typeNode)", () => {
   });
 });
 
-// The payloads above are all literal TYPES, which the checker hands over
-// directly. A `typeof SOME_CONST` payload naming an object or array cannot be
-// carried that way — the values are recovered by reading the const's
-// INITIALIZER off the AST.
-//
-// That reader's handling of numbers in their non-literal spellings is pinned by
-// the `default-typeof-const-numbers` fixture, whose golden can hold `-0`, `NaN`
-// and the infinities directly. What stays here is the one case a golden cannot
-// state: that a shadowed global is NOT folded, which is an assertion about what
-// does not happen.
 describe("defaults recovered from a `typeof CONST` initializer", () => {
+  // The payloads above are all literal TYPES, which the checker hands over
+  // directly. A `typeof SOME_CONST` payload naming an object or array cannot be
+  // carried that way — the values are recovered by reading the const's
+  // INITIALIZER off the AST.
+  //
+  // That reader's handling of numbers in their non-literal spellings is pinned
+  // by the `default-typeof-const-numbers` fixture, whose golden can hold `-0`,
+  // `NaN` and the infinities directly. What stays here is the one case a golden
+  // cannot state: that a shadowed global is NOT folded, which is an assertion
+  // about what does not happen.
+
   const transformer = new SchemaGenerator();
 
   async function defaultOfX(declarations: string): Promise<unknown> {

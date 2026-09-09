@@ -123,37 +123,33 @@ export default pattern(() => {
   const alex = Writable.of<LunchProfile>({ name: "Alex" });
   const poll = CozyPoll({});
 
-  // Reference times derive from the interval `#now/300` wish — the same
+  // The clock the assertions read: the interval `#now/300` wish, the same
   // shared ticking clock the pattern under test runs on (the pattern body
-  // cannot read the ambient clock; the bare one-shot `#now` would freeze at
-  // first capture, which is exactly what the poll must not do): "yesterday"
-  // for the seeded stale vote, and the day key the pattern is expected to
-  // filter to. Both read as unresolved (undefined / "") until the wish
-  // resolves; the dependent assertions guard that window and the harness
-  // re-evaluates them once the wish lands.
+  // cannot read the ambient clock, and the bare one-shot `#now` would freeze
+  // at first capture, which is exactly what the poll must not do). It reads
+  // as unresolved (undefined / "") until the wish lands; the dependent
+  // assertions guard that window and the harness re-evaluates them once it
+  // does.
   const nowCell = wish<number>({ query: "#now/300" });
-  const staleCastAt = computed(() =>
-    nowCell.result == null ? undefined : nowCell.result - 86_400_000
-  );
   const todayKey = computed(() =>
     nowCell.result == null ? "" : dayKeyOf(nowCell.result)
   );
 
-  // A vote cast "yesterday" — stored, but hidden by the current-day filter.
-  // `castAt` resolves with the wish; until then it reads undefined, which
-  // the filter also treats as not-today.
+  // Seed cells for the two polls whose scenarios start with data in them.
+  // Plain cells, filled once by `action_seed_fixtures` below, never a
+  // `computed()`: an argument is a link, so a derived one would hold the
+  // poll's durable state in the derivation's own output cell, and the next
+  // run of that derivation replaces every vote the poll has cast with the
+  // seed again. `#now/300` advances on wall-clock five-minute boundaries, so
+  // a seed derived from it re-runs partway through the run. See
+  // docs/common/workflows/pattern-testing.md, "Seeding Stored State".
   const stan = Writable.of<LunchProfile>({ name: "Stan" });
-  const staleVotes = computed((): Vote[] => [
-    {
-      voter: stan,
-      optionId: "opt-seeded",
-      voteType: "green",
-      castAt: staleCastAt,
-    },
-  ]);
+  const staleVotes = Writable.of<Vote[]>([]);
+  const collidingUsers = Writable.of<User[]>([]);
+  const collidingVotes = Writable.of<Vote[]>([]);
 
-  // Second instance seeded with a stale vote, for the current-day filter
-  // scenario (castVote always stamps "now", so staleness must be seeded).
+  // Second instance, for the current-day filter scenario: it holds a vote cast
+  // "yesterday" (castVote always stamps "now", so staleness must be seeded).
   // Stan claims his identity through the seam before the join step below.
   const stalePoll = CozyPoll({
     options: [SEEDED_OPTION],
@@ -162,7 +158,6 @@ export default pattern(() => {
 
   // Participant names with shared prefixes use distinct current-day vote labels.
   // Each label preserves complete displayed characters.
-  const collidingCastAt = computed(() => nowCell.result ?? undefined);
   const collidingPeople = COLLIDING_INITIAL_PEOPLE.map((
     [name, color],
     index,
@@ -172,22 +167,6 @@ export default pattern(() => {
     profile: Writable.of<LunchProfile>({ name }),
     voteType: COLLIDING_VOTE_COLORS[index] ?? "green",
   }));
-  const collidingUsers = computed((): User[] =>
-    collidingPeople.map(({ name, color, profile }) => ({
-      profile,
-      name,
-      avatar: "",
-      color,
-    }))
-  );
-  const collidingVotes = computed((): Vote[] =>
-    collidingPeople.map(({ profile, voteType }) => ({
-      voter: profile,
-      optionId: COLLIDING_INITIAL_OPTION.id,
-      voteType,
-      castAt: collidingCastAt,
-    }))
-  );
   const initialsPoll = CozyPoll({
     options: [COLLIDING_INITIAL_OPTION],
     users: collidingUsers,
@@ -213,6 +192,38 @@ export default pattern(() => {
   // card directly.
 
   // === Actions ===
+
+  // Fill every seed cell, once, before anything else runs. A handler reads a
+  // timestamp off the clock and writes it as a fixed number, which is how the
+  // seed gets a date without the polls' state living in a derivation. An
+  // unresolved clock writes nothing, and `assert_stale_vote_hidden` reads the
+  // seeded vote back, so a seed that never landed fails there.
+  const action_seed_fixtures = action(() => {
+    const now = nowCell.result;
+    if (now === undefined) return;
+    staleVotes.set([{
+      voter: stan,
+      optionId: SEEDED_OPTION.id,
+      voteType: "green",
+      castAt: now - 86_400_000,
+    }]);
+    collidingUsers.set(
+      collidingPeople.map(({ name, color, profile }) => ({
+        profile,
+        name,
+        avatar: "",
+        color,
+      })),
+    );
+    collidingVotes.set(
+      collidingPeople.map(({ profile, voteType }) => ({
+        voter: profile,
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType,
+        castAt: now,
+      })),
+    );
+  });
 
   const action_become_alex = action(() => {
     poll.overrideViewer.send({ profile: alex, name: "Alex" });
@@ -309,6 +320,11 @@ export default pattern(() => {
     if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
   });
 
+  const action_clear_my_vote_first = action(() => {
+    const first = poll.options[0];
+    if (first) poll.clearMyVote.send({ optionId: first.id });
+  });
+
   const action_reset_votes = action(() => {
     poll.resetVotes.send({});
   });
@@ -383,6 +399,32 @@ export default pattern(() => {
     poll.options[0]?.addedByName === "Alex"
   );
 
+  // The empty state is the only thing on the board before anyone adds an
+  // option, and its job is to say who can do something about that. It reads
+  // differently to a viewer with no host to wait for than to the host
+  // themselves, so both are checked; between them they are every branch the
+  // hint has except the one naming somebody else, which needs a second
+  // identity and belongs to multi-user.test.tsx.
+  const assert_empty_state_awaits_a_host = assert(() =>
+    poll.optionCount === 0 &&
+    findNode(poll[UI], (node) => hasExactText(node, "No options yet")) !==
+      undefined &&
+    findNode(
+        poll[UI],
+        (node) => hasExactText(node, "Waiting for a host to join."),
+      ) !== undefined
+  );
+
+  const assert_empty_state_prompts_the_host = assert(() =>
+    poll.optionCount === 0 &&
+    findNode(poll[UI], (node) => hasExactText(node, "No options yet")) !==
+      undefined &&
+    findNode(
+        poll[UI],
+        (node) => hasExactText(node, "Add the first one above."),
+      ) !== undefined
+  );
+
   const assert_two_options = assert(() => poll.options.length === 2);
 
   const assert_green_vote_recorded = assert(() => {
@@ -419,6 +461,8 @@ export default pattern(() => {
   });
 
   const assert_revote_green_cleared = assert(() => poll.votes.length === 0);
+
+  const assert_my_vote_cleared = assert(() => poll.votes.length === 0);
 
   const assert_votes_reset = assert(() => poll.votes.length === 0);
 
@@ -602,20 +646,24 @@ export default pattern(() => {
   });
 
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,
-  // the count, and the rendered swatches. Guarded on both `#now` reads —
-  // this pattern's (`todayKey`, which also resolves the seeded `castAt`) and
-  // the poll's own (via `todayDate`) — so it passes only once the day filter
-  // is live and the vote really is dated yesterday, not merely during the
-  // load window's empty vote view.
-  const assert_stale_vote_hidden = assert(() =>
-    todayKey !== "" &&
-    stalePoll.todayDate === todayKey &&
-    stalePoll.votes.length === 1 &&
-    stalePoll.todaysVotes.length === 0 &&
-    stalePoll.todayVoteCount === 0 &&
-    findNodeByProp(stalePoll[UI], "data-vote-swatch-name", "Stan") ===
-      undefined
-  );
+  // the count, and the rendered swatches. The seeded `castAt` is read back and
+  // dated earlier than today (day keys are "YYYY-MM-DD", so they compare as
+  // dates), so the vote is hidden for the reason the filter is meant to hide
+  // it. Guarded on both `#now` reads — this pattern's (`todayKey`) and the
+  // poll's own (via `todayDate`) — so it passes only once the day filter is
+  // live.
+  const assert_stale_vote_hidden = assert(() => {
+    const seeded = stalePoll.votes[0];
+    return todayKey !== "" &&
+      stalePoll.todayDate === todayKey &&
+      stalePoll.votes.length === 1 &&
+      typeof seeded?.castAt === "number" &&
+      dayKeyOf(seeded.castAt) < todayKey &&
+      stalePoll.todaysVotes.length === 0 &&
+      stalePoll.todayVoteCount === 0 &&
+      findNodeByProp(stalePoll[UI], "data-vote-swatch-name", "Stan") ===
+        undefined;
+  });
 
   // Options saved before generated art was introduced have no `imageUrl`
   // property. They must still satisfy the card's map/pattern contract and
@@ -682,6 +730,9 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
+      // Seed data first, so nothing downstream depends on a derivation that
+      // could re-run over the top of what the polls write.
+      { action: action_seed_fixtures },
       // Alex claims his identity first (matching production, where the
       // `#profile` wish resolves before any interaction).
       { action: action_become_alex },
@@ -697,6 +748,8 @@ export default pattern(() => {
       { action: action_try_log_before_join },
       { action: action_try_vote_before_join },
       { assertion: assert_no_vote_without_membership },
+      // Nobody has joined, so the board has no host to name.
+      { assertion: assert_empty_state_awaits_a_host },
 
       // First join → claims admin
       { action: action_join_as_alex },
@@ -709,6 +762,9 @@ export default pattern(() => {
       // claimHost is a harmless no-op when the caller is already host.
       { action: action_claim_host },
       { assertion: assert_still_alex_host },
+
+      // Alex hosts now, so the same empty board asks him for the first option.
+      { assertion: assert_empty_state_prompts_the_host },
 
       // Admin adds options
       { action: action_add_chipotle },
@@ -735,6 +791,15 @@ export default pattern(() => {
 
       // Voting that same color once more re-adds it. A removed vote clears its
       // entity, so the toggle decision does not see stale content and dead-click.
+      { action: action_vote_green_first_again },
+      { assertion: assert_green_vote_recorded },
+
+      // Clearing my vote drops it, and casting that same color afterwards
+      // re-adds it: the clear discards the vote's stored content as well as
+      // its place in the list, so the next cast is not read as a toggle
+      // against the vote it just removed.
+      { action: action_clear_my_vote_first },
+      { assertion: assert_my_vote_cleared },
       { action: action_vote_green_first_again },
       { assertion: assert_green_vote_recorded },
 

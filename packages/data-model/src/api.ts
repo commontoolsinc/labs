@@ -1,8 +1,9 @@
 /**
- * Pattern-visible declarations for the fabric value type system, in the form
- * that `@commonfabric/api` re-exports to patterns. Everything here is an
- * interface, a type, or a `declare const`, except for the one brand-key
- * constant, so the module's only runtime footprint is that constant.
+ * Pattern-visible declarations for the fabric value type system, and for the
+ * options of the debug renderers over it, in the form that `@commonfabric/api`
+ * re-exports to patterns. Everything here is an interface, a type, or a
+ * `declare const`, except for the one brand-key constant, so the module's only
+ * runtime footprint is that constant.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -23,6 +24,13 @@
  * re-exports it to patterns, and the script that builds the type file the
  * sandbox is served inlines this text rather than following a specifier out of
  * it, so a specifier named here would reach a compiler that resolves none.
+ *
+ * Apart from the drift guards, which each compare an implementation against
+ * the declaration here by name and so import it from here under an `Api`
+ * alias, two modules import this one: `interface.ts`, which re-exports these
+ * declarations to the rest of this package, and `@commonfabric/api`, which
+ * re-exports them to patterns. Every other module in this package takes them
+ * from `interface.ts`.
  */
 
 /**
@@ -319,9 +327,24 @@ export interface FabricError extends FabricInstance {
   extraEntries(): IterableIterator<[string, FabricValue]>;
 }
 
+/** Options accepted by `FabricError.fromNativeError()`. */
+export interface FromNativeErrorOptions {
+  /**
+   * Converter applied to the error's `cause` and to each of its custom
+   * enumerable properties, whose result is what the instance holds. When
+   * absent, a value that is already a valid `FabricValue` is held as it
+   * stands, and anything else is converted the way `fabricFromNativeValue()`
+   * converts it, without freezing.
+   */
+  readonly convert?: (value: unknown) => FabricValue;
+}
+
 export interface FabricErrorConstructor {
   new (state: FabricErrorState): FabricError;
-  fromNativeError(error: Error): FabricError;
+  fromNativeError(
+    error: Error,
+    options?: FromNativeErrorOptions,
+  ): FabricError;
   prototype: FabricError;
 }
 
@@ -416,3 +439,90 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
+
+/**
+ * Options accepted by `toStructuredDebugValue()`, and by the debug-string
+ * renderers built on it.
+ */
+export interface DebugValueOptions {
+  /**
+   * Maximum depth of result nesting: a positive integer, or `Infinity` for as
+   * deep as the conversion allows. An item which would require further
+   * nesting is instead converted into a form suggestive of the elided
+   * information. When absent, the depth is ten levels. A large value is capped;
+   * there is no guarantee about the _actual_ possible maximum depth.
+   */
+  readonly maxDepth?: number;
+
+  /**
+   * Maximum number of elements of an array which are represented: a positive
+   * integer, or `Infinity` for as many as the conversion allows. An array
+   * with more elements than this has only the elements at indices below the
+   * limit converted, and in place of the rest a form suggestive of the
+   * elision, which includes the array's actual length. When absent, the limit
+   * is one hundred. A large value is capped.
+   */
+  readonly maxArrayLength?: number;
+
+  /**
+   * Maximum number of properties of an object which are represented: a
+   * positive integer, or `Infinity` for as many as the conversion allows. An
+   * object with more properties than this has only the first that many, in
+   * key order, converted, and after them a form suggestive of the elision,
+   * which includes the object's actual property count. This applies wherever
+   * properties are laid out: a plain object, a class instance's own
+   * properties, and the contents of a `FabricSpecialObject`. When absent,
+   * the limit is one hundred. A large value is capped.
+   */
+  readonly maxProperties?: number;
+
+  /**
+   * Maximum length of a string which is represented whole: a positive
+   * integer, or `Infinity` for as long as the conversion allows. A longer
+   * string is converted to a form suggestive of the elision, which carries an
+   * excerpt of the string up to the limit and the string's actual length.
+   * When absent, the limit is two hundred, or as long as the conversion
+   * allows when `maxStringLines` is present. A large value is capped.
+   */
+  readonly maxStringLength?: number;
+
+  /**
+   * Maximum number of lines of a string which is represented whole: a
+   * positive integer, or `Infinity` for as many as the conversion allows. A
+   * line break is a newline, a carriage return, or the two together; one at
+   * the end of the string ends its last line rather than starting another. A
+   * string with more lines is converted to the same form a string past
+   * `maxStringLength` is, carrying an excerpt of the string up to the limit,
+   * line breaks included, and the string's actual length; when both limits
+   * apply, the excerpt is the shorter of the two. When absent, the limit is
+   * five. A large value is capped.
+   */
+  readonly maxStringLines?: number;
+
+  /**
+   * Replacer function, called on every value and sub-value encountered, to get
+   * a replacement value to use. A replacer which does not want to replace a
+   * value returns the value it receives, and one which throws is taken to have
+   * declined to replace.
+   */
+  readonly replacer?: (value: any) => any;
+}
+
+/** Options accepted by `toCompactDebugString()`. */
+export interface CompactDebugStringOptions extends DebugValueOptions {
+  /**
+   * Maximum length of the result, or `Infinity` for no limit. When the
+   * rendering runs longer, the result is truncated to this length, which
+   * includes a trailing ASCII ellipsis of `...`. A length below three is taken
+   * as three.
+   */
+  readonly maxLength?: number;
+
+  /**
+   * Whether to quote the result as a Markdown code span, the way
+   * `backtickQuote()` does, for splicing into message text. `maxLength`
+   * bounds the rendering, not the quoted result. When absent, the result is
+   * not quoted.
+   */
+  readonly backtickQuote?: boolean;
+}

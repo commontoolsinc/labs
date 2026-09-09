@@ -14,7 +14,7 @@ import { getMimeType } from "@/lib/mime-type.ts";
  * the serving logic can be exercised against an in-memory or fixture file set.
  */
 export interface ShellStaticDeps {
-  readFile: (filePath: string) => Promise<Uint8Array>;
+  readFile: (filePath: string) => Promise<Uint8Array<ArrayBuffer>>;
   generateETag: (content: Uint8Array) => Promise<string>;
 }
 
@@ -34,55 +34,86 @@ const defaultDeps: ShellStaticDeps = {
 };
 
 /**
- * Encapsulates static file response with ETag-based caching support.
- * Handles both 200 (full content) and 304 (not modified) responses.
+ * A static file's content, held for as long as the file is cached, together
+ * with what serving it needs: its MIME type and a strong ETag over the content.
+ * Builds both 200 (full content) and 304 (not modified) responses.
  */
 export class StaticResponse {
-  mimeType: string;
-  buffer: Uint8Array;
-  etag: string;
+  #blob: Blob;
+  #mimeType: string;
+  #etag: string;
 
-  constructor(
-    buffer: Uint8Array,
-    mimeType: string,
-    etag: string,
-  ) {
-    this.buffer = buffer;
-    this.mimeType = mimeType;
-    this.etag = etag;
+  /**
+   * Constructs an instance which serves `blob` as `mimeType`, and validates a
+   * client's cached copy against `etag`.
+   */
+  constructor(blob: Blob, mimeType: string, etag: string) {
+    this.#blob = blob;
+    this.#mimeType = mimeType;
+    this.#etag = etag;
   }
 
-  static async fromFile(filePath: string, deps: ShellStaticDeps = defaultDeps) {
-    const buffer = await deps.readFile(filePath);
-    const mimeType = getMimeType(filePath);
-    const etag = await deps.generateETag(buffer);
-    return new StaticResponse(buffer, mimeType, etag);
+  /**
+   * The content served. A `Blob` is immutable, so what a response carries is
+   * always what `.etag` was computed over.
+   */
+  get blob(): Blob {
+    return this.#blob;
   }
 
-  response(ifNoneMatch?: string | null) {
-    // Check if client has matching ETag
-    if (ifNoneMatch && compareETags(this.etag, ifNoneMatch)) {
+  /** Strong ETag over `.blob`. */
+  get etag(): string {
+    return this.#etag;
+  }
+
+  /** MIME type the content is served as. */
+  get mimeType(): string {
+    return this.#mimeType;
+  }
+
+  /**
+   * Builds the response to a request carrying `ifNoneMatch`: a 304 with no
+   * body when that matches `.etag`, and otherwise a 200 with the content.
+   * Either way the response tells the client to revalidate against the ETag
+   * on every request.
+   */
+  response(ifNoneMatch?: string | null): Response {
+    if (ifNoneMatch && compareETags(this.#etag, ifNoneMatch)) {
       return new Response(null, {
         status: 304,
         headers: {
-          "ETag": this.etag,
+          "ETag": this.#etag,
         },
       });
     }
 
-    // Simple caching strategy:
-    // Use no-cache + ETag for all files
-    // This means: always validate with server, but use cache if 304
-    const cacheHeaders = createCacheHeaders(this.etag);
-
-    const response = new Response(this.buffer as BufferSource, {
+    return new Response(this.#blob, {
       status: 200,
       headers: {
-        "Content-Type": this.mimeType,
-        ...cacheHeaders,
+        "Content-Type": this.#mimeType,
+        // Without this a `Blob` body goes out chunked, which leaves the client
+        // with no length to show progress against.
+        "Content-Length": String(this.#blob.size),
+        ...createCacheHeaders(this.#etag),
       },
     });
-    return response;
+  }
+
+  /**
+   * Reads the file at `filePath` through `deps`, and returns an instance which
+   * serves its content with the MIME type its extension maps to.
+   */
+  static async fromFile(
+    filePath: string,
+    deps: ShellStaticDeps = defaultDeps,
+  ): Promise<StaticResponse> {
+    const bytes = await deps.readFile(filePath);
+    const mimeType = getMimeType(filePath);
+    const etag = await deps.generateETag(bytes);
+
+    // The `Blob` constructor copies, so the cached content is reachable only
+    // through the `Blob`, which cannot be written to.
+    return new StaticResponse(new Blob([bytes]), mimeType, etag);
   }
 }
 

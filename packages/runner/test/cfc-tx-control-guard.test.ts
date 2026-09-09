@@ -4,22 +4,30 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import {
+  CFC_ENFORCEMENT_MODES,
+  type CfcEnforcementMode,
+} from "../src/cfc/mod.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-control-guard");
 
-// Regression guard for the transaction control surface (audit S3).
-//
-// setCfcEnforcementMode / prepareCfc are on the public IExtendedStorageTransaction
-// and cell.tx is public, so code holding a Cell can reach them. prepareCfc was
-// fixed to always verify (S2); the remaining weakening lever is
-// setCfcEnforcementMode lowering an enforcing transaction back to disabled/observe.
-// The mode must not be lowerable below the highest enforcing level set on a tx.
 describe("CFC transaction control guard", () => {
+  // Regression guard for the transaction control surface (audit S3).
+  //
+  // setCfcEnforcementMode / prepareCfc are on the public
+  // IExtendedStorageTransaction and cell.tx is public, so code holding a Cell
+  // can reach them. prepareCfc was fixed to always verify (S2); the remaining
+  // weakening lever is setCfcEnforcementMode lowering an enforcing transaction
+  // back to disabled/observe. The mode must not be lowerable below the highest
+  // enforcing level set on a tx.
+
   it("refuses to weaken an enforcing transaction's mode", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // Pinned: the steps below read the mode back as "enforce-explicit", then
+      // raise it to "enforce-strict" and read that back too.
       cfcEnforcementMode: "enforce-explicit",
     });
     try {
@@ -45,11 +53,37 @@ describe("CFC transaction control guard", () => {
     }
   });
 
+  it("refuses a mode that is not on the ladder", async () => {
+    // A name the strictness ranking cannot rank passes the floor comparison
+    // whatever the floor is, so the anti-downgrade pin would not hold against
+    // it.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-strict",
+    });
+    try {
+      const tx = runtime.edit();
+      const offLadder = "enforce-strictly" as CfcEnforcementMode;
+      expect(() => tx.setCfcEnforcementMode(offLadder)).toThrow(
+        CFC_ENFORCEMENT_MODES.join(", "),
+      );
+      expect(tx.getCfcState().enforcementMode).toBe("enforce-strict");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("allows juggling non-enforcing modes before any enforcement", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // Pinned: the steps below start from a non-enforcing mode and assert that
+      // moving between "observe" and "disabled" is accepted until the first
+      // enforcing mode sets the floor.
       cfcEnforcementMode: "disabled",
     });
     try {
@@ -71,6 +105,9 @@ describe("CFC transaction control guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // The steps below ask the transaction to weaken to "disabled" and
+      // expect the guard to refuse, then commit a violation and expect a
+      // rejection. Both need the transaction to start from an enforcing rung.
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-tx-control-guard",

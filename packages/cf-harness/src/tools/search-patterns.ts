@@ -15,6 +15,8 @@ import { schemaToTypeString } from "@commonfabric/runner";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   PatternIndexClient,
+  PatternIndexPatternKind,
+  PatternIndexQuality,
   PatternIndexSignals,
 } from "../pattern-index/client.ts";
 import type { HarnessToolDefinition } from "./types.ts";
@@ -40,12 +42,19 @@ export interface SearchPatternsToolResult {
   hashtags: readonly string[];
   signals?: PatternIndexSignals;
 
+  /** Whether its published argument schema classifies it as a part or app. */
+  kind: PatternIndexPatternKind;
+
+  /** Evidence tier the index computed from recorded run outcomes. */
+  quality: PatternIndexQuality;
+
   /**
-   * With a text query: how many of its terms this hit carries, out of
-   * `queryTerms`. Matching is disjunctive and ranked — a hit with a low
-   * ratio is a distant cousin, not an answer.
+   * With a text query: how many stopword-free terms this hit carries, out of
+   * `queryTerms`. Matching is disjunctive and ranked — a hit with a low ratio
+   * is a distant cousin, not an answer.
    */
   matchedTerms?: number;
+
   queryTerms?: number;
 
   /**
@@ -59,6 +68,34 @@ export interface SearchPatternsToolResult {
 
   /** The pattern's result shape, as a TypeScript type. */
   resultType?: string;
+}
+
+/**
+ * What a run knows about a published pattern it may name by id. A
+ * `search_patterns` hit is one of these, so every field a hit reports is
+ * here; a pattern reference the task attached is another, resolved from the
+ * index by id, and a by-id read answers no ranking evidence — no match
+ * counts, and no tier — because that is what search computes over a query.
+ * Whichever it came from, this is metadata and never source.
+ */
+export interface TrustedPatternRecord {
+  patternId: string;
+  description: string;
+  hashtags: readonly string[];
+  signals?: PatternIndexSignals;
+  kind?: PatternIndexPatternKind;
+  quality?: PatternIndexQuality;
+  matchedTerms?: number;
+  queryTerms?: number;
+  importHint: string;
+  argumentType?: string;
+  resultType?: string;
+
+  /** The identity that published it, where the index reported it. */
+  ownerDid?: string;
+
+  /** When the index recorded it, where the index reported it. */
+  createdAt?: string;
 }
 
 export interface SearchPatternsToolSuccessOutput {
@@ -77,11 +114,54 @@ export type SearchPatternsToolOutput =
   | SearchPatternsToolSuccessOutput
   | SearchPatternsToolErrorOutput;
 
+const isSearchPatternsToolResult = (
+  result: unknown,
+): result is SearchPatternsToolResult => {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+    return false;
+  }
+  const record = result as Record<string, unknown>;
+  const signals = record.signals;
+  return typeof record.patternId === "string" &&
+    typeof record.description === "string" &&
+    Array.isArray(record.hashtags) &&
+    record.hashtags.every((hashtag) => typeof hashtag === "string") &&
+    (signals === undefined ||
+      (typeof signals === "object" && signals !== null &&
+        !Array.isArray(signals) && "uses" in signals &&
+        typeof signals.uses === "number" && "score" in signals &&
+        typeof signals.score === "number")) &&
+    (record.kind === "part" || record.kind === "app") &&
+    (record.quality === "penalized" || record.quality === "unproven" ||
+      record.quality === "proven") &&
+    (record.matchedTerms === undefined ||
+      typeof record.matchedTerms === "number") &&
+    (record.queryTerms === undefined ||
+      typeof record.queryTerms === "number") &&
+    typeof record.importHint === "string" &&
+    (record.argumentType === undefined ||
+      typeof record.argumentType === "string") &&
+    (record.resultType === undefined || typeof record.resultType === "string");
+};
+
+/** Narrows a raw tool result to a successful search response. */
+export const isSearchPatternsToolSuccessOutput = (
+  output: unknown,
+): output is SearchPatternsToolSuccessOutput => {
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {
+    return false;
+  }
+  const record = output as Record<string, unknown>;
+  return typeof record.outputId === "string" && record.status === "ok" &&
+    Array.isArray(record.results) &&
+    record.results.every(isSearchPatternsToolResult);
+};
+
 export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
   toolId: "search_patterns",
   title: "Search Patterns",
   description:
-    "Search the pattern index for published Common Fabric patterns by hashtag or free text. Answers with each pattern's id, description, declared argument and result shapes, and the import specifier that composes it — never its source. Run one with run_pattern's patternId argument.",
+    "Search the pattern index for published Common Fabric patterns by hashtag or free text. Answers with each pattern's id, kind, evidence quality, description, import specifier, and stopword-free match ratio; the leading results also carry declared argument and result shapes — never source. Run one with run_pattern's patternId argument.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -90,12 +170,12 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
         type: "array",
         items: { type: "string" },
         description:
-          "Hashtags a pattern must carry. Omit to search on text alone.",
+          "Hashtags to match. Any supplied hashtag can surface a result. Omit to search on text alone.",
       },
       text: {
         type: "string",
         description:
-          "Free text matched against pattern descriptions, keywords, and tags. Matching is disjunctive and ranked: results carry matchedTerms out of queryTerms, so more words widen the net rather than narrowing it. Omit to search on tags alone.",
+          "A short set of distinctive capability words. English stopwords are removed, then whole words are matched with light suffix handling against pattern descriptions, keywords, and hashtags. One content term can surface a result; adding generic words adds distant OR matches. Results carry matchedTerms out of the stopword-free queryTerms. Omit to search on tags alone.",
       },
     },
     additionalProperties: false,
@@ -123,13 +203,32 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
                 required: ["uses", "score"],
                 additionalProperties: false,
               },
+              kind: {
+                type: "string",
+                enum: ["part", "app"],
+                description:
+                  "Whether the published argument schema classifies the pattern as a reusable part or whole app.",
+              },
+              quality: {
+                type: "string",
+                enum: ["penalized", "unproven", "proven"],
+                description:
+                  "Evidence tier from recorded outcomes: penalized is net-negative, unproven has no recorded success, and proven has at least one recorded success or positive rating without a net-negative score.",
+              },
               matchedTerms: { type: "number" },
               queryTerms: { type: "number" },
               importHint: { type: "string" },
               argumentType: { type: "string" },
               resultType: { type: "string" },
             },
-            required: ["patternId", "description", "hashtags", "importHint"],
+            required: [
+              "patternId",
+              "description",
+              "hashtags",
+              "kind",
+              "quality",
+              "importHint",
+            ],
             additionalProperties: false,
           },
         },
@@ -167,7 +266,9 @@ const errorMessage = (error: unknown): string =>
  * absent: the search answers with what is known, and a shape it cannot write
  * down is not known.
  */
-const declaredType = (schema: JSONSchema | undefined): string | undefined => {
+export const patternIndexDeclaredType = (
+  schema: JSONSchema | undefined,
+): string | undefined => {
   if (schema === undefined) {
     return undefined;
   }
@@ -235,13 +336,15 @@ export const searchPatternsTool: HarnessToolDefinition<
     );
     const results = hits.map((hit, index): SearchPatternsToolResult => {
       const pattern = detailed[index];
-      const argumentType = declaredType(pattern?.argumentSchema);
-      const resultType = declaredType(pattern?.resultSchema);
+      const argumentType = patternIndexDeclaredType(pattern?.argumentSchema);
+      const resultType = patternIndexDeclaredType(pattern?.resultSchema);
       return {
         patternId: hit.patternId,
         description: hit.description,
         hashtags: hit.hashtags,
         ...(hit.signals !== undefined ? { signals: hit.signals } : {}),
+        kind: hit.kind,
+        quality: hit.quality,
         ...(hit.matchedTerms !== undefined && hit.queryTerms !== undefined
           ? { matchedTerms: hit.matchedTerms, queryTerms: hit.queryTerms }
           : {}),

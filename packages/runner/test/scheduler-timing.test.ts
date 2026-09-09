@@ -330,10 +330,11 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
-  // #4108: clearing/unsubscribing a debounced action must recompute the single
-  // shared wake timer. Otherwise the stale wake keeps idle() blocked until its
-  // dead deadline fires, even though no gated work remains.
   it("resolves idle promptly after unsubscribing a debounced effect with an armed wake", async () => {
+    // #4108: clearing/unsubscribing a debounced action must recompute the
+    // single shared wake timer. Otherwise the stale wake keeps idle() blocked
+    // until its dead deadline fires, even though no gated work remains.
+
     let runCount = 0;
     const effect: Action = () => {
       runCount++;
@@ -446,7 +447,7 @@ describe("debounce and throttling", () => {
       writes: [],
     }, {});
 
-    const scheduler = runtime.scheduler as any;
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     scheduler.actionStats.set(scheduler.getActionId(computation), {
       runCount: 3,
       totalTime: 180,
@@ -476,7 +477,7 @@ describe("debounce and throttling", () => {
       writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
     }, { isEffect: true });
 
-    const scheduler = runtime.scheduler as any;
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     scheduler.actionStats.set(scheduler.getActionId(effect), {
       runCount: 3,
       totalTime: 180,
@@ -498,7 +499,7 @@ describe("debounce and throttling", () => {
       writes: [],
     }, { isEffect: true });
 
-    const scheduler = runtime.scheduler as any;
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     scheduler.actionStats.set(scheduler.getActionId(effect), {
       runCount: 3,
       totalTime: 180,

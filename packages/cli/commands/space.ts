@@ -1,13 +1,24 @@
-// `cf space` — operator commands over a whole space store.
+// `cf space` — the commands that act on a space.
 //
-// Today this is the rehearsal-clone workflow from
+// The noun is what the verb acts on, rather than what it ranges over.
+// `recreate-root` and `set-home` rebuild a space's root and home patterns
+// against a running server; `clone`, `verify`, `reset` and `fingerprint` work
+// on the same space as a store on disk. Both are the space, reached at
+// different moments in its life, which is what puts them under one noun.
+//
+// The rehearsal-clone workflow those four serve is in
 // docs/plans/space-clone-rehearsal.md: make a writable copy of a real space,
 // run a migration against it, judge the result, reset, repeat.
 //
-// Why this is NOT under `cf inspect`: inspect's contract is that it is
-// read-only — "it explains, it never reproduces or replays" — and that boundary
-// is what makes it trustworthy. A clone exists precisely to be written to, so
-// it gets its own noun.
+// `verify` and `reset` take a clone directory rather than a space, because a
+// rehearsal copy is identified by where it was written. The noun does not
+// resolve that: their argument names the copy, not the space it is a copy of.
+//
+// Why `inspect` stays a separate noun when it also acts on a store: that split
+// is contract, not noun. `inspect` is read-only — it explains, it never
+// reproduces or replays — and that boundary is what makes it trustworthy. A
+// clone exists precisely to be written to. One object, two nouns, kept apart
+// by what each promises about it rather than by what each addresses.
 //
 // Acquiring the snapshot stays manual for production, by design: the dump
 // endpoint is hard-off there (see memory-dump-policy.ts) and a whole-space dump
@@ -30,6 +41,7 @@ import {
 } from "@commonfabric/state-inspector";
 
 import { hasJsonArgument } from "../lib/json-output.ts";
+import { buildRecreateRootCommand, buildSetHomeCommand } from "./piece.ts";
 
 function out(json: boolean, data: unknown, render: () => void): void {
   if (json) console.log(JSON.stringify(data, null, 2));
@@ -230,7 +242,8 @@ function verifyUncertaintyNote(u: VerifyResult["uncertainty"]): string {
 export const space = new Command()
   .name("space")
   .description(
-    "Whole-space operator commands: rehearsal clones of a space store.",
+    "Commands that act on a space: its root and home patterns, and rehearsal " +
+      "clones of its store.",
   )
   .default("help")
   .error((error, command) => {
@@ -462,4 +475,11 @@ export const space = new Command()
     } finally {
       db.close();
     }
-  });
+  })
+  /* space recreate-root */
+  .command(
+    "recreate-root",
+    buildRecreateRootCommand("space recreate-root"),
+  )
+  /* space set-home */
+  .command("set-home", buildSetHomeCommand("space set-home"));

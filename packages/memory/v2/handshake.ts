@@ -1,4 +1,4 @@
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 
 import {
   compatibleMemoryProtocolFlags,

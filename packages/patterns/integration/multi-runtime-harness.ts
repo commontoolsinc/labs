@@ -16,8 +16,11 @@
  * runtimes (verified-load registries, frame stacks and similar module-level
  * state cross-talk), and production never does — every browser tab or CLI
  * process is its own realm. The storage server is self-hosted in-process
- * (@commonfabric/memory/v2/standalone), so no toolshed is needed; pass
- * `apiUrl` to target a running toolshed instead.
+ * (@commonfabric/memory/v2/standalone), and serves the authored patterns tree
+ * beside it, so no toolshed is needed; pass `apiUrl` to target a running
+ * toolshed instead. Serving that tree is what lets a session resolve a
+ * `system:` origin, and so what lets a `#profile` wish open its real create
+ * surface rather than an account of why it could not.
  *
  * POSTURE (server-execution v2): the self-hosted standalone server has no
  * serving host — no ExecutorHost, no serving loop — and its engine reads
@@ -36,16 +39,20 @@
  * to before: flag unset or false keeps the in-process standalone server.
  */
 
+import { fromFileUrl } from "@std/path/from-file-url";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import type { CfcWriteFloorMode } from "@commonfabric/runner/cfc";
+import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import {
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
@@ -73,6 +80,13 @@ export interface MultiRuntimeSessionSpec {
    * near-zero in-process latency hides.
    */
   wsDelayMs?: number;
+  /**
+   * Write-side `requiredIntegrity` floor for this session's runtime,
+   * overriding the harness-wide setting. Set it per session to model a fleet
+   * partway through the staged rollout, where one client already enforces the
+   * floor and another does not.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 export interface MultiRuntimeHarnessOptions {
@@ -104,6 +118,12 @@ export interface MultiRuntimeHarnessOptions {
    * self-hosted in-process storage server.
    */
   apiUrl?: URL;
+  /**
+   * Write-side `requiredIntegrity` floor for every runtime this harness
+   * creates, the bootstrap worker that authors the piece included. Defaults to
+   * the runtime's own default, which is `off`.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -114,6 +134,27 @@ const RPC_TIMEOUT_MS = 120_000;
  * ~2–3 s serving drain of a 40-event pipelined storm, small against the
  * suite timeouts a wedged consequence would otherwise eat. */
 const SERVED_SETTLE_QUIESCENCE_BUDGET_MS = 10_000;
+
+/**
+ * The authored patterns tree this repository deploys, served at the same
+ * address as the in-process storage server.
+ *
+ * A runtime resolves a `system:` provenance ref — the origin the wish
+ * builtin's sidecar surfaces record, and the one a space root carries —
+ * against the host serving its space. Self-hosting storage and leaving that
+ * route unanswered is a topology no deployment has, and under it a piece
+ * whose identity is a profile cell never gets its create surface. Answering it
+ * here is what lets a headless multi-runtime test drive the real resolution.
+ *
+ * One route for the process: it computes each pattern's closure identity once
+ * and holds it, and every harness in a run wants the same answers.
+ */
+let patternsRoute: PatternsRoute | undefined;
+function systemPatternsRoute(): PatternsRoute {
+  return patternsRoute ??= new PatternsRoute(
+    fromFileUrl(new URL("..", import.meta.url)),
+  );
+}
 
 class WorkerClient {
   #worker: Worker;
@@ -272,7 +313,13 @@ export class MultiRuntimeSession {
     }) as { ok: boolean; error?: { name?: string; message?: string } };
   }
 
-  /** Read a value from the piece result, pulling fresh state first. */
+  /**
+   * Read a value from the piece result, pulling fresh state first. Where the
+   * result schema says `asCell` — over a pattern's `[UI]` tree, among other
+   * places — the value carries the link that reaches the cell rather than the
+   * cell, which belongs to the runtime's own realm. Read a path below such a
+   * cell, or use `readRaw`, to reach its contents.
+   */
   async read(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("read", { path });
   }
@@ -282,6 +329,23 @@ export class MultiRuntimeSession {
    *  carry, e.g. a query result's `requestHash`. */
   async readRaw(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("readRaw", { path });
+  }
+
+  /**
+   * Mint a cell in this runtime's space holding `value`, and answer with the
+   * link that reaches it. `cause` names the cell: the same cause is the same
+   * cell, a different cause a different one.
+   *
+   * The link is ordinary data, so it can be passed straight back in a `send`
+   * event to reach a handler input declared `asCell`. That is how a headless
+   * caller hands a pattern a cell it did not create — a viewer identity, say,
+   * where a browser would supply a resolved `#profile`.
+   */
+  async createCell(
+    cause: FabricValue,
+    value: FabricValue,
+  ): Promise<FabricValue> {
+    return await this.#client.call("createCell", { cause, value });
   }
 
   /** Inspect the normalized link (id, space, scope) at `path` in the result. */
@@ -427,7 +491,9 @@ export class MultiRuntimeHarness {
         SERVER_EXECUTION_DEFAULT_ENABLED;
     const targetUrl = options.apiUrl ??
       (serverExecutionOn ? new URL(env.API_URL) : undefined);
-    const server = targetUrl ? undefined : StandaloneMemoryServer.start();
+    const server = targetUrl ? undefined : StandaloneMemoryServer.start({
+      serve: (request) => systemPatternsRoute().serve(request),
+    });
     const apiUrl = (targetUrl ?? server!.url).href;
 
     const sessions: MultiRuntimeSession[] = [];
@@ -442,6 +508,7 @@ export class MultiRuntimeHarness {
             `multi-runtime-harness ${normalized.label}`,
             { implementation: "noble" },
           );
+        const cfcWriteFloor = normalized.cfcWriteFloor ?? options.cfcWriteFloor;
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
           identity: identity.keyPair,
@@ -451,6 +518,7 @@ export class MultiRuntimeHarness {
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),
+          ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
         });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
@@ -468,6 +536,9 @@ export class MultiRuntimeHarness {
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
+        ...(options.cfcWriteFloor !== undefined
+          ? { cfcWriteFloor: options.cfcWriteFloor }
+          : {}),
       });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
@@ -618,5 +689,18 @@ export class MultiRuntimeHarness {
       });
     }
     await this.#server?.close();
+  }
+
+  /**
+   * Drop every worker without asking it to shut down first, for a caller that
+   * has no `await` to spend — a process-exit listener, which Deno runs
+   * synchronously. `dispose()` is the ordinary path and says goodbye properly;
+   * this one exists so a harness held for the life of a process is still
+   * released deterministically rather than left to process teardown. The
+   * in-process server is not closed, because closing it is asynchronous and it
+   * has nothing outside this process to release.
+   */
+  terminate(): void {
+    for (const session of this.sessions) session.client().terminate();
   }
 }

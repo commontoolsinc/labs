@@ -25,6 +25,9 @@ export const acl = new Command()
     prefix: "CF_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .globalEnv("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .globalOption("-s,--space <space:string>", "The space name or DID")
   /* acl ls */
   .command("ls", "List all ACL entries for a space.")

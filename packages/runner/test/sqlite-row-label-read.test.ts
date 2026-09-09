@@ -454,6 +454,41 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
     });
     expectError(res, "from");
   });
+
+  it("gates a row on an INTEGER column — the per-mailbox facet shape", () => {
+    // The read side hands the evaluator whatever the driver returned, and for
+    // the column a mailbox table keys its rows by that is a number. Each
+    // mailbox's rows come back labeled for that mailbox alone.
+    const tables = {
+      messages: table(
+        { id: "integer", source_id: "integer", body: "text" },
+        (f) => ({
+          confidentiality: all(
+            whenMatches(f.source_id, /^7$/, constant("did:mailbox:seven")),
+            whenMatches(f.source_id, /^8$/, constant("did:mailbox:eight")),
+            dbOwner(),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables,
+      columns: [
+        col("id", "messages", "id"),
+        col("source_id", "messages", "source_id"),
+        col("body", "messages", "body"),
+      ],
+      rows: [
+        { id: 1, source_id: 7, body: "hi" },
+        { id: 2, source_id: 8, body: "yo" },
+      ],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [
+      { confidentiality: ["did:mailbox:seven", OWNER] },
+      { confidentiality: ["did:mailbox:eight", OWNER] },
+    ]);
+  });
 });
 
 describe("computeRowLabelRead — output ceiling + onExceed", () => {
@@ -566,6 +601,23 @@ describe("resolveCeilingPlaceholders", () => {
     );
     if ("error" in res) throw new Error(res.error);
     assertEquals(res.atoms, ["did:key:zMe", OWNER, "pii"]);
+  });
+
+  it("resolves a placeholder inside an `anyOf` alternative", () => {
+    const res = resolveCeilingPlaceholders(
+      [{ anyOf: [{ __ctCurrentPrincipal: true }, { __ctDbOwner: true }] }],
+      { actingPrincipal: "did:key:zMe", owner: OWNER },
+    );
+    if ("error" in res) throw new Error(res.error);
+    assertEquals(res.atoms, [{ anyOf: ["did:key:zMe", OWNER] }]);
+  });
+
+  it("an unresolvable placeholder inside an `anyOf` fails closed", () => {
+    const res = resolveCeilingPlaceholders(
+      [{ anyOf: [{ __ctCurrentPrincipal: true }, OWNER] }],
+      { owner: OWNER },
+    );
+    assert("error" in res);
   });
 
   it("an unresolvable placeholder fails closed", () => {

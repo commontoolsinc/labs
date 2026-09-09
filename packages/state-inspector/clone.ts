@@ -17,11 +17,13 @@
 //   <dir>/clone.json               manifest: source, hashes, counts
 //   <dir>/.cf-clone                marker — "this store is NOT production"
 //   <dir>/pristine/<did>.sqlite    the baseline; never opened read-write
-//   <dir>/engine-v3/<did>.sqlite   the working copy a toolshed serves
+//   <dir>/engine-v3/engine-v3/<did>.sqlite
+//                                  the working copy a toolshed serves
 //
-// `engine-v3/` is not decoration: it is the on-disk layout the memory server
-// resolves through `resolveSpaceStoreUrl`, so pointing `MEMORY_DIR` at <dir>
-// serves the clone as a live space under the SAME DID.
+// That path is not decoration, and the doubled segment is not a typo: it is
+// what the memory server composes, so `clonePaths` DERIVES it rather than
+// spelling it out. Pointing `MEMORY_DIR` at <dir> then serves the clone as a
+// live space under the SAME DID.
 
 import * as Path from "@std/path";
 // The only read-WRITE database handle in this package, and it opens nothing:
@@ -44,7 +46,7 @@ import {
   type ScopedEntity,
 } from "./fingerprint.ts";
 
-/** Filenames the layout depends on. */
+/** Manifest filename the layout depends on. */
 const MANIFEST = "clone.json";
 
 /**
@@ -57,6 +59,7 @@ const MANIFEST = "clone.json";
  * Kept out of `clone.json` so that file stays small enough to read by eye.
  */
 const BASELINE = "baseline-entities.json";
+
 const MARKER = ".cf-clone";
 const PRISTINE_DIR = "pristine";
 
@@ -87,6 +90,7 @@ export interface CloneManifest {
    * sidecar existed, which fall back to recomputing.
    */
   baselineHash?: string;
+
   snapshotBytes: number;
 
   /** Durable counts at clone time — the cheap half of "did content survive?". */
@@ -142,6 +146,7 @@ export interface ClonePaths {
 
   /** Per-entity baseline hashes (see {@link BASELINE}). */
   baselinePath: string;
+
   pristinePath: string;
   workingPath: string;
 }
@@ -423,8 +428,13 @@ export interface VerifyResult {
      */
     reclassifiedGenerated: number;
 
-    /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
+    /**
+     * `changed` broken out per entity kind, so that "74 pieces" reads
+     * differently from "74 cells".
+     */
     changedByKind: Record<string, number>;
+
+    /** `removed` broken out the same way. */
     removedByKind: Record<string, number>;
   };
 

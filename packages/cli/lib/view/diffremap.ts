@@ -39,11 +39,13 @@ export function remapStructure(ctx: HunkStructureContext): StructureNode[] {
 export interface RemapCtx {
   /** Source line (file or fragment) → diff line, for visible lines. */
   newToDiff: Map<number, number>;
+
   diffLineStarts: number[];
   rawLines: string[];
 
   /** Line starts of the source text the nodes were parsed from. */
   sourceLineStarts: number[];
+
   sourceOmitsUtf8Bom: boolean;
   definitions: Map<string, Definition[]>;
 }

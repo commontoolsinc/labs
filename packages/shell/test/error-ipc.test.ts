@@ -30,7 +30,7 @@ class MockTransport extends EventEmitter<TransportEvents>
     return Promise.resolve();
   }
 
-  // Simulate receiving a message from the worker
+  /** Simulates receiving a message from the worker. */
   simulateMessage(msg: IPCRemoteMessage): void {
     this.emit("message", msg);
   }

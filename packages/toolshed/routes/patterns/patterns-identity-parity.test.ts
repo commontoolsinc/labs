@@ -8,7 +8,7 @@ import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { Engine, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { PatternsServer } from "@/routes/patterns/patterns-server.ts";
+import { createPatternsRoute } from "@/routes/patterns/patterns-server.ts";
 
 /**
  * The load-bearing invariant of the `?identity` endpoint: the identity the
@@ -71,7 +71,7 @@ describe("?identity parity with a worker HTTP compile", () => {
 
   it("default-app.tsx: endpoint identity == worker compile", async () => {
     const worker = await workerCompiledIdentity("system/default-app.tsx");
-    const endpoint = await new PatternsServer().identity(
+    const endpoint = await createPatternsRoute().identity(
       "system/default-app.tsx",
     );
     expect(endpoint).toBe(worker);
@@ -79,7 +79,35 @@ describe("?identity parity with a worker HTTP compile", () => {
 
   it("home.tsx: endpoint identity == worker compile", async () => {
     const worker = await workerCompiledIdentity("system/home.tsx");
-    const endpoint = await new PatternsServer().identity("system/home.tsx");
+    const endpoint = await createPatternsRoute().identity("system/home.tsx");
+    expect(endpoint).toBe(worker);
+  });
+
+  // The surfaces the wish builtin instantiates record a `system:` origin and
+  // are opened through the same route. A surface whose light identity differs
+  // from what compiling its source produces is refused every time it opens, so
+  // it belongs here beside the roots.
+  it("profile-create.tsx: endpoint identity == worker compile", async () => {
+    const worker = await workerCompiledIdentity("system/profile-create.tsx");
+    const endpoint = await createPatternsRoute().identity(
+      "system/profile-create.tsx",
+    );
+    expect(endpoint).toBe(worker);
+  });
+
+  it("profile-picker.tsx: endpoint identity == worker compile", async () => {
+    const worker = await workerCompiledIdentity("system/profile-picker.tsx");
+    const endpoint = await createPatternsRoute().identity(
+      "system/profile-picker.tsx",
+    );
+    expect(endpoint).toBe(worker);
+  });
+
+  it("suggestion.tsx: endpoint identity == worker compile", async () => {
+    const worker = await workerCompiledIdentity("system/suggestion.tsx");
+    const endpoint = await createPatternsRoute().identity(
+      "system/suggestion.tsx",
+    );
     expect(endpoint).toBe(worker);
   });
 });

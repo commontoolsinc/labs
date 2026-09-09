@@ -145,6 +145,31 @@ reads the worker's scheduler, runner and storage rows plus main-thread IPC, with
 row recording set sizes rather than milliseconds will evict real timings — read
 those by name instead of widening the summary.
 
+The storage rows follow one inbound frame in arrival order, each keyed by the
+module that pays for the step: `storage.v2.remote/receive/decodeFrame`
+(websocket decompression), `memory.v2.client/receive/decodeBoundary` then
+`/schemaExpansion` (protocol decoding, and schema expansion only for a frame
+carrying a reference), and `storage.v2.remote/receive/dispatchPayload` — the
+whole synchronous handling of the frame, which for a pushed effect includes
+updating the watch view but not the replica. Two rows time replica application:
+`storage.v2/watchRefresh/applySessionSync` covers graph-watch refreshes, and
+`storage.v2/watchPush/applySessionSync` covers the subscription consumer. Direct
+operation-watch and watch-removal application are outside both spans.
+
+Around a graph-watch refresh, `storage.v2/watchRefresh/watchAddSync` includes
+watch-mutation queue wait, the client request, response-order wait in concurrent
+mode, and watch-view application. `memory.v2.client/watchAdd/request` covers
+the client request, including connection readiness, encoding, the transport
+round trip, and response handling;
+`memory.v2.client/watchAdd/apply` covers watch bookkeeping and watch-view
+application. The outer span minus the request span therefore includes
+application and scheduling overhead as well as waiting; it does not isolate
+queue wait. The rows aggregate different call populations, and their percentiles
+cannot be subtracted to recover any of these components. `watchRefresh/total`
+brackets the whole refresh, including replica application. The
+`runner/start/*Wave` rows bracket each resume pre-sync wave around the per-cell
+`runner/start/resume*` spans.
+
 ## 4. Split until an explosion has an origin
 
 A count that is too high is visible at the top level. The caller that multiplies
@@ -300,6 +325,36 @@ Look for both before choosing. The perf skill carries the causes this runtime
 has actually produced, and the reasons an investigation that ends at the pattern
 has often stopped early.
 
+## What the client sent, and what came back
+
+Every rung above measures time. A read that is too wide shows up in them as a
+long span and a large upsert count, and neither says which documents were
+asked for or which arrived — the question an over-wide sync turns on.
+`CF_MEMORY_FRAME_LOG=<file>` answers it from the client's side of the wire:
+the memory client appends one JSON line per frame in either direction, with
+the frame's type and size, a watch mutation's roots and selectors, a commit's
+operations and read-set shape, and every document a response delivered with
+its size and top-level keys. The file holds a second kind of line as well:
+selectors repeat across roots, so each distinct one is written once as a
+`dir: "selector"` record the first time a root uses it, and every root after
+that names it by that record's hash. A capture therefore has more lines than
+frames, and a count of frames skips the selector lines.
+
+Read it by pairing each outgoing watch with its response by `requestId`, then
+asking three things of the pair: how many roots went out, how many documents
+came back, and what those documents were. Grouping the delivered documents by
+their top-level keys is a heuristic for the last: the record carries at most
+the first twelve keys, so it separates a piece's stored result from a rendered
+tree, a link, or a schema well enough to size each category, and a key absent
+from a record is not evidence the document lacks it. A commit line carries its confirmed reads
+split by document kind and path depth, and the count of reads that asserted a
+document absent: a commit that walked deep into documents it had never loaded
+is visible as depth and absence together, before the server rejects it.
+
+On a `cf` invocation against the Topics board this is what separated a survey
+that produced sixty kilobytes of output from the twenty-five megabytes it
+received to produce them, and named the selectors that asked for each part.
+
 ## The server side
 
 A toolshed carries the same timing machinery as everything above, and reports it
@@ -349,13 +404,50 @@ process:
 - `logCounts` — the same per-logger counts, which is how a warning storm shows
   up as a number rather than as a log to grep.
 - `slowQueries` — the last hundred query, watch, or commit operations over
-  100 ms, with the space and the root and watch counts. A `transact` entry
-  also carries the commit's operation and read counts, its outcome (`ok`,
+  `CF_SLOW_QUERY_THRESHOLD_MS` (100 ms unless set; a local investigation
+  sets it to `0` to record every operation), with the space and the root
+  and watch counts. `graph.query`,
+  `session.watch.set` and `session.watch.add` entries attribute the traversal
+  (`rootsVisited`, `rootsElapsedMs`, `slowestRoot`) and carry `managerReads`,
+  the engine document reads across the whole request — the width a root
+  count cannot show, since one root's declaration can fan out over many
+  documents. `session.watch.add` and `session.watch.refresh` entries also
+  carry `upserts`, the snapshots the frame delivered: a wide traversal that
+  yields few is repeated server work, and a wide frame is transport and
+  client-ingest work as well. A refresh carries only `watches` and `upserts`:
+  it re-evaluates by dirty document rather than by root, so it has no
+  traversal to attribute, and absent is the honest answer there. A `transact`
+  entry also carries the commit's operation and read counts, its outcome (`ok`,
   the error name, or `threw` — a slow rejected commit records like a slow
   applied one), and `lockWaitMs`: how long the commit waited for the space
   publication lock before evaluating. Flush passes hold that same lock, so
   a `transact` whose `lockWaitMs` dominates its elapsed time was queued
   behind fan-out, not expensive itself.
+  Read the traversal fields with the query evaluation cache's coverage in
+  mind. The cache serves only whole, current-state evaluations: an eligible
+  `graph.query` (without `atSeq` or keyed snapshots), each branch group
+  established by `session.watch.set`, and a `session.watch.add` group when that
+  session has no tracked graph for the branch yet. A subsequent
+  `session.watch.add` for an already tracked branch extends the session's graph
+  through `extendTrackedGraph()` and bypasses the cache because its result
+  depends on what the session already covers. A page load that grows its watch
+  set in batches therefore re-walks those later batches. Nonzero `rootsVisited`
+  there is expected extension work, not evidence of a cache miss.
+- `documentCaches` — the memory server's decoded-document cache, one entry
+  per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`)
+  under the server's `totalBudgetBytes` (beside it the total `bytes`, and
+  `totalBudgetEvictions`: entries given up to hold that total rather than a
+  space's own bounds):
+  per space, `entries` and `bytes` against `budgetBytes` and `maxEntries`,
+  and the lifetime `hits`, `misses` and `evictions`. The occupancy figures
+  (`entries`, `bytes`, and which spaces appear at all) are a snapshot of the
+  moment — the one exception to the paragraph below; the three counters
+  accumulate. A corpus is read again by every
+  load and every refresh, so a space in good shape shows `hits` climbing
+  across loads and `misses` rising only with commits. `evictions` climbing
+  while a corpus is being walked means its working set does not fit the
+  budget, and every walk is paying decode and deep-freeze for it again — on
+  the Topics board that was most of a second of server time per walk.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made
@@ -399,6 +491,16 @@ a large batched fan-out and one expensive send are the same number here and
 dividing it to recover a per-frame cost is unsound. Read it as a bound instead —
 a client's push waits at least the refresh delay plus these two — and reach for
 `servingLoop.push` when the question is which sessions a batch served.
+
+`memory/watchAdd/total` covers each `session.watch.add` handler from admission
+through completion, including duplicate or empty additions, rejected requests,
+and failures. It ends before outbound schema preparation and transport.
+`slowQueries` records successful additions over its threshold, measured from
+evaluation through response assembly. `memory/response/prepareSchemas` against
+`memory/response/sendRaw` splits each outbound message, response or effect, into
+schema-table compression and the hand-off to the transport;
+`memory.compression/send/encode` is the websocket compression that follows, on
+whichever side is sending.
 
 ### Profile the process
 

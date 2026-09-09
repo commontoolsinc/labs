@@ -3,23 +3,28 @@ import { expect } from "@std/expect";
 import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
-import { ConsoleServer, resolveConsoleConfig } from "../../console/server.ts";
-import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import {
-  createHarnessChatEventEnvelope,
-  type HarnessChatEventEnvelope,
-  type HarnessChatStructuredEvent,
-} from "../../src/contracts/interactive-chat.ts";
+  ConsoleServer,
+  createConsoleInteractiveServiceOptions,
+  resolveConsoleConfig,
+} from "../../console/server.ts";
+import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
+import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
+import { MAX_HARNESS_PATTERN_REFS } from "../../src/pattern-refs.ts";
 import {
+  type HarnessInteractiveChatEventListener,
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../../src/interactive-chat-service.ts";
+import { openSqliteHarnessChatSessionStore } from "../../src/sqlite-session-store.ts";
 import type {
+  CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../../src/prompt-loop.ts";
+import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 
 /**
  * A loop that answers the task it was given and nothing else. The console
@@ -44,6 +49,43 @@ const answeringLoop: HarnessInteractivePromptLoopFactory = () => ({
 });
 
 /**
+ * A loop that records the supplied completion in the run artifact directory.
+ * This is the production ordering the console depends on: the prompt loop
+ * persists its transcript before the service emits `turn_completed`.
+ */
+const artifactLoop = (
+  messages: readonly HarnessTranscriptMessage[],
+): HarnessInteractivePromptLoopFactory =>
+(loopOptions) => ({
+  runTranscript: async (
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> => {
+    if (
+      loopOptions.artifactRoot === undefined || loopOptions.runId === undefined
+    ) {
+      throw new Error("artifact loop requires an artifact root and run id");
+    }
+    const transcript = [...options.transcript, ...messages];
+    await writeTurnTranscript(
+      loopOptions.artifactRoot,
+      loopOptions.runId,
+      transcript,
+      options.transcript.length,
+    );
+    const finalAssistantText =
+      transcript.findLast((message) => message.role === "assistant")?.content ??
+        "";
+    return {
+      model: "gpt-test",
+      finalAssistantText,
+      transcript,
+      modelTurns: 1,
+      runState: {} as HarnessPromptLoopResult["runState"],
+    };
+  },
+});
+
+/**
  * A clock that advances a second per reading. Two turns started in the same
  * millisecond are ordered by turn id, which a real session's random ids make
  * arbitrary, so the tests that turn on which turn came first give the service
@@ -59,6 +101,19 @@ const advancingClock = () => {
 
 /** The identity the proxied index client signs with in these tests. */
 const signer = await Identity.fromPassphrase("cf-harness console index proxy");
+
+/** What the index answers for the pattern a task attaches by id. */
+const INDEXED_PATTERN = {
+  patternId: "pat-expenses",
+  ownerDid: "did:key:zOwner",
+  createdAt: "2026-08-01T00:00:00.000Z",
+  description: "Totals an expense list",
+  hashtags: ["expenses"],
+  dependencies: [],
+};
+
+/** An entity id of the shape an input-cell reference has to carry. */
+const CELL_ID = `of:fid1:${"A".repeat(43)}`;
 
 const config = () =>
   resolveConsoleConfig(
@@ -107,14 +162,43 @@ const getRequest = (
   headers: Record<string, string> = {},
 ): Request => new Request(`http://127.0.0.1:8100${path}`, { headers });
 
+const writeTurnTranscript = async (
+  artifactRoot: string,
+  turnId: string,
+  transcript: readonly HarnessTranscriptMessage[],
+  firstGeneratedIndex = 0,
+): Promise<void> => {
+  const runRoot = join(artifactRoot, turnId);
+  await Deno.mkdir(runRoot, { recursive: true });
+  await Deno.writeTextFile(
+    join(runRoot, "transcript.json"),
+    JSON.stringify(transcript),
+  );
+  await Deno.writeTextFile(
+    join(runRoot, "run-report.json"),
+    JSON.stringify({
+      finalAssistantText: transcript.slice(firstGeneratedIndex).findLast(
+        (message) => message.role === "assistant",
+      )?.content ?? "",
+      timeline: transcript.map((message, transcriptIndex) => ({
+        kind: "transcript_message",
+        transcriptIndex,
+        role: message.role,
+        ...(transcriptIndex >= firstGeneratedIndex ? { modelTurn: 1 } : {}),
+      })),
+    }),
+  );
+};
+
 describe("console/server", () => {
   let server: ConsoleServer;
+
   /** The `Cookie` header the page carries, as loading the page hands it out. */
   let cookie: string;
 
   beforeEach(async () => {
     server = new ConsoleServer(
-      config(),
+      await config(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -177,7 +261,7 @@ describe("console/server", () => {
       return Promise.resolve(response);
     };
     const indexed = new ConsoleServer(
-      configWithIndex(),
+      await configWithIndex(),
       (onEvent) =>
         new HarnessInteractiveChatService({
           createPromptLoop: answeringLoop,
@@ -202,106 +286,247 @@ describe("console/server", () => {
     };
   };
 
-  /**
-   * A server whose cell-label snapshot the test releases by hand, and an
-   * event stream already open on it. The snapshot is handed in because it
-   * reads a space database this test has none of, and because when it settles
-   * is the whole of what these tests are about.
-   */
-  const snapshotServer = async (
-    recordCellLabels: (sessionId: string) => Promise<void>,
-  ): Promise<{ server: ConsoleServer; stream: Response }> => {
-    const held = new ConsoleServer(
-      config(),
-      (onEvent) =>
-        new HarnessInteractiveChatService({
-          createPromptLoop: answeringLoop,
-          now: advancingClock(),
-          onEvent,
+  /** Reads one live completed event backed by its durable run transcript. */
+  const liveTurnResult = async (
+    messages: readonly HarnessTranscriptMessage[],
+  ): Promise<unknown> => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-event-",
+    });
+    try {
+      const resultConfig = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--artifact-root",
+          artifactRoot,
+        ],
+        {},
+        "/console",
+      );
+      const resultServer = new ConsoleServer(
+        resultConfig,
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            basePromptLoopOptions: { artifactRoot },
+            createPromptLoop: artifactLoop(messages),
+            now: advancingClock(),
+            onEvent,
+            runIdForTurn: (_sessionId, turnId) => turnId,
+          }),
+      );
+      const page = await resultServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const response = await resultServer.handle(getRequest(
+        "/api/events?afterSequence=0",
+        { cookie: resultCookie },
+      ));
+      const startedResponse = await resultServer.handle(
+        jsonRequest("/api/task", { text: "track my books" }, {
+          cookie: resultCookie,
         }),
-      undefined,
-      recordCellLabels,
-    );
-    const page = await held.handle(getRequest("/"));
-    await page.body?.cancel();
-    const streamCookie = page.headers.get("set-cookie")!.split(";")[0];
-    return {
-      server: held,
-      stream: await held.handle(
-        getRequest("/api/events?afterSequence=0", { cookie: streamCookie }),
-      ),
-    };
+      );
+      expect(startedResponse.status).toBe(200);
+      return (await envelopesUntil(response, "turn_completed")).at(-1)!.event
+        .result;
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
   };
 
-  const envelope = (
-    sequence: number,
-    event: HarnessChatStructuredEvent,
-  ): HarnessChatEventEnvelope =>
-    createHarnessChatEventEnvelope({
-      sessionId: "session-1",
-      sequence,
-      event,
-    });
-
-  describe("the cell-label snapshot a terminal event waits on", () => {
-    it("writes a terminal event to a stream only once its snapshot has landed", async () => {
-      let land: (() => void) | undefined;
-      const snapshot = new Promise<void>((resolve) => {
-        land = resolve;
-      });
-      const held = await snapshotServer(() => snapshot);
-      const frames = frameReader(held.stream);
-      try {
-        held.server.broadcast(
-          envelope(1, { kind: "assistant_completed", text: "built it" }),
-        );
-        // Reading that frame back is what says the stream has drained its
-        // backfill: until it has, an envelope is buffered rather than written.
-        expect(await frames.next()).toBe("chat:assistant_completed");
-
-        held.server.broadcast(
-          envelope(2, { kind: "turn_completed", turnId: "turn-1" }),
-        );
-        // A frame written while the terminal event is still waiting. A stream
-        // delivers in the order it was written, so the terminal event arriving
-        // after this one is what says it did not overtake its snapshot.
-        held.server.ping();
-        land!();
-
-        expect(await frames.next()).toBe("ping");
-        expect(await frames.next()).toBe("chat:turn_completed");
-      } finally {
-        await frames.cancel();
-      }
-    });
-
-    it("writes a terminal event whose snapshot could not be taken", async () => {
-      const held = await snapshotServer(() =>
-        Promise.reject(new Error("no space database for console-test"))
+  describe("console prompt configuration", () => {
+    it("threads configured skills.sh discovery into the run and policy", async () => {
+      const resolved = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-registry-url",
+          "https://registry.example",
+        ],
+        {},
+        "/console",
       );
-      const frames = frameReader(held.stream);
+      const serviceOptions = createConsoleInteractiveServiceOptions(
+        resolved,
+        {
+          modelProvider: "openai-compatible-gateway",
+          modelAuthSource: "none",
+          gatewayAuthMode: "none",
+        },
+        () => {},
+      );
+
+      expect(resolved.skillsSh).toEqual({
+        baseUrl: "https://registry.example",
+      });
+      expect(serviceOptions.basePromptLoopOptions?.skillsSh).toEqual({
+        baseUrl: "https://registry.example",
+      });
+      expect(serviceOptions.runIdForTurn?.("session-1", "turn-1")).toBe(
+        "turn-1",
+      );
+      // A registry and a fabric session back both skill tools, so a session
+      // configured for one offers acquisition as well as discovery.
+      const policy = harnessSessionChatPolicy(resolved);
+      expect(policy.allowedToolIds).toContain("search_skills");
+      expect(policy.allowedToolIds).toContain("acquire_skill");
+    });
+
+    it("withholds the skill tools from a session with no registry", async () => {
+      const policy = harnessSessionChatPolicy(await config());
+      expect(policy.allowedToolIds).not.toContain("search_skills");
+      expect(policy.allowedToolIds).not.toContain("acquire_skill");
+    });
+
+    it("reads the skills.sh discovery registry from the environment", async () => {
+      const resolved = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_SKILLS_REGISTRY_URL: "https://registry.example" },
+        "/console",
+      );
+
+      expect(resolved.skillsSh).toEqual({
+        baseUrl: "https://registry.example",
+      });
+    });
+
+    it("rejects a skills.sh discovery registry that is not a URL", async () => {
+      await expect(
+        resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--skills-registry-url",
+            "not a url",
+          ],
+          {},
+          "/console",
+        ),
+      ).rejects.toThrow("--skills-registry-url must be a valid URL");
+    });
+
+    it("reads the named prompt and disables child composition guidance", async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "cf-harness-console-prompt-",
+      });
       try {
-        held.server.broadcast(
-          envelope(1, { kind: "assistant_completed", text: "built it" }),
+        await Deno.writeTextFile(
+          join(directory, "system.txt"),
+          "COMPOSE FIRST\n",
         );
-        expect(await frames.next()).toBe("chat:assistant_completed");
+        const resolved = await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--system-prompt-file",
+            "system.txt",
+            "--no-child-composition-guidance",
+          ],
+          {},
+          directory,
+        );
 
-        held.server.broadcast(envelope(2, {
-          kind: "turn_failed",
-          turnId: "turn-1",
-          error: { code: "internal_error", message: "the model gave up" },
-        }));
-
-        expect(await frames.next()).toBe("chat:turn_failed");
+        expect(resolved.systemPrompt).toBe("COMPOSE FIRST\n");
+        expect(resolved.subagentCompositionGuidance).toBe(false);
+        const serviceOptions = createConsoleInteractiveServiceOptions(
+          resolved,
+          {
+            modelProvider: "openai-compatible-gateway",
+            modelAuthSource: "none",
+            gatewayAuthMode: "none",
+          },
+          () => {},
+        );
+        expect(serviceOptions.systemPrompt).toBe("COMPOSE FIRST\n");
+        expect(
+          serviceOptions.basePromptLoopOptions?.subagentCompositionGuidance,
+        ).toBe(false);
       } finally {
-        await frames.cancel();
+        await Deno.remove(directory, { recursive: true });
       }
     });
 
-    it("loads the server module on a host with no FFI permission", async () => {
+    it("rejects a prompt file that cannot be read", async () => {
+      await expect(
+        resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--system-prompt-file",
+            "missing.txt",
+          ],
+          {},
+          "/console-prompt-test",
+        ),
+      ).rejects.toThrow(
+        "--system-prompt-file could not be read: /console-prompt-test/missing.txt",
+      );
+    });
+
+    it("rejects a prompt file containing only whitespace", async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "cf-harness-console-prompt-",
+      });
+      try {
+        const promptPath = join(directory, "empty.txt");
+        await Deno.writeTextFile(promptPath, " \n\t");
+
+        await expect(
+          resolveConsoleConfig(
+            [
+              "--fabric-identity",
+              "key.pkcs8",
+              "--fabric-space",
+              "console-test",
+              "--session-db",
+              "none",
+              "--system-prompt-file",
+              promptPath,
+            ],
+            {},
+            directory,
+          ),
+        ).rejects.toThrow(`--system-prompt-file is empty: ${promptPath}`);
+      } finally {
+        await Deno.remove(directory, { recursive: true });
+      }
+    });
+  });
+
+  describe("the module", () => {
+    it("loads on a host with no FFI permission", async () => {
       // The console promises a machine without the SQLite native library can
-      // serve its page, and a run whose cells there are none of takes no
-      // snapshot. So evaluating this module must not open that library.
+      // serve its page: a run reads its space through that library only as
+      // it ends, and only when it holds a cell to ask about. So evaluating
+      // this module must not open that library.
       const repoRoot = resolve(import.meta.dirname!, "..", "..", "..", "..");
       const wrapperDir = await Deno.makeTempDir({
         prefix: "cf-harness-console-import-",
@@ -370,6 +595,442 @@ describe("console/server", () => {
     });
   });
 
+  describe("GET /api/status", () => {
+    it("answers with the configured artifact root before a task is started", async () => {
+      const response = await server.handle(
+        getRequest("/api/status", { cookie }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        artifactRoot: (await config()).artifactRoot,
+        sessions: [],
+      });
+    });
+  });
+
+  describe("GET /api/policy", () => {
+    it("returns what a session started here would run under, before any session exists", async () => {
+      const response = await server.handle(
+        getRequest("/api/policy", { cookie }),
+      );
+
+      expect(response.status).toBe(200);
+      const resolved = await config();
+      const policy = harnessSessionChatPolicy(resolved);
+      expect(await response.json()).toEqual({
+        systemPromptSha256: null,
+        allowedToolIds: [...policy.allowedToolIds],
+        allowedSubagentProfiles: [...policy.allowedSubagentProfiles],
+        fabricSpace: resolved.fabricSession.space,
+        artifactRoot: resolved.artifactRoot,
+        sessionDbPath: null,
+      });
+    });
+
+    it("answers 403 without the token, as the route carrying the same policy on a session does", async () => {
+      const response = await server.handle(getRequest("/api/policy"));
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("GET /api/health", () => {
+    it("reports the configured Fabric API and unverified session liveness without a token", async () => {
+      const response = await server.handle(getRequest("/api/health"));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: true,
+        fabricApiUrl: (await config()).fabricSession.apiUrl,
+        fabricSession: "unverified",
+      });
+    });
+
+    it("answers 403 when the request names another host", async () => {
+      const response = await server.handle(
+        getRequest("/api/health", { host: "evil.test:8100" }),
+      );
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("task Loom context", () => {
+    it("rejects malformed Loom targets before starting a turn", async () => {
+      for (const loomId of ["../private", {}, "loom-not-valid"]) {
+        const response = await server.handle(
+          jsonRequest("/api/task", { text: "Make a Loom", loomId }, { cookie }),
+        );
+        expect(response.status).toBe(400);
+      }
+      expect(server.service.turns()).toHaveLength(0);
+    });
+
+    it("persists the submitted origin even when the next turn names another Loom", async () => {
+      const first = await startTask({
+        text: "First",
+        loomId: "loom-1111111111111111",
+      });
+      await startTask({
+        text: "Second",
+        sessionId: first.sessionId,
+        loomId: "loom-2222222222222222",
+      });
+      expect(
+        server.service.turns(first.sessionId).map((entry) =>
+          entry.input.loomId
+        ),
+      ).toEqual(["loom-1111111111111111", "loom-2222222222222222"]);
+    });
+  });
+
+  describe("GET /api/turns/<turnId>/result", () => {
+    it("returns named errors for malformed and unknown turn paths", async () => {
+      const malformedRoute = await server.handle(getRequest(
+        "/api/turns/not-a-result",
+        { cookie },
+      ));
+      expect(malformedRoute.status).toBe(404);
+
+      const malformedEncoding = await server.handle(getRequest(
+        "/api/turns/%/result",
+        { cookie },
+      ));
+      expect(malformedEncoding.status).toBe(404);
+
+      const unknownTurn = await server.handle(getRequest(
+        "/api/turns/turn-nobody-started/result",
+        { cookie },
+      ));
+      expect(unknownTurn.status).toBe(404);
+      expect(await unknownTurn.json()).toEqual({
+        code: "turn_not_found",
+        error: "turn turn-nobody-started was not found",
+      });
+    });
+
+    it("returns a named error when completed-turn artifacts are unavailable", async () => {
+      const started = await startTask({ text: "track my books" });
+
+      const response = await server.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie },
+      ));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        code: "turn_result_unavailable",
+        error: `result for turn ${started.turnId} is unavailable`,
+      });
+    });
+
+    it("returns the durable result of a completed turn", async () => {
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-result-route-",
+      });
+      try {
+        const resultConfig = await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        );
+        const resultServer = new ConsoleServer(
+          resultConfig,
+          (onEvent) =>
+            new HarnessInteractiveChatService({
+              createPromptLoop: answeringLoop,
+              now: advancingClock(),
+              onEvent,
+            }),
+        );
+        const page = await resultServer.handle(getRequest("/"));
+        await page.body?.cancel();
+        const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
+        const startedResponse = await resultServer.handle(
+          jsonRequest("/api/task", {
+            text: "track my books",
+            loomId: "loom-1111111111111111",
+          }, {
+            cookie: resultCookie,
+          }),
+        );
+        const started = await startedResponse.json();
+        await resultServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+        await writeTurnTranscript(artifactRoot, started.turnId, [
+          {
+            role: "tool",
+            toolCallId: "call-1",
+            toolName: "assign_slug",
+            content: JSON.stringify({
+              outputId: "run:assign_slug:1",
+              status: "ok",
+              slug: "reading-list",
+              url: "http://localhost:8000/console-test/reading-list",
+            }),
+          },
+          { role: "assistant", content: "built it" },
+        ]);
+
+        const response = await resultServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          { cookie: resultCookie },
+        ));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          originLoomId: "loom-1111111111111111",
+          looms: [],
+          pieces: [{
+            slug: "reading-list",
+            url: "http://localhost:8000/console-test/reading-list",
+          }],
+          spaceName: "console-test",
+          finalText: "built it",
+        });
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("returns a completed turn after its session is restored", async () => {
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-result-restored-",
+      });
+      const store = await openSqliteHarnessChatSessionStore({
+        url: toFileUrl(join(artifactRoot, "sessions.sqlite")),
+      });
+      try {
+        const resultConfig = await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        );
+        const createService = (onEvent: HarnessInteractiveChatEventListener) =>
+          new HarnessInteractiveChatService({
+            basePromptLoopOptions: { artifactRoot },
+            createPromptLoop: artifactLoop([
+              { role: "assistant", content: "restored result" },
+            ]),
+            onEvent,
+            runIdForTurn: (_sessionId, turnId) => turnId,
+            sessionStore: store,
+          });
+        const firstServer = new ConsoleServer(
+          resultConfig,
+          createService,
+        );
+        const firstPage = await firstServer.handle(getRequest("/"));
+        await firstPage.body?.cancel();
+        const firstCookie = firstPage.headers.get("set-cookie")!.split(";")[0];
+        const startedResponse = await firstServer.handle(
+          jsonRequest("/api/task", { text: "persist this turn" }, {
+            cookie: firstCookie,
+          }),
+        );
+        const started = await startedResponse.json();
+        await firstServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+
+        const restoredServer = new ConsoleServer(
+          resultConfig,
+          createService,
+        );
+        await restoredServer.service.initializeFromStore();
+        const restoredPage = await restoredServer.handle(getRequest("/"));
+        await restoredPage.body?.cancel();
+        const restoredCookie = restoredPage.headers.get("set-cookie")!.split(
+          ";",
+        )[0];
+
+        const response = await restoredServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          { cookie: restoredCookie },
+        ));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          looms: [],
+          pieces: [],
+          spaceName: "console-test",
+          finalText: "restored result",
+        });
+      } finally {
+        store.close();
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("returns a named error for a turn that has not completed", async () => {
+      let finish: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const waitingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: async (options) => {
+                await gate;
+                return await answeringLoop({} as never).runTranscript(options);
+              },
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await waitingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await waitingServer.handle(
+        jsonRequest("/api/task", { text: "keep working" }, {
+          cookie: waitingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      try {
+        const response = await waitingServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          { cookie: waitingCookie },
+        ));
+
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({
+          code: "turn_not_completed",
+          error: `turn ${started.turnId} has not completed`,
+        });
+      } finally {
+        finish!();
+        await waitingServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+      }
+    });
+
+    it("answers 410 `turn_failed` with the turn's error for a turn that failed", async () => {
+      // A failed turn will never have a result, so a poller is told to stop
+      // rather than to ask again.
+      const failingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: () =>
+                Promise.reject(new Error("model stream returned an error")),
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await failingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const failingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await failingServer.handle(
+        jsonRequest("/api/task", { text: "build it" }, {
+          cookie: failingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      await failingServer.service.waitForTurn(
+        started.sessionId,
+        started.turnId,
+      );
+
+      const response = await failingServer.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie: failingCookie },
+      ));
+
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        code: "turn_failed",
+        error: `turn ${started.turnId} failed`,
+        detail: {
+          code: "internal_error",
+          message: "model stream returned an error",
+        },
+      });
+    });
+
+    it("answers 410 `turn_canceled` for a turn that was canceled", async () => {
+      let finish: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const waitingServer = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: async (options) => {
+                await gate;
+                return await answeringLoop({} as never).runTranscript(options);
+              },
+            }),
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await waitingServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
+      const startedResponse = await waitingServer.handle(
+        jsonRequest("/api/task", { text: "keep working" }, {
+          cookie: waitingCookie,
+        }),
+      );
+      const started = await startedResponse.json();
+      const canceled = await waitingServer.handle(
+        jsonRequest("/api/cancel", { sessionId: started.sessionId }, {
+          cookie: waitingCookie,
+        }),
+      );
+      expect(canceled.status).toBe(200);
+      finish!();
+      await waitingServer.service.waitForTurn(
+        started.sessionId,
+        started.turnId,
+      );
+
+      const response = await waitingServer.handle(getRequest(
+        `/api/turns/${started.turnId}/result`,
+        { cookie: waitingCookie },
+      ));
+
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        code: "turn_canceled",
+        error: `turn ${started.turnId} was canceled`,
+        detail: "canceled from the console page",
+      });
+    });
+  });
+
   describe("POST /api/task", () => {
     it("starts a follow-up turn in the session the request names", async () => {
       const started = await startTask({ text: "track my books" });
@@ -406,6 +1067,303 @@ describe("console/server", () => {
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe("sessionId must be a string");
     });
+
+    it("attaches the task's input cells to the run that answers it", async () => {
+      // The weaver flow: a caller names cells it wants the task computed
+      // over, by reference and under its own names. What reaches the run is
+      // the specification; the run mints the tokens the model sees.
+      const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+      const capturing = new ConsoleServer(
+        await config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: (options) => {
+              loopOptions.push(options);
+              return answeringLoop(options);
+            },
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await capturing.handle(getRequest("/"));
+      await page.body?.cancel();
+      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
+
+      const response = await capturing.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "itinerary", ref: `/${CELL_ID}/days` }],
+      }, { cookie: capturedCookie }));
+      expect(response.status).toBe(200);
+      const started = await response.json();
+      await capturing.service.waitForTurn(started.sessionId, started.turnId);
+
+      expect(loopOptions.at(-1)?.inputCells).toEqual([
+        { name: "itinerary", ref: `/${CELL_ID}/days` },
+      ]);
+    });
+
+    it("answers 400 for an input cell the flag's own grammar refuses", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "not a name", ref: `/${CELL_ID}/days` }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("--input-cell name");
+    });
+
+    it("answers 400 for an input-cell ref that names no entity, before any turn starts", async () => {
+      // The mint would refuse this ref; refusing it here costs no turn.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make a budget dashboard",
+        inputCells: [{
+          name: "transactions",
+          ref: `/fid1:${"A".repeat(43)}/account`,
+        }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for input cells that are not a list of name and ref", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "itinerary" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each input cell needs a string name and ref",
+      );
+    });
+
+    it("answers 400 for input cells that are not a list at all", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: { itinerary: `/${CELL_ID}/days` },
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("inputCells must be an array");
+    });
+
+    it("answers 400 for an input cell that is not an object", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [`itinerary=/${CELL_ID}/days`],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each input cell must be an object",
+      );
+    });
+
+    it("answers 400 for a name the request uses twice", async () => {
+      // Two references under one name is a request that has not said which
+      // cell the model's `itinerary` is.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [
+          { name: "itinerary", ref: `/${CELL_ID}/days` },
+          { name: "itinerary", ref: `/${CELL_ID}/nights` },
+        ],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "inputCells names `itinerary` twice",
+      );
+    });
+
+    it("starts a task that names no input cells at all", async () => {
+      const started = await startTask({
+        text: "track my books",
+        inputCells: null,
+      });
+
+      expect(started.turnId).toBeDefined();
+    });
+
+    it("attaches the task's pattern references to the run that answers it", async () => {
+      // The pill's `use <id>` flow: the caller names published patterns by
+      // the index's own id. What reaches the run is the id; resolving it
+      // against the index is the run's, before its first model turn.
+      const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-pattern-refs-",
+      });
+      const capturing = new ConsoleServer(
+        await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--pattern-index-url",
+            "https://index.test/api",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        ),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            basePromptLoopOptions: {
+              patternIndexClientFactory: () =>
+                Promise.resolve(
+                  new PatternIndexClient({
+                    baseUrl: "https://index.test/api",
+                    fetchFn: () =>
+                      Promise.resolve(Response.json(INDEXED_PATTERN)),
+                    signer,
+                  }),
+                ),
+            },
+            createPromptLoop: (options) => {
+              loopOptions.push(options);
+              return answeringLoop(options);
+            },
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await capturing.handle(getRequest("/"));
+      await page.body?.cancel();
+      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
+
+      try {
+        const response = await capturing.handle(jsonRequest("/api/task", {
+          text: "use pat-expenses for a dice roller app",
+          patternRefs: [{ patternId: "pat-expenses" }],
+        }, { cookie: capturedCookie }));
+        expect(response.status).toBe(200);
+        const started = await response.json();
+        await capturing.service.waitForTurn(started.sessionId, started.turnId);
+
+        expect(
+          capturing.service.events(started.sessionId).map((envelope) =>
+            envelope.event.kind
+          ),
+        ).toContain("turn_completed");
+        expect(loopOptions.at(-1)?.patternRefs).toEqual([
+          { patternId: "pat-expenses" },
+        ]);
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("answers 400 for a pattern reference that is not an index id, before any turn starts", async () => {
+      // The prose the person typed after `use` is not an id, and an id is
+      // the whole of the reference grammar.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "use it for a dice roller app",
+        patternRefs: [{ patternId: "it for a dice roller app" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("patternId must match");
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for pattern references that are not a list at all", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: { patternId: "pat-expenses" },
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "patternRefs must be an array",
+      );
+    });
+
+    it("answers 400 for a pattern reference that is not an object at all", async () => {
+      // A reference is a `{ patternId }`, so a bare id in the list is a
+      // spelling the route refuses rather than one it reads through.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: ["pat-expenses"],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each pattern reference must be an object",
+      );
+    });
+
+    it("answers 400 for a `null` sitting in the reference list", async () => {
+      // Distinct from a `null` in place of the list itself, which is how a
+      // body says it attaches no patterns and starts an ordinary task.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: [null],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each pattern reference must be an object",
+      );
+    });
+
+    it("answers 400 for a pattern reference that carries no string patternId", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: [{ id: "pat-expenses" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each pattern reference needs a string patternId",
+      );
+    });
+
+    it("answers 400 for an id the request names twice", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: [
+          { patternId: "pat-expenses" },
+          { patternId: "pat-expenses" },
+        ],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "patternRefs names `pat-expenses` twice",
+      );
+    });
+
+    it("answers 400 for more pattern references than a task may attach", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: Array.from(
+          { length: MAX_HARNESS_PATTERN_REFS + 1 },
+          (_unused, index) => ({ patternId: `pat-${index}` }),
+        ),
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        `at most ${MAX_HARNESS_PATTERN_REFS}`,
+      );
+    });
+
+    it("starts a task that names no pattern references at all", async () => {
+      const started = await startTask({
+        text: "track my books",
+        patternRefs: null,
+      });
+
+      expect(started.turnId).toBeDefined();
+    });
   });
 
   describe("GET /api/events", () => {
@@ -427,6 +1385,55 @@ describe("console/server", () => {
         "assistant_completed",
         "turn_completed",
       ]);
+    });
+
+    it("adds the durable result to a completed turn", async () => {
+      expect(
+        await liveTurnResult([
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: "call-1",
+              type: "function",
+              function: { name: "assign_slug", arguments: "{}" },
+            }],
+          },
+          {
+            role: "tool",
+            toolCallId: "call-1",
+            toolName: "assign_slug",
+            content: JSON.stringify({
+              outputId: "run:assign_slug:1",
+              status: "ok",
+              slug: "reading-list",
+              url: "http://localhost:8000/console-test/reading-list",
+            }),
+          },
+          { role: "assistant", content: "built it" },
+        ]),
+      ).toEqual({
+        looms: [],
+        pieces: [{
+          slug: "reading-list",
+          url: "http://localhost:8000/console-test/reading-list",
+        }],
+        spaceName: "console-test",
+        finalText: "built it",
+      });
+    });
+
+    it("adds `pieces: []` when a completed turn assigned no slug", async () => {
+      expect(
+        await liveTurnResult([
+          { role: "assistant", content: "calculated it" },
+        ]),
+      ).toEqual({
+        looms: [],
+        pieces: [],
+        spaceName: "console-test",
+        finalText: "calculated it",
+      });
     });
 
     it("replays only the session the stream names", async () => {
@@ -470,7 +1477,7 @@ describe("console/server", () => {
       // unreadable keyfile names the path the operator configured, which the
       // page must not read.
       const server = new ConsoleServer(
-        config(),
+        await config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
             createPromptLoop: answeringLoop,
@@ -677,6 +1684,94 @@ describe("console/server", () => {
     });
   });
 
+  describe("the live pane", () => {
+    it("hands the live pane the same token cookie the console page carries", async () => {
+      const response = await server.handle(getRequest("/live/session-1"));
+      await response.body?.cancel();
+
+      const setCookie = response.headers.get("set-cookie") ?? "";
+      expect(setCookie).toMatch(/^cf_harness_console_token=.+/);
+      expect(setCookie).toContain("SameSite=Strict");
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain("Path=/");
+    });
+
+    it("confines the live pane with the page's content security policy", async () => {
+      const response = await server.handle(getRequest("/live/session-1"));
+      await response.body?.cancel();
+
+      const policy = response.headers.get("content-security-policy") ?? "";
+      expect(policy).toContain("default-src 'self'");
+      // The pane is opened at the top level of its own view, never framed.
+      expect(policy).toContain("frame-ancestors 'none'");
+    });
+
+    it("hands that cookie to a pane whose session id the address escaped", async () => {
+      const response = await server.handle(getRequest("/live/session%2F1"));
+      await response.body?.cancel();
+
+      expect(response.headers.get("set-cookie")).toMatch(
+        /^cf_harness_console_token=/,
+      );
+    });
+
+    it("answers 403 for a live pane request naming another host", async () => {
+      const response = await server.handle(
+        getRequest("/live/session-1", { host: "evil.test:8100" }),
+      );
+      await response.body?.cancel();
+
+      expect(response.status).toBe(403);
+    });
+
+    it("answers 404 without a token for a path below the session segment", async () => {
+      const response = await server.handle(
+        getRequest("/live/session-1/turn-1"),
+      );
+      await response.body?.cancel();
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get("set-cookie")).toBeNull();
+    });
+
+    it("sends the trailing-slash live address to its canonical form, relatively", async () => {
+      // The pane's stylesheet and script are `../styles/...` and
+      // `../scripts/...`; from `/live/session-1/` they would resolve one level
+      // too deep. The Location is relative so it lands under whatever prefix
+      // a host fronts the console at, with no rewriting on the host's side.
+      const response = await server.handle(getRequest("/live/session-1/"));
+      await response.body?.cancel();
+
+      expect(response.status).toBe(308);
+      expect(response.headers.get("location")).toBe("../session-1");
+      expect(response.headers.get("set-cookie")).toBeNull();
+    });
+
+    it("keeps the turn and pieces base a trailing-slash live address carries", async () => {
+      // `?turn=` narrows the pane and `?piecesBase=` says where a piece
+      // renders; a redirect that dropped them would open the pane on the
+      // wrong thing.
+      const response = await server.handle(getRequest(
+        "/live/session-1/?turn=turn-1&piecesBase=http%3A%2F%2Fh%2Fpattern-pane",
+      ));
+      await response.body?.cancel();
+
+      expect(response.status).toBe(308);
+      expect(response.headers.get("location")).toBe(
+        "../session-1?turn=turn-1&piecesBase=http%3A%2F%2Fh%2Fpattern-pane",
+      );
+    });
+
+    it("still refuses the trailing-slash live address naming another host", async () => {
+      const response = await server.handle(
+        getRequest("/live/session-1/", { host: "evil.test:8100" }),
+      );
+      await response.body?.cancel();
+
+      expect(response.status).toBe(403);
+    });
+  });
+
   describe("request authorization", () => {
     it("hands the page a strictly same-site token cookie", async () => {
       const response = await server.handle(getRequest("/"));
@@ -811,7 +1906,7 @@ describe("console/server", () => {
 interface StreamedEnvelope {
   sessionId: string;
   sequence: number;
-  event: { kind: string };
+  event: { kind: string; result?: unknown };
 }
 
 /**
@@ -853,55 +1948,6 @@ const envelopesUntil = async (
   } finally {
     await reader.cancel();
   }
-};
-
-/**
- * One SSE frame at a time, named `<event>` for a frame the server writes
- * itself and `chat:<kind>` for a chat envelope. Each read resolves on the
- * chunk the server enqueued, so it ends when a frame is written rather than
- * after any span of time.
- */
-const frameReader = (response: Response): {
-  next: () => Promise<string>;
-  cancel: () => Promise<void>;
-} => {
-  const reader = response.body!.pipeThrough(new TextDecoderStream())
-    .getReader();
-  const named = (frame: string): string | undefined => {
-    const lines = frame.split("\n");
-    const event = lines.find((line) => line.startsWith("event: "))?.slice(7);
-    if (event === undefined) {
-      return undefined;
-    }
-    if (event !== "chat") {
-      return event;
-    }
-    const data = lines.find((line) => line.startsWith("data: "))!.slice(6);
-    return `chat:${(JSON.parse(data) as StreamedEnvelope).event.kind}`;
-  };
-  const read: string[] = [];
-  let buffered = "";
-  return {
-    next: async (): Promise<string> => {
-      while (read.length === 0) {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          throw new Error("the stream closed before it wrote another frame");
-        }
-        buffered += chunk.value;
-        const frames = buffered.split("\n\n");
-        buffered = frames.pop() ?? "";
-        for (const frame of frames) {
-          const name = named(frame);
-          if (name !== undefined) {
-            read.push(name);
-          }
-        }
-      }
-      return read.shift()!;
-    },
-    cancel: () => reader.cancel(),
-  };
 };
 
 const kindsUntil = async (

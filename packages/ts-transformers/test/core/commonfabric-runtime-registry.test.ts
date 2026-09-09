@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 import ts from "typescript";
@@ -75,39 +75,44 @@ function extractInjectedCallableExports(sourceText: string): string[] {
     }
   }
 
-  let commonfabricObject: ts.ObjectLiteralExpression | undefined;
+  // The object literal is the one annotated with the builder surface type.
+  // `factory.ts` annotates it rather than casting, so the compiler checks it
+  // against what `@commonfabric/api` declares; that annotation is the durable
+  // marker for it, where the name of the local holding it is not.
+  //
+  // More than one declaration names that type, so every match is collected and
+  // exactly one is required to carry a literal. Taking the first would bind
+  // this guard to traversal order, and a second literal appearing later would
+  // narrow what it reads without failing.
+  const isBuilderSurfaceAnnotation = (node: ts.VariableDeclaration) =>
+    node.type !== undefined &&
+    sourceText.slice(node.type.pos, node.type.end).includes(
+      "BuilderFunctionsAndConstants",
+    );
+
+  const candidates: ts.ObjectLiteralExpression[] = [];
   ts.forEachChild(sourceFile, function visit(node) {
     if (
       ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === "commonfabric" &&
+      isBuilderSurfaceAnnotation(node) &&
       node.initializer
     ) {
       const initializer = unwrapExpression(node.initializer);
       if (ts.isObjectLiteralExpression(initializer)) {
-        commonfabricObject = initializer;
+        candidates.push(initializer);
         return;
       }
-    }
-
-    if (
-      ts.isPropertyAssignment(node) &&
-      getPropertyNameText(node.name) === "commonfabric"
-    ) {
-      const initializer = unwrapExpression(node.initializer);
-      if (ts.isObjectLiteralExpression(initializer)) {
-        commonfabricObject = initializer;
-        return;
-      }
-      return;
     }
     ts.forEachChild(node, visit);
   });
 
-  assert(
-    commonfabricObject,
-    "Failed to locate createBuilder().commonfabric object in runner builder factory",
+  assertEquals(
+    candidates.length,
+    1,
+    "Expected exactly one object literal annotated with the builder surface " +
+      `type in runner builder factory, found ${candidates.length}`,
   );
+  const commonfabricObject = candidates[0];
 
   const injectedExports = new Set<string>();
   for (const property of commonfabricObject.properties) {

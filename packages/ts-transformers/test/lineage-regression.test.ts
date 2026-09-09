@@ -162,6 +162,7 @@ interface BuilderSite {
    * hoisted `const __cfLift_N = __cfHelpers.lift(...)` this is the INNER
    * call; for a top-level authored builder it is the call itself. */
   readonly call: ts.CallExpression;
+
   readonly callback: ts.ArrowFunction | ts.FunctionExpression | undefined;
 }
 

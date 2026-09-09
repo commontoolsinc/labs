@@ -6,6 +6,7 @@
  * them. This reads a data file from inside both participants, which is the
  * only place the crossing can be observed.
  */
+
 import { assert, dataFile, multiUserTest, pattern, TESTS } from "commonfabric";
 
 interface Cities {

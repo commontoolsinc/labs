@@ -13,9 +13,11 @@ export interface TileView {
   label: string; // header label (plain text; escaped by the renderer)
   status: Status; // good / warn / bad / unknown -> green / orange / red / gray
   value?: string; // big headline (TRUSTED html — escape in the tile if it holds data)
+  valueLabel?: string; // plain-text headline shown when CSS truncates value
   sub?: string; // sub line (plain text; escaped by the renderer)
   extra?: string; // trusted inline html under sub (sparkline / strip / list)
   duration?: number; // a span in ms; rendered (humanSpan) in the chart's bottom-left corner
+  alignChartBottom?: boolean; // keep the chart at the tile bottom when its grid row grows taller
   aside?: string; // trusted inline html minor header facet (e.g. an MTD or "running" badge)
   href?: string; // if set, the whole tile becomes a link (external opens a new tab)
   hint?: string; // small drill affordance text, e.g. "commits ↗"

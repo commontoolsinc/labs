@@ -479,6 +479,7 @@ export interface ReplayFailure {
 
   /** Repo-relative fixture path. */
   path: string;
+
   detail: string;
 }
 

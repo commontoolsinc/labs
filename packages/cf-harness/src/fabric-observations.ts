@@ -31,6 +31,7 @@ export interface FabricActionErrorRecord {
   /** The error's name — the discriminant that tells a policy refusal
    * (`CfcCommitRefusalError`) from a thrown computation (`Error`). */
   name: string;
+
   message: string;
 
   /**

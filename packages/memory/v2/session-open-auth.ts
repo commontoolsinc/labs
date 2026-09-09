@@ -21,7 +21,7 @@
  *    identity. An open signed for host A cannot be replayed to host B.
  */
 
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { fromDID } from "../util.ts";

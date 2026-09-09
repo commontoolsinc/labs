@@ -25,8 +25,8 @@ import {
   cloneIfNecessary,
   type CloneOptions,
   isValidFabricValue,
-} from "@/fabric-value.ts";
-import type { FabricValue } from "@/fabric-value.ts";
+} from "@/index.ts";
+import type { FabricValue } from "@/index.ts";
 import { isDeepFrozen, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
@@ -234,6 +234,7 @@ describe("cloneIfNecessary()", () => {
       // A `FabricError` with no `cause` or extras is deep-frozen as soon
       // as the wrapper is `Object.freeze`'d (the wrapper itself is the
       // canonical state). `cloneIfNecessary` therefore returns identity.
+
       const error = FabricError.fromNativeError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(error);
@@ -243,6 +244,7 @@ describe("cloneIfNecessary()", () => {
 
     it("deep-clones a `FabricError` with a mutable cause", () => {
       // Wrapper frozen but `cause` not -> not deep-frozen -> clone.
+
       const error = FabricError.fromNativeError(
         new Error("test", { cause: { mutable: true } }),
       );
@@ -257,6 +259,7 @@ describe("cloneIfNecessary()", () => {
     it("produces a mutable `FabricError` clone (deep, `frozen=false`)", () => {
       // Deep clone with `frozen: false` yields a fresh *mutable*
       // `FabricError`.
+
       const error = FabricError.fromNativeError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(
@@ -272,6 +275,7 @@ describe("cloneIfNecessary()", () => {
     it("preserves a nested already-deep-frozen `FabricError` by identity", () => {
       // Container is rebuilt (mutable input -> frozen output) but the
       // nested deep-frozen FabricError is returned by identity.
+
       const error = FabricError.fromNativeError(new Error("nested"));
       Object.freeze(error);
       const value = { err: error, x: 42 };
@@ -287,6 +291,7 @@ describe("cloneIfNecessary()", () => {
     it("shallow-clones an object containing a `FabricError` (`deep=false`)", () => {
       // Shallow clone of a container shares the nested instance by
       // reference -- it is never traversed or rebuilt.
+
       const error = FabricError.fromNativeError(new Error("nested"));
       const value = { err: error, x: 42 };
       const result = cloneIfNecessary(value, { deep: false }) as Record<
@@ -334,6 +339,7 @@ describe("cloneIfNecessary()", () => {
     // clone leaves in the shape a `FabricPlainObject` has -- the same
     // answer the array case gives an `Array` subclass -- rather than
     // propagating a shape the model has no representation for.
+
     function nullProto(
       fields: Record<string, unknown>,
     ): Record<string, unknown> {
@@ -378,6 +384,7 @@ describe("cloneIfNecessary()", () => {
     it("produces a value `isValidFabricValue()` accepts", () => {
       // The point of canonicalizing: what comes out is a member of the type,
       // where the input was not.
+
       const value = nullProto({ a: 1 });
       expect(isValidFabricValue(value)).toBe(false);
       expect(isValidFabricValue(cloneIfNecessary(value as FabricValue))).toBe(
@@ -423,6 +430,7 @@ describe("cloneIfNecessary()", () => {
     // optimization must not apply to one: returning it as-is would carry a
     // live prototype into stored state, where an overridden `Symbol.iterator`
     // yields content that the indices never show.
+
     class Smuggler extends Array<unknown> {
       override *[Symbol.iterator](): Generator<unknown> {
         yield "smuggled";
@@ -438,6 +446,7 @@ describe("cloneIfNecessary()", () => {
 
     it("does not report a frozen subclass instance as deep-frozen", () => {
       // This is what turns off the identity optimization below.
+
       expect(isValidDeepFrozenFabricValue(frozenSmuggler()))
         .toBe(false);
     });

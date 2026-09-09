@@ -10,9 +10,9 @@ import {
   internSchema,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model-schema";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import {
-  DEFAULT_GENERATE_OBJECT_MODELS,
+  DEFAULT_GENERATE_OBJECT_MODEL,
   DEFAULT_MODEL_NAME,
   extractTextFromLLMResponse,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
@@ -59,7 +59,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -469,16 +469,6 @@ async function executeWithToolsLoop(params: {
 }
 
 /**
- * Announce the builtin's result cell again, in a transaction of its own.
- *
- * The announcement rides the same transaction as the request it belongs to, so
- * a refused request takes the announcement with it and the pattern is left
- * pointing at nothing — including at the error the refusal is about to record.
- * Writing it again puts the result cell back where a reader looks for it. The
- * value is the one the refused transaction carried, so on the runs that kept
- * their announcement this writes what is already there.
- */
-/**
  * Common error handler for LLM requests.
  * Resets state and allows retry on next invocation.
  */
@@ -501,7 +491,9 @@ async function handleLLMError<T, P>(
    * results); inert everywhere else. */
   effectKey?: string,
   /** Announces the builtin's result cell, for the caller whose announcement
-   * rode a transaction that was abandoned. It runs whether or not a newer
+   * rode a transaction that was abandoned: a refused request takes the
+   * announcement with it and leaves the pattern pointing at nothing, including
+   * at the error the refusal is about to record. It runs whether or not a newer
    * request has taken over, because the announcement says where the answer
    * appears and is the same either way, and the run that took over will not
    * make it again. */
@@ -757,13 +749,14 @@ export function llm(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llm: { result: cause } },
         LLMResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1143,13 +1136,14 @@ export function generateText(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { generateText: { result: cause } },
         GenerateTextResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1434,7 +1428,7 @@ export function generateText(
  * @param schema - JSON Schema to validate the response against.
  * @param system - Optional system message.
  * @param maxTokens - Maximum number of tokens to generate.
- * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODELS).
+ * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODEL).
  * @param cache - Whether to cache the response (defaults to true).
  * @param metadata - Additional metadata to pass to the LLM.
  * @param tools - Optional tools to make available to the LLM.
@@ -1504,13 +1498,14 @@ export function generateObject<T extends Record<string, unknown>>(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { generateObject: { result: cause } },
         GenerateObjectResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1623,7 +1618,7 @@ export function generateObject<T extends Record<string, unknown>>(
         stop: "",
         maxTokens: maxTokens ?? 8192,
         stream: true,
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+        model: model ?? DEFAULT_GENERATE_OBJECT_MODEL,
         metadata: {
           ...readyMetadata,
           context: "piece",
@@ -2058,7 +2053,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           toDeepFrozenSchema(schema),
         ),
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+        model: model ?? DEFAULT_GENERATE_OBJECT_MODEL,
         metadata: {
           ...readyMetadata,
           context: "piece",

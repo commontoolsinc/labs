@@ -89,6 +89,22 @@ composite web component; use a flattened-tree tool or the pierce fallback below.
    so a navigation that settled on `load` would otherwise hand back a page
    whose shell is still booting.
 
+   Every such page is also opened at a fixed viewport, `SHELL_VIEWPORT` in
+   `packages/integration/shell-utils.ts`, wide enough for the shell's desktop
+   header layout. The header switches layouts on the viewport width, and a
+   browser left to its own default picks a width that varies by platform, so
+   without the pin which layout a suite drives would be a property of the
+   machine running it. A test that means to drive the narrow layout sets a
+   viewport of its own with `page.setViewportSize()`.
+
+   Pinning the width settles which layout is rendered; it does not settle
+   whether a control in it is there to be clicked. A wait that asks only whether
+   an element exists is satisfied by one laid out at no size, and the failure
+   then surfaces one step later as a click that cannot land. Ask
+   `probe.isRendered` in the wait, as
+   [`waiting-in-tests.md`](waiting-in-tests.md) requires of a wait that
+   precedes a click.
+
 ## Why This Works
 
 - **Host roles** give single-control `cf-*` components one stable semantic
@@ -255,6 +271,14 @@ of it inside the page is reported rather than clicked. A page that moves the
 control after even that last measurement is caught as well: the helper stops an
 interaction that misses before the page sees it, and aims again.
 `docs/development/waiting-in-tests.md` describes how.
+
+It also holds until the control is enabled. A disabled control has a layout box
+and passes every rendered-ness check, and it still takes no click: the browser
+raises none on it, and a `cf-button` additionally gives it
+`pointer-events: none`, which sends the press to the host that wraps it.
+Where the state that enables a control is also the state that drops a surface
+above it, waiting covers the move as well as the enable, because the aim is
+taken once the page has settled into the layout it keeps.
 
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
 lower-level wait after navigation or a state change. When the next step

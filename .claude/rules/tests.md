@@ -28,6 +28,35 @@ selected suite's launch path. An Astral import alone is not proof that a test
 starts Chrome. Deno's `-A` does not escape the outer sandbox. The full rule is
 in `docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
 
+## A browser test routes itself by its name
+
+A test that needs a real browser but not a running product goes in a
+`*.browser.test.ts` file, and that name is the whole of the wiring. Every
+package that splits its tests this way matches the pattern twice: once as an
+`--ignore` that keeps the file out of plain `deno test` discovery, and once as
+the argument list handed to `deno-web-test`. Both are globs, so there is no list
+to add the file to. `packages/dashboard` spreads the pair across a runner script
+and the task that runner calls, which changes where they are written and not
+what they match.
+
+Two things break it, and the second is what makes the first hard to notice.
+
+A browser-only test under any other name lands in the plain Deno pass, where it
+fails on the first browser global it touches. So use the name whenever the test
+needs a browser, whatever its subject.
+`packages/ui/src/v2/components/cf-svg/sanitize-svg.browser.test.ts` is the case
+to keep in mind: it is not a component test at all, and needs a browser for
+`DOMParser` alone.
+
+A `typeof document === "undefined"` guard around the body turns that loud
+failure into a silent one. The file runs in Deno, returns before its first
+assertion, and reports "ok" having checked nothing. A file the glob routes
+always has a document, so the guard can only ever hide a mis-wiring. Write no
+guard.
+
+`docs/development/TESTING.md#focused-browser-regressions` states the rest,
+including when to use this route rather than the browser integration lane.
+
 ## Shape of a unit test file
 
 First check which kind of file you are in. A `*.test.tsx` under
@@ -45,8 +74,8 @@ authority, and a new test file is a reason to open it rather than to copy a
 neighbor. Not every file in the tree follows it, so what sits beside you in
 the same directory is not evidence of what to write.
 
-The four its readers most often get wrong by defaulting to the surrounding
-code:
+The eight rules its readers most often get wrong by defaulting to the
+surrounding code:
 
 - BDD only — `describe()` / `it()` / `beforeEach()` from `@std/testing/bdd`,
   never `Deno.test()`.
@@ -57,6 +86,29 @@ code:
   function", not "rejects a bare function".
 - `expect()` over `assert*()`, always for structured values. Plain `assert(x)`
   only where truthiness itself is the assertion.
+- A comment about a test or a group of tests goes inside the block, as the first
+  thing in the callback and followed by a blank line. Above the `describe()` or
+  `it()` line, the next block inserted there lands between the comment and what
+  it describes. Two shapes are exceptions: hooks — a `beforeEach()` reads like
+  any other statement with a comment over it — and a callback with no body of
+  its own, which keeps its comment beside it. That second shape covers a bare
+  expression, `{}` on the opener's line, and a `Deno.test({ … })` whose `fn`
+  names a function declared elsewhere.
+- A comment covering several adjacent tests is telling you those tests want a
+  `describe()` of their own, or says one thing per case and belongs in each.
+  Wrapping a run renames every test in it; bridge the rename per
+  `docs/development/test-records.md`.
+- A section marker is a `//` frame: an opening `//` line, a noun-phrase title,
+  optionally a blank `//` line and a description, and a closing `//` line, set
+  off by a blank line below it and above it where there is anything above.
+- A section marker covers the region up to the next marker at the same level, or
+  the end of the block or file, so writing one means choosing where it ends and
+  putting a marker there. Its title is a claim about everything in that region,
+  and the region holds the helpers and fixtures sitting in it as well as the
+  blocks, so shared setup goes above the file's first marker. Moving or deleting
+  a comment takes away whatever boundary it was providing for the region above
+  it. None of this is checked mechanically; a file that reads better than the
+  rule wins.
 
 On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
 exception is a directory of independent components, `packages/ui` and
@@ -69,8 +121,10 @@ value such as a `FabricHash`.
 
 ## Wait on an event, never on a poll
 
-`deno task check-no-waitfor` fails the build when a test imports the polling
-`waitFor` from `@commonfabric/integration`. Reach for the primitive that
+`deno task check-no-waitfor` fails the build when an integration test imports
+the polling `waitFor` from `@commonfabric/integration`. Only `integration/`
+directories under `packages/` are in scope; a unit test's poll has no gate, and
+the rule below is what holds it. Reach for the primitive that
 resolves on the thing actually happening:
 
 - In a browser test: `awaitViewSettled(page)` for "the view is interactive",
@@ -127,7 +181,7 @@ nothing about it.
 Each test execution produces a telemetry record named by what the runner
 reports — the describe chain, the `Deno.test` name, the pattern file path.
 Nothing to instrument when adding a test to an existing suite; the runners
-record on their own. Two consequences worth knowing while writing one:
+record on their own. Three consequences worth knowing while writing one:
 
 - The reported name is the test's identity across history. Prefer stable,
   content-derived wording over positional counters (`#${i}`) or

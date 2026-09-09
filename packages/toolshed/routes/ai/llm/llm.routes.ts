@@ -106,7 +106,17 @@ const MessageContentSchema = z.discriminatedUnion("type", [
 ]);
 
 export const MessageSchema = z.object({
-  role: z.enum(["system", "user", "assistant", "tool"]),
+  // A system instruction is not a message. `BuiltInLLMMessage` leaves the role
+  // out and the provider SDK refuses one inside `messages`, so a caller that
+  // sends one is told which field to move it to rather than only which values
+  // the enum takes. Every other role falls through to zod's own wording.
+  role: z.enum(["user", "assistant", "tool"], {
+    error: (issue) =>
+      issue.input === "system"
+        ? "A system instruction travels in the request's 'system' field, " +
+          "not as a message in 'messages'"
+        : undefined,
+  }),
   content: z.union([z.string(), z.array(MessageContentSchema)]),
   nativeModelToolResults: z.array(z.object({
     type: z.literal("cf-harness.native-model-tool-result"),

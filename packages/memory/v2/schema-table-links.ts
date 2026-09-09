@@ -1,10 +1,10 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model";
 import {
   isLinkRef,
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";

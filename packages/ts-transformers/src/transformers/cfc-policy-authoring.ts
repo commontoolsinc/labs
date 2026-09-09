@@ -1,6 +1,5 @@
 import ts from "typescript";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepFreeze, hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import type { CfcPolicyCompilerManifestV1 } from "../core/runtime-contract.ts";

@@ -4,7 +4,7 @@ import {
   internPathSelector,
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model-schema";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { MIME } from "@commonfabric/memory/interface";
 import type {
   CellScope,

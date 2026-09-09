@@ -123,16 +123,34 @@ defaults to `CF_HARNESS_FABRIC_API_URL`, then to `http://localhost:8000`. Point
 it at the same server the console was started against, or the report describes a
 machine the runs never touched. Add `--expect-git-sha=<sha>` to refuse the batch
 unless that server reports the commit you meant to measure, and `--base` to ask
-ancestry against a branch other than `main`.
+ancestry against a branch other than `main`. A commit known to be off that base
+also refuses by default. `--allow-diverged` is the explicit opt-out for a batch
+that intentionally measures such a server; a commit that cannot be checked
+remains a non-fatal `unchecked` reading.
+
+`--cell-spec=<file>` states what this experiment requires of the console, and
+refuses the whole batch before the first task when the console is something
+else. See [The cell spec](#the-cell-spec).
 
 The runner loads the console page to pick up the token cookie every `/api` route
-is gated on, reads the index, and then runs each task in its own session. It
-waits on the console's own `turn_completed`, `turn_failed` or `turn_canceled`
-event, read off the server-sent event stream, and on nothing else. There is no
-timeout: a turn that hangs is a batch that hangs, which an operator can see and
-release with a `POST /api/cancel`, rather than a bound that turns a slow run
-into a failed one. It writes `report.md` and `report.json` under `--out`, and
-exits non-zero if any task ended other than completed.
+is gated on. Before reading the index or starting a paid model turn, it requires
+`/api/status` to carry an absolute top-level `artifactRoot` and a `sessions`
+array, and — when a cell spec was named — the console's `/api/policy` to satisfy
+every field of it. It then reads the index and runs each task in its own
+session. It waits on the console's own `turn_completed`, `turn_failed` or
+`turn_canceled` event, read off the server-sent event stream, and on nothing
+else. There is no timeout: a turn that hangs is a batch that hangs, which an
+operator can see and release with a `POST /api/cancel`, rather than a bound that
+turns a slow run into a failed one.
+
+After a turn settles, the runner locates its root run under the session's
+`artifactRoot`, falling back to the console-wide root. A candidate must have
+been created after the batch began and its transcript's first user message must
+exactly equal the suite task. No match is recorded as not measured. More than
+one match is an ambiguity, also recorded as not measured with every candidate
+run identifier; directory order never chooses a run silently. The runner writes
+`report.md` and `report.json` under `--out`, and exits non-zero if any task
+ended other than completed.
 
 Measuring runs that are already on disk needs no console:
 
@@ -181,6 +199,96 @@ carries its own identifier, so without the hop it would read as pre-existing and
 count a composition of seeded work as evidence against the seeding.
 
 Hops beyond the first are not resolved, and the report says so.
+
+## The cell spec
+
+A suite says what the batch asks the model. A cell spec says what the console
+has to be for those answers to mean anything, and it is checked before the first
+task rather than read out of the artifacts afterwards. A console whose policy
+cannot offer the tool an experiment exists to test produces a night of runs that
+look, in every other artifact, exactly like runs that chose not to use it.
+
+The file is JSON, passed as `--cell-spec`. Every field is optional and every
+field present is asserted; a field left out is not checked and the report says
+so. `label` names the spec and asserts nothing, and a file carrying nothing else
+is refused — a check that checks nothing is indistinguishable from one that
+passed.
+
+```json
+{
+  "label": "phase 3, composition under the authored prompt",
+  "systemPromptSha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  "requiredToolIds": ["run_pattern", "search_patterns", "record_feedback"],
+  "forbiddenToolIds": ["web_search"],
+  "requiredSubagentProfiles": ["pattern-author"],
+  "fabricSpace": "pattern-index-demo",
+  "artifactRoot": "/Users/me/labs/packages/cf-harness/.cf-harness-console/runs",
+  "sessionDbPath": "/Users/me/labs/packages/cf-harness/.cf-harness-console/sessions.sqlite"
+}
+```
+
+| field                                                    | asserts                                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `systemPromptSha256`                                     | the SHA-256 of the seeded system prompt, or `null` for a console seeding none |
+| `allowedToolIds`                                         | the whole tool set, compared as a set                                         |
+| `requiredToolIds` / `forbiddenToolIds`                   | tools the policy must offer, and must not                                     |
+| `allowedSubagentProfiles`                                | the whole profile set                                                         |
+| `requiredSubagentProfiles` / `forbiddenSubagentProfiles` | profiles the policy must authorize, and must not                              |
+| `fabricSpace`                                            | the space the runs write into                                                 |
+| `artifactRoot`                                           | where the console files its runs                                              |
+| `sessionDbPath`                                          | the durable session store, or `null` for sessions held in memory              |
+
+Stating a set as a whole and in parts at once is refused rather than resolved:
+`allowedToolIds` beside `requiredToolIds` is a file that has not decided which
+claim it makes. So is a name in both the required and the forbidden list, and a
+field name nothing asserts, which would otherwise pass silently as a typo. An
+empty required or forbidden list is refused for the same reason: every console
+offers at least nothing, so the field looks like a check and is not. An empty
+whole set is kept, because there it is the strongest claim the file can make —
+that the policy offers nothing at all.
+
+A mismatch refuses the batch with exit code 6, names every disagreeing field
+with expected against actual, and starts no task. So does a console that will
+not disclose its policy at all: a spec was named, and nothing can report it
+satisfied.
+
+The prompt crosses as a digest and never as text. Take one with
+`shasum -a 256 <the prompt file>` and paste the hex.
+
+Two limits worth holding. `/api/policy` reports what the console's policy
+**asks** for, and the prompt loop withholds a tool again when its backing is
+absent — so a spec naming `search_patterns` proves the policy offers it, not
+that a turn will hold it; the index pre-flight is what says the backing answers.
+And the digest covers the seeded system prompt alone, not the tool descriptors
+or the subagent guidance that also reach a model.
+
+The spec describes a console, because a console is the only thing this runner
+starts work on. `measure-runs` reads runs that are already on disk and spends
+nothing, so it has nothing to refuse; a `cf-harness` CLI run states its own
+policy in the flags that start it, where it is visible in the command rather
+than in a server somebody else configured.
+
+## The batch publishes into the corpus it is measuring
+
+It does, and that is deliberate rather than an oversight. The loop under
+measurement **is** the publishing loop: a session that builds something
+contributes it, and a run made publish-inert would measure a different system
+from the one the question is about. The console cannot be made inert in any case
+— `--no-pattern-index-publish` is the `cf-harness` CLI's flag and the console
+never reads it (CT-2119).
+
+What makes the reading sound is the ordering, not stillness. The index snapshot
+is taken **before the first task** and again **after the last**, so the "before"
+reading is of a corpus that was verified, and everything the batch adds appears
+as the difference between the two rather than as an unexplained delta. A reader
+who sees "the batch publishes into the corpus it is measuring" without that
+ordering will reasonably conclude someone made a mistake.
+
+Two consequences worth stating. A batch is not repeatable against the same
+corpus — the second run starts from what the first one left, and its "index
+before" will say so. And a batch run before a publish gate lands accumulates
+entries that gate never saw, which is a fact about the corpus that outlives the
+batch; where that is the case, the report's preamble should say it.
 
 ## What the report holds
 
@@ -276,9 +384,56 @@ causes by a priority ordering chosen for another purpose, and a measurement that
 inherits one reports that ordering rather than what happened.
 
 It **does not measure the index's own ranking.** The report records each listed
-pattern's score, and score is computed from recorded events. With
-`record_feedback` uncalled, a score is a count of "an agent started this and
-nothing threw".
+pattern's score, and score is computed from recorded events; a score is close to
+a count of "an agent started this and nothing threw". Retrieval quality — what a
+search actually hands back, and at which rank — is a separate instrument with a
+separate query set, described in [Measuring retrieval](#measuring-retrieval)
+below. Keep the two apart: this protocol asks whether a session reached for the
+index at all, and that one asks whether what it was handed was the right thing.
+
+## Measuring retrieval
+
+[`scripts/pattern-index-retrieval-queries.json`](../scripts/pattern-index-retrieval-queries.json)
+is a labelled query set, and `scripts/score-retrieval.ts` scores
+`searchPatterns` against it. Both are read-only against the index, so a run is
+safe while a batch is publishing.
+
+```sh
+PATTERN_INDEX_BASE_URL=https://index.example \
+CF_IDENTITY="$HOME/.cf/my-key.pkcs8" \
+deno run -A scripts/score-retrieval.ts --out=report.json \
+  --min-hit-at-5=0.5 --max-dirty-negatives=15
+```
+
+**The exit code is the verdict; the printed lines are not.** The thresholds are
+arguments rather than constants because the corpus moves, and a gate with a
+baked-in expected value stops being readable the first time someone publishes.
+Before trusting a passing run, make it fail once — raising `--min-hit-at-5`
+above the reported rate is the cheapest way.
+
+Three properties of the set decide what its numbers mean, and all three are
+stated in the file itself rather than here, so that editing one edits its own
+documentation:
+
+- **Labels are derived from source and declared schemas, never from
+  descriptions.** A query set written by reading descriptions retrieves those
+  descriptions and measures nothing.
+- **Queries are asked in four registers**, one of them the real queries
+  extracted verbatim from console run transcripts. Registers are scored apart,
+  because phrasing changes the answer far more than the corpus does.
+- **Negative queries carry the weight.** A query nothing should answer is where
+  loose matching shows up; a capability query cannot distinguish a good index
+  from a permissive one.
+
+Adding a query leaves the earlier ones comparable. Rewording one does not, so
+add rather than reword — the same rule the task suite carries, for the same
+reason.
+
+**The set measures free-text search only.** Tag-only searches — `tags` passed
+with no `text` — are a different mechanism, an `array-contains-any` over
+author-chosen hashtags, and they are a large minority of what runs actually
+issue. Nothing measures them yet, so a retrieval number from this set describes
+part of the search surface and should be quoted that way.
 
 ## The server the runs ran against
 
@@ -293,13 +448,14 @@ asks the local repository whether that commit is on `main`, and records
 `ancestor`, `diverged`, or `unchecked` — a commit this clone does not hold is
 `unchecked`, which is not the same reading as one known to be off the branch.
 
-Two rules about that recording, both load-bearing.
+Two rules about that reading, both load-bearing.
 
-**It records, it does not refuse.** Running against a deliberately mismatched
-server is documented practice, so a `diverged` reading is a fact for the reader
-rather than grounds to refuse a night's work. The one refusal is an expectation
-the batch was given explicitly: `--expect-git-sha=<sha>` refuses when the server
-reports a different commit.
+**Knowing a commit is wrong differs from not knowing.** A `diverged` reading
+refuses before the first task unless the operator passes `--allow-diverged` to
+record an intentional mismatch. An `unchecked` reading stays non-fatal: a clone
+that does not hold the commit, or a git command that could not answer, has not
+shown the server to be off the branch. An explicit `--expect-git-sha=<sha>` is
+stricter still and refuses whenever the server reports a different commit.
 
 **The server's CFC block is never differenced against the console's.** They
 describe different runtimes. `cfcFlowLabels` is core-default off and the
@@ -310,6 +466,74 @@ the toolshed runs a production-server preset. A server built from `main` reports
 contradiction would refuse every correctly configured night. The report prints
 the server's block as the server's, beside the console's as the console's, and
 leaves the comparison to a reader who knows which runtime they are asking about.
+
+The comment above `ServerMeta` in `scripts/run-measurement-batch.ts` is the
+canonical statement of that rule, and is the thing to read before treating the
+server's block as evidence about anything a run wrote.
+
+## Which dial decides whether a label is written
+
+**The writing session's, and only the writing session's.** A `labelMap` is a
+field of the document a transaction commits, written by the runtime that commits
+it — the fabric session's runtime here, whose dials `--fabric-cfc-flow-labels`
+and `--fabric-cfc-posture` set. The memory server stores what it is given and
+mints no label of its own, so no server configuration turns label persistence on
+or off for these runs, and there is no toolshed environment variable that would.
+A toolshed reporting `flowLabels: "off"` while a session writes labeled
+documents into it is the system working.
+
+Two consequences worth stating, because assuming either way round is expensive:
+
+- The server's posture is **not** evidence about what a run wrote. To find out
+  what a run wrote, read the space.
+- A run's own `cell-labels.json` is not evidence either, unless it says
+  `status: "read"`. An `unavailable` snapshot is a reader that never reached the
+  store, which is the section below.
+
+## Reading the labels back
+
+The labels live in the serving toolshed's own store, and a run reads them from
+that file rather than over the wire. Finding it is the operator's job whenever
+the harness and the toolshed do not share a working tree.
+
+The search walks up from the working directory looking for
+`packages/toolshed/cache/memory` and `cache/memory` at each level, so it finds
+the store of a toolshed serving from the same checkout and no other. A
+measurement run from a second worktree — the ordinary arrangement, since the
+toolshed holds a branch still while the work moves on — shares no ancestor with
+the serving tree, and the search comes up empty. That reads as
+`unavailableReason: "space-not-found"`, under which every cell of the run is
+recorded as unasked-about.
+
+The worse case is a second worktree that has served the same space itself at
+some point, and so holds a file of the same name. The search finds that one,
+opens it, and finds none of the cells the run wrote. Each such cell is recorded
+with `unreadReason: "no-document"` rather than with an empty entry list, and a
+snapshot in which every cell reads that way is warned about as the wrong store.
+Neither reading is "the run wrote no labels".
+
+Point it at the store instead. Either of these names the same place:
+
+```sh
+# The environment the search consults first, for any run.
+MEMORY_DIR=/path/to/serving-tree/packages/toolshed/cache/memory
+
+# The flag, which names one database file directly.
+--space-db /path/to/serving-tree/packages/toolshed/cache/memory/engine-v3/engine-v3/<did>.sqlite
+```
+
+`--space-db` (`CF_HARNESS_SPACE_DB`) takes a file and needs the three fabric
+session flags beside it. `MEMORY_DIR` takes the cache directory and lets the
+space the session names resolve within it, which is what a batch spanning
+several spaces wants.
+
+A snapshot that then says `status: "read"` is a positive finding: the cells it
+lists carry the labels it shows, and a cell with an empty `entries` and no
+`unreadReason` is a cell the space holds no label for. The read follows the
+links out of each cell as far as the pattern's shape runs — a piece names its
+results, and each result may name cells of its own — so a label derived on a
+computed value sits in the snapshot under the path of links that reaches it,
+naming the cell it was read from as `source`.
 
 ## The failure this measurement exists to not commit
 
@@ -332,7 +556,8 @@ wrong from the inside — that is the whole difficulty. The rules that follow fr
 it are the ones this document keeps repeating: an unread reading is recorded as
 unread and never as a zero; two readings that could differ are printed side by
 side rather than differenced; a refusal is a refusal rather than a warning; and
-a check refuses only on something it was told, never on something it inferred.
+a known-diverged server refuses unless the operator explicitly allows that
+mismatch, while an unread ancestry remains non-fatal.
 
 ## Changing this
 

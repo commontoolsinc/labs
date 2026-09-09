@@ -8,7 +8,11 @@
 
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import type { HarnessFabricSessionConfig } from "./config.ts";
+import {
+  fabricSessionPresetCfcDials,
+  type HarnessFabricSessionConfig,
+  type HarnessFabricSessionPresetCfcDials,
+} from "./config.ts";
 import {
   createFabricInstantiationRecorder,
   type FabricPatternInstantiations,
@@ -54,23 +58,60 @@ export type HarnessFabricSessionFactory = () => Promise<HarnessFabricSession>;
  */
 export const harnessFabricSessionControllerOptions = (
   config: HarnessFabricSessionConfig,
-): {
+): HarnessFabricSessionPresetCfcDials & {
   apiUrl: URL;
   space: string;
-  cfcEnforcementMode?: HarnessFabricSessionConfig["cfcEnforcementMode"];
-  cfcFlowLabels?: HarnessFabricSessionConfig["cfcFlowLabels"];
-  cfcPosture?: HarnessFabricSessionConfig["cfcPosture"];
+  cfcReadMaxConfidentiality?: HarnessFabricSessionConfig[
+    "cfcReadMaxConfidentiality"
+  ];
+  cfcReadOnExceed?: HarnessFabricSessionConfig["cfcReadOnExceed"];
 } => ({
   apiUrl: new URL(config.apiUrl),
   space: config.space,
-  ...(config.cfcEnforcementMode !== undefined
-    ? { cfcEnforcementMode: config.cfcEnforcementMode }
+  ...fabricSessionPresetCfcDials(config),
+  ...(config.cfcReadMaxConfidentiality !== undefined
+    ? { cfcReadMaxConfidentiality: config.cfcReadMaxConfidentiality }
     : {}),
-  ...(config.cfcFlowLabels !== undefined
-    ? { cfcFlowLabels: config.cfcFlowLabels }
+  ...(config.cfcReadOnExceed !== undefined
+    ? { cfcReadOnExceed: config.cfcReadOnExceed }
     : {}),
-  ...(config.cfcPosture !== undefined ? { cfcPosture: config.cfcPosture } : {}),
 });
+
+/**
+ * The two steps of building a session that a test replaces: loading the
+ * identity the session acts as, and connecting the controller. Production
+ * reads the PKCS#8 key from disk and calls `PiecesController.initialize`.
+ */
+export interface HarnessFabricSessionFactoryDeps {
+  /** Loads the identity named by the config's `identityKeyPath`. */
+  loadIdentity?: (identityKeyPath: string) => Promise<Identity>;
+
+  /** Connects the controller; `PiecesController.initialize` by default. */
+  initialize?: (
+    options: Parameters<typeof PiecesController.initialize>[0],
+  ) => Promise<PiecesController>;
+}
+
+/**
+ * Whether `runtime` is bounded by exactly the read ceiling `options` asked
+ * for. The controller's options and the runtime's own fields are two
+ * declarations that can drift apart, and a session whose runtime holds a
+ * different ceiling than the one the config asked for — or none — would read
+ * under one posture while its artifacts attest another.
+ */
+export const fabricSessionRuntimeBoundedAsConfigured = (
+  runtime: Pick<
+    PiecesController["runtime"],
+    "cfcReadMaxConfidentiality" | "cfcReadOnExceed"
+  >,
+  options: Pick<
+    ReturnType<typeof harnessFabricSessionControllerOptions>,
+    "cfcReadMaxConfidentiality" | "cfcReadOnExceed"
+  >,
+): boolean =>
+  JSON.stringify(runtime.cfcReadMaxConfidentiality) ===
+    JSON.stringify(options.cfcReadMaxConfidentiality) &&
+  runtime.cfcReadOnExceed === options.cfcReadOnExceed;
 
 /**
  * Default factory over `config`: loads the PKCS#8 identity from disk and
@@ -79,20 +120,35 @@ export const harnessFabricSessionControllerOptions = (
  * silent absence. The controller's runtime is given an instantiation recorder,
  * whose read side rides along on the session — the observer is a runtime
  * constructor option, so this is the only point at which it can be installed.
+ *
+ * The session is refused, and its runtime disposed, when the runtime is not
+ * bounded by the read ceiling the config asked for
+ * (`fabricSessionRuntimeBoundedAsConfigured`).
  */
 export const createHarnessFabricSessionFactory = (
   config: HarnessFabricSessionConfig,
+  deps: HarnessFabricSessionFactoryDeps = {},
 ): HarnessFabricSessionFactory =>
 async () => {
-  const identity = await Identity.fromPkcs8(
-    await Deno.readFile(config.identityKeyPath),
-  );
+  const loadIdentity = deps.loadIdentity ??
+    (async (path: string) => Identity.fromPkcs8(await Deno.readFile(path)));
+  const initialize = deps.initialize ??
+    ((options) => PiecesController.initialize(options));
+  const identity = await loadIdentity(config.identityKeyPath);
   const recorder = createFabricInstantiationRecorder();
-  const pieces = await PiecesController.initialize({
-    ...harnessFabricSessionControllerOptions(config),
+  const options = harnessFabricSessionControllerOptions(config);
+  const pieces = await initialize({
+    ...options,
     identity,
     onPatternInstantiated: recorder.observe,
   });
+  if (!fabricSessionRuntimeBoundedAsConfigured(pieces.runtime, options)) {
+    await pieces.runtime.dispose().catch(() => {});
+    throw new Error(
+      "fabric session runtime is not bounded by the configured read " +
+        "ceiling; refusing to run under it",
+    );
+  }
   return { pieces, identity, instantiations: recorder.instantiations };
 };
 

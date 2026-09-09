@@ -8,6 +8,7 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 // The manual-rescue case for a stranded piece. A piece whose stored
 // `patternIdentity` resolves to nothing — the live population is the board
@@ -106,9 +107,13 @@ describe("setsrc over an unloadable current pattern", () => {
       cell.setMetaRaw("patternIdentity", {
         identity: RETIRED_BUNDLE_IDENTITY,
         symbol: "default",
-      });
-      cell.setMetaRaw("pieceSourceHistory", undefined);
-      cell.setMetaRaw("patternSource", undefined);
+      }, rawMetaWriteAuthorization);
+      cell.setMetaRaw(
+        "pieceSourceHistory",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
+      cell.setMetaRaw("patternSource", undefined, rawMetaWriteAuthorization);
     });
     expect(
       error?.message,
@@ -158,7 +163,7 @@ describe("setsrc over an unloadable current pattern", () => {
       piece.getCell().withTx(tx).setMetaRaw("patternIdentity", {
         identity: RETIRED_BUNDLE_IDENTITY,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error?.message).toBeUndefined();
     await runtime.idle();

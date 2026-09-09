@@ -3,14 +3,14 @@ import {
   type JSONSchemaObj,
   type JSONValue,
 } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  isDeepFrozen,
   shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import {
   internSchema,
   isNontrivialSchema,
@@ -43,16 +43,6 @@ import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
-import {
-  canBranchMatch,
-  combineOptionalSchema,
-  combineSchema,
-  combineSchemaForLink,
-  createDefaultTraversalContext,
-  IObjectCreator,
-  mergeAnyOfMatches,
-  SchemaObjectTraverser,
-} from "@commonfabric/runner/traverse";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -83,6 +73,16 @@ import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  canBranchMatch,
+  combineOptionalSchema,
+  combineSchema,
+  combineSchemaForLink,
+  createDefaultTraversalContext,
+  IObjectCreator,
+  mergeAnyOfMatches,
+  SchemaObjectTraverser,
+} from "./traverse.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -1395,25 +1395,38 @@ export function createOpaqueReference(
 
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
+  #runtime: Runtime;
+
+  #tx: IExtendedStorageTransaction;
+
+  #synced: boolean;
+  #baseLink: NormalizedFullLink;
+  #cfcLabelView: CfcLabelView | undefined;
+
   constructor(
-    private runtime: Runtime,
-    private tx: IExtendedStorageTransaction,
-    private synced: boolean,
-    private baseLink: NormalizedFullLink,
-    private cfcLabelView: CfcLabelView | undefined,
+    runtime: Runtime,
+    tx: IExtendedStorageTransaction,
+    synced: boolean,
+    baseLink: NormalizedFullLink,
+    cfcLabelView: CfcLabelView | undefined,
   ) {
+    this.#runtime = runtime;
+    this.#tx = tx;
+    this.#synced = synced;
+    this.#baseLink = baseLink;
+    this.#cfcLabelView = cfcLabelView;
   }
 
   setBase(
     baseLink: NormalizedFullLink,
     cfcLabelView: CfcLabelView | undefined,
   ): void {
-    this.baseLink = baseLink;
-    this.cfcLabelView = cloneCfcLabelView(cfcLabelView);
+    this.#baseLink = baseLink;
+    this.#cfcLabelView = cloneCfcLabelView(cfcLabelView);
   }
 
-  private labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
-    return labelViewForLink(this.baseLink, this.cfcLabelView, link);
+  #labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
+    return labelViewForLink(this.#baseLink, this.#cfcLabelView, link);
   }
 
   /**
@@ -1488,8 +1501,10 @@ class TransformObjectCreator
     return mergeAnyOfMatches(matches);
   }
 
-  // This controls the behavior when properties is specified, but
-  // additonalProperties is not.
+  /**
+   * Does nothing: when `properties` is specified but `additionalProperties` is
+   * not, a property outside the map is excluded rather than stored.
+   */
   addOptionalProperty(
     _obj: Record<string, FabricValue>,
     _key: string,
@@ -1499,17 +1514,18 @@ class TransformObjectCreator
     // in the schema, but it doesn't include our property, and we don't have
     // additionalProperties set. So we don't do `obj[key] = value`;
   }
+
   applyDefault<T>(
     link: NormalizedFullLink,
     value: T | undefined,
   ): T | undefined {
     return processDefaultValue(
-      this.runtime,
-      this.tx,
+      this.#runtime,
+      this.#tx,
       link,
       value,
-      this.synced,
-      this.labelViewFor(link),
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 
@@ -1529,11 +1545,11 @@ class TransformObjectCreator
     link: NormalizedFullLink,
   ): AnyCellWrapping<FabricValue> {
     return createOpaqueReference(
-      this.runtime,
+      this.#runtime,
       link,
-      this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#tx,
+      this.#synced,
+      this.#labelViewFor(link),
     ) as AnyCellWrapping<FabricValue>;
   }
 
@@ -1549,16 +1565,18 @@ class TransformObjectCreator
   ): AnyCellWrapping<FabricValue> {
     return annotateWithBackToCellSymbols(
       value,
-      this.runtime,
+      this.#runtime,
       link,
-      this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#tx,
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 
-  // This is an early pass to see if we should just create a proxy or cell
-  // If not, we will actually resolve our links to get to our values.
+  /**
+   * Creates the object. This is an early pass to see if we should just create a
+   * proxy or cell; if not, we actually resolve our links to get to our values.
+   */
   createObject(
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,
@@ -1570,11 +1588,11 @@ class TransformObjectCreator
     // object so we can get back to the cell if needed.
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(
-        this.runtime,
-        this.tx,
+        this.#runtime,
+        this.#tx,
         link,
         0,
-        this.labelViewFor(link),
+        this.#labelViewFor(link),
       );
     } else if (isObjectOrArray(link.schema)) {
       // A reference-form schema resolves here — materialization is a
@@ -1612,26 +1630,26 @@ class TransformObjectCreator
           ? link
           : blockedHandleLink(link, followCap);
         return createCell(
-          this.runtime,
+          this.#runtime,
           {
             ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
-          getTransactionForChildCells(this.tx),
-          this.synced,
+          getTransactionForChildCells(this.#tx),
+          this.#synced,
           cellKind,
-          this.labelViewFor(link),
+          this.#labelViewFor(link),
         ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
       if (ContextualFlowControl.isTrueSchema(schema)) {
         return createQueryResultProxy(
-          this.runtime,
-          this.tx,
+          this.#runtime,
+          this.#tx,
           link,
           0,
-          this.labelViewFor(link),
+          this.#labelViewFor(link),
         );
       }
       // link.schema is not true, and not asCell/asStream
@@ -1639,12 +1657,12 @@ class TransformObjectCreator
       if (schema.default !== undefined && value === undefined) {
         // processDefaultValue already annotates with back to cell
         return processDefaultValue(
-          this.runtime,
-          this.tx,
+          this.#runtime,
+          this.#tx,
           link,
           schema.default,
-          this.synced,
-          this.labelViewFor(link),
+          this.#synced,
+          this.#labelViewFor(link),
         );
       }
       // If we're an object, we may be missing some properties that have a
@@ -1670,16 +1688,16 @@ class TransformObjectCreator
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
-                this.runtime,
-                this.tx,
+                this.#runtime,
+                this.#tx,
                 {
                   ...link,
                   path: [...link.path, propName],
                   schema: propSchema,
                 },
                 undefined,
-                this.synced,
-                rebaseCfcLabelView(this.labelViewFor(link), [propName]),
+                this.#synced,
+                rebaseCfcLabelView(this.#labelViewFor(link), [propName]),
               );
             }
           }
@@ -1690,11 +1708,11 @@ class TransformObjectCreator
     }
     return annotateWithBackToCellSymbols(
       value,
-      this.runtime,
+      this.#runtime,
       link,
-      this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#tx,
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 }

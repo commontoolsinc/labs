@@ -21,6 +21,7 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   // storage manager passes through untouched; EXPERIMENTAL_* flags come from
   // the injected env reader via the canonical mapping; and the shared
   // first-party posture (the CFC pin) rides along from the preset.
+
   const storageManager = {
     sentinel: true,
   } as unknown as RuntimeOptions["storageManager"];
@@ -59,6 +60,7 @@ Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", as
   // on OTEL_ENABLED it attaches and flips the preflight-telemetry gate. Without
   // a registered OTel provider the API hands the bridge no-op instruments, so
   // the enabled path is safe to exercise in a test.
+
   const signer = await Identity.fromPassphrase("runtime-options-otel-test");
   const config = {
     MEMORY_URL: "http://memory.test:8000/",
@@ -118,6 +120,7 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
   // the constructed Runtime rather than re-read from the environment, so the
   // published posture includes the defaults and preset resolution the server is
   // actually running under — a second reading could disagree with the first.
+
   const signer = await Identity.fromPassphrase("runtime-options-posture-test");
   const storageManager = StorageManager.emulate({ as: signer });
   publishExperimentalPosture(null);
@@ -138,10 +141,15 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
     // The CFC posture publishes alongside, from the same constructed Runtime
     // (lib/cfc-posture.ts): the preset core pin plus constructor defaults.
     const cfc = cfcPosture();
-    assertEquals(cfc?.enforcementMode, "enforce-explicit");
-    assertEquals(cfc?.flowLabels, "off");
+    assertEquals(cfc?.enforcementMode.rung, "enforce-explicit");
+    assertEquals(cfc?.flowLabels.rung, "off");
+    assertEquals(cfc?.flowLabels.diagnosticOnly, true);
     assertEquals(cfc?.policyDigest, null);
-    assertEquals(cfc?.sinkCeilings, []);
+    // Every known sink is named, none of them ceilinged: a server that has
+    // configured nothing publishes ten ungated sinks rather than an empty
+    // list a reader could take for full coverage.
+    assertEquals(cfc?.sinks.length, 10);
+    assertEquals(cfc?.sinks.every((sink) => "ungated" in sink), true);
     assertEquals(posture?.modernCellRep, true);
     // Resolved, not passed: the env reader said nothing about these, and a
     // client adopting the posture needs the values in effect rather than the

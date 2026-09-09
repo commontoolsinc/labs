@@ -9,7 +9,7 @@ Prefix the URLs with
 
 This directory mixes exemplars, capability demos, regression fixtures, and
 legacy experiments. They do NOT carry equal authority. Before imitating any
-pattern, check its tier here (tracked in CT-1701):
+pattern, check its tier:
 
 - **primitive** — designed for embedding in other patterns (used as a JSX tag),
   headless-able. Exposes streams + cells + an optional default `[UI]`. Copy
@@ -27,6 +27,33 @@ pattern, check its tier here (tracked in CT-1701):
 Any pattern not listed below (newly added, or missed) should be treated as
 **demo** until triaged.
 
+## The tier is in the file
+
+The two tiers that mean "do not copy" — legacy and fixture — do not rely on this
+page being found. Every pattern source in them opens with a marker naming the
+tier, so the answer reaches a reader who arrived from a directory listing, a
+grep hit, or a link straight to the file:
+
+```ts
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
+```
+
+Membership is the table in `tasks/pattern-tiers.ts`, which tiers whole
+directories and individual files. `deno task check-pattern-tiers` holds the two
+to each other in both directions: a listed file without its marker fails, a
+marker on an unlisted file fails, and a table entry matching nothing fails. So a
+new fixture cannot arrive unmarked, and a marker cannot outlive its reason.
+`deno task fix-pattern-tiers` applies or corrects a marker.
+
+The sections below therefore do not re-list the members of those two tiers. The
+marker in the file is the answer; the table is where it comes from.
+
+The three copyable tiers carry no marker. Their instruction is to copy, or to
+copy the capability call and not the style, which is what a reader already
+assumes — and the several hundred remaining pattern sources would each need one
+to say it.
+
 ## primitive
 
 Composable building blocks designed for embedding in other patterns
@@ -35,10 +62,21 @@ Composable building blocks designed for embedding in other patterns
 adopter-first entry bar.
 
 `amount-ledger.tsx`, `check-list.tsx`, `counter.tsx`, `dice-roller.tsx`,
-`option-picker.tsx`, `sortable-table.tsx`, and the `demo/` host that embeds all
-six. Each is a single self-contained file taking real, optional inputs, with an
-embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can drop it
-in as a JSX tag or run it standalone.
+`option-picker.tsx`, `sortable-table.tsx`, and the `demo/` host that embeds
+those six. Each is a single self-contained file taking real, optional inputs,
+with an embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can
+drop it in as a JSX tag or run it standalone.
+
+`ledger-month-transactions.tsx` and `mailbox-month-headers.tsx` read a loom
+connector store instead of a caller's own cell. Their input is a `SqliteDb`
+handle, so neither is in the `demo/` host: a host that embeds one has to hand it
+a database. Their pattern tests build one with `sqliteDatabase()` and drive the
+atom's reactive `month` input, which is what re-runs a query the atom declares
+no `reactOn` for; `packages/cf-harness/test/primitives-connector-reads.test.ts`
+states what only an injected handle can. Between them they carry the two
+tombstone conventions a connector store uses — the integer `deleted = 0` flag on
+a connector ledger, `deleted_at IS NULL` on the mail store — which is the thing
+a session reading one of these databases has no other way to learn.
 
 Their adopter is the pattern index: they are published to it as composable
 parts, and their descriptions are derived from their doc comments by
@@ -56,10 +94,6 @@ benefited (see the contract doc's "Lessons" section).
 `do-list/`, `fair-share/`, `form-demo.tsx`, `notes/`, `reading-list/` (canonical
 list-detail example), `simple-list/`, `todo-list/`.
 
-Caveat: `simple-list/simple-list.tsx` exports `MODULE_METADATA` so it can embed
-in the legacy Record containers — do not copy that export (see the `record/`
-note under legacy).
-
 ## demo
 
 Capability and app demos (root files): `annotation.tsx`,
@@ -74,11 +108,13 @@ profile roster — every participant's cross-space profile badge), `self.tsx`,
 
 App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
-`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
-explorations), `google/` (the `core/` tree; `google/WIP/` is legacy),
-`habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
-`project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
-`scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
+`collection-naming/` (the member-naming library and the board that exercises it;
+the library is the reference, the board is a demo), `contacts/`, `cozy-poll/`,
+`examples/`, `experimental/` (explicitly unhardened explorations), `google/`
+(the `core/` tree; `google/WIP/` is legacy), `habit-tracker/`, `lobby/`,
+`lunch-poll/`, `profile-group-chat/`, `project-list/`, `router/`,
+`scoped-group-chat/`, `scoped-user-directory/`, `scrabble/`,
+`shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
 
 Connector-owned patterns live with their connector families: the
@@ -98,39 +134,32 @@ not a style reference.
 
 ## fixture
 
-`gideon-tests/`, `integration/`, `test/`, `plain-array-callback-locals/`,
-`scope-bug-computed-vnode-blank/`, `scope-bug-ct1597-forward/`,
-`scope-bug-ct1597-reduce/`, `cell-link.tsx` (suggestion tester),
-`nested-map-ifelse-test.tsx`, `render-test.tsx`, `self-reference-test.tsx`, and
-every `*.test.ts(x)` file anywhere in this package. (The blanket `*.test.ts(x)`
-rule is about pattern-authoring idioms — test _style_ is governed by
-`docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
-remain good references for it.)
+Every fixture pattern source carries the fixture marker, so the file says so
+itself. Two groups sit outside the marker's reach and are fixture anyway:
+
+- Every `*.test.ts(x)` file anywhere in this package. The blanket rule is about
+  pattern-authoring idioms — test _style_ is governed by
+  `docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
+  remain good references for it.
+- `integration/`, the browser test harness. These are test drivers rather than
+  patterns, and nothing compiles them as pattern entries.
 
 ## legacy
 
-**`record/`, `record.tsx`, `record-backup.tsx`, `record-icon.tsx`, and
-`container-protocol.ts`** — the registry/`MODULE_METADATA` approach is a
-parallel composition system; do not copy it — compose patterns directly as JSX
-tags + wish discovery instead. Whether `record/` is retired outright or kept as
-a demo is an open question, deliberately deferred to the review of the CT-1701
-tiering PR.
+The remaining legacy patterns each carry the legacy marker:
 
-**Attribute/module clones feeding that registry** — their `MODULE_METADATA`
-ceremony exists only to register with Record containers and is not a model to
-follow: `address.tsx`, `age-category.tsx`, `birthday.tsx`, `custom-field.tsx`,
-`dietary-restrictions.tsx`, `email.tsx`, `emoji-picker.tsx`, `gender.tsx`,
-`giftprefs.tsx`, `link.tsx`, `location.tsx`, `location-track.tsx`,
-`nickname.tsx`, `occurrence-tracker.tsx`, `phone.tsx`, `photo.tsx`,
-`rating.tsx`, `relationship.tsx`, `social.tsx`, `status.tsx`, `tags.tsx`,
-`text-import.tsx`, `timeline.tsx`, `timing.tsx`, `type-picker.tsx`.
+- `factory-outputs/` and its support file `vehicles.ts` — machine-generated
+  pattern-factory outputs, kept with their eval scores and never intended as
+  style references. `parking-coordinator/main.tsx` is also a live integration
+  and capability-gate fixture, which is why it stays.
+- `google/WIP/` — parked work that never graduated into `google/core/`.
 
-**`factory-outputs/`** (+ its support files `vehicles.ts`, `vehicles.test.ts`) —
-machine-generated pattern-factory outputs kept with their eval scores; never
-intended as style references.
-
-**`google/WIP/`** — parked, unfinished work that never graduated into
-`google/core/`.
+The registry/`MODULE_METADATA` composition system — `record/`, `record.tsx`, its
+backup and icon companions, `container-protocol.ts`, and the two dozen attribute
+modules that existed only to register with it — has been removed. It was a
+parallel composition system with no callers outside itself. Compose patterns
+directly as JSX tags plus `wish` discovery instead;
+`docs/common/patterns/composition.md` covers how.
 
 Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
 `README.md`, `DEPRECATED_IDIOMS.md`, `test/vnode-helpers.ts` (the shared
@@ -209,47 +238,62 @@ assignees. The board publishes a bounded discovery index — the topics
 themselves, declared through a narrow row schema of summary scalars, so a row's
 address IS its topic's and a survey and the follow-up read name one document.
 `addTopic` returns the piece it created, so a caller addresses a new topic
-straight from the create. Topics reference each other by CELL: the board derives
-the whole graph once by scanning what each topic points at with `equals`, and
-each topic reads its own inbound edges out of that pivot. Demonstrates:
-reading-list-style piece-in-list composition, `PerUser` display-name on a shared
-piece, mergeable comment appends, session-scoped drafts, bounding a whole-list
-derivation with a narrow declared `lift` parameter, passing topics through a
-sort so an activity-ordered list keeps the identity its elements already have,
-`multiUserTest` coverage.
+straight from the create. The board owns a member namespace through
+`collection-naming/naming.ts`: `addTopic` allocates the next decimal name in the
+same transaction as the append, each topic reads its own name out of the board's
+names table and publishes it as `shortName`, and `backfillNames` names what the
+board held before it numbered anything. Topics reference each other by CELL: the
+board derives the whole graph once by scanning what each topic points at with
+`equals`, and each topic reads its own inbound edges out of that pivot.
+Demonstrates: reading-list-style piece-in-list composition, profile-native
+browser authorship on a shared piece, mergeable comment appends, session-scoped
+drafts, bounding a whole-list derivation with a narrow declared `lift`
+parameter, passing topics through a sort so an activity-ordered list keeps the
+identity its elements already have, `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
-PerUser, mergeable, index, discovery, bounded read, row identity, references,
-backlinks, cell identity, equals, mentions
+profile, mergeable, index, discovery, bounded read, row identity, references,
+backlinks, cell identity, equals, mentions, member names, shortName, namespace,
+backfill
 
 ### Input Schema
 
 ```ts
 interface TopicsInput {
-  topics?: Writable<TopicPiece[] | Default<[]>>;
-  myName?: PerUser<Writable<string | Default<"">>>;
+  topics?: Writable<TopicDemand[] | Default<[]>>;
+  // The member namespace: each decimal name to the topic it names, held as an
+  // unread reference
+  names?: Writable<Default<NamesMap, {}>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
-// board's own list, wired at creation, as the @-mention universe for the
-// topic's body editor.
+// TopicInput additionally takes the three wirings addTopic gives a child:
+// mentionable (the @-mention universe for the body editor), boardCrossrefs
+// (the reference pivot), and boardNames (the names table it reads its own
+// number out of).
 ```
 
 ### Output Schema
 
 ```ts
 interface TopicsOutput {
-  topics: TopicPiece[];
-  mentionable: TopicPiece[];
+  topics: TopicDemand[];
+  // { [NAME], title, shortName, piece } per topic — one document of copies
+  mentionable: MentionableRow[];
   topicCount: number;
   // The topics, read through { title, createdAt, createdBy, commentCount,
-  //   lastActivityAt } — a row addresses the topic it describes
+  //   lastActivityAt, shortName } — a row addresses the topic it describes
   index: TopicIndexRow[];
   // { topic, mentionedBy } per topic — the reference graph, derived once here
   crossrefs: TopicCrossrefRow[];
-  myName: string;
-  // Returns { topic } — the piece it created
+  // The namespace, the table every topic reads its name out of, and the
+  // policy the names are held to
+  names: Default<NamesMap, {}>;
+  namesTable: NamesTableRow[];
+  naming: NamingDeclaration;
+  // Returns { topic, name } — the piece it created and the name it allocated
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
-  setMyName: Stream<{ name: string }>;
+  // Names every unnamed member in filing order; idempotent
+  backfillNames: Stream<BackfillNamesEvent, BackfillNamesResult>;
+  submitTopic: Stream<void>;
 }
 ```
 
@@ -257,10 +301,13 @@ interface TopicsOutput {
 
 A single #topic piece: the durable object the tracker's list holds. Body edits
 go through an explicit Edit→Save toggle (one whole-value `set` per save keeps
-the concurrent-edit window small); comments and links are mergeable appends. Use
-from `topics/main.tsx` via `navigateTo()`, or standalone.
+the concurrent-edit window small); comments and links are mergeable appends.
+Reads the board's name for itself out of `boardNames` by identity, publishes it
+as `shortName`, and renders it as a badge beside the title; a topic wired to no
+board shows none. Use from `topics/main.tsx` via `navigateTo()`, or standalone.
 
-**Keywords:** topic, detail, thread, comment, links, body, navigateTo
+**Keywords:** topic, detail, thread, comment, links, body, navigateTo,
+shortName, member name, badge
 
 ---
 
@@ -435,9 +482,8 @@ interface TodoListOutput {
 
 ## `simple-list/simple-list.tsx`
 
-A checklist with indent support. Works standalone (it also carries a legacy
-`MODULE_METADATA` export for Record containers — see the status-tier caveat
-above; don't copy that part).
+A checklist with indent support. Runs standalone, and embeds in another pattern
+as a JSX tag.
 
 **Keywords:** checklist, indentation, composable
 

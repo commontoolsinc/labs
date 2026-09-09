@@ -36,10 +36,11 @@ describe("shapableWakeGroupKey", () => {
     ).toBe(`${instanceKey}|input`);
   });
 
-  // Server pushes stay unshaped: the adoption-era reason is deleted with the
-  // observation machinery (server-execution v2 stage C), and re-deciding the
-  // shaping is a separate open question. See shapableWakeGroupKey.
   it("never shapes server pushes (pull / integrate)", () => {
+    // Server pushes stay unshaped: the adoption-era reason is deleted with the
+    // observation machinery (server-execution v2 stage C), and re-deciding the
+    // shaping is a separate open question. See shapableWakeGroupKey.
+
     expect(shapableWakeGroupKey(state, notif("pull"), withPiece)).toBe(
       undefined,
     );

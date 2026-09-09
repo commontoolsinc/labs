@@ -83,6 +83,7 @@ for (const size of SIZES) {
 
 /** Sparse, to track the cost of extent as distinct from element count. */
 const sparse: unknown[] = [];
+
 sparse.length = 100_000;
 sparse[0] = "first";
 sparse[99_999] = "last";
@@ -94,6 +95,7 @@ const compact: unknown[] = ["first", "last"];
 
 /** Rejected for a named property, which short-circuits on the last key. */
 const named = [1, 2, 3] as unknown[] & { foo?: string };
+
 named.foo = "bar";
 
 /**
@@ -102,6 +104,7 @@ named.foo = "bar";
  * check accepts this array, so its row doubles as an accepting-case measure.)
  */
 const getterIndexed = [1, 2, 3];
+
 Object.defineProperty(getterIndexed, 2, {
   get: () => 33,
   enumerable: true,

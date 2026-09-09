@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
@@ -41,7 +41,8 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // Persisting flow labels is what writes the `origin: "derived"` entries
+      // that `derivedIntegrity` reads back in every test here.
       cfcFlowLabels: "persist",
     });
     return { storageManager, runtime };
@@ -160,7 +161,9 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
     try {
       await seedDoc(runtime, "flow-wl-a", [certified("p1")]);
       // Doc B carries a confidentiality label (so it resolves) but NO
-      // certification.
+      // certification. The clause names this space, the audience a document
+      // living in it already reaches, so the label flows onto the output
+      // without that output declaring a ceiling of its own.
       const seed = runtime.edit();
       const bCell = runtime.getCell(space, "flow-wl-b", undefined, seed);
       const bId = bCell.getAsNormalizedFullLink().id;
@@ -172,7 +175,10 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
           schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
-            entries: [{ path: [], label: { confidentiality: ["plain"] } }],
+            entries: [{
+              path: [],
+              label: { confidentiality: [cfcAtom.space(space)] },
+            }],
           },
         },
       });
@@ -197,7 +203,7 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
       const conf = entriesOf(storageManager, out.getAsNormalizedFullLink().id)
         .filter((e) => e.origin === "derived")
         .flatMap((e) => e.label.confidentiality ?? []);
-      expect(conf).toContainEqual("plain");
+      expect(conf).toContainEqual(cfcAtom.space(space));
     } finally {
       await runtime.dispose();
       await storageManager.close();

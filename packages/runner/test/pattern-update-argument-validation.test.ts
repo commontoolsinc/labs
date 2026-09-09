@@ -14,6 +14,7 @@ import { readStoredLinkChainRaw } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // A pattern update must not leave durable state the new version's argument
 // schema cannot read. `packages/piece/src/schema-compatibility.ts` waives one
@@ -161,7 +162,7 @@ describe("pattern update validates the stored argument", () => {
       cell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: ref.identity,
         symbol: ref.symbol,
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(stampError?.message).toBeUndefined();
     let error: string | undefined;
@@ -334,7 +335,11 @@ describe("pattern update validates the stored argument", () => {
       "markerless-root",
     );
     const { error: stripError } = await rt.editWithRetry((tx) => {
-      cell.withTx(tx).setMetaRaw("patternSetupIdentity", undefined);
+      cell.withTx(tx).setMetaRaw(
+        "patternSetupIdentity",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(stripError?.message).toBeUndefined();
     await rt.idle();
@@ -432,7 +437,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -524,7 +529,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -593,6 +598,7 @@ describe("pattern update validates the stored argument", () => {
       cell.withTx(wtx).setMetaRaw(
         "argument",
         coldArgument.getAsWriteRedirectLink({ base: cell }),
+        rawMetaWriteAuthorization,
       );
     });
     expect(retargetError?.message).toBeUndefined();
@@ -637,7 +643,11 @@ describe("pattern update validates the stored argument", () => {
       rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
         .asSchema(undefined as never)
         .set({ count: "seven" } as never);
-      cell.withTx(wtx).setMetaRaw("patternSetupIdentity", undefined);
+      cell.withTx(wtx).setMetaRaw(
+        "patternSetupIdentity",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(prepError?.message).toBeUndefined();
     await rt.idle();
@@ -715,7 +725,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -724,7 +734,11 @@ describe("pattern update validates the stored argument", () => {
     // Strip the marker AND repair the argument: now the piece is markerless,
     // running V1, under a pointer naming V2, with nothing left to refuse.
     const { error: prepError } = await rt.editWithRetry((wtx) => {
-      cell.withTx(wtx).setMetaRaw("patternSetupIdentity", undefined);
+      cell.withTx(wtx).setMetaRaw(
+        "patternSetupIdentity",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
       rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
         .asSchema(undefined as never)
         .set({ count: 7 } as never);
@@ -790,7 +804,11 @@ describe("pattern update validates the stored argument", () => {
 
     // Strip it, the state a piece written before the meta existed is in.
     const { error: stripError } = await rt.editWithRetry((tx) => {
-      cell.withTx(tx).setMetaRaw("schema", undefined);
+      cell.withTx(tx).setMetaRaw(
+        "schema",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(stripError?.message).toBeUndefined();
     await rt.idle();
@@ -816,7 +834,11 @@ describe("pattern update validates the stored argument", () => {
     // branch returns from a different place — so a fix applied to only one of
     // them leaves half the callers unrepaired.
     const { error: stripAgain } = await rt.editWithRetry((tx) => {
-      cell.withTx(tx).setMetaRaw("schema", undefined);
+      cell.withTx(tx).setMetaRaw(
+        "schema",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(stripAgain?.message).toBeUndefined();
     await rt.idle();
@@ -1069,7 +1091,11 @@ describe("pattern update validates the stored argument", () => {
       prim.withTx(tx).asSchema(undefined as never).set({ p: true } as never);
       // A doc record a meta-only write leaves behind: present, no value —
       // the stamped-but-unmaterialized state real vintages hold.
-      metaOnly.withTx(tx).setMetaRaw("slug", "walk-meta-only");
+      metaOnly.withTx(tx).setMetaRaw(
+        "slug",
+        "walk-meta-only",
+        rawMetaWriteAuthorization,
+      );
     });
     expect(writeError?.message).toBeUndefined();
     await rt.idle();
@@ -1295,7 +1321,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();
@@ -1351,7 +1377,7 @@ describe("pattern update validates the stored argument", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v2Ref.identity,
       symbol: v2Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
     await cell.pull();

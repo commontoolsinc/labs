@@ -35,7 +35,6 @@ import {
   benchPage,
   CALIBRATION_FILE,
   formatNs,
-  jsonFromZip,
   pointsForWindow,
   representativeBenchmarkCpu,
   sampleBenchmarkRuns,
@@ -48,6 +47,7 @@ import {
   ciHistoryBucketMs,
 } from "../ci-job-history.ts";
 import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
+import { artifactZip, bytes, makeZip } from "../test/artifact-zip.ts";
 
 // The history store falls back to the system temporary directory when no cache
 // directory is named. The package's test runner names a fresh one for each run.
@@ -83,89 +83,8 @@ function ctx(env: Record<string, string> = {}): Ctx {
 // zip building
 //
 
-function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
-}
-
-interface Member {
-  name: string;
-  method: number; // 0 = stored, 8 = deflate
-  data: Uint8Array; // the bytes as they sit on disk (already compressed for method 8)
-}
-
-// Assemble a zip: a local header plus payload per member, then the central
-// directory and the end-of-central-directory record. CRCs are left zero — the
-// reader takes its sizes and offsets from the central directory and checks
-// neither. `entryCount` overrides the count the EOCD advertises.
-function makeZip(
-  members: Member[],
-  entryCount = members.length,
-): Uint8Array<ArrayBuffer> {
-  const enc = new TextEncoder();
-  const local: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
-  let offset = 0;
-  for (const m of members) {
-    const name = enc.encode(m.name);
-    const lh = new Uint8Array(30 + name.length);
-    const lv = new DataView(lh.buffer);
-    lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(8, m.method, true);
-    lv.setUint32(18, m.data.length, true);
-    lv.setUint32(22, m.data.length, true);
-    lv.setUint16(26, name.length, true);
-    lh.set(name, 30);
-
-    const cd = new Uint8Array(46 + name.length);
-    const cv = new DataView(cd.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(10, m.method, true);
-    cv.setUint32(20, m.data.length, true);
-    cv.setUint32(24, m.data.length, true);
-    cv.setUint16(28, name.length, true);
-    cv.setUint32(42, offset, true);
-    cd.set(name, 46);
-
-    local.push(lh, m.data);
-    central.push(cd);
-    offset += lh.length + m.data.length;
-  }
-  const cdBytes = concat(central);
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, entryCount, true);
-  ev.setUint16(10, entryCount, true);
-  ev.setUint32(12, cdBytes.length, true);
-  ev.setUint32(16, offset, true);
-  return concat([...local, cdBytes, eocd]);
-}
-
-const bytes = (s: string) => new TextEncoder().encode(s);
-
-async function deflate(s: string): Promise<Uint8Array> {
-  const cs = new CompressionStream("deflate-raw");
-  const done = new Response(cs.readable).arrayBuffer();
-  const w = cs.writable.getWriter();
-  await w.write(bytes(s));
-  await w.close();
-  return new Uint8Array(await done);
-}
-
-// The shape CI uploads: a text member alongside the deno bench report, the report
-// deflated.
-async function benchZip(json: string): Promise<Uint8Array<ArrayBuffer>> {
-  return makeZip([
-    { name: "notes.txt", method: 0, data: bytes("ignore me") },
-    { name: "results.json", method: 8, data: await deflate(json) },
-  ]);
-}
+// The shape the benchmarks.yml artifact upload takes.
+const benchZip = (json: string) => artifactZip("results.json", json);
 
 //
 // the stub api
@@ -950,10 +869,9 @@ Deno.test("benchmark: paging stops at the 45-day cutoff, and an out-of-window ru
   ];
   await withApi({ pages: { 1: page1 } }, async (calls) => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
-    // The most recent run is a failure, so the tile reads red; none of the runs
-    // sampled had an artifact, so there is nothing to headline.
+    // The most recent run failed, and none of the sampled runs had an artifact.
     assertEquals(v.status, "bad");
-    assertEquals(v.value, "—");
+    expect(v.value).toBe("failed");
     // Every failure on the page, in a row. The one success is older than the
     // trend's window, but it is still on the page fetched, so it still dates the
     // outage the failures make.
@@ -1259,12 +1177,13 @@ Deno.test("benchmark: the headline considers CPUs measured in the last 12 hours"
 });
 
 Deno.test("benchmark: the tile reports when every CPU measurement is stale", async () => {
+  const measurements = Array.from({ length: 8 }, (_, day) => ({
+    id: 95_000 + day,
+    at: BASE - (8 - day) * DAY,
+    total: (5 + day) * 1e6,
+  }));
   await withTotals(
-    Array.from({ length: 8 }, (_, day) => ({
-      id: 95_000 + day,
-      at: BASE - (8 - day) * DAY,
-      total: (5 + day) * 1e6,
-    })),
+    measurements,
     async () => {
       const tile = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
       assertEquals(tile.status, "unknown");
@@ -1272,6 +1191,62 @@ Deno.test("benchmark: the tile reports when every CPU measurement is stale", asy
       assertEquals(tile.sub, "no recent benchmark data");
     },
   );
+  await withTotals([
+    ...measurements,
+    { id: 95_008, at: BASE, conclusion: "failure" },
+  ], async () => {
+    const tile = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    expect(tile.status).toBe("bad");
+    expect(tile.value?.replace(/<[^>]*>/g, "")).toMatch(
+      /^failed \(was ▲[\d.]+[%×]\)$/,
+    );
+    expect(tile.href).toBe("/bench?view=runtime&repo=labs");
+    expect(tile.extra).toContain("<svg");
+  });
+});
+
+Deno.test("benchmark: a stale failure keeps the latest measured CPU's trend", async () => {
+  const measurements = [
+    ...Array.from({ length: 8 }, (_, day) => ({
+      cpu: "retired CPU",
+      at: BASE - (30 - day) * DAY,
+      avg: (5 + day) * 1e6,
+    })),
+    ...Array.from({ length: 8 }, (_, day) => ({
+      cpu: TEST_CPU,
+      at: BASE - (7 - day) * DAY,
+      avg: 5e6,
+    })),
+  ];
+  const artifacts: Api["artifacts"] = {};
+  const zips: Api["zips"] = {};
+  const runs: GhRun[] = [];
+  for (const [index, measurement] of measurements.entries()) {
+    const id = 96_000 + index;
+    runs.push(ghRun(id, measurement.at));
+    artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+    zips[id * 10] = await benchZip(report([
+      bench("packages/a/x.bench.ts", null, "work", { avg: measurement.avg }),
+    ], "", measurement.cpu));
+  }
+  const pages = { 1: runs.toReversed() };
+  const originalNow = Date.now;
+  try {
+    Date.now = () => BASE + 2 * HOUR;
+    await withApi({ pages, artifacts, zips }, async () => {
+      const before = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      expect(before.status).toBe("good");
+      expect(before.value).toBe("flat");
+
+      Date.now = () => BASE + 14 * HOUR;
+      pages[1].unshift(ghRun(96_099, BASE + 13 * HOUR, "failure"));
+      const after = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      expect(after.status).toBe("bad");
+      expect(after.value?.replace(/<[^>]*>/g, "")).toBe("failed (was flat)");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 Deno.test("benchmark: a red run's measurements still reach the trend", async () => {
@@ -1437,7 +1412,7 @@ Deno.test("benchmark: the calibration the tile divides out is the one CI runs", 
   assertStringIncludes(workflow, `"/${CALIBRATION_FILE}",`);
 });
 
-Deno.test("benchmark: returns a failed rising view after the run list settles", async () => {
+Deno.test("benchmark: returns a failed view after the run list settles", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "benchmark-settled-view-",
   });
@@ -1507,7 +1482,9 @@ Deno.test("benchmark: returns a failed rising view after the run list settles", 
     }));
     const final = await active;
     expect(final.status).toBe("bad");
-    expect(final.value).toContain("▲");
+    expect(final.value?.replace(/<[^>]*>/g, "")).toMatch(
+      /^failed \(was ▲[\d.]+[%×]\)$/,
+    );
   } finally {
     releaseRuns(Response.json({ workflow_runs: [] }));
     await collection?.catch(() => {});
@@ -1519,9 +1496,9 @@ Deno.test("benchmark: returns a failed rising view after the run list settles", 
   }
 });
 
-Deno.test("benchmark: a failed most-recent run turns the tile red over its last good total", async () => {
+Deno.test("benchmark: shows the failure and cached trend when the most recent completed run failed", async () => {
   const at = (d: number) => SAMPLED_BASE - (6 - d) * DAY;
-  // The last successful run totals 7ms; the failed head has no artifact to headline.
+  // Seven daily measurements, then a failed run with no artifact.
   await withTotals([
     ...Array.from({ length: 7 }, (_, d) => ({ id: 9_200 + d, at: at(d), total: d === 6 ? 7e6 : 5e6 })),
     { id: 9_299, at: SAMPLED_BASE + HOUR, conclusion: "failure" },
@@ -1529,7 +1506,9 @@ Deno.test("benchmark: a failed most-recent run turns the tile red over its last 
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // the newest run failed
     assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
-    assertStringIncludes(v.value ?? "", "flat"); // the trend of the runs before the failure
+    expect(v.value?.replace(/<[^>]*>/g, "")).toBe("failed (was flat)");
+    expect(v.valueLabel).toBe("failed (was flat)");
+    expect(v.href).toBe("/bench?view=runtime&repo=labs");
     assert(!(v.extra ?? "").includes("benchmark")); // the failure took the count line
   });
 });
@@ -1548,7 +1527,7 @@ Deno.test("benchmark: consecutive failures are counted on the tile", async () =>
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // red however flat the trend is
     assertMatch(v.sub ?? "", /^last good .+ ago · 3 runs failed$/);
-    assertStringIncludes(v.value ?? "", "flat"); // the trend over the runs before the failures
+    expect(v.value?.replace(/<[^>]*>/g, "")).toBe("failed (was flat)");
     assert(!(v.extra ?? "").includes("benchmark")); // no count line beside the failure line
   });
 });
@@ -1564,7 +1543,9 @@ Deno.test("benchmark: a failure outranks a rising trend", async () => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // red, not the orange the rise would give
     assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
-    assertStringIncludes(v.value ?? "", "▲"); // the rise is still the headline
+    expect(v.value?.replace(/<[^>]*>/g, "")).toMatch(
+      /^failed \(was ▲[\d.]+[%×]\)$/,
+    );
   });
 });
 
@@ -1810,9 +1791,8 @@ Deno.test("benchmark: adding a benchmark is not read as a rise", async () => {
 });
 
 Deno.test("benchmark: a run that finished green but produced no valid data reads red", async () => {
-  // Seven good days, then a run that passes CI but whose artifact carries no usable
-  // measurement. It ran and made nothing, so it is as good as failed: red, over the
-  // last run whose total could be read.
+  // Seven good days, then a run that passes CI but whose artifact carries no
+  // usable measurement.
   const at = (d: number) => d === 7
     ? SAMPLED_BASE + HOUR
     : SAMPLED_BASE - (6 - d) * DAY;
@@ -1836,7 +1816,7 @@ Deno.test("benchmark: a run that finished green but produced no valid data reads
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // it ran but made nothing usable
     assertEquals(v.sub, "no benchmark data");
-    assertStringIncludes(v.value ?? "", "flat"); // the trend over the readable runs
+    expect(v.value?.replace(/<[^>]*>/g, "")).toBe("failed (was flat)");
   });
 });
 
@@ -2133,59 +2113,6 @@ Deno.test("benchmark: a run's results are immutable, so a cached run is not refe
   });
 });
 
-Deno.test("jsonFromZip: reads a stored json member, ignoring a text member beside it", async () => {
-  const zip = makeZip([
-    { name: "notes.txt", method: 0, data: bytes("not the report") },
-    { name: "results.json", method: 0, data: bytes(`{"benches":[]}`) },
-  ]);
-  assertEquals(await jsonFromZip(zip), `{"benches":[]}`);
-});
-
-Deno.test("jsonFromZip: inflates a deflated json member", async () => {
-  const json = report([
-    bench("packages/a/x.bench.ts", null, "tick", timings(5)),
-  ]);
-  assertEquals(await jsonFromZip(await benchZip(json)), json);
-});
-
-Deno.test("jsonFromZip: a zip with no json member -> null", async () => {
-  const zip = makeZip([{
-    name: "notes.txt",
-    method: 0,
-    data: bytes("nothing"),
-  }]);
-  assertEquals(await jsonFromZip(zip), null);
-});
-
-Deno.test("jsonFromZip: bytes with no end-of-central-directory record -> null", async () => {
-  assertEquals(await jsonFromZip(new Uint8Array(10)), null); // shorter than the record itself
-  assertEquals(await jsonFromZip(new Uint8Array(200)), null);
-});
-
-Deno.test("jsonFromZip: a central directory shorter than its own count stops instead of reading past it", async () => {
-  const zip = makeZip([{ name: "notes.txt", method: 0, data: bytes("x") }], 2);
-  assertEquals(await jsonFromZip(zip), null);
-});
-
-Deno.test("jsonFromZip: a member whose local header the central directory does not point at -> null", async () => {
-  const zip = makeZip([{
-    name: "results.json",
-    method: 0,
-    data: bytes(`{"benches":[]}`),
-  }]);
-  new DataView(zip.buffer).setUint32(0, 0xdeadbeef, true); // clobber the local file header signature
-  assertEquals(await jsonFromZip(zip), null);
-});
-
-Deno.test("jsonFromZip: a compression method we cannot read -> null, not garbage", async () => {
-  const zip = makeZip([{
-    name: "results.json",
-    method: 99,
-    data: bytes(`{"benches":[]}`),
-  }]);
-  assertEquals(await jsonFromZip(zip), null);
-});
-
 // A geometric series over twelve days: the Theil–Sen slope is exact, so the
 // series ends at exactly `fold` times where it started.
 const SHAPES = [
@@ -2435,7 +2362,7 @@ Deno.test("benchmark: stale CPU trends stay out of the headline while their line
         pageLines.map((line) => line.pointCount).sort((a, b) => a - b),
         [2, 2, 2, 2, 2, 2, 8, 8, 8, 8],
       );
-      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 10);
+      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 8);
       const pageMarkerColors = [
         ...html.matchAll(/<circle[^>]*fill="([^"]+)"/g),
       ].map((match) => match[1]);

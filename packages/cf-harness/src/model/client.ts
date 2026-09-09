@@ -5,6 +5,8 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import type { HarnessCredentialOwnerRef } from "../contracts/run-manifest.ts";
+import type { HarnessProviderError } from "./provider-error.ts";
+import type { HarnessModelAttemptRetry } from "./transport-retry.ts";
 
 export interface HarnessModelRequestSummary {
   model: string;
@@ -24,7 +26,24 @@ export interface HarnessModelAttemptDiagnostic {
   maxTransportAttempts: number;
   startedAt: string;
   endedAt: string;
+
+  /**
+   * Elapsed time from request dispatch until the response headers arrive. A
+   * provider that sends headers ahead of the generated tokens ends this long
+   * before the model is done, so it measures the transport rather than the
+   * turn.
+   */
   durationMs: number;
+
+  /**
+   * Elapsed time from request dispatch until the response is complete — the
+   * whole body read, or the stream closed at its terminal event. This is the
+   * model's own working time, and the number to compare a turn against wall
+   * clock with. Absent when the provider client never observed the exchange
+   * end.
+   */
+  responseCompleteDurationMs?: number;
+
   request: HarnessModelRequestSummary;
   outcome: "http_response" | "transport_error";
   httpStatus?: number;
@@ -35,6 +54,19 @@ export interface HarnessModelAttemptDiagnostic {
   responseBodyExcerpt?: string;
   responseBodyTruncated?: boolean;
   errorDetail?: string;
+
+  /**
+   * The provider's stated reason for the failure, when the response, stream,
+   * or error body carried one.
+   */
+  providerError?: HarnessProviderError;
+
+  /**
+   * Present when this attempt failed transiently and the client issued
+   * another: what was transient, and the backoff before the next attempt.
+   * Absent on the attempt that ended the exchange, however it ended.
+   */
+  retry?: HarnessModelAttemptRetry;
 }
 
 export interface HarnessModelTurnRequest {
@@ -53,6 +85,7 @@ export interface HarnessModelTurnRequest {
    * compaction entirely.
    */
   compactThreshold?: number;
+
   signal?: AbortSignal;
   onAttempt?: (
     attempt: HarnessModelAttemptDiagnostic,
@@ -67,10 +100,12 @@ export interface HarnessModelUsage {
 
   /** Cache-write tokens included within `inputTokens`, not additional tokens. */
   cacheWriteTokens?: number;
+
   outputTokens?: number;
 
   /** Reasoning tokens included within `outputTokens`, not additional tokens. */
   reasoningTokens?: number;
+
   totalTokens?: number;
 
   /**
@@ -133,6 +168,7 @@ export interface HarnessModelCatalogEntry {
 
   /** Maximum output tokens; needed to derive the usable input budget. */
   maxOutputTokens?: number;
+
   supportsParallelToolCalls: boolean;
 }
 
@@ -141,6 +177,7 @@ export interface HarnessModelClient {
 
   /** Exact authenticated owner binding for owner-bound providers. */
   readonly credentialOwner?: HarnessCredentialOwnerRef;
+
   complete(request: HarnessModelTurnRequest): Promise<HarnessModelTurnResult>;
   listModels?(
     signal?: AbortSignal,

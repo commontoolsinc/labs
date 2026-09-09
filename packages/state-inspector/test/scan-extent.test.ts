@@ -64,6 +64,7 @@ interface SeedEntity {
 
   /** The stored document, written once per revision. */
   document: Record<string, unknown>;
+
   revisions: number;
 
   /** Branch the revisions are written on. Defaults to the space branch. */
@@ -545,11 +546,13 @@ describe("scan-extent", () => {
   });
 
   describe("a module that ranks below the pieces pointing at it", () => {
-    /** Three busy pieces; their module written once, so it sorts last. */
+    /** The document all three busy pieces share. */
     const PIECE_DOC = {
       value: { $NAME: "Topic" },
       patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
     };
+
+    /** Three busy pieces, and their module written once, so it sorts last. */
     const quietModule = (run: (space: SpaceDb) => void) =>
       withSeeded(
         [

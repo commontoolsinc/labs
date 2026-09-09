@@ -82,6 +82,7 @@ export type ExecutorHostOptions = {
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
+
   policy?: SpaceServerPolicy;
 
   /** The RULED test switch for the tenure's space-root ensure (OW45
@@ -135,6 +136,7 @@ export class ExecutorHost {
   /** Wakers for in-flight backoff sleeps — close() flushes them so a
    * delayed re-activation never stalls shutdown. */
   readonly #backoffWakers = new Set<() => void>();
+
   readonly #stats: ServingLoopStats = emptyServingLoopStats();
   #releaseServerExecution: () => void = () => {};
   #closed = false;

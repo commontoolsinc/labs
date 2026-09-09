@@ -18,15 +18,9 @@ import type { RenderPolicy } from "../src/worker/types.ts";
 // fallthrough, all-atoms-admitted loop exit) cover nondeterministically across
 // runs. Calling the admission methods directly pins them to a fixed path.
 
-// Private admission methods on WorkerReconciler, reached through a typed cast
-// rather than `any` so the call sites still type-check.
-type ReconcilerAdmission = {
-  canRenderCellUnderPolicy(cell: unknown, policy: RenderPolicy): boolean;
-  atomRenderableUnderPolicy(atom: unknown, policy: RenderPolicy): boolean;
-};
-
-function admissionSeam(reconciler: WorkerReconciler): ReconcilerAdmission {
-  return reconciler as unknown as ReconcilerAdmission;
+// The admission checks, reached through the reconciler's accessor.
+function admissionSeam(reconciler: WorkerReconciler) {
+  return reconciler.accessForTestingOnly;
 }
 
 Deno.test("worker reconciler CFC atom admission", async (t) => {

@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-08-28. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-03. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Phases 1–7 landed; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -50,7 +50,7 @@ was last checked against the code.
 | [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
-| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
+| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate to an unconditional ceiling                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
@@ -71,8 +71,11 @@ are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
 `lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
-`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
-today, Phase 7 having landed flip-ready DARK (its section); the other flags in
+`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets (the
+summary table above states its current value and its section carries the
+dated history), with an explicit value selecting either arm regardless (the
+single-process presets read no default and stay OFF — the section says how);
+the other flags in
 this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
@@ -316,9 +319,8 @@ server](#clients-that-are-not-built-alongside-their-server).
   states, no shippable intermediates (spec README §3.4); deliberately named
   unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
   alias it. Both states, defined:
-  - **OFF (the default today — the first-party default constant is `false`;
-    explicit `false` selects it regardless of the constant): today's
-    behavior, byte-for-byte.** Every client
+  - **OFF (explicit `false` selects it regardless of the constant): the
+    pre-v2 behavior, byte-for-byte.** Every client
     runtime runs and commits derivations exactly as it does today, and every
     client commit is `authored`-class — `derived` is never claimed off the
     flag. The commit `class` metadata is still *written* in this arm (it is
@@ -326,8 +328,8 @@ server](#clients-that-are-not-built-alongside-their-server).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON (explicit `true` — or the first-party default once the flip PR
-    sets the constant `true`): the v2 posture.** With stages A–F landed
+  - **ON (explicit `true` selects it regardless of the constant): the v2
+    posture.** With stages A–F landed
     this means: the per-class admission rows of protocol.md §2 are enforced
     — the `derived` row is the stage-B lease equality check PLUS stage F's
     derived-envelope defense-in-depth (the producing session must BE the
@@ -360,45 +362,86 @@ server](#clients-that-are-not-built-alongside-their-server).
     F10 interim — is DELETED). Later stages add their surfaces under
     this same flag; both halves of any coupled behavior move together
     on it.
-- **Current default and planned end state.** **OFF by default** — the ONE
-  first-party default is `SERVER_EXECUTION_DEFAULT_ENABLED` in
-  [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
-  value `false` (Phase 7 landed flip-READY, DARK, by owner ruling
-  2026-08-16), read by every deployed-topology entry point — the
-  `productionServer` / `remoteClient` construction presets (toolshed's
-  operator runtime, the background piece service, the CLI, every pieces
-  controller and integration harness against a toolshed), toolshed's
-  serving-host gate and its memory ACL principal lists (the DELEGATING
-  class since OW31's build — the process identity is no longer an
-  implicit-OWNER service principal), and the browser
+- **Current default and planned end state.** The summary table's cell
+  states the current value of the ONE first-party default,
+  `SERVER_EXECUTION_DEFAULT_ENABLED` in
+  [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts)
+  (a test pins the cell to the constant); the dated status entries below
+  carry its history (landed flip-ready dark at `false` 2026-08-16; flipped
+  ON 2026-08-28 after the plan's Phase-7 ordered gates; each later flip has
+  its own entry). It is read by every deployed-topology entry
+  point — the `productionServer` / `remoteClient` construction presets
+  (toolshed's operator runtime, the background piece service, the CLI,
+  every pieces controller and integration harness against a toolshed),
+  toolshed's serving-host gate and its memory ACL principal lists (the
+  DELEGATING class since OW31's build — the process identity is no
+  longer an implicit-OWNER service principal), and the browser
   shell's build define fallback. An UNSET flag resolves to it; an explicit
-  `EXPERIMENTAL_SERVER_EXECUTION=true` (or `experimental.serverExecution:
-  true`, or the shell define `true`) selects the ON arm, an explicit `false`
-  the OFF arm regardless of the constant. Single-process harnesses do not
+  `EXPERIMENTAL_SERVER_EXECUTION=false` (or `experimental.serverExecution:
+  false`, or the shell define `"false"`) selects the OFF arm and an explicit
+  `true` the ON arm, regardless of the constant; whichever arm is not the
+  default is the per-deployment lever (the rollback lever whenever the
+  default is ON). CI resolves stable `default` and `opposite`
+  roles through `tasks/server-execution-ci.ts`: `default` leaves the flag
+  unset, while `opposite` explicitly selects the inverse and bakes that same
+  value into its toolshed shell. Therefore changing the default is exactly:
+  `SERVER_EXECUTION_DEFAULT_ENABLED`, the summary cell above, a dated status
+  entry here, and a delta in the plan's live coordination block; workflow
+  job topology, probes, skip placement, coverage ownership, test record
+  variants, and every other document follow automatically.
+  Single-process harnesses do not
   read the constant: a bare `new Runtime` and the `patternTest` /
   `localDev` / `unitTest` presets have no serving host, so they resolve the
   ambient baseline (OFF) by construction — the unit suites and `cf test`
-  run the derive-and-commit model; the ON posture's unit coverage sets the
-  flag explicitly (the `executor-*` suites) and its integration coverage is
-  the explicit-`true` CI lanes. In CI (testing.md §2) the DEFAULT lanes are
-  the OFF posture (probed), and the explicit-`true` lanes on an ON-BUILT
-  binary (`build-toolshed-on`; the shell define is baked at build) are the
-  ON arm — the full posture, verified by a probe before each suite, its
-  Deno-side clients declaring the posture from the env — with skips only
-  through `tasks/server-execution-on-skips.ts`, printed loudly (six
-  `phase-7` entries today, all red under the full ON posture, none
-  vacuous). **THE FLIP IS ITS OWN ONE-LINE PR** (the constant → `true`, plus
-  the absolute pin, the CI lane roles + probes, and this entry; repo
-  convention: a flip is reverted by reverting the PR that only flips),
-  landing after the plan's Phase-7 ordered gates: OW32 (the client-side
-  non-settling loop in the two-browser journeys) triaged → OW17 (the
-  serving replica's per-instance re-keying, with OW29) → OW28
-  (`compile-and-run` as an outbox effect kind) → the honest propagation
-  benchmark → the skip list EMPTY and the deployed-topology binaries the
-  presets flip exercised ON by a gate → the flip PR. End state: after a soak
-  on main (which starts at the flip PR's merge) the flag retires and the
-  OFF code path is removed — a separate post-soak PR (the plan's Phase 7
-  task 2, split from the flip because stacked PRs cannot soak).
+  run the derive-and-commit model (which is why the flip does not reach
+  the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
+  the lane-posture item the topics measurement report recorded for the
+  flip decision); the ON posture's unit coverage sets the
+  flag explicitly (the `executor-*` suites) and its integration coverage
+  is whichever CI role resolves ON. In CI (testing.md §2), `default`
+  follows the constant and `opposite` is its explicit inverse; both are
+  probed through the shared role
+  resolver; the opposite lane uses `build-toolshed-opposite`, whose shell
+  define is baked from the resolved inverse. The
+  `deployed-topology-gate` job exercises the real `bg-piece-service`
+  binary and cf-harness's fabric session at the default resolution, and
+  the CLI lanes probe the server their `cf` adopts its posture from —
+  with ON-arm skips and OFF-arm authored coverage following the resolved arm.
+  Skips are only through `tasks/server-execution-on-skips.ts`, printed loudly
+  (EMPTY at the flip, its stated precondition). End
+  state: after a soak on main at the ON default, the flag retires and the
+  OFF code path is removed — a separate post-soak
+  PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
+  `build-toolshed-opposite`).
+- **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
+  returned the constant to `false` — the first data-only flip: this value
+  and this registry's current-status prose, with no workflow, test, or role
+  edits (the 2026-09-02 hygiene's promise, exercised). Everything the flip
+  PR built stays: the serving-side machinery, the deployed-topology gates,
+  and the two-arm lanes, whose roles now resolve `default` = OFF and
+  `opposite` = ON (an ON-built shell, carrying the EMPTY ON-arm skip
+  registry and the `server-execution` record marker; authored-pattern
+  coverage rides the default lanes). Explicit `true` selects ON per
+  deployment. Re-flipping is the same two-surface change back.
+- **Status on 2026-09-02 (toggle hygiene).** The default remained ON and runtime
+  behavior is unchanged. CI now expresses the two postures as stable roles
+  derived from the one default constant. A rollback-default PR can therefore
+  be a constant change plus its status documentation; it does not duplicate or
+  mechanically invert the workflow.
+- **Status on 2026-08-28 (the FLIP).** The flip PR set the constant `true`
+  after every ordered gate was met on main (the ON-skip registry EMPTY
+  across all four suites — the ruled-3b-close lift #6528; OW31's ruled
+  write/read-authority posture BUILT; the first-ON-CI gate's owed rows
+  OW45–OW53 CLOSED; the OW38(ii) performance bar RULED met by the owner
+  on the topics measurement). It carried the lane-role swap (default
+  lanes = the ON arm, probed; explicit-`false` lanes = the OFF guard on
+  the then-named `build-toolshed-off`), the deployed-topology gates (the
+  `bg-piece-service` binary and cf-harness's fabric session at the
+  default resolution; the CLI lanes probed as `cf`'s gate;
+  `PiecesController` hosts riding the default lanes), and the
+  env-else-default posture resolution for the Deno-side integration
+  clients. The soak on main runs from its merge; the OFF path, the OFF
+  guard lanes, and this flag retire in the post-soak removal PR.
 - **Status on 2026-08-16 (Phase 7 flip-READY, landed DARK).** Phases 1–6
   landed; Phase 7 landed the flip's mechanism — the one constant and its
   readers, OW27 per-stream send pacing in the event-append queue
@@ -432,11 +475,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   still dark: OFF by default and byte-identical to today; the ON arm now
   actually serves (with the documented two-deriver interim). Stage G
   (effects + outbox) remains.
-- **Path to removal.** The flip PR (the constant → `true`) after the
-  ordered gates above; soak the default on main; then the post-soak PR
-  retires the flag, removes the OFF path (and the OFF regression-guard CI
-  lanes + the OFF-built binary the flip PR introduces by inverting
-  `build-toolshed-on`), and closes out this entry.
+- **Path to removal.** Soak on main at the ON default; then the post-soak PR
+  retires the flag, removes the OFF path (and the opposite regression-guard
+  lanes + `build-toolshed-opposite`), and closes out this entry.
 
 ---
 
@@ -570,6 +611,11 @@ latter's for its fabric session from `--fabric-cfc-enforcement-mode`
 (raise-only: `enforce-explicit` or `enforce-strict`) and
 `--fabric-cfc-flow-labels`, with `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
 `CF_HARNESS_FABRIC_CFC_FLOW_LABELS` as their environment defaults.
+`remoteClient` takes a host-controlled `cfcWriteFloor` on top of those two,
+which `PiecesController.initialize` forwards and the pattern multi-runtime
+harness routes on to each worker runtime, per session or for the whole
+harness. That dial is how a caller reaches the floor's `observe` rung, which
+the named bundle below sets only to `enforce`.
 
 One named bundle sits beside the per-dial rollout: every preset's `CoreParams`
 accepts `cfcPosture: "max-enforcement"`, which spreads
@@ -577,12 +623,21 @@ accepts `cfcPosture: "max-enforcement"`, which spreads
 `persist`, write floor / policy evaluation / declared monotonicity /
 label-metadata protection at `enforce`, trigger-read gating on, the §10.1
 standard prompt-caveat policy as the deployment's `cfcPolicyRecords`, and
-public-only confidentiality ceilings on the network-fetch sinks
-(`MAX_ENFORCEMENT_SINK_CEILINGS`). The llm sinks carry no ceiling, and a sink
-with no ceiling gets no gate: llm-sink release is ungoverned under this
-posture — pending a boundary-scoped admission mechanism, since an exact-match
-ceiling cannot admit the source-varying material-risk caveats an llm sink
-exists to process. The bundle deliberately leaves the
+public-only confidentiality ceilings on the network-fetch sinks.
+
+The bundle's sink decisions are total over the sink registry
+(`MAX_ENFORCEMENT_SINK_GOVERNANCE`, from which `MAX_ENFORCEMENT_SINK_CEILINGS`
+derives): every sink `KNOWN_SINKS` names carries either a ceiling or an
+explicit ungated release with its reason, its owner, and the condition that
+retires it, so a sink added to the inventory without a decision is a compile
+error rather than a sink that quietly releases ungated. The llm sinks are the
+explicit ungated ones, and a sink with no ceiling gets no gate: llm-sink
+release is ungoverned under this posture — pending a boundary-scoped admission
+mechanism, since an exact-match ceiling cannot admit the source-varying
+material-risk caveats an llm sink exists to process. Building that mechanism
+is planned in
+[`docs/plans/cfc-llm-sink-admission.md`](../plans/cfc-llm-sink-admission.md).
+The bundle deliberately leaves the
 enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
 raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
@@ -594,6 +649,52 @@ cf-harness console is the one surface that opts in by default — it exists to
 show CFC working, so its fabric session takes the bundle unless
 `--fabric-cfc-posture none` says otherwise, and it prints the posture it
 resolved at startup.
+
+Every surface that publishes a posture publishes the same record,
+`cfcPostureReport` in `packages/runner/src/cfc/posture-report.ts`: each dial's
+resolved rung together with whether that rung decides anything and what it
+decides on, the policy-snapshot digest, every known sink as a ceiling or an
+explicit ungated release, and every published deviation as
+`{what, owner, retirement}`. Three of those are load-bearing. An `observe` rung
+carries `diagnosticOnly: true`, so `policyEvaluation: observe` cannot be read
+as active enforcement. The sink list is total, so a sink's absence from a list
+of ceilings can no longer read as coverage. And the record carries its own
+`provenance`.
+
+`provenance` is what keeps a prediction from reading as an attestation.
+`cfcPostureReport(runtime)` reads a constructed Runtime's resolved fields and
+stamps `resolved`; `projectedCfcPostureReport(options)` computes what a runtime
+built with those options will resolve, before it exists, and stamps
+`projected`. Those are the only two ways to build a record, so neither can be
+mislabelled. Toolshed's `/api/meta` publishes `resolved`. The cf-harness
+console and run state publish `projected`: the session's runtime is built
+lazily on the first `run_pattern` and may never be built at all, and a host may
+supply its own session factory, so what those surfaces know at the time they
+publish is what the run expects to be at. A projection goes through the same
+`presetCfcOptions` and `resolveCfcDials` the Runtime itself resolves from —
+the same resolution, not a second statement of it — but the field says what it
+is. `deno task cfc-audit --expected-posture` compares a published record
+against a written-down profile, and fails a deployment that publishes a
+projection; see the cf-harness README.
+
+Every value that resolution returns is a rung of its own dial.
+`resolveCfcDials` checks each stated value against the same table of rungs the
+record's `decidesOn` is read from, and throws on one that is not among them,
+naming the dial and its rungs. The two dials that are simply on or off take
+`true` and `false` and nothing else.
+
+A dial off its ladder has no rung to run on, and the record then disagrees with
+the runtime. For a named-rung dial the guards around a gate test for
+`!== "off"` and let the value through, while the gate itself tests for the one
+enforcing rung and declines to act, so the dial runs as `observe` does while
+the published record calls it enforcing. The two on-or-off dials part the other
+way round: the gates read them for truthiness, while the record tests for
+`true`, so a truthy value that is not `true` runs the gate while the record
+says the gate is off. Resolving such a value to the default instead would hand
+a deployment a posture it never stated, so the construction fails. That check
+reaches every host, whether its dials come from a preset, a worker
+initialization message, a command line, or the CFC section of a JSON manifest.
+
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
@@ -644,9 +745,15 @@ the per-epic implementation notes).
 - **Purpose.** Controls flow-label propagation at the commit boundary. Values
   are `off`, `observe`, and `persist`. `observe` computes the conservative label
   join and emits diagnostics but writes nothing; `persist` writes the derived
-  label components onto every value write target. Propagation runs only when the
-  enforcement mode is at least `observe`; it derives and stores labels but never
-  rejects on its own.
+  label components onto value write targets, except where the target's declared
+  store policy already carries every clause the join would state there and the
+  component adds no integrity of its own — such an entry changes no label a
+  reader resolves, so the persist seam drops it. A transaction the runtime
+  attributes to an implementation carries derivation provenance in its
+  integrity, which no store policy states, so its value entries are kept and a
+  labeled collection an attributed writer maintains still grows per element.
+  Propagation runs only when the enforcement mode is at least `observe`; it
+  derives and stores labels but never rejects on its own.
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `persist` as the downstream egress gates (render ceiling, sink
   ceilings, and the LLM path) come online.
@@ -658,7 +765,11 @@ the per-epic implementation notes).
 
 ### `cfcWriteFloor`
 
-- **Toggle via.** `RuntimeOptions.cfcWriteFloor`.
+- **Toggle via.** `RuntimeOptions.cfcWriteFloor`; per-environment through the
+  `remoteClient` preset param, which `PiecesController.initialize` accepts and
+  forwards. The pattern multi-runtime harness routes it on to each worker
+  runtime, per session or for the whole harness, so an integration test can
+  drive real patterns against an enforcing floor.
 - **Added by.** Bernhard Seefeld, in "write-side requiredIntegrity floor (Epic
   D3, SC-18)" (#4479, 2026-07-02).
 - **Purpose.** A write-side minimum-integrity check. Values are `off`,
@@ -669,7 +780,7 @@ the per-epic implementation notes).
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `enforce` once field testing confirms the floor does not
   over-reject legitimate writes.
-- **Status on 2026-07-08.** Implemented and in staged rollout.
+- **Status on 2026-08-19.** Implemented and in staged rollout.
 - **Path to removal.** Once integrity propagation is complete and the floor is
   proven safe, the check could fold into the base enforcement ladder and the
   separate dial could be retired.
@@ -831,10 +942,11 @@ the per-epic implementation notes).
   the lower rungs kept for diagnostics, like the other CFC ladders.
 
 > The related `RuntimeOptions` fields `cfcSinkMaxConfidentiality`,
-> `cfcPolicyRecords`, and `cfcTrustConfig` are CFC _configuration inputs_ (the
-> policy records, per-sink ceilings, and trust statements the dials evaluate
-> against), not on/off rollout dials, so they are not tracked as flags here.
-> They are validated and frozen at `Runtime` construction.
+> `cfcReadMaxConfidentiality` (with `cfcReadOnExceed`), `cfcPolicyRecords`, and
+> `cfcTrustConfig` are CFC _configuration inputs_ (the policy records, per-sink
+> ceilings, the runtime-wide `db.query` read ceiling, and trust statements the
+> dials evaluate against), not on/off rollout dials, so they are not tracked as
+> flags here. They are validated and frozen at `Runtime` construction.
 
 ---
 
@@ -1067,23 +1179,26 @@ the per-epic implementation notes).
   [`packages/shell/src/lib/render-ceiling.ts`](../../packages/shell/src/lib/render-ceiling.ts).
   Because the ceiling crosses the worker boundary in the fixed initialization
   data, flipping it takes effect on the next runtime (a reload or re-login), not
-  live.
+  live. A browser integration test states the side it needs through the
+  `renderCeiling` option of `ShellIntegration.goto`, which writes the same key
+  after the navigation and before the login.
 - **Added by.** Bernhard Seefeld, in "populate the render confidentiality
   ceiling behind a shell dogfood flag (Epic H3a)" (#4550, 2026-07-07).
 - **Purpose.** Populates the CFC render confidentiality ceiling in the shell's
-  runtime. When on, display sinks admit only the acting user's own identity atom
-  plus allow-listed influence-class caveat kinds; everything else fails closed
-  and renders as a blocked placeholder, and author-supplied render-boundary
-  declassification is denied.
-- **Current default and planned end state.** Off by default. It changes what the
-  shell renders and is expected to over-block until exchange resolution (a later
-  CFC stage, Epic H3b) lands, so it is enabled deliberately per browser profile
-  for dogfooding. The end state is to graduate the ceiling on once exchange
-  resolution makes the blocking precise.
-- **Status on 2026-07-08.** Implemented, off by default, dogfood only.
-- **Path to removal.** Land exchange resolution so the ceiling stops
-  over-blocking, turn it on by default, and then remove the localStorage toggle
-  and make the ceiling unconditional.
+  runtime. Display sinks admit the acting user's identity and personal-space
+  atoms plus allow-listed influence-class caveat kinds. Before the fit check,
+  the worker resolves shared `Space` labels through verified reader membership;
+  a delegate's access to the session workspace requires its own membership
+  evidence. Confidentiality the ceiling does not satisfy stays blocked, and
+  author-supplied render-boundary declassification is denied.
+- **Current default and planned end state.** Off by default and enabled per
+  browser profile for dogfooding. The end state is to enable the ceiling by
+  default and make it unconditional.
+- **Status on 2026-09-08.** Exchange resolution is implemented. Where reader
+  membership is required, missing or unsynced ACL evidence keeps the content
+  blocked; a reader grant admits it and a revocation blocks it again.
+- **Path to removal.** Finish dogfood validation, turn the ceiling on by default,
+  then remove the localStorage toggle and make the ceiling unconditional.
 
 ## Category 5: Fuse mount cache tuning
 
@@ -1206,9 +1321,24 @@ site has:
 
 The second is the weaker claim, but it does not fail quietly, and that is the
 point. Add a production use of one of these values and the throw fires — at the
-moment the use is added, in the change that added it — leaving exactly two
-honest ways forward: implement the handling the throw names, or back the use
-out. So the tripwire is its own enforcement, which is why an ungated site is
+moment the use is added, in the change that added it. Three honest ways lead out
+of that: implement the handling the throw names, back the use out, or establish
+that the site was never one a refusal belonged at and give it the answer it
+owes.
+
+That third one is rare and carries the heaviest burden of proof, because it
+closes nothing. A site taking it still cannot reach what the value holds; what
+changes is that it reports that in a form its caller can act on rather than
+throwing. So it is available only where the site has somewhere to put the
+report and records it there, and where refusing would cost more than the gap
+does — a walk under a subscription that has to keep delivering cannot throw at
+all, and a walk that only decides what a path finds is reporting an absence
+rather than handing back a wrong value. Reaching for a non-throwing predicate,
+on its own, is not this: without the record it is the quiet exemption the next
+obligation rules out, and the two are told apart by what the site does with the
+answer rather than by which identifier it calls.
+
+So the tripwire is its own enforcement, which is why an ungated site is
 legitimate. What it is not is a flag, so do not cite this section as though one
 stood behind every throw.
 
@@ -1226,7 +1356,10 @@ than at any one of the sites:
 - **Meeting one.** A throw firing is the instrument working, not a defect in it.
   Implement the missing handling at the site it names — for a flag-gated site
   that work _is_ the flag's graduation work — or back out the use that reached
-  it. What is not on the list is exempting the value so the walk stays quiet.
+  it, or take the third way above and say in the change why the site owes an
+  answer rather than a refusal. What is not on the list is exempting the value
+  so the walk stays quiet, and swapping a throwing call for a non-throwing one
+  without recording what the site now under-reports is that.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these
@@ -1274,7 +1407,8 @@ The background piece service's main and worker processes use the same mapping
 and the same presets, so the server-side wirings agree on how a value parses.
 
 The CLI is not one of them. `cf`, the pieces controller behind it, the agents
-host and `cast-admin` are clients of a deployment rather than part of one, and
+host, the GitHub connector host and `cast-admin` are clients of a deployment
+rather than part of one, and
 they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
@@ -1316,7 +1450,8 @@ The shell disagrees with its server only by explicit define: toolshed bakes
 the defines and serves the bundle, so the two ship one posture per deploy.
 Every other client is installed, deployed, or checked out on its own
 schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
-agents host, the background-piece admin CLI — and the environment they read
+agents host, the GitHub connector host, the background-piece admin CLI — and
+the environment they read
 belongs to whoever launched them, not to the deployment they talk to. Left
 there, the operator has to know a deployment's flags and set them by hand, and
 nothing reports it when they do not.
@@ -1326,7 +1461,7 @@ These clients take the posture from the server instead. Each one calls
 before constructing its `Runtime`:
 
 ```
-cf / pieces controller / agents host / cast-admin
+cf / pieces controller / agents host / github host / cast-admin
   |
   +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
   |     the posture the SERVER runs at

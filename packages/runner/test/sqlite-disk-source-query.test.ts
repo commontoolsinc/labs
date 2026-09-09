@@ -6,12 +6,13 @@
 // Reading ROWS from a seeded on-disk file end to end (register -> query ->
 // rows, and the unregistered cell-db fallback) is proven against the real
 // client/server transport in packages/memory/test/v2-sqlite-disk-source.test.ts
-// (loopback). That test owns the `@db/sqlite` file-seeding dependency; here we
-// stay dependency-free and prove only the runner-specific delta: the provider
-// delegates register/execute to the session, and the server's read-only
-// rejection for a registered id surfaces back through the runner. The write is
-// rejected on `id` membership BEFORE any file attach, so no on-disk file is
-// needed.
+// (loopback), and labeling such a read through a pattern input is proven in
+// this package's integration lane (integration/sqlite-cfc-label-injected.test.ts).
+// Both seed a real file with `@db/sqlite`; this UNIT lane does not, and proves
+// only the runner-specific delta: the provider delegates register/execute to
+// the session, and the server's read-only rejection for a registered id
+// surfaces back through the runner. The write is rejected on `id` membership
+// BEFORE any file attach, so no on-disk file is needed here.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

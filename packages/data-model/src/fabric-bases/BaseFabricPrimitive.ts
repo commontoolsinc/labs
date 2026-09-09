@@ -64,8 +64,7 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    * which have no enumerable own properties for an inspector to find.
    *
    * Delegates to the canonical debug renderer rather than formatting here, so
-   * that this surface improves whenever that one does. Instance state is
-   * elided as `(...)`.
+   * that this surface improves whenever that one does.
    *
    * Duplicated on `BaseFabricInstance`, unavoidably. There is no shared base
    * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the

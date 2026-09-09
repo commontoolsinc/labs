@@ -47,6 +47,7 @@ import {
   isRetryableCommitRejection,
   isStaleReadConflict,
 } from "../src/storage/rejection.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("ui-cell-write space");
 const space = spaceSigner.did() as MemorySpace;
@@ -66,20 +67,6 @@ const schema = {
 } as const;
 
 type Doc = { drafts: { message?: string; other?: string } };
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /**
  * The engine's stale-read rejection, byte-shaped like the live tap evidence

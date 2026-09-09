@@ -255,6 +255,104 @@ function compiledPattern(
 }
 
 describe("listPieceCallables", () => {
+  it("loads the addressed piece without starting it or the space root", async () => {
+    const resultRoot = cell(
+      { addTopic: { $stream: true } },
+      {
+        type: "object",
+        properties: { addTopic: ADD_TOPIC_EVENT },
+      },
+    );
+    const inputRoot = cell(undefined, undefined);
+    const pieceRoot = {
+      ...pieceRootCell({ addTopic: { $stream: true } }),
+      entityId: { "/": "fid1:piece-stored" },
+    };
+    const getPieceCellCalls: unknown[][] = [];
+    let ensureCalls = 0;
+    const manager = {
+      ensureDefaultPattern: () => {
+        ensureCalls++;
+        return Promise.resolve();
+      },
+      getPieceCell: (...args: unknown[]) => {
+        getPieceCellCalls.push(args);
+        return Promise.resolve(pieceRoot);
+      },
+      getResult: () => resultRoot,
+      getArgument: () => inputRoot,
+      getSpace: () => "home",
+    };
+
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-stored",
+        space: "home",
+      },
+      { loadPieces: () => Promise.resolve(manager as never) },
+    );
+
+    expect(ensureCalls).toBe(0);
+    expect(getPieceCellCalls).toEqual([
+      [
+        "fid1:piece-stored",
+        { reconcile: true, start: false },
+        undefined,
+        undefined,
+      ],
+    ]);
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["addTopic"]);
+  });
+
+  it("loads the pattern reference and compiled pattern concurrently", async () => {
+    const resultRoot = cell(
+      { addTopic: { $stream: true } },
+      {
+        type: "object",
+        properties: { addTopic: ADD_TOPIC_EVENT },
+      },
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => release = resolve);
+    const started: string[] = [];
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getCell: () => resultRoot,
+      getPatternRef: async () => {
+        started.push("reference");
+        await gate;
+        return TEST_PATTERN_REF;
+      },
+      getPattern: async () => {
+        started.push("compiled");
+        await gate;
+        return compiledPattern({ result: {}, nodes: [] });
+      },
+    };
+
+    const pending = listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-stored",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({ getSpace: () => "home" } as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+    for (let i = 0; i < 10 && started.length < 2; i++) await Promise.resolve();
+    const beforeRelease = [...started].sort();
+    release();
+
+    expect(beforeRelease).toEqual(["compiled", "reference"]);
+    await pending;
+  });
+
   it("lists handlers and tools with schemas; excludes data; result shadows input", async () => {
     const resultRoot = cell(
       {

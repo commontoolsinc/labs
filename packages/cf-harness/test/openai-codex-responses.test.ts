@@ -51,6 +51,7 @@ Deno.test("Codex Responses client rejects conflicting credential owner bindings"
   assertThrows(
     () =>
       new OpenAICodexResponsesClient({
+        transportRetries: 0,
         credentialResolver: {
           ownerKey: owner.ownerKey,
           credentialOwner: owner,
@@ -64,6 +65,7 @@ Deno.test("Codex Responses client rejects conflicting credential owner bindings"
   assertThrows(
     () =>
       new OpenAICodexResponsesClient({
+        transportRetries: 0,
         credentialResolver: {
           ownerKey: "loom:user-b",
           credentialOwner: owner,
@@ -78,6 +80,7 @@ Deno.test("Codex Responses client rejects conflicting credential owner bindings"
 Deno.test("Codex Responses client sends the pinned owner-authenticated request", async () => {
   let request: { input: URL | RequestInfo; init?: RequestInit } | undefined;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (input, init) => {
       request = { input, init };
@@ -130,6 +133,7 @@ Deno.test("Codex Responses supports stable affinity and reasoning controls", asy
   let body: Record<string, unknown> | undefined;
   let headers: Headers | undefined;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (_input, init) => {
       body = JSON.parse(String(init?.body));
@@ -166,6 +170,7 @@ Deno.test("Codex Responses supports stable affinity and reasoning controls", asy
 Deno.test("Codex Responses rejects API prompt cache mode controls", async () => {
   let resolvedCredential = false;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: {
       resolve: () => {
         resolvedCredential = true;
@@ -195,6 +200,7 @@ Deno.test("Codex Responses client bounds stable run affinity identifiers", async
   const requests: Array<{ headers: Headers; body: Record<string, unknown> }> =
     [];
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (_input, init) => {
       requests.push({
@@ -256,6 +262,7 @@ Deno.test("Codex Responses client recovers streamed output items when store:fals
   // streamed items or it silently drops the model's message and tool calls
   // (observed live: agents did nothing, 0 tool calls, empty final text).
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(sse(
@@ -302,6 +309,7 @@ Deno.test("Codex Responses client recovers streamed output items when the termin
   // The same backend has also been observed returning `output: null` (not just
   // an empty array) with valid streamed items. Treat null like empty.
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(sse(
@@ -336,6 +344,7 @@ Deno.test("Codex Responses client recovers streamed output items when the termin
 Deno.test("Codex Responses client normalizes tool calls and preserves encrypted continuation", async () => {
   const requestBodies: Array<Record<string, unknown>> = [];
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (_input, init) => {
       requestBodies.push(JSON.parse(String(init?.body)));
@@ -425,6 +434,7 @@ Deno.test("Codex Responses client normalizes tool calls and preserves encrypted 
 Deno.test("Codex Responses client rejects cross-model continuation before resolving credentials", async () => {
   let credentialResolutions = 0;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: {
       resolve: () => {
         credentialResolutions += 1;
@@ -466,6 +476,7 @@ Deno.test("Codex Responses client rejects cross-model continuation before resolv
 
 Deno.test("Codex Responses client surfaces refusal-only output", async () => {
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(sse({
@@ -496,6 +507,7 @@ Deno.test("Codex Responses client surfaces refusal-only output", async () => {
 
 Deno.test("Codex Responses client rejects streams without a terminal event", async () => {
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(
@@ -519,6 +531,7 @@ Deno.test("Codex Responses client rejects streams without a terminal event", asy
 
 Deno.test("Codex Responses client rejects malformed SSE JSON", async () => {
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(
@@ -544,6 +557,7 @@ Deno.test("Codex Responses client keeps multiple tool calls and failure outputs 
   const requestBodies: Array<Record<string, unknown>> = [];
   let requestCount = 0;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (_input, init) => {
       requestBodies.push(JSON.parse(String(init?.body)));
@@ -632,6 +646,7 @@ Deno.test("Codex Responses client maps bounded image attachments", async () => {
     });
     let requestBody: Record<string, unknown> | undefined;
     const client = new OpenAICodexResponsesClient({
+      transportRetries: 0,
       credentialResolver: { resolve: () => Promise.resolve(credential) },
       fetchFn: (_input, init) => {
         requestBody = JSON.parse(String(init?.body));
@@ -667,6 +682,7 @@ Deno.test("Codex Responses client maps bounded image attachments", async () => {
 
 Deno.test("Codex Responses client rejects incomplete tool calls", async () => {
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(sse({
@@ -718,6 +734,7 @@ Deno.test("Codex Responses client parses CRLF SSE split across byte boundaries",
     },
   });
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () => Promise.resolve(new Response(body, { status: 200 })),
   });
@@ -741,6 +758,7 @@ Deno.test("Codex Responses client parses CRLF SSE split across byte boundaries",
 
 Deno.test("Codex Responses client rejects conflicting duplicate tool-call ids", async () => {
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(sse({
@@ -781,6 +799,7 @@ Deno.test("Codex model discovery is live, owner-authenticated, and ordered", asy
   let requestedHeaders = new Headers();
   let requestedRedirect: RequestRedirect | undefined;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (input, init) => {
       requestedUrl = String(input);
@@ -846,6 +865,7 @@ Deno.test("Codex model discovery classifies provider failures", async () => {
     ] as const
   ) {
     const client = new OpenAICodexResponsesClient({
+      transportRetries: 0,
       credentialResolver: { resolve: () => Promise.resolve(credential) },
       fetchFn,
     });
@@ -859,6 +879,7 @@ Deno.test("Codex model discovery classifies provider failures", async () => {
 Deno.test("Codex Responses quota errors are concise and do not retain response bodies", async () => {
   const attempts: unknown[] = [];
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(
@@ -905,6 +926,7 @@ Deno.test("Codex Responses classifies provider HTTP failures", async () => {
     ] as const
   ) {
     const client = new OpenAICodexResponsesClient({
+      transportRetries: 0,
       credentialResolver: { resolve: () => Promise.resolve(credential) },
       fetchFn: () => Promise.resolve(new Response("unavailable", { status })),
     });
@@ -926,6 +948,7 @@ Deno.test("Codex Responses classifies provider HTTP failures", async () => {
 Deno.test("Codex transport errors redact credential and account values", async () => {
   const attempts: unknown[] = [];
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.reject(
@@ -964,6 +987,7 @@ Deno.test("Codex Responses bounds failures while reading provider error bodies",
     },
   });
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () => Promise.resolve(new Response(body, { status: 503 })),
   });
@@ -986,6 +1010,7 @@ Deno.test("Codex Responses preserves abort during provider error diagnostics", a
   const controller = new AbortController();
   const reason = new Error("abort during provider diagnostics");
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(new Response("unavailable", { status: 503 })),
@@ -1020,6 +1045,7 @@ Deno.test("Codex Responses abort cancels an active stream without retry", async 
     },
   });
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: {
       resolve: (signal) => {
         assertEquals(signal, controller.signal);
@@ -1061,6 +1087,7 @@ Deno.test("Codex Responses preserves non-DOM abort reasons when stream cancellat
   });
   const controller = new AbortController();
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () => {
       markRequested();
@@ -1095,6 +1122,7 @@ Deno.test("Codex Responses preserves abort after credential resolution", async (
   });
   let requests = 0;
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: {
       resolve: async () => {
         markResolving();
@@ -1146,6 +1174,7 @@ Deno.test("Codex Responses returns on the first terminal event and cancels a kee
     },
   });
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () => Promise.resolve(new Response(body, { status: 200 })),
   });
@@ -1164,6 +1193,7 @@ Deno.test("Codex Responses returns on the first terminal event and cancels a kee
 
 Deno.test("Codex Responses recognizes response.failed as terminal", async () => {
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () =>
       Promise.resolve(sse({
@@ -1182,7 +1212,7 @@ Deno.test("Codex Responses recognizes response.failed as terminal", async () => 
         runId: "run-response-failed",
       }),
     HarnessControlError,
-    "invalid terminal response",
+    "Codex Responses ended with status failed",
   );
 });
 
@@ -1197,6 +1227,7 @@ Deno.test("Codex Responses cancels the stream after malformed SSE", async () => 
     },
   });
   const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: () => Promise.resolve(new Response(body, { status: 200 })),
   });

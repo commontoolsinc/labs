@@ -26,6 +26,7 @@ import {
   readPiecePin,
   repairPieces,
   type RepairReport,
+  type RepairRow,
   type RestoreOutcome,
   restorePiece,
   type RetargetSource,
@@ -41,12 +42,16 @@ import {
 import { retargetPieces } from "@commonfabric/piece/ops/bulk-retarget";
 import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
-import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
+import {
+  loadPieces,
+  type PieceConfig,
+  type PieceResolutionDeps,
+  resolveAddressedPieceConfig,
+  type SpaceConfig,
+} from "./piece.ts";
 
-export interface SourcePinDependencies {
-  loadPieces?: typeof loadPieces;
-  resolvePieceAddress?: typeof resolvePieceAddress;
-}
+/** What {@link readSourcePin} resolves its address and connection through. */
+export type SourcePinDependencies = PieceResolutionDeps;
 
 /**
  * Read one piece's source pin — reference, current revision when a log
@@ -61,11 +66,13 @@ export async function readSourcePin(
   deps: SourcePinDependencies = {},
 ): Promise<PiecePin | undefined> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
+  const resolved = await resolveAddressedPieceConfig(pieces, config, deps);
+  return await readPiecePin(
     pieces,
-    config.piece,
+    resolved.piece,
+    new Map(),
+    resolved.pieceScope,
   );
-  return await readPiecePin(pieces, piece, new Map(), config.pieceScope);
 }
 
 /**
@@ -103,6 +110,12 @@ export interface RepairRunRequest {
 
   /** Write the fixer's documents; absent, the run is the dry report. */
   apply?: boolean;
+
+  /**
+   * Called with each row as it settles, so a caller can say where a run that
+   * never returned had reached. Passed through to the engine's own reporter.
+   */
+  onRow?: (row: RepairRow) => void;
 }
 
 export interface RepairRunDependencies {
@@ -171,6 +184,7 @@ export async function runRepair(
       fixerIdentity,
       plan,
       ...(request.apply === true ? { apply: true } : {}),
+      ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
     });
   }
   const module = await (deps.importProgram ?? importProgramSnapshot)(program);
@@ -188,6 +202,7 @@ export async function runRepair(
     fixerIdentity,
     ...(plan === undefined ? {} : { plan }),
     ...(request.apply === true ? { apply: true } : {}),
+    ...(request.onRow === undefined ? {} : { onRow: request.onRow }),
   });
 }
 
@@ -238,6 +253,7 @@ export interface RetargetRunRequest {
    * any such row is refused without them; a dry run needs none.
    */
   accept?: readonly string[];
+
   /** Write each row's source; absent, the run is the classification alone. */
   apply?: boolean;
 
@@ -349,6 +365,7 @@ export interface RollbackRunRequest {
    * precondition being the reference that row produced.
    */
   planPath: string;
+
   /**
    * Pieces the operator accepts, by name, as ones this rollback cannot
    * return — their prior source is not retained. Every other unretained row
@@ -356,12 +373,16 @@ export interface RollbackRunRequest {
    * refuses it too.
    */
   accept?: readonly string[];
+
   /** Restore each row's revision; absent, the run is the classification. */
   apply?: boolean;
+
   /** Pieces one session serves before it is replaced. */
   groupSize?: number;
+
   /** Called as each row settles, for reporting as the run proceeds. */
   onRow?: (row: ApplyRow) => void;
+
   /** The derived plan's `takenAt`; defaults to now. A seam so tests can pin it. */
   takenAt?: string;
 }
@@ -375,6 +396,7 @@ export interface RollbackRunDependencies {
 /** A rollback run's report, beside the plan the derivation produced. */
 export interface RollbackRunResult {
   report: ApplyReport;
+
   /** The derived plan, so a caller can report what it was run from. */
   plan: PiecePlan;
 }
@@ -416,13 +438,12 @@ export interface RestoreRunRequest {
    * returned to and writes nothing.
    */
   revisionId?: string;
+
   /** Perform the restore; absent, the run reads and writes nothing. */
   apply?: boolean;
 }
 
-export interface RestoreRunDependencies {
-  loadPieces?: typeof loadPieces;
-  resolvePieceAddress?: typeof resolvePieceAddress;
+export interface RestoreRunDependencies extends PieceResolutionDeps {
   restorePiece?: typeof restorePiece;
 }
 
@@ -437,19 +458,18 @@ export async function runRestore(
   deps: RestoreRunDependencies = {},
 ): Promise<RestoreOutcome> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
-    pieces,
-    config.piece,
-  );
-  return await (deps.restorePiece ?? restorePiece)(pieces, piece, {
+  const resolved = await resolveAddressedPieceConfig(pieces, config, deps);
+  return await (deps.restorePiece ?? restorePiece)(pieces, resolved.piece, {
     ...(request.revisionId === undefined
       ? {}
       : { revisionId: request.revisionId }),
     ...(request.apply === true ? { apply: true } : {}),
-    // The scope the address carried, threaded the way `readSourcePin`
+    // The scope the address resolved to, threaded the way `readSourcePin`
     // threads it: a scoped reference names a different cell, so a run that
     // dropped it would list and restore a piece nobody asked about.
-    ...(config.pieceScope === undefined ? {} : { scope: config.pieceScope }),
+    ...(resolved.pieceScope === undefined
+      ? {}
+      : { scope: resolved.pieceScope }),
   });
 }
 

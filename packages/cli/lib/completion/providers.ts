@@ -7,7 +7,7 @@
  *
  * Every provider resolves its fabric context from the half-typed line first and
  * the environment second, which is what lets
- * `cf piece call -s other-space --piece <TAB>` list the pieces of `other-space`
+ * `cf piece call -s other-space --cell <TAB>` list the pieces of `other-space`
  * rather than whatever `CF_SPACE`-shaped default the shell happens to carry.
  *
  * Failure is always silent and always empty. A completion request runs while
@@ -20,7 +20,10 @@ import type { Candidate } from "./static.ts";
 import type { CompletionLine } from "./line.ts";
 import { longName } from "./line.ts";
 import { absPath } from "../utils.ts";
-import { normalizeLLMFriendlyRef } from "../llm-friendly-ref.ts";
+import {
+  normalizeLLMFriendlyRef,
+  splitArgumentSuffix,
+} from "../llm-friendly-ref.ts";
 import { parseScopedIdSegment } from "@commonfabric/runner/shared";
 import type { PieceConfig, SpaceConfig } from "../piece.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
@@ -104,12 +107,13 @@ export function resolveSpaceContext(
 }
 
 /**
- * The target reference the line names, in whichever of the four spellings it
- * was written: `--piece`, a positional canonical address, or the piece a
- * `--url` carries.
+ * The target the line names, in whichever spelling it was written: the
+ * `--cell`/`--piece` flag, a positional reference, or the piece a `--url`
+ * carries. Cliffy keys the flag by its leading name, so one lookup answers
+ * for both of its spellings.
  */
 function writtenPieceRef(line: CompletionLine): string | undefined {
-  const piece = line.options.get("piece") ?? line.address;
+  const piece = line.options.get("cell") ?? line.address;
   if (piece) return piece;
   const url = line.options.get("url");
   if (!url) return undefined;
@@ -124,18 +128,18 @@ function writtenPieceRef(line: CompletionLine): string | undefined {
  * Same as `resolveSpaceContext`, plus the target the line already names —
  * parsed through the same grammar the command's own intake parses it with.
  *
- * `normalizeLLMFriendlyRef` reads the canonical reference: the embedded space,
- * the `@scope` suffix, an embedded path, and the `#argument` suffix that
- * selects the arguments cell the way `--input` does. What it does not
- * recognize falls through to the alias grammar, which is `id[@scope]`. Taking
- * the word verbatim as a piece id — which this did — meant every documented
- * spelling but the bare id resolved to a listing call that could not succeed,
- * and so to a slot that silently offered nothing.
+ * `normalizeLLMFriendlyRef` reads the reference: the embedded space, the
+ * `@scope` suffix, an embedded path, and the `#argument` suffix that selects
+ * the arguments cell the way `--input` does. What it does not recognize falls
+ * through to the alias grammar, `id[@scope][#argument]`. Every spelling the
+ * command's intake accepts has to reach one of the two readings: a word taken
+ * verbatim as a piece id resolves to a listing call that cannot succeed, and
+ * so to a slot that silently offers nothing.
  *
  * A malformed reference is `null` rather than a throw: the caller is a
  * provider, and a half-typed word is the normal state of one.
  */
-function resolvePieceContext(line: CompletionLine): PieceConfig | null {
+export function resolvePieceContext(line: CompletionLine): PieceConfig | null {
   const written = writtenPieceRef(line);
   if (!written) return null;
 
@@ -149,9 +153,11 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
   }
 
   if (!ref) {
+    let bare;
     let alias;
     try {
-      alias = parseScopedIdSegment(written);
+      bare = splitArgumentSuffix(written);
+      alias = parseScopedIdSegment(bare.target);
     } catch {
       return null;
     }
@@ -161,6 +167,7 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
       ...space,
       piece: alias.id,
       ...(alias.scope && { pieceScope: alias.scope }),
+      ...(bare.input && { pieceInput: true }),
     };
   }
 
@@ -176,7 +183,7 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
 }
 
 /**
- * What the `--piece` slot accepts: every slug the space's index records, then
+ * What the `--cell` slot accepts: every slug the space's index records, then
  * every piece id.
  *
  * Both are values the flag takes, and the slug is the readable half of that
@@ -261,7 +268,7 @@ export function shapeSlugCandidates(
   });
 }
 
-/** Callables (handlers and streams) exposed by the line's `--piece`. */
+/** Callables (handlers and streams) exposed by the line's `--cell`. */
 async function callableCandidates(
   line: CompletionLine,
 ): Promise<ProviderResult> {
@@ -336,9 +343,10 @@ async function cellPathCandidates(
   if (!config) return NOTHING;
 
   const { parentPath, prefix } = splitPathPrefix(line.word);
-  const keys = await childKeys(config, parentPath, {
-    // `#argument` on the reference and `--input` as a flag are two spellings
-    // of one selection, so both reach the arguments cell here.
+  const { listCellKeys } = await import("../cell-listing.ts");
+  const keys = await listCellKeys(config, parentPath, {
+    // `#argument` on the target and `--input` as a flag are two spellings of
+    // one selection, so both reach the arguments cell here.
     input: line.flags.has("input") || config.pieceInput === true,
   });
   if (keys.length === 0) return NOTHING;
@@ -347,42 +355,6 @@ async function cellPathCandidates(
     candidates: keys.map((key) => ({ value: `${prefix}${key}` })),
     directives: [{ kind: "nospace" }],
   };
-}
-
-/**
- * Keys directly under `path` on a piece's cell. An array yields its indices, an
- * object its property names, and a leaf yields nothing — which is the correct
- * signal that the path is already complete.
- *
- * A path embedded in the reference comes first, the way `mergePiecePath` puts
- * it, so `--piece /of:fid1:…/items` completes `items`' keys rather than the
- * root's.
- */
-async function childKeys(
-  config: PieceConfig,
-  path: string,
-  options: { input?: boolean } = {},
-): Promise<string[]> {
-  const { getCellValue } = await import("../piece.ts");
-  const { parseCellPath } = await import("@commonfabric/runner");
-  const segments = [
-    ...(config.piecePath ?? []),
-    ...(path ? parseCellPath(path) : []),
-  ];
-  return keysOf(await getCellValue(config, segments, options));
-}
-
-/**
- * The completable keys of one cell value: an array yields its indices, an
- * object its property names, and a leaf yields nothing — which is the correct
- * signal that the path already names a value rather than a container.
- */
-export function keysOf(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((_, index) => String(index));
-  if (value && typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>);
-  }
-  return [];
 }
 
 /**
@@ -412,7 +384,9 @@ export function splitPathPrefix(
  * wish commits a cell to the space: a Tab must not write.
  */
 const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
-  "piece get",
+  "cell get",
+  // The superseded top-level spelling, which still completes its own options
+  // for a caller who has not migrated.
   "get",
 ];
 
@@ -426,7 +400,7 @@ const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
  *
  * The vocabulary needs no request the slot does not already have: the value
  * being projected is the one at the piece and path the line names, which is
- * what `cf get` would read.
+ * what `cf cell get` would read.
  */
 function projectionFieldCandidates(
   flag: "select" | "schema",
@@ -642,12 +616,14 @@ export function shapeProjectionCandidates(
 }
 
 /**
- * `pieceId/path/to/field` endpoints for `cf piece link`.
+ * A `pieceId/path/to/field` token, completed in both halves.
  *
- * Before the `/` the candidates are piece ids; after it they are that piece's
- * cell keys, so both halves of a link reference complete.
+ * Before the `/` the candidates are what a `--cell` takes — the space's slugs
+ * and its piece ids; after it they are that piece's cell keys, so one slot
+ * spans two vocabularies. `nospace` holds the cursor at the separator, which
+ * continues the same word.
  */
-async function linkEndpointCandidates(
+async function pieceWithPathCandidates(
   line: CompletionLine,
 ): Promise<ProviderResult> {
   const typed = line.word;
@@ -663,10 +639,11 @@ async function linkEndpointCandidates(
   const pieceId = typed.slice(0, cut);
   const { parentPath } = splitPathPrefix(typed.slice(cut + 1));
 
-  const keys = await childKeys({ ...config, piece: pieceId }, parentPath);
+  const { listCellKeys } = await import("../cell-listing.ts");
+  const keys = await listCellKeys({ ...config, piece: pieceId }, parentPath);
   if (keys.length === 0) return NOTHING;
 
-  const prefix = linkEndpointPrefix(pieceId, parentPath);
+  const prefix = pieceWithPathPrefix(pieceId, parentPath);
   return {
     candidates: keys.map((key) => ({ value: `${prefix}${key}` })),
     directives: [{ kind: "nospace" }],
@@ -674,10 +651,11 @@ async function linkEndpointCandidates(
 }
 
 /**
- * Prefix for a `piece link` endpoint candidate. The empty parent path is the
- * case that matters: `id//key` would be a different, invalid reference.
+ * Prefix a `pieceId/path` candidate carries, so the shell replaces the whole
+ * token. The empty parent path is the case that matters: `id//key` would be a
+ * different, invalid reference.
  */
-export function linkEndpointPrefix(
+export function pieceWithPathPrefix(
   pieceId: string,
   parentPath: string,
 ): string {
@@ -894,7 +872,10 @@ function onlyOn(
 const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
   "check",
   "piece new",
+  // Both mounts of `set-home`: the superseded one keeps completing its own
+  // flags for a caller who has not migrated, it is only never suggested.
   "piece set-home",
+  "space set-home",
   "piece setsrc",
   "piece survey",
   "test",
@@ -942,7 +923,9 @@ function patternFiles(): Promise<ProviderResult> {
  * own file completion only when the option is path-shaped.
  */
 const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
-  piece: pieceCandidates,
+  // `--piece` is a deprecated name for the same option, and Cliffy keys it by
+  // the leading one, so this entry serves both spellings.
+  cell: pieceCandidates,
   select: onlyOn(
     PROJECTION_SOURCE_COMMANDS,
     projectionFieldCandidates("select"),
@@ -970,7 +953,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
     () => Promise.resolve(directive({ kind: "dirs" })),
   ),
   // `--list` names a piece to survey or repair instead of a collection, so it
-  // takes what `--piece` takes. Scoped, because a `--list` elsewhere would
+  // takes what `--cell` takes. Scoped, because a `--list` elsewhere would
   // mean something else entirely.
   list: onlyOn(["piece survey", "piece repair"], pieceCandidates),
   // `cf piece survey --validator` reads a JSON-schema file.
@@ -1040,35 +1023,37 @@ const INSPECT_ENTITY_COMMANDS: readonly string[] = [
 /**
  * Positional providers, keyed by `<command path>:<argument name>`. The command
  * path disambiguates arguments that share a name across commands — `path` means
- * a cell path under `piece get` but a filesystem path elsewhere.
+ * a cell path under `cf cell get` but a filesystem path elsewhere.
  */
 const ARGUMENT_PROVIDERS: Readonly<
   Record<string, (line: CompletionLine) => Promise<ProviderResult>>
 > = {
-  "piece call:callable": callableCandidates,
-  // The first positional of `piece get`/`piece set` is a cell path unless the
-  // caller writes a canonical address there, and an address is pasted rather
-  // than completed — so the path candidates serve the slot either way. The
-  // top-level spellings are the same commands mounted at top level, and
-  // their entries keep the two spellings completing identically.
-  "piece get:addressOrPath": cellPathCandidates,
-  "piece get:path": cellPathCandidates,
+  "cell get-label:path": cellPathCandidates,
   "piece get-label:path": cellPathCandidates,
-  "piece set:addressOrPath": cellPathCandidates,
-  "piece set:path": cellPathCandidates,
+  "cell set-label:path": cellPathCandidates,
   "piece set-label:path": cellPathCandidates,
+  "piece call:callable": callableCandidates,
   "call:callable": callableCandidates,
+  // The first positional of `cf cell get`/`cf cell set` is a cell path unless the caller
+  // writes a canonical address there, and an address is pasted rather than
+  // completed — so the path candidates serve the slot either way.
+  "cell get:addressOrPath": cellPathCandidates,
   "get:addressOrPath": cellPathCandidates,
+  "cell get:path": cellPathCandidates,
   "get:path": cellPathCandidates,
+  "cell set:addressOrPath": cellPathCandidates,
   "set:addressOrPath": cellPathCandidates,
+  "cell set:path": cellPathCandidates,
   "set:path": cellPathCandidates,
-  "piece link:source": linkEndpointCandidates,
-  "piece link:target": linkEndpointCandidates,
+  "piece link:source": pieceWithPathCandidates,
+  "piece link:target": pieceWithPathCandidates,
   // Naming an existing slug re-points it, which is the case completion helps
   // with; a slug being coined for the first time is a word nothing can offer.
   "piece set-slug:slug": slugCandidates,
-  // The target a slug redirects to takes what `--piece` takes.
-  "piece set-slug:source": pieceCandidates,
+  // A slug redirects to a cell, which is a piece and a path inside it — the
+  // spelling that points a name at a collection. Same grammar as a link
+  // endpoint, so the same candidates.
+  "piece set-slug:source": pieceWithPathCandidates,
   "piece new:main": patternFiles,
   "piece setsrc:main": patternFiles,
   "check:files": patternFiles,
@@ -1078,6 +1063,7 @@ const ARGUMENT_PROVIDERS: Readonly<
   "id did:keypath": () =>
     Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   "piece set-home:main": patternFiles,
+  "space set-home:main": patternFiles,
   "piece getsrc:outpath": () => Promise.resolve(directive({ kind: "files" })),
   "deps update:file": () => Promise.resolve(directive({ kind: "files" })),
   "fuse mount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),

@@ -42,7 +42,7 @@ duplicated on three surfaces:
    result links. Narrowing multiplies the problem: `schemaAtPath` re-attaches
    the reachable `$defs` closure to every narrowed variant, so N views into
    one type store N overlapping closures.
-2. **Client→server, per watch.** `refreshWatchSet`
+2. **Client→server, per watch.** `SpaceReplica.#refreshWatchSet()`
    (`packages/runner/src/storage/v2.ts`) sends one watch spec per (doc,
    selector), each with the full inline selector schema. No compression
    exists in this direction, and a reconnect the server cannot resume

@@ -3,8 +3,10 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   FabricInstance,
   FabricPrimitive,
+  toCompactDebugString,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
 import {
   type FabricExecValue,
   isPattern,
@@ -20,7 +22,6 @@ import {
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaLink,
-  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
@@ -30,6 +31,7 @@ import {
   sanitizeSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
+import { isAliasBinding } from "./alias-binding.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
@@ -47,6 +49,13 @@ import type {
 } from "./builder/types.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { getServerExecutionConfig } from "@commonfabric/memory/v2";
+
+/**
+ * Longest rendering of a binding an error message carries. A binding can
+ * hold anything a cell can, and the message names it rather than carrying
+ * it.
+ */
+const MAX_BINDING_RENDER = 200;
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
@@ -110,7 +119,11 @@ const foldDeclaredScopeIntoLinkSchema = (
   if (authoredRootSchema === undefined || !isObjectOrArray(link.schema)) {
     return link;
   }
-  if (ContextualFlowControl.getSchemaScopeCap(link.schema) !== undefined) {
+  const emittedSchema = sanitizeAliasSchemaForBinding(link.schema);
+  if (
+    !isObjectOrArray(emittedSchema) ||
+    ContextualFlowControl.getSchemaScopeCap(emittedSchema) !== undefined
+  ) {
     return link;
   }
   const authoredSlotSchema = path.length > 0
@@ -125,7 +138,13 @@ const foldDeclaredScopeIntoLinkSchema = (
   ) {
     return link;
   }
-  return { ...link, schema: { ...link.schema, scope: declaredCap } };
+  return {
+    ...link,
+    schema: deepFrozenCloneAndInternSchema({
+      ...emittedSchema,
+      scope: declaredCap,
+    }),
+  };
 };
 
 const scopedLinkForPath = (
@@ -153,9 +172,7 @@ const scopedLinkForPath = (
   }
 
   const finalSchema = schemaOverride ?? childSchema;
-  const linkSchema = finalSchema === undefined
-    ? undefined
-    : sanitizeAliasSchemaForBinding(finalSchema);
+  const linkSchema = finalSchema;
   scope = declaredScope(linkSchema) ?? scope;
 
   return {
@@ -171,6 +188,19 @@ const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
   // schemas without cell wrappers so scoped asCell entries do not stamp the
   // redirect link's own scope and bypass stored argument links.
   sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
+
+/**
+ * Returns a link with a canonical schema without freezing the caller's input.
+ */
+const canonicalSchemaLink = (
+  link: NormalizedFullLink | undefined,
+): NormalizedFullLink | undefined => {
+  if (link === undefined || !isObjectOrArray(link.schema)) return link;
+  const schema = deepFrozenCloneAndInternSchema(
+    sanitizeSchemaForLinks(link.schema, KeepAsCell.All),
+  );
+  return schema === link.schema ? link : { ...link, schema };
+};
 
 const descriptorForPartialCauseAlias = (
   partialCause: JSONValue,
@@ -233,15 +263,20 @@ function sendValueToBindingInner<T>(
   if (argumentCellLink === undefined) {
     argumentCellLink = getMetaLink(cell as Cell<unknown>, "argument")!;
   }
-  // Handle both legacy $alias format and new sigil link format. `$alias` is
-  // only meaningful here because `binding` comes from a Pattern object;
-  // `isWriteRedirectLink` itself no longer matches it.
+  // A binding reaches a write target either as a sigil write redirect or as
+  // an `$alias` record. The second is only meaningful because `binding` comes
+  // from a pattern node graph; the link predicates do not match it, so this
+  // function resolves it here against the instance's argument and result
+  // cells. This and `unwrapOneLevelAndBindToDoc` below are the only two
+  // places that do.
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
     if (isAliasBinding(binding)) {
       const alias = binding.$alias;
       if ((alias.defer ?? 0) > 0) {
         throw new Error(
-          `Cannot write to deferred alias: ${JSON.stringify(binding)}`,
+          `Cannot write to deferred alias: ${
+            toCompactDebugString(binding, { maxLength: MAX_BINDING_RENDER })
+          }`,
         );
       }
       if (alias.partialCause !== undefined) {
@@ -260,7 +295,9 @@ function sendValueToBindingInner<T>(
         );
       } else if (typeof alias.cell !== "string") {
         throw new Error(
-          "Invalid pseudo-alias cell: " + JSON.stringify(binding),
+          `Invalid pseudo-alias cell: ${
+            toCompactDebugString(binding, { maxLength: MAX_BINDING_RENDER })
+          }`,
         );
       } else {
         // Certain strings have special meaning as the cell id
@@ -434,7 +471,13 @@ function sendValueToBindingInner<T>(
     // `Object.is`, not `===`: a constant `NaN` binding legitimately matches a
     // produced `NaN`, and `0` vs `-0` is a genuine mismatch.
     if (!Object.is(binding, value)) {
-      throw new Error(`Got ${value} instead of ${binding}`);
+      throw new Error(
+        `Got ${
+          toCompactDebugString(value, { maxLength: MAX_BINDING_RENDER })
+        } instead of ${
+          toCompactDebugString(binding, { maxLength: MAX_BINDING_RENDER })
+        }`,
+      );
     }
   }
 }
@@ -544,7 +587,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
-  const resultCellLink = resultCell.getAsNormalizedFullLink();
+  const resultCellLink = canonicalSchemaLink(
+    resultCell.getAsNormalizedFullLink(),
+  )!;
+  argumentCellLink = canonicalSchemaLink(argumentCellLink);
 
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
@@ -734,6 +780,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       return converted;
     } else return binding;
   }
+
   return convert(binding, options?.targetSchema) as T;
 }
 

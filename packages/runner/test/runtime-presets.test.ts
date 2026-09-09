@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import {
   ADOPT_SERVER_FLAGS_ENV,
@@ -131,6 +132,8 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   cfcPrefixProvenanceStats: { treat: "absent" },
   cfcTrustConfig: { treat: "absent" },
   cfcSinkMaxConfidentiality: { treat: "absent" },
+  cfcReadMaxConfidentiality: { treat: "absent" },
+  cfcReadOnExceed: { treat: "absent" },
   trustSnapshotProvider: { treat: "absent" },
   hideInternalStackFrames: { treat: "absent" },
   commitBackpressure: { treat: "absent" },
@@ -239,6 +242,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
     } as unknown as NonNullable<RuntimeOptions["telemetry"]>;
     const commitBackpressure = { retryWindowMs: 100 };
     const spaceHostMap = { "did:key:zSpace": "https://host.example" };
+    const readCeiling = ["did:key:zOwner", { anyOf: ["a", "b"] }];
     const onPatternInstantiated = () => {};
 
     it("productionServer", () => {
@@ -269,6 +273,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
         onPatternInstantiated,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -279,6 +286,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
         onPatternInstantiated,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
       });
     });
 
@@ -310,6 +320,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         spaceHostMap,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
         trustSnapshotProvider,
         telemetry,
         consoleHandler,
@@ -322,6 +334,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         spaceHostMap,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
         trustSnapshotProvider,
         telemetry,
         consoleHandler,
@@ -407,10 +421,24 @@ describe("runtimePresets conformance (CT-1814)", () => {
         });
       });
 
-      // A responding server that declares no readerSchemaPrecedence predates
-      // the flag and necessarily runs the strict combine: absence adopts as
-      // the legacy false. A declared value wins as usual.
+      it("warns naming the value, and skips the flag, given a value that is not a boolean", () => {
+        const warn = stub(console, "warn");
+        let parsed;
+        try {
+          parsed = parseServerExperimentalOptions({ modernCellRep: "yes" });
+        } finally {
+          warn.restore();
+        }
+        expect(parsed).toEqual({ readerSchemaPrecedence: false });
+        expect(warn.calls.length).toBe(1);
+        expect(warn.calls[0].args[0]).toContain('modernCellRep=`"yes"`');
+      });
+
       it("adopts legacy false for an absent readerSchemaPrecedence declaration", () => {
+        // A responding server that declares no readerSchemaPrecedence predates
+        // the flag and necessarily runs the strict combine: absence adopts as
+        // the legacy false. A declared value wins as usual.
+
         expect(parseServerExperimentalOptions({}).readerSchemaPrecedence)
           .toBe(false);
         expect(
@@ -699,6 +727,83 @@ describe("runtimePresets conformance (CT-1814)", () => {
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain(ADOPT_SERVER_FLAGS_ENV);
       });
+
+      it("an adopted server-OFF posture rides the deployed-topology presets explicitly, immune to the first-party default", async () => {
+        // The separately-installed-host shape (the #6535 Codex P1 on the
+        // GitHub host): nothing declared in the environment, talking to a
+        // server held on the explicit-OFF rollback posture. Adoption hands
+        // the preset an EXPLICIT `false`, and the presets' `??` fill then
+        // never consults `SERVER_EXECUTION_DEFAULT_ENABLED` — which is why
+        // the first arm of this pin references no constant: it must hold
+        // under EITHER value (that immunity is the rollback lever working
+        // across a staggered upgrade, not a restatement of the absolute
+        // pin in toolshed's server-execution-flag.test.ts).
+        const adopted = await experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          fetch: () =>
+            Promise.resolve(metaResponse({
+              did: "did:key:z",
+              experimental: { serverExecution: false },
+            })),
+        });
+        expect(adopted.serverExecution).toBe(false);
+        for (const preset of ["remoteClient", "productionServer"] as const) {
+          expect(
+            runtimePresets[preset]({
+              apiUrl,
+              storageManager,
+              experimental: adopted,
+            })
+              .experimental?.serverExecution,
+          ).toBe(false);
+        }
+        // The arm adoption replaces: an env-only resolution leaves the
+        // unset flag ABSENT, and the preset fills it with the first-party
+        // constant — under a flipped default that is an ON client against
+        // the rolled-back OFF server, the mixed topology the adoption
+        // exists to prevent. Compared against the imported constant, not a
+        // literal, so this documents the exposure without pinning the
+        // constant's value.
+        expect(
+          runtimePresets.remoteClient({
+            apiUrl,
+            storageManager,
+            experimental: experimentalOptionsFromEnv(() => undefined),
+          }).experimental?.serverExecution,
+        ).toBe(SERVER_EXECUTION_DEFAULT_ENABLED);
+      });
+
+      it("an explicit environment outranks the published posture in both directions, through the preset", async () => {
+        // Both arms stay selectable on a deployed client: the env is the
+        // documented rollback lever and CI's way to pin a lane, so it must
+        // survive adoption AND the preset fill in each direction.
+        for (
+          const arm of [
+            { env: "true", server: false, resolved: true },
+            { env: "false", server: true, resolved: false },
+          ] as const
+        ) {
+          const adopted = await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: (name) =>
+              name === "EXPERIMENTAL_SERVER_EXECUTION" ? arm.env : undefined,
+            fetch: () =>
+              Promise.resolve(metaResponse({
+                did: "did:key:z",
+                experimental: { serverExecution: arm.server },
+              })),
+          });
+          expect(adopted.serverExecution).toBe(arm.resolved);
+          expect(
+            runtimePresets.remoteClient({
+              apiUrl,
+              storageManager,
+              experimental: adopted,
+            }).experimental?.serverExecution,
+          ).toBe(arm.resolved);
+        }
+      });
     });
   });
 
@@ -746,6 +851,19 @@ describe("runtimePresets conformance (CT-1814)", () => {
       expect(output.cfcEnforcementMode).toBe("enforce-strict");
       // The bundle's persist is what makes the strict raise conform.
       expect(output.cfcFlowLabels).toBe("persist");
+    });
+
+    it("lets a host session hold the write floor at observe over the bundle", () => {
+      // The floor's rollout runs observe before enforce (§8.12.4.1 / SC-18),
+      // a rung the all-or-nothing bundle cannot name. The host dial is what
+      // reaches it, so it has to win over the bundle's enforcing value.
+      const output = runtimePresets.remoteClient({
+        ...minimalCore,
+        ...posture,
+        cfcWriteFloor: "observe",
+      });
+      expect(output.cfcWriteFloor).toBe("observe");
+      expect(postureOutputs.remoteClient.cfcWriteFloor).toBe("enforce");
     });
 
     it("ceilings every network-fetch sink public-only and no llm sink", () => {

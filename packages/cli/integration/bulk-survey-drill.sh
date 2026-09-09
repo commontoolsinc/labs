@@ -79,7 +79,7 @@ if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
 fi
 FILED=0
 for title in alpha beta gamma; do
-  if $CF call -q --piece "$BOARD" $ARGS addMember "{\"title\":\"$title\"}" \
+  if $CF piece call -q --piece "$BOARD" $ARGS addMember "{\"title\":\"$title\"}" \
     >/dev/null 2>&1; then
     FILED=$((FILED + 1))
   else
@@ -90,7 +90,7 @@ check "3" "$FILED" "filed alpha, beta, gamma"
 
 step "2. One call seeds the rest of the board-sized set"
 SEED_EXTRA=$((MEMBERS_TOTAL - 3))
-SEEDED=$($CF call -q --piece "$BOARD" $ARGS seedMembers \
+SEEDED=$($CF piece call -q --piece "$BOARD" $ARGS seedMembers \
   "{\"count\":$SEED_EXTRA}" 2>/dev/null | jq -r '.result.filed // empty')
 check "$SEED_EXTRA" "$SEEDED" "one call filed the remaining $SEED_EXTRA"
 
@@ -170,7 +170,7 @@ check "$HOLDER_FACTS" "$PIN_FACTS" \
   "inspect's source pin matches the survey's holder row, symbol included"
 
 step "9. A change shows on the next survey (live read)"
-$CF call -q --piece "$BOARD" $ARGS addMember '{"title":"delta"}' \
+$CF piece call -q --piece "$BOARD" $ARGS addMember '{"title":"delta"}' \
   >/dev/null 2>&1 || bad "addMember delta failed"
 AFTER=$($CF piece survey -q --piece "$BOARD" --path items $ARGS \
   2>/dev/null | head -1 | jq -r '.enumerated.collection')

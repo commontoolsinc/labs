@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import type { JSONSchema } from "@commonfabric/api";
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { hashSchema } from "@/hashSchema.ts";
 
 describe("hashSchema()", () => {

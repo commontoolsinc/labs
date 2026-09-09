@@ -3,15 +3,15 @@ import { describe, it } from "@std/testing/bdd";
 import { CFCellContext } from "./index.ts";
 import { resetRetiredElementWarnings } from "../../core/retired-element.ts";
 
-// The contract for a retired element, exercised on the first one.
-//
-// It stays REGISTERED — that is the whole point. Durable pattern source names
-// it, a piece runs the source it was stored with, and an element the browser
-// does not know is one nothing can warn about. It renders its children and
-// nothing else, and it accepts the props the old source passes without acting
-// on them.
-
 describe("CFCellContext (retired)", () => {
+  // The contract for a retired element, exercised on the first one.
+  //
+  // It stays REGISTERED — that is the whole point. Durable pattern source names
+  // it, a piece runs the source it was stored with, and an element the browser
+  // does not know is one nothing can warn about. It renders its children and
+  // nothing else, and it accepts the props the old source passes without acting
+  // on them.
+
   it("is still registered under its tag", () => {
     expect(customElements.get("cf-cell-context")).toBe(CFCellContext);
   });

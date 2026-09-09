@@ -1,5 +1,5 @@
 import { internSchema } from "@commonfabric/data-model-schema";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 
 import type { Schema } from "../builder/types.ts";

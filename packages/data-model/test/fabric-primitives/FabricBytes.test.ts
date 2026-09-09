@@ -22,9 +22,10 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 describe("FabricBytes", () => {
-  // Pure type-identity / supertype check: cross-cutting carve-out per the
-  // rule (doesn't fit a single member, isn't construction mechanics).
   it("extends `FabricPrimitive` (not `FabricInstance`)", () => {
+    // Pure type-identity / supertype check: cross-cutting carve-out per the
+    // rule (doesn't fit a single member, isn't construction mechanics).
+
     const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
     expect(fb instanceof FabricPrimitive).toBe(true);
     expect(fb instanceof FabricInstance).toBe(false);

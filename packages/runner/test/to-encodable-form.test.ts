@@ -442,7 +442,7 @@ describe("moduleToEncodableForm", () => {
 
     // The implementation became verified during the STANDALONE Engine's
     // evaluation, so it carries process-global content-addressed provenance
-    // (Engine.recordModuleProvenance) and `moduleToEncodableForm` writes a `$implRef`.
+    // (Engine.#recordModuleProvenance) and `moduleToEncodableForm` writes a `$implRef`.
     // But this pattern was registered WITHOUT going through
     // `compilePattern`/`registerEvaluatedModules` on THIS runtime, so its
     // engine's implementation index never saw the artifact and cannot resolve

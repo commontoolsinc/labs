@@ -22,10 +22,12 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
+
 for (let i = 0; i < 32; i++) SAMPLE_HASH[i] = i;
 
 /** A fixed 17-byte hash for deterministic tests. */
 const SAMPLE_HASH_17 = new Uint8Array(17);
+
 for (let i = 0; i < 17; i++) SAMPLE_HASH_17[i] = ((i * 17) + 177) & 0xff;
 
 describe("FabricHash", () => {

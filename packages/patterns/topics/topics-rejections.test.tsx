@@ -2,20 +2,26 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 17` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 35` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
-import { action, assert, TESTS } from "commonfabric";
+import { action, assert, type Default, TESTS, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
-import Topics from "./main.tsx";
-import Topic from "./topic.tsx";
+import Topics, { type TopicDemand } from "./main.tsx";
+import Topic, { type TopicComment, type TopicLink } from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
-  const legacyBoard = Topics({});
+  // Its list and namespace are held here so an UNNAMED topic can be filed
+  // straight into the list, past `addTopic`. Without one there is nothing a
+  // wrongly-running backfill could name, and the assertion that the namespace
+  // stayed empty would hold however the guard behaved.
+  const legacyTopics = new Writable<TopicDemand[] | Default<[]>>([]);
+  const legacyNames = new Writable<Record<string, unknown>>({});
+  const legacyBoard = Topics({ topics: legacyTopics, names: legacyNames });
 
   // One valid signed topic on the board, so `addTopic`'s own rejections have a
   // board to leave unchanged.
@@ -40,6 +46,28 @@ export default pattern(() => {
   });
   const action_add_blank_legacy_agent = action(() => {
     legacyBoard.addTopic.send({ title: "must not land", agentName: " " });
+  });
+
+  // One unnamed topic, filed straight into the list past `addTopic` and
+  // link-bound to the board's table — the state an operator leaves behind
+  // before a backfill. Both halves earn their place: without the topic there
+  // is nothing a backfill could name, and without the wiring its row reads no
+  // name whether one was written or not.
+  const action_file_an_unnamed_topic = action(() => {
+    legacyTopics.push(
+      Topic({
+        title: "Unnamed",
+        createdAt: 1,
+        boardNames: legacyBoard.namesTable,
+      }),
+    );
+  });
+
+  // backfillNames: blank agentName. It writes the namespace rather than a
+  // topic's content, and it is signed on the same terms — a run nobody signed
+  // is a mutation nobody is accountable for.
+  const action_backfill_unsigned = action(() => {
+    legacyBoard.backfillNames.send({ agentName: "   " });
   });
 
   // addComment: empty body; blank agentName.
@@ -132,6 +160,199 @@ export default pattern(() => {
   // and unlike its elders, a MISSING agentName is as rejected as a blank one:
   // the verb postdates the unsigned-caller era and carries no legacy path.
   const directTopic = Topic({ title: "Keep this title" });
+  // A reference is not enough: it must reference one of THIS topic's own
+  // records. A cell that reads back as an object satisfies "is a reference"
+  // while belonging to something else, and a verb that stamped it would write
+  // into a document this topic does not own — silently, since the caller's own
+  // cell would show the change and nothing here would.
+  const foreignComment = new Writable<TopicComment>({
+    body: "elsewhere",
+    sentAt: 1,
+  });
+  const foreignLink = new Writable<TopicLink>({
+    kind: "web",
+    url: "https://example.com/elsewhere",
+    label: "elsewhere",
+  });
+  const action_remove_foreign_comment = action(() => {
+    seedTopic.removeComment.send({
+      comment: foreignComment,
+      agentName: "Sol",
+    });
+  });
+  const action_edit_foreign_comment = action(() => {
+    seedTopic.editComment.send({
+      comment: foreignComment,
+      body: "rewritten from outside",
+      agentName: "Sol",
+    });
+  });
+  const assert_foreign_comment_untouched = assert(() =>
+    foreignComment.get().removedAt === undefined &&
+    foreignComment.get().body === "elsewhere"
+  );
+
+  // The retraction verbs' own refusal arms. Each is a path the Coverage Check
+  // named as unexercised, and each is a way a caller can be wrong that must
+  // produce a value rather than a silent no-op.
+  const action_remove_comment_unsigned = action(() => {
+    seedTopic.removeComment.send({
+      comment: foreignComment,
+      agentName: "   ",
+    });
+  });
+
+  const action_remove_link_both_spellings = action(() => {
+    seedTopic.removeLink.send({
+      link: foreignLink,
+      url: "https://example.com/a",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_link_neither_spelling = action(() => {
+    seedTopic.removeLink.send({ agentName: "Sol" });
+  });
+  const action_remove_link_unknown_url = action(() => {
+    seedTopic.removeLink.send({
+      url: "https://example.com/never-added",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_foreign_link = action(() => {
+    seedTopic.removeLink.send({ link: foreignLink, agentName: "Sol" });
+  });
+  const assert_foreign_link_untouched = assert(() =>
+    foreignLink.get().removedAt === undefined
+  );
+
+  // A payload that is not a reference at all. The verb must refuse rather than
+  // resolve it to nothing and report success — the same shape `mention` and
+  // `unmention` are held to above.
+  const action_remove_comment_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.removeComment as any)?.send({
+      comment: "fid1:notAReference",
+      agentName: "Sol",
+    });
+  });
+  const action_edit_comment_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.editComment as any)?.send({
+      comment: "fid1:notAReference",
+      body: "rewritten",
+      agentName: "Sol",
+    });
+  });
+  const action_remove_link_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (seedTopic.removeLink as any)?.send({
+      link: "fid1:notAReference",
+      agentName: "Sol",
+    });
+  });
+  const action_edit_comment_unsigned = action(() => {
+    seedTopic.editComment.send({
+      comment: foreignComment,
+      body: "rewritten",
+      agentName: "   ",
+    });
+  });
+  const action_remove_link_unsigned = action(() => {
+    seedTopic.removeLink.send({ link: foreignLink, agentName: "   " });
+  });
+
+  // Retracting what is already retracted. A second call is not a no-op that
+  // quietly succeeds: the record carries one retraction, and a caller asking
+  // for another is wrong about the state.
+  const retractedComments = new Writable<TopicComment[]>([]);
+  const retractedLinks = new Writable<TopicLink[]>([]);
+  const retractedTopic = Topic({
+    title: "Already retracted",
+    comments: retractedComments,
+    links: retractedLinks,
+  });
+  const action_seed_retractable = action(() => {
+    retractedTopic.addComment.send({ body: "once", agentName: "Sol" });
+    retractedTopic.addLink.send({
+      url: "https://example.com/once",
+      agentName: "Sol",
+    });
+  });
+  // Blank body, on a comment this topic OWNS and has not retracted. Sent at a
+  // foreign comment it would reject on membership three checks earlier and
+  // never reach the guard it is named for — which line coverage cannot tell
+  // you, because the condition is evaluated on every successful edit.
+  const action_edit_blank_body = action(() => {
+    retractedTopic.editComment.send({
+      comment: retractedComments.key(0),
+      body: "   ",
+      agentName: "Sol",
+    });
+  });
+  const assert_body_survived_blank_edit = assert(() =>
+    retractedComments.get()[0]?.body === "once"
+  );
+
+  // A structural COPY of a comment this topic really holds. It is
+  // content-identical to a stored record, so every content-based check passes
+  // it and only identity separates the two — which makes it the case that says
+  // whether membership is proved by identity or by shape.
+  //
+  // It is also the negative half of view-identity.test.tsx. The browser's
+  // retraction controls bind the elements a filtered, sorted `computed()`
+  // hands them; that those elements still address the stored array is what
+  // that file pins, and this is the case that would pass anyway if membership
+  // were content-based, leaving the property untested.
+  const action_remove_copied_comment = action(() => {
+    const real = retractedTopic.comments[0];
+    if (real) {
+      retractedTopic.removeComment.send({
+        comment: { ...real } as typeof real,
+        agentName: "Sol",
+      });
+    }
+  });
+  const assert_copied_comment_refused = assert(() =>
+    retractedComments.get()[0]?.removedAt === undefined &&
+    retractedTopic.commentCount === 1
+  );
+
+  const action_retract_both = action(() => {
+    retractedTopic.removeComment.send({
+      comment: retractedComments.key(0),
+      agentName: "Sol",
+    });
+    retractedTopic.removeLink.send({
+      link: retractedLinks.key(0),
+      agentName: "Sol",
+    });
+  });
+  const action_retract_comment_again = action(() => {
+    retractedTopic.removeComment.send({
+      comment: retractedComments.key(0),
+      agentName: "Sol",
+    });
+  });
+  const action_edit_retracted_comment = action(() => {
+    retractedTopic.editComment.send({
+      comment: retractedComments.key(0),
+      body: "rewriting a retraction",
+      agentName: "Sol",
+    });
+  });
+  const action_retract_link_again = action(() => {
+    retractedTopic.removeLink.send({
+      link: retractedLinks.key(0),
+      agentName: "Sol",
+    });
+  });
+  const assert_one_retraction_each = assert(() =>
+    retractedTopic.commentCount === 0 &&
+    (retractedComments.get()[0]?.removedAt ?? 0) > 0 &&
+    retractedComments.get()[0]?.body === "once" &&
+    (retractedLinks.get()[0]?.removedAt ?? 0) > 0
+  );
+
   const action_rename_blank_title = action(() => {
     directTopic.setTitle.send({ title: "   ", agentName: "Sol" });
   });
@@ -169,13 +390,26 @@ export default pattern(() => {
 
   const assert_legacy_board_empty = assert(() => legacyBoard.topicCount === 0);
 
+  // The refused backfill wrote no name, which is the half a throw alone does
+  // not prove: the verb rejects before it reaches the namespace. The board
+  // holds one unnamed topic, link-bound to its table, so a backfill that ran
+  // would write `1` and the row would show it. Removing the verb's guard reds
+  // every clause here: the count moves only if the create's rejection also
+  // stopped landing, the namespace gains the key the run wrote, and the row
+  // follows the namespace through the member's own wiring.
+  const assert_unnamed_topic_went_unnamed = assert(() =>
+    legacyBoard.topicCount === 1 &&
+    Object.keys(legacyNames.get()).length === 0 &&
+    legacyBoard.index?.[0]?.shortName === undefined
+  );
+
   return {
     // Every rejection below MUST surface as a thrown handler error —
-    // seventeen throwing actions, seventeen runtime errors. The exact count
+    // thirty-five throwing actions, thirty-five runtime errors. The exact count
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 17,
+    expectRuntimeErrors: 35,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -185,6 +419,9 @@ export default pattern(() => {
       { assertion: assert_board_unchanged },
       { action: action_add_blank_legacy_agent },
       { assertion: assert_legacy_board_empty },
+      { action: action_file_an_unnamed_topic },
+      { action: action_backfill_unsigned },
+      { assertion: assert_unnamed_topic_went_unnamed },
       { action: action_blank_comment },
       { assertion: assert_seed_topic_untouched },
       { action: action_comment_unsigned },
@@ -213,6 +450,43 @@ export default pattern(() => {
       { assertion: assert_direct_title_unchanged },
       { action: action_rename_unsigned },
       { assertion: assert_direct_title_unchanged },
+      { action: action_remove_foreign_comment },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_edit_foreign_comment },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_comment_unsigned },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_link_both_spellings },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_link_neither_spelling },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_link_unknown_url },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_foreign_link },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_remove_comment_text_address },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_edit_comment_text_address },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_link_text_address },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_edit_comment_unsigned },
+      { assertion: assert_foreign_comment_untouched },
+      { action: action_remove_link_unsigned },
+      { assertion: assert_foreign_link_untouched },
+      { action: action_seed_retractable },
+      { action: action_edit_blank_body },
+      { assertion: assert_body_survived_blank_edit },
+      { action: action_remove_copied_comment },
+      { assertion: assert_copied_comment_refused },
+      { action: action_retract_both },
+      { assertion: assert_one_retraction_each },
+      { action: action_retract_comment_again },
+      { assertion: assert_one_retraction_each },
+      { action: action_edit_retracted_comment },
+      { assertion: assert_one_retraction_each },
+      { action: action_retract_link_again },
+      { assertion: assert_one_retraction_each },
     ],
   };
 });

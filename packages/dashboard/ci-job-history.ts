@@ -23,7 +23,6 @@ import {
   friendlyError,
   github,
   performanceGithub,
-  SPARK_FADE,
   sparkline,
 } from "./lib.ts";
 import { GitHubRateLimitBudgetError } from "./github-rate-limit.ts";
@@ -1509,17 +1508,19 @@ export class CiJobHistoryCollector {
     return pending;
   }
 
-  // An attempt keeps its detail for exactly as long as the run index keeps the
-  // attempt. Compression makes an attempt's detail small enough that the whole
-  // retention window fits, so nothing GitHub would have to serve again is
-  // discarded early.
-  //
-  // Passing every attempt the index holds, with no cap of its own, is what
-  // makes pruning safe to run against a chart being assembled: a chart draws
-  // the runs the index names, so the set kept here always covers it. A cap
-  // here would break that, and no amount of coordinating the two would repair
-  // it — a chart would simply be reading files this had already decided to
-  // drop.
+  /**
+   * Drops the Gantt detail of the attempts the run index no longer keeps. An
+   * attempt keeps its detail for exactly as long as the run index keeps the
+   * attempt. Compression makes an attempt's detail small enough that the whole
+   * retention window fits, so nothing GitHub would have to serve again is
+   * discarded early.
+   *
+   * Passing every attempt the index holds, with no cap of its own, is what
+   * makes pruning safe to run against a chart being assembled: a chart draws
+   * the runs the index names, so the set kept here always covers it. A cap here
+   * would break that, and no amount of coordinating the two would repair it — a
+   * chart would simply be reading files this had already decided to drop.
+   */
   async #pruneGanttDetail(source: CiHistorySource): Promise<void> {
     await this.#detail.prune(
       source,
@@ -1999,14 +2000,16 @@ export class CiJobHistoryCollector {
     };
   }
 
-  // Hands each run a chart draws to `visit`, reading one attempt's step detail
-  // at a time and letting go of it before reading the next, so the memory a
-  // chart costs does not grow with its size. The 150 attempts the range slider
-  // allows are around 17 MB of timings between them.
-  //
-  // A run the detail store cannot return is left out, except under an exact
-  // selection, where the caller asked for particular runs and a chart missing
-  // one of them would misrepresent the commit.
+  /**
+   * Hands each run a chart draws to `visit`, reading one attempt's step detail
+   * at a time and letting go of it before reading the next, so the memory a
+   * chart costs does not grow with its size. The 150 attempts the range slider
+   * allows are around 17 MB of timings between them.
+   *
+   * A run the detail store cannot return is left out, except under an exact
+   * selection, where the caller asked for particular runs and a chart missing
+   * one of them would misrepresent the commit.
+   */
   async #eachGanttRun(
     source: CiHistorySource,
     entries: CachedCiRun[],
@@ -2032,10 +2035,13 @@ export class CiJobHistoryCollector {
     return drawn;
   }
 
-  // The subset of `entries` whose step detail reads back, without keeping any
-  // of it. An attempt counts as drawable only when its detail parses, so one
-  // that cannot be read — a format this version does not recognize, a damaged
-  // file — is collected from GitHub again like one that was never stored.
+  /**
+   * Returns the subset of `entries` whose step detail reads back, without
+   * keeping any of it. An attempt counts as drawable only when its detail
+   * parses, so one that cannot be read — a format this version does not
+   * recognize, a damaged file — is collected from GitHub again like one that
+   * was never stored.
+   */
   async #drawableGanttRuns(
     source: CiHistorySource,
     entries: CachedCiRun[],
@@ -2059,8 +2065,11 @@ export class CiJobHistoryCollector {
     ) !== null;
   }
 
-  // The index entries a chart would draw from the cache alone, newest first.
-  // Reading their detail is left to the caller, which often does not need it.
+  /**
+   * Returns the index entries a chart would draw from the cache alone, newest
+   * first. Reading their detail is left to the caller, which often does not
+   * need it.
+   */
   #cachedGanttRuns(
     source: CiHistorySource,
     options: CiGanttOptions,
@@ -2094,9 +2103,11 @@ export class CiJobHistoryCollector {
       .slice(0, options.limit);
   }
 
-  // Collects a chart and returns every run of it at once. Convenient to assert
-  // against, and bounded only by the range slider, so the dashboard itself uses
-  // writeGanttInput instead.
+  /**
+   * Collects a chart and returns every run of it at once. Convenient to assert
+   * against, and bounded only by the range slider, so the dashboard itself
+   * uses `writeGanttInput()` instead.
+   */
   async gantt(
     token: string | undefined,
     source: CiHistorySource,
@@ -2116,8 +2127,11 @@ export class CiJobHistoryCollector {
     );
   }
 
-  // Every run of an already collected chart, held together. Bounded only by the
-  // range slider, so the dashboard uses writeGanttInput instead.
+  /**
+   * Returns every run of an already collected chart, held together. Bounded
+   * only by the range slider, so the dashboard uses `writeGanttInput()`
+   * instead.
+   */
   async ganttRuns(
     source: CiHistorySource,
     selection: GanttSelection,
@@ -2129,9 +2143,11 @@ export class CiJobHistoryCollector {
     return { runs };
   }
 
-  // Collects a chart and writes it straight to `destination` as the JSON the
-  // Gantt renderer reads, one run at a time. Nothing holds the whole chart, so
-  // the dashboard's memory does not grow with the size of the chart it serves.
+  /**
+   * Collects a chart and writes it straight to `destination` as the JSON the
+   * Gantt renderer reads, one run at a time. Nothing holds the whole chart, so
+   * the dashboard's memory does not grow with the size of the chart it serves.
+   */
   async writeGanttInput(
     source: CiHistorySource,
     selection: GanttSelection,
@@ -2158,7 +2174,7 @@ export class CiJobHistoryCollector {
     return written;
   }
 
-  // Hands over the runs of an already collected chart.
+  /** Hands over the runs of an already collected chart. */
   async #emitGantt(
     source: CiHistorySource,
     selection: GanttSelection,
@@ -2833,7 +2849,7 @@ function renderSeries(
     values,
     CHART_LINE,
     undefined,
-    SPARK_FADE[status],
+    true,
     xs,
     {
       trim: PERFORMANCE_HISTORY_SCALE_TRIM,

@@ -20,7 +20,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
@@ -757,10 +757,11 @@ describe("CFC schema reference discovery", () => {
     expect(resolved.additionalProperties).toEqual({ $ref: "#/$defs/Inner" });
   });
 
-  // A schema reaching the runtime has not necessarily come from the schema
-  // generator, so a keyword can hold a value no schema can be. Pruning walks
-  // every subschema-bearing keyword, so each one is a way in.
   describe("a keyword holding a value that is not a schema", () => {
+    // A schema reaching the runtime has not necessarily come from the schema
+    // generator, so a keyword can hold a value no schema can be. Pruning walks
+    // every subschema-bearing keyword, so each one is a way in.
+
     const MALFORMED: [label: string, schema: JSONSchema][] = [
       ["additionalProperties", {
         type: "object",

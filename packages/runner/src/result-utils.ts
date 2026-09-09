@@ -1,6 +1,7 @@
 import type { FabricValue } from "@commonfabric/api";
 
 import type { Cell } from "./cell.ts";
+import { rawMetaWriteAuthorization } from "./meta-seam.ts";
 
 /**
  * @param resultCell The cell whose meta pattern will be set
@@ -19,7 +20,11 @@ export function setPatternCell(
     // A `Cell`'s type parameter is always `FabricValue`-compatible, so
     // `getRaw()` yields a `FabricValue`. `Cell<unknown>` just cannot say so;
     // constraining `Cell<T extends FabricValue>` is what would remove this.
-    resultCell.setMetaRaw("pattern", parentPattern as FabricValue);
+    resultCell.setMetaRaw(
+      "pattern",
+      parentPattern as FabricValue,
+      rawMetaWriteAuthorization,
+    );
   }
 }
 
@@ -27,5 +32,6 @@ export function setResultCell(cell: Cell<unknown>, resultCell: Cell<unknown>) {
   cell.setMetaRaw(
     "result",
     resultCell.getAsWriteRedirectLink({ includeSchema: true }),
+    rawMetaWriteAuthorization,
   );
 }

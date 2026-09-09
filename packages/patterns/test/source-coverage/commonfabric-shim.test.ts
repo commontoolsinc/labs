@@ -36,15 +36,12 @@
 
 // The generated child import map resolves the transitive
 // `data-model`/`content-hash`/`leb128` graph these pull in.
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 export { valueEqual };
 export {
   toCompactDebugString,
   toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
+} from "@commonfabric/data-model";
 
 //
 // Stubs
@@ -128,6 +125,12 @@ export function clearGenerateTextResult(): void {
 }
 
 export class Writable<T = unknown> {
+  static perSession = class<T = unknown> extends Writable<T> {
+    static of<T>(value: T): Writable<T> {
+      return new Writable.perSession<T>(value);
+    }
+  };
+
   #value: T;
 
   constructor(value: T) {
@@ -443,13 +446,25 @@ export function byRef(_ref: string): () => Record<string, never> {
   return () => ({});
 }
 
-export function createNodeFactory(): unknown {
-  return undefined;
-}
-
 export function __cf_data<T>(value: T): T {
   return value;
 }
+
+//
+// Real implementation pass-through, second group
+//
+
+// Plain data and one pure predicate, which `@commonfabric/api` both declares
+// and implements. The real `commonfabric` surface passes these through from
+// there rather than faking them, so this does too -- a fake would be a second
+// copy of a list whose whole point is to have one.
+export {
+  CFC_CANONICAL_ALIAS_NAMES,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  isFabricPrimitiveSchemaType,
+  MERGEABLE_OP_METHODS,
+} from "@commonfabric/api";
 
 export function findEventHandlers(
   node: unknown,

@@ -1,3 +1,4 @@
+import { loomAuthoringForTurn } from "./loom-authoring.ts";
 import {
   isObjectNotArray,
   type ReadonlyRecord,
@@ -8,7 +9,9 @@ import {
   type CreateHarnessPromptLoopOptions,
   type RunHarnessTranscriptOptions,
 } from "./prompt-loop.ts";
-import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import { establishHarnessSessionContext } from "./session-assembly.ts";
+import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
+import type { HarnessPatternRefSpec } from "./contracts/pattern-refs.ts";
 import {
   createHarnessChatErrorResponse,
   createHarnessChatEventEnvelope,
@@ -70,18 +73,50 @@ export type HarnessInteractiveChatEventListener = (
   event: HarnessChatEventEnvelope,
 ) => void | Promise<void>;
 
+/**
+ * Told that a listener could not take an event that is already durable.
+ *
+ * Delivery is not part of committing, so a host that wants to act on a failed
+ * delivery — a transport whose peer has gone, say — reads it here rather than
+ * from the outcome of whatever turn produced the event.
+ */
+export type HarnessInteractiveChatEventDeliveryErrorHandler = (
+  event: HarnessChatEventEnvelope,
+  error: unknown,
+) => void;
+
 export interface CreateHarnessInteractiveChatServiceOptions {
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
+
+  /**
+   * Maps one service turn to a run artifact identifier when the transport
+   * owns that mapping. The prompt loop must construct the run from its
+   * options, so this cannot accompany an injected engine or run state.
+   */
+  runIdForTurn?: (sessionId: string, turnId: string) => string;
+
+  /**
+   * System prompt seeded as the first message of a session's transcript.
+   *
+   * A session without one runs with no system message at all, which is what
+   * the console does by default: the parent's guidance is the tool
+   * descriptors and nothing else. Seeding happens once per session, on the
+   * first turn that finds no system message in the durable transcript, so a
+   * following turn inherits it from history rather than prepending a second.
+   */
+  systemPrompt?: string;
 
   /**
    * The single authenticated owner bound to this service process. Required
    * for openai-codex; interactive requests cannot select or replace it.
    */
   credentialOwner?: HarnessCredentialOwnerRef;
+
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   now?: () => string;
   randomUUID?: () => string;
   onEvent?: HarnessInteractiveChatEventListener;
+  onEventDeliveryError?: HarnessInteractiveChatEventDeliveryErrorHandler;
   sessionStore?: HarnessChatSessionStore;
   maxInMemoryEvents?: number;
 }
@@ -103,6 +138,7 @@ interface HarnessInteractiveChatSessionRecord {
    * session is refused rather than sent to a provider.
    */
   recoveryError?: HarnessChatError;
+
   startingTurnId?: string;
   startingTurn?: HarnessChatTurnStatus;
   activeTurnToken?: object;
@@ -352,6 +388,7 @@ type HarnessTranscriptMalformation =
 class MalformedHarnessChatTranscriptError extends Error {
   /** Kind of malformed history encountered. */
   readonly malformation: HarnessTranscriptMalformation;
+
   /** Zero-based index of the message where validation failed. */
   readonly transcriptIndex: number;
 
@@ -413,6 +450,7 @@ const unknownToolOutcome = (
 interface NormalizedHarnessChatTranscript {
   /** Transcript with every repairable tool call paired to one result. */
   transcript: HarnessTranscriptMessage[];
+
   /** Tool call IDs paired to synthesized unknown-outcome results. */
   synthesizedToolCallIds: readonly string[];
 }
@@ -539,7 +577,7 @@ const chatTurnError = (error: unknown): HarnessChatError => {
 };
 
 const isTerminalTurnStatus = (
-  status: HarnessChatTurnStatus["status"],
+  status: HarnessChatTurnStatus["status"] | undefined,
 ): boolean =>
   status === "completed" || status === "failed" || status === "canceled";
 
@@ -644,14 +682,18 @@ const fileChangeFromToolMessage = (
 
 export class HarnessInteractiveChatService {
   readonly #basePromptLoopOptions: CreateHarnessPromptLoopOptions;
+  readonly #runIdForTurn?: (sessionId: string, turnId: string) => string;
   readonly #loomLocalHostBinding?: LoomLocalHostBinding;
   readonly #loomLocalHostModel?: string;
   readonly #createPromptLoop: HarnessInteractivePromptLoopFactory;
   readonly #now: () => string;
   readonly #randomUUID: () => string;
   readonly #onEvent?: HarnessInteractiveChatEventListener;
+  readonly #onEventDeliveryError?:
+    HarnessInteractiveChatEventDeliveryErrorHandler;
   readonly #sessionStore?: HarnessChatSessionStore;
   readonly #maxInMemoryEvents?: number;
+  readonly #systemPrompt?: string;
   readonly #sessions = new Map<string, HarnessInteractiveChatSessionRecord>();
   readonly #events: HarnessChatEventEnvelope[] = [];
   #emitQueue: Promise<void> = Promise.resolve();
@@ -659,6 +701,23 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    const injectedRunSource = this.#basePromptLoopOptions.engine !== undefined
+      ? "engine"
+      : this.#basePromptLoopOptions.runState !== undefined
+      ? "run state"
+      : undefined;
+    if (
+      options.runIdForTurn !== undefined &&
+      injectedRunSource !== undefined
+    ) {
+      throw new Error(
+        `turn run-id mapping cannot be combined with an injected ${injectedRunSource}`,
+      );
+    }
+    this.#runIdForTurn = options.runIdForTurn;
+    if (options.systemPrompt !== undefined) {
+      this.#systemPrompt = options.systemPrompt;
+    }
     this.#loomLocalHostBinding = loomLocalHostBindingFromPromptLoopOptions(
       this.#basePromptLoopOptions,
     );
@@ -717,6 +776,7 @@ export class HarnessInteractiveChatService {
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#randomUUID = options.randomUUID ?? defaultRandomUUID;
     this.#onEvent = options.onEvent;
+    this.#onEventDeliveryError = options.onEventDeliveryError;
     this.#sessionStore = options.sessionStore;
     if (
       options.maxInMemoryEvents !== undefined &&
@@ -1112,7 +1172,11 @@ export class HarnessInteractiveChatService {
       loomLocalHostBinding: this.#loomLocalHostBinding,
       artifactRoot: params.artifactRoot,
       capabilities: params.capabilities,
-      policy: resolveHarnessChatPolicy(params.policy, params.context),
+      policy: resolveHarnessChatPolicy(
+        params.policy,
+        params.context,
+        this.#basePromptLoopOptions.loomAuthoring?.allowCommentThreads === true,
+      ),
       browserAccess: params.browserAccess,
       metadata: params.metadata,
     });
@@ -1138,6 +1202,16 @@ export class HarnessInteractiveChatService {
     requestId: string,
     params: HarnessChatStartTurnParams,
   ): Promise<HarnessChatResponse<HarnessChatTurnStatus>> {
+    if (
+      params.input.loomId !== undefined &&
+      (typeof params.input.loomId !== "string" ||
+        !/^loom-[a-f0-9]{16}$/.test(params.input.loomId))
+    ) {
+      return createHarnessChatErrorResponse(requestId, {
+        code: "invalid_request",
+        message: "loomId must be a canonical Loom identifier",
+      });
+    }
     const record = this.#sessions.get(params.sessionId);
     if (record === undefined) {
       return sessionNotFoundError(requestId, params.sessionId);
@@ -1211,6 +1285,7 @@ export class HarnessInteractiveChatService {
     const policy = resolveHarnessChatPolicy(
       params.policy ?? record.status.policy,
       context,
+      this.#basePromptLoopOptions.loomAuthoring?.allowCommentThreads === true,
     );
     const browserAccess = params.browserAccess ?? record.status.browserAccess;
     if (
@@ -1399,22 +1474,15 @@ export class HarnessInteractiveChatService {
     browserAccess: HarnessChatBrowserAccessLease | undefined,
   ): Promise<void> {
     const session = record.status;
-    const transcript: HarnessTranscriptMessage[] = [
-      ...record.transcript,
-      {
-        role: "user",
-        content: params.input.text,
-        ...(params.input.imageAttachments !== undefined &&
-            params.input.imageAttachments.length > 0
-          ? { imageAttachments: params.input.imageAttachments }
-          : {}),
-      },
-    ];
-    // Prompt loops replay their initial transcript through onTranscriptEvent.
-    // Those messages are durable history, not activity from this turn: in
-    // particular, a recovered unknown-outcome result must not be re-emitted as
-    // a newly completed tool call.
-    let observedTranscriptLength = transcript.length;
+    // Seeded only when the durable history carries no system message. A turn
+    // persists the transcript it ran, so the second turn of a seeded session
+    // finds the message already there and prepends nothing.
+    const seededSystemPrompt: readonly HarnessTranscriptMessage[] =
+      this.#systemPrompt !== undefined &&
+        !record.transcript.some((message) => message.role === "system")
+        ? [{ role: "system", content: this.#systemPrompt }]
+        : [];
+    let observedTranscriptLength = 0;
     // The `delegate_task` children this turn has announced, keyed by the
     // parent tool call that started each one. Membership is what closes the
     // bracket: a `subagent_completed` is emitted only for a child whose
@@ -1422,9 +1490,47 @@ export class HarnessInteractiveChatService {
     const startedSubagents = new Map<string, HarnessChatSubagentSummary>();
 
     try {
-      const loop = await this.#startPromptLoop(
-        this.#buildPromptLoopOptions(session, policy, browserAccess),
+      const { loop, contextMessages } = await this.#startPromptLoop(
+        this.#buildPromptLoopOptions(
+          session,
+          turnId,
+          policy,
+          browserAccess,
+          params.inputCells,
+          params.patternRefs,
+          params.input.loomId,
+        ),
       );
+      // The context messages announce what this turn's own run holds — its
+      // preloaded skills, its granted references, its input cells, its
+      // attached patterns — so they sit immediately before the request they
+      // are held for, after the history the session already had.
+      const transcript: HarnessTranscriptMessage[] = [
+        ...seededSystemPrompt,
+        ...record.transcript,
+        ...(this.#basePromptLoopOptions.loomAuthoring === undefined ? [] : [{
+          role: "user" as const,
+          content: params.input.loomId === undefined
+            ? "Host Loom context: this turn has no originating Loom. Use loom_authoring_context to recover historical receipts; history does not select a target or count as new work."
+            : `Host Loom context: this turn originates in ${params.input.loomId}. Inspect that exact target before extending it. A request to create a separate Loom still creates one. Historical receipts are not new work.`,
+        }]),
+        ...contextMessages.map((content) =>
+          ({ role: "user", content }) as const
+        ),
+        {
+          role: "user",
+          content: params.input.text,
+          ...(params.input.imageAttachments !== undefined &&
+              params.input.imageAttachments.length > 0
+            ? { imageAttachments: params.input.imageAttachments }
+            : {}),
+        },
+      ];
+      // Prompt loops replay their initial transcript through
+      // onTranscriptEvent. Those messages are durable history, not activity
+      // from this turn: in particular, a recovered unknown-outcome result must
+      // not be re-emitted as a newly completed tool call.
+      observedTranscriptLength = transcript.length;
       const result = await loop.runTranscript({
         transcript,
         model: session.model,
@@ -1494,6 +1600,14 @@ export class HarnessInteractiveChatService {
       if (record.canceledTurnIds.has(turnId)) {
         return;
       }
+      // A turn that already reached a terminal status committed its outcome
+      // before this threw, which leaves delivering the event as the only thing
+      // that can have failed. Recording the turn as failed on the strength of
+      // that would overwrite an outcome the store already holds, so the turn is
+      // left as it finished and the failure stays a delivery failure.
+      if (isTerminalTurnStatus(record.turns.get(turnId)?.turn.status)) {
+        return;
+      }
       // `record.transcript` still holds the transcript from before this turn.
       // Persisting it here is the rollback: the turn's partial history stays in
       // the event log and the run artifacts, and never becomes model history.
@@ -1506,41 +1620,80 @@ export class HarnessInteractiveChatService {
   }
 
   /**
-   * Starts a turn's loop on a run that already knows its skills. A turn is its
-   * own run, so the scan happens per turn, against the engine this builds and
-   * hands to the loop: the registry has to be on the run state before the
-   * first model turn for `read_skill_resource` to answer and for a delegated
-   * subagent to inherit its profile's preloaded skills.
+   * Starts a turn's loop on a run that already holds everything it was
+   * configured with, and returns the context messages announcing it.
    *
-   * Tools reach the tree on the host here, so the scan records host paths and
-   * no sandbox mount is involved.
+   * A turn is its own run, so this happens per turn against the engine this
+   * builds and hands to the loop: the skill registry has to be on the run
+   * state before the first model turn for `read_skill_resource` to answer and
+   * for a delegated subagent to inherit its profile's preloaded skills, and
+   * the grants and input cells mint their tokens into that run's own handle
+   * table — the tokens a turn is told about are the ones its own run holds.
+   *
+   * Tools reach the tree on the host here, so the skills scan records host
+   * paths and no sandbox mount is involved.
    */
   async #startPromptLoop(
     options: CreateHarnessPromptLoopOptions,
-  ): Promise<HarnessInteractivePromptLoop> {
+  ): Promise<{
+    loop: HarnessInteractivePromptLoop;
+    contextMessages: readonly string[];
+  }> {
     // The skills root reaches this either way: on the options directly, or on
     // an injected engine's own config (where `options.skillsRoot` is unset).
     // Read both so neither shape is missed.
     const skillsRoot = options.engine?.config.skillsRoot ?? options.skillsRoot;
-    if (skillsRoot === undefined) {
-      return this.#createPromptLoop(options);
+    const fabricSession = options.engine?.config.fabricSession ??
+      options.fabricSession;
+    if (
+      options.engine === undefined && skillsRoot === undefined &&
+      fabricSession === undefined &&
+      (options.patternRefs?.length ?? 0) === 0
+    ) {
+      // Nothing configured needs a run to be brought up before its first model
+      // turn, and constructing an engine to discover that would build a
+      // sandbox runtime for a turn that has no use for one.
+      return { loop: this.#createPromptLoop(options), contextMessages: [] };
     }
-    // A turn is its own run, so the scan happens every turn: it records the
-    // registry the skill tools read before the first model call, and a run
-    // that reuses an engine still refreshes it, so a skill added or removed
-    // mid-session is not stale.
     const engine = options.engine ?? new CfHarnessEngine(options);
-    await persistHarnessRunSkillRegistry(engine, { skillsRoot });
-    return this.#createPromptLoop({ ...options, engine });
+    const contextMessages = await establishHarnessSessionContext({
+      engine,
+      config: {
+        ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+        skillNames: [],
+      },
+      onGrantsUnavailable: (error) =>
+        console.error("fabric grants unavailable for this turn:", error),
+    });
+    return {
+      loop: this.#createPromptLoop({ ...options, engine }),
+      contextMessages,
+    };
   }
 
   #buildPromptLoopOptions(
     session: HarnessChatSessionStatus,
+    turnId: string,
     policy: HarnessChatPolicy,
     browserAccess?: HarnessChatBrowserAccessLease,
+    inputCells?: readonly HarnessInputCellSpec[],
+    patternRefs?: readonly HarnessPatternRefSpec[],
+    loomId?: string,
   ): CreateHarnessPromptLoopOptions {
+    const loomAuthoring = loomAuthoringForTurn(
+      this.#basePromptLoopOptions.loomAuthoring,
+      session.sessionId,
+      loomId,
+    );
     return {
       ...this.#basePromptLoopOptions,
+      ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
+      ...(inputCells !== undefined && inputCells.length > 0
+        ? { inputCells }
+        : {}),
+      ...(patternRefs !== undefined && patternRefs.length > 0
+        ? { patternRefs }
+        : {}),
       ...(session.workspace?.hostPath !== undefined
         ? { workspaceHostPath: session.workspace.hostPath }
         : {}),
@@ -1548,6 +1701,9 @@ export class HarnessInteractiveChatService {
         ? { cwd: session.workspace.cwd }
         : {}),
       ...(session.model !== undefined ? { model: session.model } : {}),
+      ...(this.#runIdForTurn !== undefined
+        ? { runId: this.#runIdForTurn(session.sessionId, turnId) }
+        : {}),
       ...(this.#loomLocalHostBinding !== undefined &&
           session.model !== undefined
         ? {
@@ -1912,7 +2068,34 @@ export class HarnessInteractiveChatService {
     if (record !== undefined && nextTurn !== undefined) {
       record.turns.set(nextTurn.turn.turnId, nextTurn);
     }
-    await this.#onEvent?.(envelope);
+    try {
+      await this.#onEvent?.(envelope);
+    } catch (error) {
+      // The event is committed by this point, and the record already carries
+      // the state it announced. Callers that asked for this emit still hear
+      // about the failure, so it is reported and rethrown rather than caught
+      // here — what must not happen is further up, where a turn's outcome is
+      // decided.
+      this.#reportEventDeliveryError(envelope, error);
+      throw error;
+    }
+  }
+
+  #reportEventDeliveryError(
+    envelope: HarnessChatEventEnvelope,
+    error: unknown,
+  ): void {
+    if (this.#onEventDeliveryError !== undefined) {
+      this.#onEventDeliveryError(envelope, error);
+      return;
+    }
+    // Without a handler the failure would be silent, which reads the same as a
+    // delivery that worked.
+    console.error(
+      `cf-harness chat event ${envelope.sequence} (${envelope.event.kind}) was not delivered: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   #pruneInMemoryEvents(): void {

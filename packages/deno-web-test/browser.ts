@@ -1,11 +1,8 @@
+import { ConsoleEvent, LaunchOptions, Page } from "@astral/astral";
 import {
-  Browser as AstralBrowser,
-  ConsoleEvent,
-  launch,
-  LaunchOptions,
-  Page,
-} from "@astral/astral";
-import { closeAstralBrowser } from "@commonfabric/integration/astral-adapter";
+  BOOT_FAILURE_MESSAGE,
+  BrowserProcess,
+} from "@commonfabric/integration/browser-process";
 import { sleep } from "@commonfabric/utils/sleep";
 
 import { DEFAULT_TEST_TIMEOUT_MS, extractAstralConfig } from "./config.ts";
@@ -15,21 +12,20 @@ import { tsToJs } from "./utils.ts";
 
 const LAUNCH_RETRY_ATTEMPTS = 5;
 const LAUNCH_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
-const LAUNCH_RETRYABLE_BOOT_FAILURE = "Your binary refused to boot";
 
-type LaunchFn = (options: LaunchOptions) => Promise<AstralBrowser>;
+type LaunchFn = (options: LaunchOptions) => Promise<BrowserProcess>;
 type SleepFn = (ms: number) => Promise<unknown>;
 
 export function isRetryableAstralLaunchError(error: unknown): boolean {
   return String(error).includes(LAUNCH_RETRYABLE_ETXTBSY) ||
-    error instanceof Error && error.message === LAUNCH_RETRYABLE_BOOT_FAILURE;
+    error instanceof Error && error.message === BOOT_FAILURE_MESSAGE;
 }
 
 export async function launchWithRetry(
   options: LaunchOptions,
-  launchImpl: LaunchFn = launch,
+  launchImpl: LaunchFn = BrowserProcess.start,
   sleepImpl: SleepFn = sleep,
-): Promise<AstralBrowser> {
+): Promise<BrowserProcess> {
   for (let attempt = 1; attempt <= LAUNCH_RETRY_ATTEMPTS; attempt++) {
     try {
       return await launchImpl(options);
@@ -51,13 +47,13 @@ export class BrowserController extends EventTarget {
   static readonly #HARNESS_READY_POLL_MS = 200;
   #manifest: Manifest;
   #page: Page | null;
-  #browser: AstralBrowser | null;
+  #process: BrowserProcess | null;
   #serverPort: number;
 
   constructor(manifest: Manifest, serverPort: number) {
     super();
     this.#manifest = manifest;
-    this.#browser = null;
+    this.#process = null;
     this.#page = null;
     this.#serverPort = serverPort;
   }
@@ -73,8 +69,10 @@ export class BrowserController extends EventTarget {
     if (this.#page) {
       await this.#page.goto(testUrl);
     } else {
-      this.#browser = await launchWithRetry(extractAstralConfig(config));
-      this.#page = await this.#browser.newPage(testUrl);
+      this.#process = await launchWithRetry(
+        extractAstralConfig(config, this.#manifest.profileDir),
+      );
+      this.#page = await this.#process.newPage(testUrl);
       this.#page.addEventListener("console", (e) => {
         // Not sure why this event needs reconstructed in order
         // to re-fire, rather than just passing it into `dispatchEvent`.
@@ -139,9 +137,9 @@ export class BrowserController extends EventTarget {
 
   async close() {
     this.#page = null;
-    if (this.#browser) {
-      await closeAstralBrowser(this.#browser);
+    if (this.#process) {
+      await this.#process.close();
     }
-    this.#browser = null;
+    this.#process = null;
   }
 }

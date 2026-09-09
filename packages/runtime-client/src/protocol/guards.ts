@@ -10,9 +10,11 @@
 import { isDID } from "@commonfabric/identity";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
+  AttachPortNotification,
   CellRef,
   CellUpdateNotification,
   ClientNotificationType,
+  ClientTransportNotificationType,
   ConsoleNotification,
   ErrorNotification,
   EventNeedsAttentionNotification,
@@ -290,6 +292,20 @@ export function isVDomBatchNotification(
     value.type === NotificationType.VDomBatch &&
     typeof value.batchId === "number" &&
     Array.isArray(value.ops)
+  );
+}
+
+/**
+ * Is `value` an {@link AttachPortNotification}? What it recognizes is the
+ * marker alone -- the port the marker is about travels beside the message, in
+ * the transfer list, so nothing here can look at it.
+ */
+export function isAttachPortNotification(
+  value: unknown,
+): value is AttachPortNotification {
+  return (
+    isObjectNotArray(value) &&
+    value.type === ClientTransportNotificationType.AttachPort
   );
 }
 

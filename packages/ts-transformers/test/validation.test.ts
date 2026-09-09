@@ -2680,11 +2680,12 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     },
   );
 
-  // The rule ignores the body, so reactive reads laundered through these shapes
-  // are caught without a body scanner.
   await t.step(
     "errors regardless of how the body reads the reactive value",
     async () => {
+      // The rule ignores the body, so reactive reads laundered through these
+      // shapes are caught without a body scanner.
+
       const bodies = [
         "{ get t() { const { token } = value; return token; } }", // destructuring
         "{ read() { return { ...value }; } }", // spread
@@ -2705,10 +2706,11 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     },
   );
 
-  // Closing the JSX hole: an object-literal member function in a JSX data
-  // position is not lowered there and is rejected, but JSX event handlers and
-  // render/array-method callbacks stay legal.
   await t.step("errors on a function-valued property inside JSX", async () => {
+    // Closing the JSX hole: an object-literal member function in a JSX data
+    // position is not lowered there and is rejected, but JSX event handlers and
+    // render/array-method callbacks stay legal.
+
     const { diagnostics } = await validateSource(
       `      import { computed, pattern, h } from "commonfabric";
 
@@ -2798,12 +2800,14 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     assertEquals(memberErrors(diagnostics).length, 0);
   });
 
-  // A class in pattern context is flagged by pattern-context:function-creation
-  // (the class rule), not by the object-member rule — object-member is scoped to
-  // object-literal members. This pins the division between the two diagnostics.
   await t.step(
     "flags a class via function-creation, not via object-member",
     async () => {
+      // A class in pattern context is flagged by
+      // pattern-context:function-creation (the class rule), not by the
+      // object-member rule — object-member is scoped to object-literal members.
+      // This pins the division between the two diagnostics.
+
       const { diagnostics } = await validateSource(
         `      import { computed, pattern } from "commonfabric";
 
@@ -2825,13 +2829,14 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     },
   );
 
-  // A function-valued property may be wrapped in transparent expressions
-  // (parentheses, `as`, `satisfies`, `!`, `<T>`) before the property assignment.
-  // The wrapped spelling is the same member and reports object-member, not
-  // function-creation, in and out of JSX.
   await t.step(
     "reports object-member for transparently-wrapped function properties",
     async () => {
+      // A function-valued property may be wrapped in transparent expressions
+      // (parentheses, `as`, `satisfies`, `!`) before the property
+      // assignment. The wrapped spelling is the same member and reports
+      // object-member, not function-creation, in and out of JSX.
+
       const wrapped = [
         "{ read: (() => value?.token) as () => string | undefined }", // as-cast
         "{ read: (() => value?.token) }", // parentheses
@@ -2877,13 +2882,14 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     },
   );
 
-  // `toJSON` is an ordinary member name here. The rule is body-agnostic for it
-  // as for every other member: the reactive-read lowering pass does not descend
-  // into any function body, and a member the data model cannot store is
-  // unstorable whatever it reads.
   await t.step(
     "flags a toJSON() member that reads nothing reactive",
     async () => {
+      // `toJSON` is an ordinary member name here. The rule is body-agnostic for
+      // it as for every other member: the reactive-read lowering pass does not
+      // descend into any function body, and a member the data model cannot
+      // store is unstorable whatever it reads.
+
       const { diagnostics } = await validateSource(
         `      import { pattern } from "commonfabric";
 
@@ -4999,14 +5005,15 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
 });
 
 Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
-  // ClosureTransformer hoists reactive callback bodies (computed/lift/etc.)
-  // into top-level `const __cfModuleCallback_N = ...` declarations. Those
-  // bodies must still receive the reactive-root lowering pass so chains like
-  // `cell.result` get lowered to `cell.key("result")` — otherwise the access
-  // stays as plain JS and unwraps the cell at runtime.
   await t.step(
     "lowers property access on opaque roots inside computed() bodies",
     async () => {
+      // ClosureTransformer hoists reactive callback bodies (computed/lift/etc.)
+      // into top-level `const __cfModuleCallback_N = ...` declarations. Those
+      // bodies must still receive the reactive-root lowering pass so chains
+      // like `cell.result` get lowered to `cell.key("result")` — otherwise the
+      // access stays as plain JS and unwraps the cell at runtime.
+
       const source = `
         import { computed, Default, pattern, wish } from "commonfabric";
 

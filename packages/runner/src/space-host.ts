@@ -46,6 +46,7 @@ export const normalizeSpaceHost = (host: string | URL): URL => {
       "Space host must contain only an origin",
     );
   }
+
   return parsed;
 };
 

@@ -191,10 +191,7 @@ function resolvedStreamLink(streamCell: Cell<unknown>, runtime: Runtime) {
 }
 
 async function processNextQueuedEvent(runtime: Runtime): Promise<void> {
-  const scheduler = runtime.scheduler as unknown as {
-    eventQueue: Array<Parameters<typeof dispatchQueuedEvent>[1]>;
-    eventExecutionState: Parameters<typeof dispatchQueuedEvent>[0];
-  };
+  const scheduler = runtime.scheduler.accessForTestingOnly;
   const queuedEvent = scheduler.eventQueue[0];
   if (queuedEvent !== undefined) {
     await dispatchQueuedEvent(scheduler.eventExecutionState, queuedEvent);
@@ -1577,14 +1574,15 @@ describe("scheduler event receipts", () => {
     expect(receipt.get()).toEqual({});
   });
 
-  // The dispatch-side closed-world gate (verb contract WS-C, C5): an event
-  // schema that declares `additionalProperties: false` makes an undeclared
-  // field a rejection, never ignored. Characterized before the gate existed
-  // (2026-07-31, this file's harness, unmodified code): the extra field was
-  // silently STRIPPED — the handler ran, saw only the declared fields, and
-  // the receipt spent the event id. The gate replaces that with the existing
-  // thrown-handler outcome; an OPEN schema keeps the stripped delivery.
   describe("closed-world event schemas at dispatch", () => {
+    // The dispatch-side closed-world gate (verb contract WS-C, C5): an event
+    // schema that declares `additionalProperties: false` makes an undeclared
+    // field a rejection, never ignored. Characterized before the gate existed
+    // (2026-07-31, this file's harness, unmodified code): the extra field was
+    // silently STRIPPED — the handler ran, saw only the declared fields, and
+    // the receipt spent the event id. The gate replaces that with the existing
+    // thrown-handler outcome; an OPEN schema keeps the stripped delivery.
+
     function snapshotEvent(event: unknown): unknown {
       if (event === undefined) return undefined;
       if (event === null || typeof event !== "object") return event;

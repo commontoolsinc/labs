@@ -6,6 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { getPatternIdentityRef, resolveEntryIdentity } from "../src/index.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // CT-1923 (2026-07-29 estuary): a running piece whose durable patternIdentity
 // names an identity this runtime cannot load sat stranded forever: the
@@ -122,7 +123,7 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     cell.withTx(tx).setMetaRaw("patternIdentity", {
       identity,
       symbol: "default",
-    });
+    }, rawMetaWriteAuthorization);
     await tx.commit();
     await rt.idle();
     // Deterministic: settles the watcher load chain and any roll-forward.

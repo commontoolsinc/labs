@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import { isAliasBinding } from "../src/alias-binding.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import {
   linkCfcLabelView,
@@ -25,7 +26,6 @@ import {
   areNormalizedLinksSame,
   getDerivedInternalCellLink,
   getMetaCell,
-  isAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
@@ -40,6 +40,8 @@ import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -111,6 +113,7 @@ describe("pattern-binding", () => {
       testCell.setMetaRaw(
         "argument",
         argumentCell.getAsWriteRedirectLink({ base: testCell }),
+        rawMetaWriteAuthorization,
       );
 
       sendValueToBinding(tx, testCell, undefined, {
@@ -231,6 +234,10 @@ describe("pattern-binding", () => {
       // A genuine mismatch throws.
       expect(() => sendValueToBinding(tx, testCell, argumentCellLink, 42, 43))
         .toThrow("Got 43 instead of 42");
+      // A produced object is rendered, not stringified as `[object Object]`.
+      expect(() =>
+        sendValueToBinding(tx, testCell, argumentCellLink, 42, { a: 1 })
+      ).toThrow("Got {a:1} instead of 42");
     });
 
     it("normalizes cell values before writing a narrower scoped binding", () => {
@@ -601,6 +608,53 @@ describe("pattern-binding", () => {
       });
     });
 
+    it("binds aliases from a caller-owned circular schema", () => {
+      const circularSchema: JSONSchema & {
+        properties: Record<string, JSONSchema>;
+      } = {
+        type: "object",
+        properties: {},
+      };
+      circularSchema.properties.self = circularSchema;
+      const resultCell = runtime.getCell(
+        space,
+        "circular schema result cell",
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        "circular schema argument cell",
+        undefined,
+        tx,
+      );
+      const argumentLink = {
+        ...argumentCell.getAsNormalizedFullLink(),
+        schema: circularSchema,
+      };
+
+      const result = unwrapOneLevelAndBindToDoc(
+        { self: { $alias: { cell: "argument", path: ["self"] } } },
+        argumentLink,
+        resultCell,
+      );
+
+      const parsed = parseLink(result.self, resultCell)!;
+      expect(Object.isFrozen(circularSchema)).toBe(false);
+      expect(parsed.path).toEqual(["self"]);
+      expect(resolvedSchema(parsed.schema)).toEqual({
+        $ref: "#/$defs/CircularSchema_0",
+        $defs: {
+          CircularSchema_0: {
+            type: "object",
+            properties: {
+              self: { $ref: "#/$defs/CircularSchema_0" },
+            },
+          },
+        },
+      });
+    });
+
     it("serializes returned local pattern cells as aliases", () => {
       const frame = pushFrame({
         runtime,
@@ -721,6 +775,7 @@ describe("pattern-binding", () => {
         { derivedInternalCells: [{ partialCause: "a" }] },
       ) as T;
     };
+
     const alias = () => ({ $alias: { partialCause: "a", path: [] } });
 
     it("returns a binding with nothing to rebind by identity", () => {
@@ -819,10 +874,12 @@ describe("pattern-binding", () => {
         }
       }
       class Watched extends Array {
-        // `ArrayConstructor` is what the base class declares here, and `Spy`
-        // does not structurally satisfy it (no callable-without-`new` form).
-        // The cast is the point of the fixture: an exotic species is exactly
-        // what is under test.
+        /**
+         * The species, cast: `ArrayConstructor` is what the base class declares
+         * here, and `Spy` does not structurally satisfy it (no
+         * callable-without-`new` form). The cast is the point of the fixture:
+         * an exotic species is exactly what is under test.
+         */
         static override get [Symbol.species](): ArrayConstructor {
           return Spy as unknown as ArrayConstructor;
         }

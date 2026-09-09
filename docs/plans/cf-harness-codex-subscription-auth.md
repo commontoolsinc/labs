@@ -149,8 +149,11 @@ incompatible or too costly to maintain; it is not the selected path here.
 8. Browser callback login is the default. Device login is explicit and uses the
    provider-mandated polling interval. That bounded, cancelable protocol poll is
    the only new polling loop authorized by this plan.
-9. The first transport is SSE. WebSocket pooling, cached WebSocket deltas,
-   transport retries, sleeps, and automatic provider fallback are deferred.
+9. The first transport is SSE. WebSocket pooling, cached WebSocket deltas, and
+   automatic provider fallback are deferred. A transient transport or
+   provider failure is issued again under the bounded backoff the package
+   README describes under "Model attempts and transport retry"; that bounded
+   retry is the only sleep the model clients hold.
 10. Model ids come from the selected provider or explicit operator choice. Do
     not copy an upstream hard-coded allowlist and do not silently substitute a
     different model when a subscription lacks access.
@@ -621,7 +624,7 @@ Expected files:
 ## Deferred work
 
 - Codex Responses WebSocket transport and connection reuse.
-- Automatic transport retry or fallback.
+- Automatic provider fallback.
 - OS keychain-backed `cf-harness` credential storage.
 - Importing credentials from Codex CLI or other harnesses.
 - A native Codex app-server runtime mode.

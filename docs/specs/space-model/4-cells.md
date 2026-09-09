@@ -192,9 +192,9 @@ differ in what they already know about the value in hand:
   the runtime's own, shared with the builder artifacts the same walk serializes.
 
 `toJSON()` returns the same link under the JSON protocol's name, so a cell reads
-as what it names in any renderer that honors the protocol — `toCompactDebugString()`
-among them. The data model gives that name no standing of its own, and neither
-mechanism above consults it.
+as the link it names, framed by its class name, in any renderer that honors the
+protocol — `toCompactDebugString()` among them. The data model gives that name
+no standing of its own, and neither mechanism above consults it.
 
 `toSigilLinkOrNull()`, `toEncodableForm()` and `toJSON()` return one link under
 three names: the latter two delegate, so they cannot disagree. `getAsLink()` is
@@ -329,7 +329,7 @@ The current system does **not** add timestamps or unique IDs to event payloads:
   include it in the allowlist of properties passed through
 
 However, each handler **invocation** does receive a unique identity. When an
-event handler is invoked, `Runner.instantiateJavaScriptHandlerNode`
+event handler is invoked, `Runner.#instantiateJavaScriptHandlerNode`
 (`packages/runner/src/runner.ts`) puts an event id in the `cause` object used
 to derive cell identities for handler results — the durable id minted for the
 dispatched event (`tx.dispatchedEventId`), falling back to a fresh

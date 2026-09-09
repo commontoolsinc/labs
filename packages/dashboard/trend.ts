@@ -9,6 +9,7 @@
  * series of megabytes are judged on the same scale.
  */
 
+import { median } from "./lib.ts";
 import type { Status } from "./types.ts";
 
 const DAY_MS = 86_400_000;
@@ -26,14 +27,6 @@ const CHANGE_POINT_SIGMAS = 4;
 // How much smaller the straight line's total deviation must be for it to
 // describe the series instead of the levels.
 const LINE_PREFERENCE_MARGIN = 0.1;
-
-const median = (values: number[]): number => {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = sorted.length >> 1;
-  return sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
-};
 
 export function distinctTrendDays(times: number[], values: number[]): number {
   const days = new Set<number>();

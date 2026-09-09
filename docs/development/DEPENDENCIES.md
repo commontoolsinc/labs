@@ -162,6 +162,64 @@ that `check.sh` and the `deno-setup` action both still read `mise.toml` rather
 than a hardcoded version, and that the action holds no version literal that
 disagrees with the pin.
 
+### GitHub Actions
+
+Every step under `.github/` that names an action outside this repository
+selects it by a 40-character commit, with the release as a trailing comment:
+
+```
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+```
+
+Both halves of that line defend against something. The commit defends against
+the publisher: a tag is a name they can move, so a step naming one runs
+whatever the name points at when the job starts, and several of these steps
+share a job with a Google Cloud access token or a deploy key. The comment
+defends against us: nobody checks a 40-character commit by eye, so a commit
+that is not the release it claims to be would pass review on the strength of
+the comment beside it.
+
+`deno task check-action-pins`, a step in the `check` job, holds both. It asks
+GitHub which commit the named release points at and fails when a step names no
+commit, carries no release comment, or names a commit that release does not
+point at.
+
+The comment names the release itself, `# v4.2.0` and not `# v4`. A publisher
+moves `v4` onto each release, so a comment naming one says only which major
+version a commit belongs to, hides how far behind it is, and stops being true
+without anybody touching the file. The check rejects such a comment and names
+the release to write instead.
+
+The check reaches api.github.com, which means a GitHub outage fails it. That
+is the accepted cost of having one check that proves the thing rather than a
+local record of a proof made earlier, which would need its own verification to
+be worth anything. Set `GITHUB_TOKEN` in any context where the rate limit
+matters; CI passes it from `secrets.GITHUB_TOKEN`.
+
+To roll a pin, find the release to move to, resolve it to its commit, and
+write both:
+
+```bash
+gh api repos/actions/checkout/releases/latest --jq '.tag_name'
+gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq '.object.sha'
+```
+
+An annotated tag answers with the tag object rather than the commit; follow it
+through with `gh api repos/OWNER/REPO/git/tags/SHA --jq '.object.sha'`.
+Because the comments name releases, how far behind a pin is reads off the
+line itself, and the releases page says what is newer.
+
+Two actions are in use at two versions, which has to be decided when either is
+rolled: `google-github-actions/auth` at v1.3.0 on the deploy path and v3.0.0
+elsewhere, and `actions/cache` at v4.3.0 in four `deno.yml` steps and v6.1.0
+everywhere else.
+
+The `setup-deno` pin touches the Deno toolchain pin in one place.
+`deno task check-deno-pins` rejects any version literal in
+`.github/actions/deno-setup/action.yml` that disagrees with `mise.toml`, so
+that pin's comment keeps its `v` prefix, `# v2.0.5` rather than `# 2.0.5`, and
+the release is not read as a Deno version.
+
 ### TypeScript
 
 The runtime compiles patterns itself, using the TypeScript compiler API at
@@ -352,16 +410,24 @@ and inspect the generated HTML before accepting a new release.
 
 ### Cliffy
 
-The CLI uses three declarations that have to remain compatible:
+The CLI uses four declarations that have to remain compatible:
 
 - The root import map pins `@cliffy/command` at `1.0.0-rc.8`.
-- `packages/cli/deno.jsonc` pins `@cliffy/table` at the same release.
+- `packages/cli/deno.jsonc` pins `@cliffy/flags` at the same release. It is
+  `@cliffy/command`'s own option parser, read directly by the shuttle shell so
+  that a shell verb's flags are spelled and refused as a command's are.
+- That CLI config pins `@cliffy/table` at the same release.
 - That CLI config pins `@std/fmt/colors` to the range used by Cliffy.
 
-The two Cliffy packages share internal packages and resolve as a set. They are
-held at the release candidate because Cliffy 1.2.1 changes how a required
-argument followed by a variadic argument is parsed. With that release,
-`cf call` stops receiving its first argument.
+`@cliffy/command` and `@cliffy/table` share internal packages, and
+`@cliffy/flags` is `@cliffy/command`'s own dependency, so all three resolve as
+a set. A `@cliffy/flags` pinned here to anything but the release
+`@cliffy/command` resolves puts two copies of the option parser in the
+workspace: the one a `cf` command parses through, and the one the shell does.
+
+They are held at the release candidate because Cliffy 1.2.1 changes how a
+required argument followed by a variadic argument is parsed. With that release,
+`cf piece call` stops receiving its first argument.
 
 The `@std/fmt/colors` pin has a separate single-copy requirement.
 `setColorEnabled()` stores state in its module instance. If the CLI imports a
@@ -369,7 +435,8 @@ different copy from Cliffy, disabling color does not affect Cliffy's version,
 error, and usage output. `packages/cli/test/color-mode.test.ts` guards that
 shared state.
 
-When rolling Cliffy, update `@cliffy/command` and `@cliffy/table` together.
+When rolling Cliffy, update `@cliffy/command`, `@cliffy/flags` and
+`@cliffy/table` together.
 Inspect the new command package's `@std/fmt` dependency and update the CLI alias
 to a compatible range that resolves to the same copy. Refresh the lockfile and
 run the complete CLI test task:
@@ -380,10 +447,17 @@ run the complete CLI test task:
 
 ### SQLite
 
-Six workspace members pin `@db/sqlite` exactly: `memory`, `toolshed`,
-`state-inspector`, `cf-harness`, `cli`, and `piece`. They must resolve one
-version. The memory package also repeats that version in
-`SQLITE3_RELEASE_VERSION` in
+Eight workspace members pin `@db/sqlite` exactly: `memory`, `toolshed`,
+`state-inspector`, `cf-harness`, `cli`, `piece`, `runner`, and `scripts`. They
+must resolve one version. The `runner` pin serves one integration test — the
+injected on-disk source
+(`docs/specs/sqlite-builtin/03-database-sources.md` §03.3) is only exercisable
+by seeding a real SQLite file, and the test proving `db.query` labels such a
+read belongs with the builtin it covers. No `runner/src` file imports it, and
+the runner's UNIT lane does not import `@db/sqlite`: its disk-source test
+registers an empty temp file, whose contents never matter because the write it
+asserts on is refused before any attach. The memory package also repeats that
+version in `SQLITE3_RELEASE_VERSION` in
 `packages/memory/v2/sqlite/column-origin.ts`.
 
 The second pin is a native-library identity requirement, not bookkeeping.
@@ -393,7 +467,7 @@ the column-origin binding derives the same URL from
 both files creates two independent libsqlite3 images, and passing a prepared
 statement between them can crash the process.
 
-To roll SQLite, update all six import maps and
+To roll SQLite, update all eight import maps and
 `SQLITE3_RELEASE_VERSION` in one change, run `deno install`, and verify:
 
 ```bash

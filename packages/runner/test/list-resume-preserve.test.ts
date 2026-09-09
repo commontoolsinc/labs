@@ -75,6 +75,7 @@ class ResumeBatchGate {
 
   /** Resolves once a per-element document has been held back. */
   readonly elementsHeld: Promise<void>;
+
   constructor() {
     let resolveTop!: () => void;
     let resolveElements!: () => void;
@@ -125,14 +126,20 @@ class ResumeBatchGate {
 }
 
 class GatedSessionFactory implements SessionFactory {
+  readonly #getServer: () => MemoryV2Server.Server;
+  readonly #gate?: ResumeBatchGate;
+
   constructor(
-    private readonly getServer: () => MemoryV2Server.Server,
-    private readonly gate?: ResumeBatchGate,
-  ) {}
+    getServer: () => MemoryV2Server.Server,
+    gate?: ResumeBatchGate,
+  ) {
+    this.#getServer = getServer;
+    this.#gate = gate;
+  }
   async create(spaceId: string, sgnr?: Signer) {
-    const base = MemoryV2Client.loopback(this.getServer());
+    const base = MemoryV2Client.loopback(this.#getServer());
     const client = await MemoryV2Client.connect({
-      transport: this.gate ? this.gate.wrap(base) : base,
+      transport: this.#gate ? this.#gate.wrap(base) : base,
     });
     const session = await client.mount(
       spaceId,

@@ -1158,6 +1158,19 @@ Deno.test("session: the quit save-prompt answers s / d / c", () => {
     press(s, "escape"); // back to the pager (the buffer is still dirty)
     press(s, "q"); // dirty -> save prompt
     assert(promptText(s.view()).includes("Save changes"), promptText(s.view()));
+    const beforeWheel = s.view();
+    press(s, "wheel-down");
+    assertEquals(
+      promptText(s.view()),
+      promptText(beforeWheel),
+      "wheel input leaves the prompt open",
+    );
+    assertEquals(s.view().top, beforeWheel.top, "wheel input does not scroll");
+    assertEquals(
+      s.view().dialog?.focus,
+      beforeWheel.dialog?.focus,
+      "wheel input does not move the focused button",
+    );
     press(s, "s");
     assert(saved.text?.includes("A"), saved.text ?? "");
     assert(s.quit, "s saved and quit");
@@ -2565,6 +2578,16 @@ Deno.test("filepickercov: paging through a long listing scrolls the picker", () 
   press(s, "up", "ctrl-p"); // arrow and Emacs up
   press(s, "pageup");
   assertEquals(s.view().overlay!.selectedLine, 0, "back at the top");
+});
+
+Deno.test("filepickercov: the mouse wheel moves three entries", () => {
+  const s = pickerSession();
+  press(s, "ctrl-x", "ctrl-f");
+  assertEquals(s.view().overlay?.selectedLine, 0);
+  press(s, "wheel-down");
+  assertEquals(s.view().overlay?.selectedLine, 3);
+  press(s, "wheel-up");
+  assertEquals(s.view().overlay?.selectedLine, 0);
 });
 
 Deno.test("filepickercov: backspace on an empty filter steps up a directory", () => {

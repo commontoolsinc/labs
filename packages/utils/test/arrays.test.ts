@@ -342,6 +342,7 @@ describe("arrays", () => {
     describe("subsumes the index-only check", () => {
       // `isInertArray()` includes everything
       // `isArrayWithOnlyIndexProperties()` checks; callers never need both.
+
       it("rejects a named property", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";

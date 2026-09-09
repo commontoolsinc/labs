@@ -27,6 +27,7 @@ export interface ViewLanguageFixture {
 
   /** Other adapters that deliberately share this fixture's token evidence. */
   readonly highlightingPeers?: readonly string[];
+
   readonly surveyRepository: string;
   readonly surveyCommit: string;
   readonly surveyPath: string;
@@ -114,6 +115,12 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
         "deno.jsonc",
         "package.json",
         "settings.jsonc.example",
+        "packages/shell/public/manifest.webmanifest",
+        "packages/memory/memory.tldr",
+        "deno.lock",
+        "bay.code-workspace",
+        "ios/Package.resolved",
+        "images/syzkaller/default-gvisor-config.cfg",
       ],
       aliases: ["json", "jsonc"],
     },

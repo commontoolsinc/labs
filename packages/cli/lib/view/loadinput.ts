@@ -18,6 +18,7 @@ export interface BufferedViewInput {
   /** The streamed detector consumed all bytes without selecting a byte
    * language. Later decoding can proceed directly as text. */
   readonly byteLanguageDetectionComplete?: boolean;
+
   readonly extent: RenderInputExtent;
 }
 

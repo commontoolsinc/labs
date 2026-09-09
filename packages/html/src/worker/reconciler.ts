@@ -82,6 +82,7 @@ import {
 
 /** Sentinel key in propSubscriptions for the Cell<Props> subscription itself. */
 const CELL_PROPS_KEY = "__cellProps__";
+
 const CFC_RENDER_BOUNDARY_TAG = "cf-cfc-render-boundary";
 const CFC_AUTHORSHIP_TAG = "cf-cfc-authorship";
 const CFC_BLOCKED_PLACEHOLDER_TAG = "cf-cfc-blocked";
@@ -202,29 +203,36 @@ export class WorkerReconciler {
   #pendingOps: VDomOp[] = [];
   #flushScheduled = false;
 
-  // Track the actual root child node (not the container)
+  /** The actual root child node (not the container). */
   #rootChildId: number | null = null;
+
   #rootCancel: Cancel | null = null;
 
   readonly #onOps: (ops: VDomOp[]) => number | void;
   readonly #onError?: (error: Error) => void;
   readonly #renderDeclassificationPolicy: RenderDeclassificationPolicy;
 
-  // Root-of-tree render policy: the host's default ceiling when configured
-  // (spec §8.10.6), otherwise the historical unbounded policy. Authored
-  // boundaries can only narrow from here. TypeScript-private rather than a `#`
-  // name, because `runtime-client/test/backends/runtime-processor.test.ts`
-  // reaches it across the package boundary, through the reconciler a mount
-  // holds.
-  private readonly rootRenderPolicy: RenderPolicy;
-  // Runner-side display-boundary resolver (Epic H3b): rewrites a cell's
-  // confidentiality label through the exchange rules before the ceiling fit,
-  // admitting `Space(...)`-via-`HasRole` principal forms. Undefined = H3a
-  // exact-match behavior.
+  /**
+   * Root-of-tree render policy: the host's default ceiling when configured
+   * (spec §8.10.6), otherwise the unbounded policy. Authored boundaries can
+   * only narrow from here.
+   */
+  readonly #rootRenderPolicy: RenderPolicy;
+
+  /**
+   * Runner-side display-boundary resolver, which rewrites a cell's
+   * confidentiality label through the exchange rules before the ceiling fit,
+   * admitting `Space(...)`-via-`HasRole` principal forms. When `undefined`,
+   * the label is fit by exact match.
+   */
   readonly #resolveRenderConfidentiality?: RenderConfidentialityResolver;
-  // §4.9.3 Stage 2: the membership provider whose `subscribe` lets a gated
-  // `Space(X)`-labeled cell re-render when X's ACL syncs/changes. Undefined =
-  // no reactive upgrade (the Stage-1 sync snapshot still gates soundly).
+
+  /**
+   * The membership provider (spec §4.9.3) whose `subscribe()` lets a gated
+   * `Space(X)`-labeled cell re-render when `X`'s ACL syncs or changes. When
+   * `undefined`, there is no reactive upgrade, and the sync snapshot still
+   * gates soundly.
+   */
   readonly #membershipProvider?: SpaceMembershipProvider;
 
   constructor(options: WorkerReconcilerOptions) {
@@ -242,10 +250,31 @@ export class WorkerReconciler {
     const ceiling = normalizeRenderConfidentialityCeiling(
       options.renderConfidentialityCeiling,
     );
-    this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
+    this.#rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
       declassifyConfidentiality: [],
       maxConfidentiality: [...(ceiling.atoms ?? [])],
       caveatKindAllow: [...(ceiling.caveatKinds ?? [])],
+    };
+  }
+
+  /**
+   * The root render policy and the two admission checks, which a test
+   * drives directly.
+   */
+  get accessForTestingOnly(): {
+    readonly rootRenderPolicy: RenderPolicy;
+    atomRenderableUnderPolicy(atom: unknown, policy: RenderPolicy): boolean;
+    canRenderCellUnderPolicy(
+      cell: Cell<unknown>,
+      policy: RenderPolicy,
+    ): boolean;
+  } {
+    return {
+      rootRenderPolicy: this.#rootRenderPolicy,
+      atomRenderableUnderPolicy: (atom, policy) =>
+        this.#atomRenderableUnderPolicy(atom, policy),
+      canRenderCellUnderPolicy: (cell, policy) =>
+        this.#canRenderCellUnderPolicy(cell, policy),
     };
   }
 
@@ -332,16 +361,16 @@ export class WorkerReconciler {
         // configured) before rendering its resolved content. Checked per
         // update so label changes re-evaluate, mirroring renderCellChild.
         if (
-          !this.canRenderCellUnderPolicy(
+          !this.#canRenderCellUnderPolicy(
             vnode as Cell<unknown>,
-            this.rootRenderPolicy,
+            this.#rootRenderPolicy,
           )
         ) {
           this.#reconcileIntoWrapper(
             ctx,
             wrapperState,
             this.#blockedPlaceholderVNode(),
-            this.rootRenderPolicy,
+            this.#rootRenderPolicy,
           );
           this.#rootChildId = wrapperState.currentChild?.nodeId ?? null;
           return;
@@ -359,7 +388,7 @@ export class WorkerReconciler {
           ctx,
           wrapperState,
           resolvedVnode as WorkerRenderNode,
-          this.rootRenderPolicy,
+          this.#rootRenderPolicy,
         );
         // Track the root child for cleanup
         this.#rootChildId = wrapperState.currentChild?.nodeId ?? null;
@@ -374,7 +403,7 @@ export class WorkerReconciler {
         ctx,
         vnode,
         new Set(),
-        this.rootRenderPolicy,
+        this.#rootRenderPolicy,
       );
       if (state) {
         addCancel(state.cancel);
@@ -900,7 +929,7 @@ export class WorkerReconciler {
    * own view, or — when it has none — the resolved (followed) target's view,
    * whose label may carry the `Space(...)` atoms. May throw (each caller
    * decides its own fail-closed handling). The SINGLE source of label
-   * resolution shared by the gate (`canRenderCellUnderPolicy`), the
+   * resolution shared by the gate (`#canRenderCellUnderPolicy`), the
    * represents-principal read, and the Stage-2 membership watcher
    * (`watchCellMembership`), so they can never drift out of lockstep.
    */
@@ -975,7 +1004,7 @@ export class WorkerReconciler {
     }
     const protectedValue = this.#boundaryProtectedValueCell(node);
     return protectedValue !== undefined &&
-      !this.canRenderCellUnderPolicy(protectedValue, policy);
+      !this.#canRenderCellUnderPolicy(protectedValue, policy);
   }
 
   #boundaryProtectedValueCell(
@@ -1117,11 +1146,13 @@ export class WorkerReconciler {
   }
 
   /**
-   * TypeScript-private rather than a `#` name:
-   * `test/worker-reconciler-cfc-atom-admission.test.ts` drives this member
-   * directly.
+   * Whether `cell` may render under `policy`: every atom of its
+   * confidentiality label (its schema's, when it carries none) sits under
+   * the ceiling or is declassified, resolved through the display-boundary
+   * exchange rules when a resolver is wired and a ceiling is in force. A
+   * label that cannot be read fails closed.
    */
-  private canRenderCellUnderPolicy(
+  #canRenderCellUnderPolicy(
     cell: Cell<unknown>,
     policy: RenderPolicy,
   ): boolean {
@@ -1158,7 +1189,7 @@ export class WorkerReconciler {
         return true;
       }
       return schemaLabels.every((atom) =>
-        this.atomRenderableUnderPolicy(atom, policy)
+        this.#atomRenderableUnderPolicy(atom, policy)
       );
     }
 
@@ -1171,7 +1202,7 @@ export class WorkerReconciler {
       );
     }
     for (const atom of confidentiality) {
-      if (!this.atomRenderableUnderPolicy(atom, policy)) {
+      if (!this.#atomRenderableUnderPolicy(atom, policy)) {
         return false;
       }
     }
@@ -1237,12 +1268,8 @@ export class WorkerReconciler {
    * neither author declassification nor a ceiling entry — even one naming
    * the exported marker string — may admit it. Every other atom checks
    * declassification first, then the ceiling.
-   *
-   * TypeScript-private rather than a `#` name:
-   * `test/worker-reconciler-cfc-atom-admission.test.ts` drives this member
-   * directly.
    */
-  private atomRenderableUnderPolicy(
+  #atomRenderableUnderPolicy(
     atom: unknown,
     policy: RenderPolicy,
   ): boolean {
@@ -3654,7 +3681,7 @@ export class WorkerReconciler {
         addCancel,
         () => renderResolved(childState.currentValue, true),
       );
-      const blockedByPolicy = !this.canRenderCellUnderPolicy(cell, policy);
+      const blockedByPolicy = !this.#canRenderCellUnderPolicy(cell, policy);
       const blockedByIntegrity = !blockedByPolicy &&
         this.#shouldBlockTextFromCell(resolvedChild, cell, policy);
 
@@ -4085,7 +4112,7 @@ export class WorkerReconciler {
       // `children`, say) renders as the literal text `{}` — the warn fires
       // but nothing throws. Wants a `FabricSpecialObject` test ahead of this
       // point, rendered via `toCompactDebugString()` from
-      // `@commonfabric/data-model/value-debug` (or the primitive's own
+      // `@commonfabric/data-model` (or the primitive's own
       // string form).
       console.warn("unexpected object when value was expected", value);
       return JSON.stringify(value);

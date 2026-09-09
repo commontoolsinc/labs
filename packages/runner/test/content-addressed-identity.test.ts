@@ -66,7 +66,6 @@ describe("content-addressed action identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(PROGRAM);
     await runtime.idle();
@@ -175,10 +174,7 @@ describe("content-addressed action identity", () => {
     // Simulate the bounded artifact index rolling the module out mid-session
     // (FIFO eviction after ~1000 other identities) — the worst case for a
     // `$implRef`-only stored graph, which has no legacy ref and no body.
-    const manager = runtime!.patternManager as unknown as {
-      addressableByIdentity: Map<string, unknown>;
-      modulesByIdentity: Map<string, unknown>;
-    };
+    const manager = runtime!.patternManager.accessForTestingOnly;
     manager.addressableByIdentity.clear();
     manager.modulesByIdentity.clear();
     expect(
@@ -351,7 +347,6 @@ export default pattern<{ out: string }>(({ out }) => ({
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(
       DYNAMIC_PROGRAM,
@@ -432,9 +427,7 @@ export default pattern<{ out: string }>(({ out }) => ({
   });
 });
 
-describe("$implRef resolution arm (Runner.resolveJavaScriptFunction)", () => {
-  // (The "provenance bundleId fallback" suite retired with the bundleId
-  // verification arm — identity E5, data-wipe decision.)
+describe("$implRef resolution arm (Runner.#resolveJavaScriptFunction)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -469,7 +462,6 @@ export default pattern<{ value: number }>(({ value }) => ({
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(
       LIFT_PROGRAM,

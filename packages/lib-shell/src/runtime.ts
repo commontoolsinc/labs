@@ -1,20 +1,29 @@
-import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import type { CellScope } from "@commonfabric/api";
+import {
+  createSession,
+  DID,
+  Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
+import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
-import type { FabricPlainObject } from "@commonfabric/data-model/fabric-value";
 import { navigate } from "@commonfabric/navigation";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
+  attachOptionsFrom,
   CellHandle,
   FavoritesManager,
-  PageHandle,
+  PieceHandle,
   type PieceSourceView,
   Program,
   RuntimeClient,
   RuntimeClientEvents,
   RuntimeClientOptions,
   RuntimeTelemetryMarkerResult,
+  type RuntimeTransport,
 } from "@commonfabric/runtime-client";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -127,6 +136,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * worker. Spaces absent from the map resolve to `apiUrl`, the default host.
    */
   spaceHostMap?: Record<string, string>;
+
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
 
@@ -140,12 +150,21 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   /**
    * Populate the default render confidentiality ceiling (Epic H3a). When
    * true, the worker's display sinks gate labeled values against the
-   * §8.10.6 profile for this identity and author-supplied render-boundary
-   * declassification is denied. Dogfood flag, default off (= today's
-   * unbounded rendering). Expect over-blocking while exchange resolution
-   * (H3b) is not implemented.
+   * §8.10.6 profile for the acting identity and author-supplied
+   * render-boundary declassification is denied. Dogfood flag, default off
+   * (= today's unbounded rendering).
    */
   cfcRenderCeiling?: boolean;
+
+  /**
+   * The trust the worker runs against. Its `actingPrincipal` is the identity
+   * the runtime acts as, which is also the audience the render ceiling admits
+   * when `cfcRenderCeiling` is on. Omit it to send one naming the session
+   * identity; pass `null` to send none, which leaves the worker to build its
+   * own, naming the session identity as well. A supplied snapshot without an
+   * `actingPrincipal` leaves transaction trust unnamed; rendering falls back
+   * to the session identity as its audience.
+   */
   trustSnapshot?: RuntimeTrustSnapshot | null;
 
   /**
@@ -180,8 +199,35 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
    * fall back to `/scripts/worker-runtime.js`.
+   *
+   * Ignored when `transport` supplies the connection, there being no worker to
+   * address.
    */
   workerUrl?: URL;
+
+  /**
+   * The connection to the runtime's worker. Absent, this page spawns a
+   * dedicated worker of its own and connects to that, which is what a page
+   * with no runtime around it does.
+   *
+   * Supplied, the embedder has already made the connection and this page
+   * speaks over it. How -- a port a family root's page transferred, a channel
+   * a native shell relays -- is the embedder's to know and nothing here reads.
+   */
+  transport?: RuntimeTransport;
+
+  /**
+   * Join the runtime already running behind `transport` rather than standing
+   * one up. It says which client this page is: the one whose initialization
+   * settles the runtime's identity and security posture, or one attaching to a
+   * runtime whose posture is already settled and which it asserts rather than
+   * declares.
+   *
+   * Only meaningful with `transport`: a worker this page spawned has no
+   * runtime to attach to.
+   */
+  attach?: boolean;
+
   getBuildHash?: () => Promise<string | undefined>;
 
   /**
@@ -191,14 +237,17 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   telemetry?: RuntimeTelemetrySink;
 };
 
+/** {@link fetchBuildHash}'s module-level memo. */
+let buildHashPromise: Promise<string | undefined> | undefined;
+
 /**
  * Fetch the worker bundle hash from the build manifest. This cache-busts the
  * mutable root worker URL used by local/legacy builds. Deployed shell builds
  * use their immutable `/builds/<sha>/` namespace instead.
  *
- * Cached at module level — the hash doesn't change within a page session.
+ * Cached — the hash doesn't change within a page session, so the manifest is
+ * fetched at most once.
  */
-let buildHashPromise: Promise<string | undefined> | undefined;
 export function fetchBuildHash(): Promise<string | undefined> {
   if (!buildHashPromise) {
     buildHashPromise = (async () => {
@@ -221,6 +270,46 @@ export function fetchBuildHash(): Promise<string | undefined> {
   return buildHashPromise;
 }
 
+/**
+ * The URL this page's runtime worker is loaded from.
+ *
+ * Production deploys retain each complete module graph under its commit SHA.
+ * Keeping the entry and all of its relative split chunks in that same
+ * immutable namespace prevents a later root deployment from deleting a chunk
+ * that a long-lived page still needs. An explicit `workerUrl` (local
+ * development) or an absent `clientVersion` retains the mutable root URL and
+ * its manifest cache-buster.
+ *
+ * {@link RuntimeInternals.create} calls this for the worker it spawns. It is
+ * exported for the page that spawns one and then hands ports to it: such a
+ * page holds the transport itself, and must reach the same URL doing so.
+ */
+export async function resolveWorkerUrl(
+  options: {
+    workerUrl?: URL;
+    clientVersion?: string;
+    getBuildHash?: () => Promise<string | undefined>;
+  } = {},
+): Promise<URL> {
+  const { workerUrl, clientVersion, getBuildHash = fetchBuildHash } = options;
+  const immutableBuildId = workerUrl === undefined && clientVersion
+    ? clientVersion
+    : undefined;
+  const resolved = workerUrl ?? new URL(
+    immutableBuildId
+      ? `/builds/${
+        encodeURIComponent(immutableBuildId)
+      }/scripts/worker-runtime.js`
+      : "/scripts/worker-runtime.js",
+    globalThis.location.origin,
+  );
+  if (!immutableBuildId) {
+    const buildHash = await getBuildHash();
+    if (buildHash) resolved.searchParams.set("v", buildHash);
+  }
+  return resolved;
+}
+
 export function createRuntimeClientOptions({
   session,
   apiUrl,
@@ -238,15 +327,11 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
-  // Epic H3a: populate the render confidentiality ceiling. Off by default —
-  // a deployment-posture change to what the shell renders, enabled
-  // deliberately per host (shell dogfood flag). When on, display sinks
-  // admit only the §8.10.6 profile (the acting user's own identity atom
-  // plus display-dischargeable influence-class caveat kinds) and
-  // author-supplied render declassification is denied (audit S15); the
-  // reconciler's fail-closed narrowing does the enforcement. Exact-match
-  // forms only until H3b adds exchange resolution, so over-blocking is
-  // expected — that is the point of the dogfood stage.
+  // Hosts opt into the §8.10.6 display ceiling. The worker resolves shared
+  // `Space` labels through verified reader membership before the reconciler
+  // fits them against the acting user's identity atoms and the admitted
+  // influence-class caveat kinds. Author-supplied render declassification is
+  // denied, and labels that still do not fit the ceiling stay blocked.
   cfcRenderCeiling = false,
   trustSnapshot,
   forwardWorkerConsole,
@@ -265,11 +350,22 @@ export function createRuntimeClientOptions({
   patternCoverage?: boolean;
   concurrentWatchRefresh?: boolean;
 }) {
+  // The identity the runtime renders as. A delegated host names it in its own
+  // trust snapshot; a snapshot that names nobody leaves the session identity
+  // as the render audience, the fallback the worker's own resolver applies to
+  // the same field in `runtime-processor.ts`. A named principal must be a DID:
+  // the ceiling's entries are identity atoms over one.
+  const namedPrincipal = trustSnapshot?.actingPrincipal;
+  if (namedPrincipal !== undefined && !isDID(namedPrincipal)) {
+    throw new Error(
+      `A trust snapshot's acting principal must be a DID: ${
+        JSON.stringify(namedPrincipal)
+      }`,
+    );
+  }
+  const actingPrincipal = namedPrincipal ?? session.as.did();
   const resolvedTrustSnapshot = trustSnapshot === undefined
-    ? {
-      id: `principal:${session.as.did()}`,
-      actingPrincipal: session.as.did(),
-    }
+    ? { id: `principal:${actingPrincipal}`, actingPrincipal }
     : trustSnapshot ?? undefined;
 
   return {
@@ -285,8 +381,9 @@ export function createRuntimeClientOptions({
     ...(cfcRenderCeiling
       ? {
         renderDeclassificationPolicy: "deny" as const,
+        // A display sink's audience is the identity the runtime renders as.
         renderConfidentialityCeiling: defaultRenderConfidentialityCeiling(
-          session.as.did(),
+          actingPrincipal,
         ),
       }
       : {}),
@@ -294,6 +391,51 @@ export function createRuntimeClientOptions({
     forwardWorkerConsole,
     patternCoverage,
     concurrentWatchRefresh,
+  };
+}
+
+/** One loaded piece, and whether the load started it. */
+interface PatternCacheEntry {
+  promise: Promise<PieceHandle<NameSchema>>;
+  started: boolean;
+}
+
+/** Where a slug reference lands, as a page address can carry it. */
+export interface SlugReferenceTarget {
+  /** The piece the reference reached, in the routing form of its id. */
+  pieceId: string;
+
+  /**
+   * The scope the piece's document sits in. A member reached through a link
+   * into a narrower scope is a piece like any other, and its id addresses it
+   * only alongside this — which is why it is carried rather than assumed.
+   */
+  scope: CellScope;
+
+  /**
+   * What is left of the reference after that piece. Empty where a member
+   * named a member; the member itself where the slug named a piece at its
+   * root, whose address does not include it — an address the caller has to
+   * settle before citing what it is showing.
+   */
+  pathAfter: string[];
+
+  /** Absent, which is what distinguishes a landing from a refusal. */
+  refusal?: undefined;
+}
+
+/**
+ * Why a slug reference reached no piece. A name nobody bound, or a member a
+ * collection does not hold, is an answer to the question asked rather than a
+ * fault, and a caller tells the two apart by which of these it gets.
+ */
+export interface SlugReferenceRefusal {
+  refusal: {
+    /** Which refusal it is, as the runner's slug resolution names them. */
+    code: string;
+
+    /** What to tell a reader, naming the collection and member it knows. */
+    message: string;
   };
 }
 
@@ -310,14 +452,36 @@ export class RuntimeInternals extends EventTarget {
   #disposed = false;
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
-  #spaceRootPatterns: Map<DID, Promise<PageHandle<NameSchema>>> = new Map();
+
+  /** Cached space roots, with whether the cached one was STARTED: a
+   * started root also answers a caller that only reads its exports, while
+   * one resolved without starting does not answer a caller that needs it
+   * running. */
+  #spaceRootPatterns: Map<
+    DID,
+    { pattern: Promise<PieceHandle<NameSchema>>; started: boolean }
+  > = new Map();
+  /**
+   * Loaded pieces, nested space → scope → id: a piece's whole address, held
+   * as the three things it is. One id in two scopes is two documents, and an
+   * id carries colons of its own (`of:fid1:…` beside `fid1:…`), so an
+   * address flattened into one string is one a reader has to take apart
+   * again — and taking it apart is what answered about one piece and evicted
+   * another. Nested, there is nothing to parse: a lookup walks to the entry
+   * and an eviction deletes from the map it sits in.
+   *
+   * An entry carries whether the load was STARTED: a started piece answers a
+   * caller that only reads it, while one loaded without starting does not
+   * answer a caller that needs it running.
+   */
   #patternCache: Map<
-    string,
-    { promise: Promise<PageHandle<NameSchema>>; started: boolean }
+    DID,
+    Map<CellScope, Map<string, PatternCacheEntry>>
   > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
-  // Optional OTel sink (browser telemetry enabled). Inert when undefined.
+
+  /** Optional OTel sink (browser telemetry enabled). Inert when `undefined`. */
   #telemetrySink?: RuntimeTelemetrySink;
 
   constructor(
@@ -334,6 +498,20 @@ export class RuntimeInternals extends EventTarget {
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
     this.#client.on("telemetry", this.#onTelemetry);
+  }
+
+  /**
+   * How many spaces the pattern cache is holding levels for, which a test
+   * reads to check that an eviction left none behind.
+   */
+  get accessForTestingOnly(): { readonly patternCacheSize: number } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get patternCacheSize() {
+        return outerThis.#patternCache.size;
+      },
+    };
   }
 
   runtime(): RuntimeClient {
@@ -357,22 +535,27 @@ export class RuntimeInternals extends EventTarget {
     space: DID,
     source: URL | Program | string,
     options?: { argument?: FabricPlainObject; run?: boolean },
-  ): Promise<PageHandle<T>> {
+  ): Promise<PieceHandle<T>> {
     this.#check();
-    const page = await this.#client.createPage<T>(source, space, options);
-    if (!page) {
+    const piece = await this.#client.createPiece<T>(source, space, options);
+    if (!piece) {
       throw new Error("Could not create piece");
     }
-    return page;
+    return piece;
   }
 
   /**
    * A piece's source state: the pattern it runs, the origin it tracks, the
-   * history metadata it carries, and its authored source files.
+   * history metadata it carries, and its authored source files. `scope`
+   * completes the id into a document address and defaults to the space.
    */
-  getPieceSource(space: DID, pieceId: string): Promise<PieceSourceView> {
+  getPieceSource(
+    space: DID,
+    pieceId: string,
+    scope?: CellScope,
+  ): Promise<PieceSourceView> {
     this.#check();
-    return this.#client.getPieceSource(pieceId, space);
+    return this.#client.getPieceSource(pieceId, space, scope);
   }
 
   getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
@@ -380,16 +563,26 @@ export class RuntimeInternals extends EventTarget {
     return this.#client.getPiecesListCell<T>(space);
   }
 
-  getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  /**
+   * The space's root pattern. `start` defaults to true, which a view that
+   * renders the root needs; pass false to read its exports without running
+   * it.
+   */
+  getSpaceRootPattern(
+    space: DID,
+    options: { start?: boolean } = {},
+  ): Promise<PieceHandle<NameSchema>> {
     this.#check();
+    const start = options.start ?? true;
     const cached = this.#spaceRootPatterns.get(space);
-    if (cached) return cached;
-    const pattern = this.#client.getSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, pattern);
+    if (cached && (cached.started || !start)) return cached.pattern;
+    const pattern = this.#client.getSpaceRootPattern(space, { start });
+    const entry = { pattern, started: start };
+    this.#spaceRootPatterns.set(space, entry);
     // Evict on rejection: a transient failure (unreachable host, authz)
     // must not poison the space for the runtime's lifetime.
     pattern.catch(() => {
-      if (this.#spaceRootPatterns.get(space) === pattern) {
+      if (this.#spaceRootPatterns.get(space) === entry) {
         this.#spaceRootPatterns.delete(space);
       }
     });
@@ -401,17 +594,20 @@ export class RuntimeInternals extends EventTarget {
     return this.#client.resolveSpaceName(name);
   }
 
-  async recreateSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  async recreateSpaceRootPattern(space: DID): Promise<PieceHandle<NameSchema>> {
     this.#check();
     // Clear cached pattern since we're recreating it
     this.#spaceRootPatterns.delete(space);
     const pattern = await this.#client.recreateSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, Promise.resolve(pattern));
+    this.#spaceRootPatterns.set(space, {
+      pattern: Promise.resolve(pattern),
+      started: true,
+    });
     return pattern;
   }
 
   /**
-   * Get a piece's page handle. By default this also STARTS the piece
+   * Get a piece's handle. By default this also STARTS the piece
    * (instantiates its pattern in the worker) — appropriate for the piece
    * about to be displayed. Pass `start: false` for read-only consumers
    * (e.g. listing piece names): the persisted result cell is synced and
@@ -419,48 +615,98 @@ export class RuntimeInternals extends EventTarget {
    * (starting every registered piece on reload cost about ten seconds of
    * dependency collection, either during reload or on the first interaction).
    *
-   * Cached per (space, id) — a pattern's address. A cache entry created
-   * with `start: false` is upgraded (re-fetched with start) when a
+   * Cached per (space, scope, id) — a pattern's whole address. A cache entry
+   * created with `start: false` is upgraded (re-fetched with start) when a
    * starting caller asks for the same pattern.
    */
   getPattern(
     space: DID,
     id: string,
-    options?: { start?: boolean },
-  ): Promise<PageHandle<NameSchema>> {
+    options?: { start?: boolean; scope?: CellScope },
+  ): Promise<PieceHandle<NameSchema>> {
     this.#check();
     const start = options?.start ?? true;
-    const key = `${space}:${id}`;
-    const cached = this.#patternCache.get(key);
+    // One id in two scopes is two documents, so a caller that named no scope
+    // asks about the space's.
+    const scope = options?.scope ?? "space";
+    const byId = this.#patternCacheSlot(space, scope);
+    const cached = byId.get(id);
     if (cached && (cached.started || !start)) {
       return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, space, start);
-      if (!page) {
+      const piece = await this.#client.getPiece<NameSchema>(
+        id,
+        space,
+        start,
+        scope,
+      );
+      if (!piece) {
         throw new Error(`Pattern not found: ${id}`);
       }
-      return page;
+      return piece;
     })();
-    const entry = { promise, started: start };
-    this.#patternCache.set(key, entry);
+    const entry: PatternCacheEntry = { promise, started: start };
+    byId.set(id, entry);
     // Evict on rejection so the next request retries.
     promise.catch(() => {
-      if (this.#patternCache.get(key) === entry) {
-        this.#patternCache.delete(key);
-      }
+      if (byId.get(id) === entry) this.#dropPattern(space, scope, id);
     });
     return promise;
   }
 
+  /**
+   * Drop every cached load of `id` in `space`, whatever scope it was loaded
+   * in. A caller naming a piece to invalidate knows the piece, not which
+   * scope some other caller reached it through, and an entry left behind is
+   * a stale piece handed to the next reader.
+   *
+   * Reached by walking the address rather than by matching a spelling of it.
+   */
   invalidatePattern(space: DID, id: string): void {
-    this.#patternCache.delete(`${space}:${id}`);
+    for (const scope of [...this.#patternCache.get(space)?.keys() ?? []]) {
+      this.#dropPattern(space, scope, id);
+    }
+  }
+
+  /**
+   * Drop one loaded piece, and any level of the cache it was the last thing
+   * in. A nested map holds a level per address component, so a level left
+   * empty is a space or a scope the runtime goes on holding for a piece it
+   * no longer has — and a run of failed lookups is a run of them.
+   */
+  #dropPattern(space: DID, scope: CellScope, id: string): void {
+    const byScope = this.#patternCache.get(space);
+    const byId = byScope?.get(scope);
+    if (!byScope || !byId) return;
+    byId.delete(id);
+    if (byId.size > 0) return;
+    byScope.delete(scope);
+    if (byScope.size === 0) this.#patternCache.delete(space);
+  }
+
+  /** The map holding what `space` has loaded in `scope`, created on demand. */
+  #patternCacheSlot(
+    space: DID,
+    scope: CellScope,
+  ): Map<string, PatternCacheEntry> {
+    let byScope = this.#patternCache.get(space);
+    if (!byScope) {
+      byScope = new Map();
+      this.#patternCache.set(space, byScope);
+    }
+    let byId = byScope.get(scope);
+    if (!byId) {
+      byId = new Map();
+      byScope.set(scope, byId);
+    }
+    return byId;
   }
 
   async refreshPattern(
     space: DID,
     id: string,
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     this.invalidatePattern(space, id);
     return await this.getPattern(space, id);
   }
@@ -473,14 +719,71 @@ export class RuntimeInternals extends EventTarget {
     );
   }
 
-  async getSlug(space: DID, id: string): Promise<string | undefined> {
+  /**
+   * The name the piece answers to, where it has one. `scope` completes the id
+   * into a document address and defaults to the space.
+   */
+  async getSlug(
+    space: DID,
+    id: string,
+    scope?: CellScope,
+  ): Promise<string | undefined> {
     this.#check();
-    return await this.#client.getPageSlug(id, space);
+    return await this.#client.getPieceSlug(id, space, scope);
   }
 
-  async removePage(space: DID, id: string): Promise<boolean> {
+  /**
+   * Where a slug reference lands. Not cached and not started — `getPattern`
+   * on the id this answers with is what does both, and keying that cache on
+   * the piece rather than on the reference is what lets a reference reaching
+   * a new piece load it.
+   *
+   * A name nobody bound, and a member a collection does not hold, come back
+   * as a {@link SlugReferenceRefusal} rather than as a throw: they answer the
+   * question asked, and a caller that cannot tell them from a transport fault
+   * reports "ask again" for a name that will never resolve.
+   *
+   * @throws When the piece sits outside the space asked about. Only the id
+   *   and the scope travel on to `getPattern`, which takes the space from the
+   *   view, so a reference reaching another space is refused here in those
+   *   terms rather than reported as a piece that does not exist.
+   * @throws When the resolution itself fails — a transport fault, a document
+   *   that will not decode.
+   */
+  async resolveSlug(
+    space: DID,
+    slug: string,
+    member?: string,
+  ): Promise<SlugReferenceTarget | SlugReferenceRefusal> {
     this.#check();
-    return await this.#client.removePage(id, space);
+    const landed = await this.#client.resolveSlug(slug, space, member);
+    if (landed.refusal) return { refusal: landed.refusal };
+    const reached = landed.piece.cell().ref();
+    if (reached.space !== space) {
+      throw new Error(
+        `Slug reference "${slug}" reaches a piece in space ${reached.space}, ` +
+          `and this view addresses ${space}.`,
+      );
+    }
+    return {
+      pieceId: landed.piece.id(),
+      scope: reached.scope,
+      pathAfter: landed.pathAfter,
+    };
+  }
+
+  /**
+   * Removes the piece from the space's registry, returning whether this call
+   * removed it. `scope` completes the id into a document address and defaults
+   * to the space.
+   */
+  async removePiece(
+    space: DID,
+    id: string,
+    scope?: CellScope,
+  ): Promise<boolean> {
+    this.#check();
+    return await this.#client.removePiece(id, space, scope);
   }
 
   async synced(space: DID): Promise<void> {
@@ -564,7 +867,7 @@ export class RuntimeInternals extends EventTarget {
   ): Promise<void> {
     const { cell } = e;
     // `CellHandle.id()` is the full schemed URI; routing pieceIds are bare
-    // (the `PageHandle.id()` convention) — URLs and the pageId protocol
+    // (the `PieceHandle.id()` convention) — URLs and the pieceId protocol
     // fields expect the `of:`-stripped form.
     const pieceId = cell.id().replace(/^of:/, "");
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
@@ -640,11 +943,20 @@ export class RuntimeInternals extends EventTarget {
     concurrentWatchRefresh,
     getBuildHash = fetchBuildHash,
     workerUrl,
+    transport,
+    attach = false,
     navigate,
     onConsole,
     onError,
     telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
+    if (attach && !transport) {
+      throw new Error(
+        "`attach` needs a `transport`: a worker this page spawns has no " +
+          "runtime to attach to.",
+      );
+    }
+
     // One runtime per identity: the worker session is always the
     // identity's home session. Spaces — including derived named spaces —
     // are addressed per call; nothing is bound at creation.
@@ -659,46 +971,36 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    // Production deploys retain each complete module graph under its commit
-    // SHA. Keeping the entry and all of its relative split chunks in that same
-    // immutable namespace prevents a later root deployment from deleting a
-    // chunk that a long-lived page still needs. An explicit worker URL (local
-    // development) or an absent clientVersion retains the mutable root URL and
-    // its manifest cache-buster.
-    const immutableBuildId = workerUrl === undefined && clientVersion
-      ? clientVersion
-      : undefined;
-    const resolvedWorkerUrl = workerUrl ?? new URL(
-      immutableBuildId
-        ? `/builds/${
-          encodeURIComponent(immutableBuildId)
-        }/scripts/worker-runtime.js`
-        : "/scripts/worker-runtime.js",
-      globalThis.location.origin,
-    );
-    if (!immutableBuildId) {
-      const buildHash = await getBuildHash();
-      if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
-    }
-    const transport = await WebWorkerRuntimeTransport.connect({
-      workerUrl: resolvedWorkerUrl,
+    // Built before anything is connected, so a host's bad options are
+    // refused while a worker this page would own is still unspawned.
+    const clientOptions = createRuntimeClientOptions({
+      session,
+      apiUrl,
+      spaceHostMap,
+      experimental,
+      cfcEnforcementMode,
+      cfcFlowLabels,
+      cfcRenderCeiling,
+      trustSnapshot,
+      forwardWorkerConsole,
+      patternCoverage,
+      concurrentWatchRefresh,
     });
-    const client = await RuntimeClient.initialize(
-      transport,
-      createRuntimeClientOptions({
-        session,
-        apiUrl,
-        spaceHostMap,
-        experimental,
-        cfcEnforcementMode,
-        cfcFlowLabels,
-        cfcRenderCeiling,
-        trustSnapshot,
-        forwardWorkerConsole,
-        patternCoverage,
-        concurrentWatchRefresh,
-      }),
-    );
+
+    const connection = transport ??
+      await WebWorkerRuntimeTransport.connect({
+        workerUrl: await resolveWorkerUrl({
+          workerUrl,
+          clientVersion,
+          getBuildHash,
+        }),
+      });
+    const client = attach
+      ? await RuntimeClient.attach(
+        connection,
+        attachOptionsFrom(clientOptions),
+      )
+      : await RuntimeClient.initialize(connection, clientOptions);
 
     // Expose a usable RuntimeInternals immediately. Callers that need
     // storage/piece-manager convergence should await `rt.synced(space)`

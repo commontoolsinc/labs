@@ -73,10 +73,11 @@ import {
 /** Subjects whose encoded form holds a byte buffer, so decodes only once. */
 const SINGLE_SHOT = new Set(["bytes"]);
 
-/** Encoded forms, for the decode direction of every repeat-safe subject. */
+/** Encoded forms of the repeat-safe singles, for the decode direction. */
 const SINGLES_REALM = SINGLES
   .filter(([name]) => !SINGLE_SHOT.has(name))
   .map(([n, v]) => [n, realmFromFabricValue(v)] as const);
+
 const ARRAYS_REALM = ARRAYS.map(([n, v]) =>
   [n, realmFromFabricValue(v)] as const
 );

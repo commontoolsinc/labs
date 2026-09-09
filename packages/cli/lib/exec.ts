@@ -27,6 +27,7 @@ import {
   type ParsedExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  usageCommandPrefix,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -93,6 +94,7 @@ export interface ExecutedMountedCallableFile {
 
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
 }
@@ -105,7 +107,7 @@ export interface ResolveMountedCallableOptions {
  * with. */
 export interface ExecuteMountedCallableOptions {
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
-   * to arrive in, answered by the same selection step `cf piece get`,
+   * to arrive in, answered by the same selection step `cf cell get`,
    * `cf piece call` and `cf wish` read through — so one grammar covers every
    * arrival, whichever one a caller reached for. */
   selection?: CellSelection;
@@ -373,6 +375,7 @@ export async function executeMountedCallableFile(
     },
     commandSpec: resolved.commandSpec,
     rawArgs,
+    sectionPrefix: usageCommandPrefix(filePath, invocationStyle),
     deps: {
       ...deps,
       invocation,

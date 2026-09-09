@@ -83,13 +83,21 @@ triggers are documented in the ts-transformers behavior spec §12.
 `src/schema-generator.ts`) handles: `TypeLiteral` nodes (properties
 with `questionToken` optionality; string/number index signatures →
 `additionalProperties`, first non-undefined wins, no JSDoc),
-`ArrayTypeNode`, unions (`true` member short-circuits, `false`
+`readonly` type-operator nodes (analyze the wrapped type), `ArrayTypeNode`,
+unions (`true` member short-circuits, `false`
 members filtered, singletons unwrapped), literal nodes
 `TypeReference` nodes (wrapper detection first, then a
 scope-based name-resolution fallback for unbindable synthetic references via
 `checker.getSymbolsInScope` — plus a `Date`-by-name
 special case), keyword types, and a final
 resolve-else-`true` fallback.
+
+`readonly` marks mutability and contributes no JSON Schema keyword. A
+synthetic `readonly T[]` therefore has the same schema as its wrapped `T[]`.
+In particular, `readonly unknown[]` emits
+`{ type: "array", items: { type: "unknown" } }`, preserving the element's
+reference-only semantics. The synthetic readonly array cases in
+`test/schema-generator.test.ts` cover unknown, string, and object elements.
 
 **Observed node/type divergence — literal encodings.** The node path emits
 `const` (`{ type: "string", const: "x" }`); the type path emits
@@ -154,6 +162,7 @@ by any repo test.
 | `FabricSpecialObject` nominal brand (the `"@commonfabric/FabricSpecialObject"` key, `FABRIC_SPECIAL_OBJECT_BRAND` in `packages/data-model/src/api.ts`) on any other branded type | property skipped entirely (not in `properties`, not in `required`) — the key exists only in the type system, so no runtime value could ever satisfy it; e.g. a field typed as the `FabricPrimitive` base emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
+| `SqliteDatabase` (the `SqliteDb` handle's value, carrying the `SQLITE_DB_BRAND` unique symbol) | the handle descriptor `{ id, tables, rev }` with `additionalProperties: true` (§5.2), hoisted under `SqliteDatabase`; the brand's own members describe nothing, so a structural schema would shape a handle read down to `{}` | `native-type-formatter.ts` | `test/schema/cell-type.test.ts`; end-to-end: ts-transformers `handler-schema/sqlite-db-handler-state`, `schema-injection/scoped-sqlite-factory` |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts` | date-types fixture, native-type tests |
 | `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§13) | `type-utils.ts` | `schema-generator.test.ts` |
 | `Reactive<T>` | erases to `<T>`'s schema, **no marker** (§6.4) | — | `capability-wrapper-types.test.ts` |
@@ -238,6 +247,21 @@ emits that class's schema-vocabulary name, a leaf with no `properties`, no
 (`schemaTypeOfFabricPrimitive`,
 `packages/data-model-schema/src/schemaTypeOfFabricPrimitive.ts`); the dialect side is
 specified in `docs/specs/json_schema.md`.
+
+`NativeTypeFormatter` also claims one type that is not in the name table: the
+`SqliteDb` handle's readable value, recognized by the `SQLITE_DB_BRAND` unique
+symbol its type carries (`declaresSqliteDbBrand`). It emits the handle
+descriptor the SQLite spec defines
+(`docs/specs/sqlite-builtin/01-api.md`) —
+`{ type: "object", properties: { id: { type: "string" }, tables: { type: "object", additionalProperties: true }, rev: { type: "number" } }, additionalProperties: true }`.
+The type's own members describe nothing (a nominal brand is a single symbol
+key), so a structural schema would shape every read of a handle down to `{}`.
+`tables` carries the author-declared table schemas, whose per-column `ifc`
+labels are what a pattern reads to write a query, and `additionalProperties`
+keeps the fields outside the descriptor (`scope`, `owner`) from being dropped.
+Because the claim is by brand rather than by name, this one keeps its ordinary
+`$defs` hoisting: every `SqliteDb` position emits
+`$ref: "#/$defs/SqliteDatabase"` against one descriptor.
 
 The remaining typed arrays and the buffer types map to `true` (accept
 anything), which overclaims: none of them is representable as a `FabricValue`,
@@ -412,7 +436,7 @@ emits `asCell: ["opaque"]` is wrong on this tree.
 ### 6.5 Stream event schemas — deliberately open (C5)
 
 A stream property's schema object is the verb's **event** schema — what a
-caller sends, which `cf piece verbs` publishes and `piece call` validates
+caller sends, which `cf piece verbs` publishes and `cf piece call` validates
 payloads against. It carries no `additionalProperties` of its own — only
 what the event type itself demands (an index signature, a `Record` value
 type). The verb contract wants event schemas closed-world
@@ -656,7 +680,13 @@ Mechanics:
   anchors on `moduleIdentity` plus the binding `path`. So the comparison holds
   only the binding `path` and the `uiContract` fixed, and the runner still
   verifies the live writer's `moduleIdentity` against the claim at write time,
-  so this narrows nothing.
+  so this narrows nothing. Where the claim sits in the schema makes no
+  difference to that: the checker descends every keyword that holds schemas —
+  `allOf`, `oneOf`, `if`/`then`, and `not` among them — and normalizes a claim
+  it finds there the same way it normalizes one written onto a property. This
+  package emits none of those keywords, so nothing it produces exercises that
+  today. The checker sees schemas from elsewhere as well, and holds them to the
+  same reading.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,
@@ -882,7 +912,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 
 | Spec content | Canonical source | Guard / note |
 | --- | --- | --- |
-| Formatter chain + order (§3) | `SchemaGenerator.formatters` (`src/schema-generator.ts`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
+| Formatter chain + order (§3) | `SchemaGenerator.#formatters` (`src/schema-generator.ts`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
 | Core keyword mappings (§4) | `PrimitiveFormatter.getSchemaType` (`src/formatters/primitive-formatter.ts`); node table `analyzeTypeNodeStructure` (`src/schema-generator.ts`) | void-type / array-special-types tests |
 | Hoisting exclusion rule (§5.1) | `getNamedTypeKey` (`src/type-utils.ts`) | recursion/shared-type/alias fixtures |
 | Native leaf table + guard (§5.2) | `NATIVE_TYPE_SCHEMAS` / `LIB_DECLARED_NATIVE_TYPES` (`src/formatters/native-type-formatter.ts`) | `test/native-type-parameters.test.ts` |

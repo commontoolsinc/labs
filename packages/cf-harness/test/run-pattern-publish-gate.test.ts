@@ -270,11 +270,13 @@ describe("run_pattern publish render gate", () => {
     await storageManager?.close();
   });
 
-  const createEngine = (index: IndexStub): CfHarnessEngine =>
+  const createEngine = (
+    index: IndexStub,
+    options: { publishDiscoverable?: true } = {},
+  ): CfHarnessEngine =>
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -284,6 +286,19 @@ describe("run_pattern publish render gate", () => {
             signer,
           }),
         ),
+      ...(options.publishDiscoverable === true
+        ? {
+          fabricSession: {
+            apiUrl: "https://toolshed.test/",
+            identityKeyPath: "/keys/agent.pkcs8",
+            space: "publish-gate",
+          },
+          patternIndex: {
+            baseUrl: "https://index.test",
+            publishDiscoverable: true,
+          },
+        }
+        : {}),
     });
 
   /**
@@ -310,7 +325,6 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
     });
     expect(engine.patternIndexPublications).toBeUndefined();
@@ -342,7 +356,6 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -429,7 +442,7 @@ describe("run_pattern publish render gate", () => {
     expect(output.rawCauseMessage).toBeUndefined();
   });
 
-  it("offers a table that renders its cells to search", async () => {
+  it("records a table that renders its cells without offering it to search", async () => {
     const index = stubIndex();
     const output = await runAndFlush(index, {
       sourceText: WORKING_SORTABLE_TABLE,
@@ -438,16 +451,54 @@ describe("run_pattern publish render gate", () => {
       hashtags: ["table"],
     });
 
-    expect(output.patternPublication?.status).toBe("discoverable");
-    expect(output.patternPublication?.reason).toBe("ui-rendered");
+    expect(output.patternPublication?.status).toBe("recorded");
+    expect(output.patternPublication?.reason).toBe("recorded-automatically");
     expect(published(index)).toHaveLength(1);
-    // Absent rather than `true`: a caller that does not set it produces the
-    // request every caller produced before the gate existed.
-    expect(published(index)[0].body.discoverable).toBeUndefined();
+    expect(published(index)[0].body.discoverable).toBe(false);
+    expect(published(index)[0].body.discoverabilityReason).toBe(
+      "recorded automatically; discoverability is earned by evidence",
+    );
     // A pass keeps no DOM. There is no verdict to adjudicate, and the run
     // artifact is readable through `bash` (CT-2117), so a passing run writes
     // nothing there that it does not need.
     expect(output.rawCauseMessage).toBeUndefined();
+  });
+
+  it("offers a passing render to search only when the run deliberately opts in", async () => {
+    const index = stubIndex();
+    const engine = createEngine(index, { publishDiscoverable: true });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+      hashtags: ["table"],
+    });
+    await engine.flushPatternIndexPublications();
+    const output = result.output as RunPatternToolSuccessOutput;
+
+    expect(output.patternPublication?.status).toBe("discoverable");
+    expect(output.patternPublication?.reason).toBe("ui-rendered");
+    expect(published(index)[0].body.discoverable).toBe(true);
+    expect(published(index)[0].body.discoverabilityReason).toBeUndefined();
+  });
+
+  it("records automatic and render-gated entries for distinguishable reasons", async () => {
+    const index = stubIndex();
+    await runAndFlush(index, {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+    });
+    await runAndFlush(index, {
+      sourceText: EMPTY_UI,
+      inputs: {},
+      description: "Renders nothing",
+    });
+
+    const [automatic, renderGated] = published(index);
+    expect(renderGated.body.discoverabilityReason).not.toBe(
+      automatic.body.discoverabilityReason,
+    );
   });
 
   it("finds the $UI of a pattern that declares its result type", async () => {
@@ -455,18 +506,21 @@ describe("run_pattern publish render gate", () => {
     // reported `no-ui` — a skipped check dressed as a clean run — for 20 of
     // the 24 seed components. Left as a raw read, this test fails.
     const index = stubIndex();
-    const output = await runAndFlush(index, {
+    const engine = createEngine(index, { publishDiscoverable: true });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
       sourceText: DECLARED_RESULT_UI,
       inputs: {},
       description: "Renders a rating",
     });
+    await engine.flushPatternIndexPublications();
+    const output = result.output as RunPatternToolSuccessOutput;
 
     expect(output.patternPublication?.reason).toBe("ui-rendered");
     expect(output.patternPublication?.status).toBe("discoverable");
     expect(output.rawCauseMessage).toBeUndefined();
   });
 
-  it("offers a pure computation, which has no $UI to check", async () => {
+  it("records a pure computation, which has no $UI to check", async () => {
     const index = stubIndex();
     const output = await runAndFlush(index, {
       sourceText: DOUBLER,
@@ -474,11 +528,11 @@ describe("run_pattern publish render gate", () => {
       description: "Doubles a number",
     });
 
-    expect(output.patternPublication?.status).toBe("discoverable");
-    expect(output.patternPublication?.reason).toBe("no-ui");
+    expect(output.patternPublication?.status).toBe("recorded");
+    expect(output.patternPublication?.reason).toBe("recorded-automatically");
     expect(output.patternPublication?.syntheticInputsComplete).toBe(true);
     expect(published(index)).toHaveLength(1);
-    expect(published(index)[0].body.discoverable).toBeUndefined();
+    expect(published(index)[0].body.discoverable).toBe(false);
   });
 
   it("records a $UI that rendered no text without condemning it", async () => {
@@ -496,6 +550,9 @@ describe("run_pattern publish render gate", () => {
     expect(output.patternPublication?.reason).toBe("ui-rendered-empty");
     expect(published(index)).toHaveLength(1);
     expect(published(index)[0].body.discoverable).toBe(false);
+    expect(published(index)[0].body.discoverabilityReason).toContain(
+      "no text and no attributes",
+    );
   });
 
   /**
@@ -527,7 +584,6 @@ describe("run_pattern publish render gate", () => {
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -576,6 +632,63 @@ describe("run_pattern publish render gate", () => {
     expect(published(index)).toEqual([]);
   });
 
+  it("opens the render-gate probe under the session runtime's read ceiling", async () => {
+    // The probe reads the same space the session does, so it reads under the
+    // same ceiling; a probe opened unbounded against the live API would be
+    // the leak the ceiling exists to close, through the render path.
+    const boundedManager = StorageManager.emulate({ as: signer });
+    const boundedRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: boundedManager,
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip",
+    });
+    // Registered before anything can throw: afterEach disposes it, and
+    // disposal closes the manager it owns.
+    extraRuntimes.push(boundedRuntime);
+    const boundedPieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `publish-gate-bounded-${crypto.randomUUID()}`,
+      }),
+      boundedRuntime,
+    );
+    await boundedPieces.synced();
+    const index = stubIndex();
+    let probeCeiling: unknown = "never opened";
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () =>
+        Promise.resolve({ pieces: boundedPieces, identity: signer }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: index.fetchFn,
+            signer,
+          }),
+        ),
+      openProbeRuntime: (_identity, _apiUrl, _mode, ceiling) => {
+        probeCeiling = ceiling;
+        return Promise.resolve(undefined);
+      },
+    });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+    });
+    const output = result.output as RunPatternToolSuccessOutput;
+    expect(output.status).toBe("ok");
+    expect(output.patternPublication?.reason).toBe("probe-failed");
+    expect(probeCeiling).toEqual({
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip",
+    });
+  });
+
   it("records without a verdict when the probe fails for its own reasons", async () => {
     // No abort: the failure is the probe's, and it is no evidence about the
     // rendering either way. The run still succeeds and the entry is recorded.
@@ -605,7 +718,6 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -634,25 +746,6 @@ describe("run_pattern publish render gate", () => {
     // compile cannot resolve it and every composed pattern comes back
     // uncertified. Nothing tested that branch, which is why the mode was
     // missing from it in the first place.
-    // Enforcing, not disabled: the content-addressed source cache a
-    // `cf:pattern:` import resolves from is only written under an enforcing
-    // mode, for the live run and the probe alike. A disabled-mode session
-    // cannot compile a composed source at all, so this is the mode the case
-    // exists in.
-    const enforcing = new Runtime({
-      apiUrl: new URL("http://toolshed.test"),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-    extraRuntimes.push(enforcing);
-    const enforcingPieces = new PiecesController(
-      await createSession({
-        identity: signer,
-        spaceName: `publish-gate-cfc-${crypto.randomUUID()}`,
-      }),
-      enforcing,
-    );
-    await enforcingPieces.synced();
     const doublerId = await entryIdentityOf(DOUBLER);
     const index = stubIndex({
       [doublerId]: {
@@ -671,9 +764,7 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "enforce-explicit",
-      fabricSessionFactory: () =>
-        Promise.resolve({ pieces: enforcingPieces, identity: signer }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
           new PatternIndexClient({
@@ -682,6 +773,15 @@ describe("run_pattern publish render gate", () => {
             signer,
           }),
         ),
+      fabricSession: {
+        apiUrl: "https://toolshed.test/",
+        identityKeyPath: "/keys/agent.pkcs8",
+        space: "publish-gate",
+      },
+      patternIndex: {
+        baseUrl: "https://index.test",
+        publishDiscoverable: true,
+      },
     });
     const result = await engine.invokeBuiltinTool("run_pattern", {
       sourceText: composedSource(doublerId),
@@ -699,9 +799,9 @@ describe("run_pattern publish render gate", () => {
     expect(published(index)[0].body.dependencies).toEqual([doublerId]);
   });
 
-  it("offers only the last iteration of a capability a session authored", async () => {
+  it("records earlier iterations as superseded by the retained candidate", async () => {
     // The duplicate flood, fixed where it is made: a pattern-author that
-    // iterates leaves one search result and a record of every attempt.
+    // iterates leaves one retained candidate and a record of every attempt.
     const index = stubIndex();
     const engine = createEngine(index);
     for (const label of ["Name", "Player"]) {
@@ -718,14 +818,16 @@ describe("run_pattern publish render gate", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0].body.discoverable).toBe(false);
     expect(calls[0].body.discoverabilityReason).toContain("superseded");
-    expect(calls[1].body.discoverable).toBeUndefined();
-    expect(calls[1].body.discoverabilityReason).toBeUndefined();
+    expect(calls[1].body.discoverable).toBe(false);
+    expect(calls[1].body.discoverabilityReason).toBe(
+      "recorded automatically; discoverability is earned by evidence",
+    );
     // Distinct entries: each iteration is its own content identity, and both
     // are recorded.
     expect(calls[0].body.patternId).not.toBe(calls[1].body.patternId);
   });
 
-  it("offers both of two capabilities one session authored", async () => {
+  it("records both of two capabilities one session authored", async () => {
     const index = stubIndex();
     const engine = createEngine(index);
     await engine.invokeBuiltinTool("run_pattern", {
@@ -742,9 +844,6 @@ describe("run_pattern publish render gate", () => {
 
     const calls = published(index);
     expect(calls).toHaveLength(2);
-    expect(calls.map((call) => call.body.discoverable)).toEqual([
-      undefined,
-      undefined,
-    ]);
+    expect(calls.map((call) => call.body.discoverable)).toEqual([false, false]);
   });
 });

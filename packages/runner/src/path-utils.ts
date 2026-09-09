@@ -1,4 +1,4 @@
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**

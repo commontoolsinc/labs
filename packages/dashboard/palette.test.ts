@@ -11,7 +11,6 @@ import { expect } from "@std/expect";
 import type { Status } from "./types.ts";
 import {
   LIGHT_STATUS_TEXT,
-  LIGHT_TILE_BASE,
   rgba,
   STATUS_COLOR,
   STATUS_EDGE,
@@ -216,7 +215,7 @@ describe("palette", () => {
 
     it("keeps small text and status indicators legible on a light tile", () => {
       for (const status of STATUSES) {
-        expect(contrastRatio(LIGHT_STATUS_TEXT[status], LIGHT_TILE_BASE))
+        expect(contrastRatio(LIGHT_STATUS_TEXT[status], "#ffffff"))
           .toBeGreaterThanOrEqual(4.5);
       }
     });

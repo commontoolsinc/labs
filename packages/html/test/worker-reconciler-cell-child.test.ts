@@ -15,6 +15,10 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import {
+  type CfcLabelView,
+  cfcLabelViewSymbol,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
@@ -95,9 +99,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
   // Define MockCell extending CellImpl
   class MockCell extends (CellImplConstructor as any) {
+    value: any;
     #subscribers = new Set<(value: any) => void>();
 
-    constructor(public value: any) {
+    constructor(value: any) {
       // Pass dummy args to super to satisfy it
       // CellImpl(runtime, tx, link, synced, causeContainer, kind)
       super(runtime, undefined, undefined, false, undefined, "cell");
@@ -124,6 +129,22 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
     isStream() {
       return false;
+    }
+
+    /**
+     * Returns `undefined`: a mock carries no metadata, and the inherited read
+     * throws on a link-less cell.
+     */
+    getMetaRaw(): undefined {
+      return undefined;
+    }
+
+    /**
+     * Resolves to itself, since a mock names no link; a step that needs
+     * otherwise overrides it on the instance.
+     */
+    resolveAsCell(): MockCell | Cell<unknown> {
+      return this;
     }
   }
 
@@ -1888,8 +1909,12 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     "updates same-key subpatterns and retargets unchanged UI",
     async () => {
       const collector = createOpsCollector();
+      // A public-only ceiling, so that the one output labeled confidential
+      // below is refused by the real render policy while the unlabeled ones
+      // render as before.
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
+        renderConfidentialityCeiling: { atoms: [] },
       });
       // A subpattern's output reaches the reconciler as a cell, and a cell
       // keys by the link it names rather than by the payload behind it. That
@@ -1907,6 +1932,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       });
       const outputCell = new MockCell(initialOutput);
       let resolvedOutputId = "of:fid1:nested-pattern";
+      // The one output the render policy refuses: while the resolved output
+      // is this one, it carries a confidentiality label no public-only
+      // ceiling admits; otherwise it carries none.
+      const deniedOutputId = "of:fid1:retargeted-to-blocked";
+      const deniedLabelView: CfcLabelView = {
+        version: 1,
+        entries: [{ path: [], label: { confidentiality: ["secret"] } }],
+      };
       outputCell.getAsNormalizedFullLink = () => ({
         id: "of:fid1:stable-link-container",
         space: signer.did(),
@@ -1927,6 +1960,8 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
           field === "patternIdentity"
             ? { identity: "nested-pattern", symbol: "default" }
             : undefined,
+        [cfcLabelViewSymbol]: () =>
+          resolvedOutputId === deniedOutputId ? deniedLabelView : undefined,
       } as unknown as Cell<unknown>;
       outputCell.resolveAsCell = () => resolvedOutputCell;
 
@@ -2062,10 +2097,6 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         props: { "data-row": "blocked" },
         children: ["blocked"],
       });
-      const deniedOutputId = "of:fid1:retargeted-to-blocked";
-      (reconciler as unknown as {
-        canRenderCellUnderPolicy: () => boolean;
-      }).canRenderCellUnderPolicy = () => resolvedOutputId !== deniedOutputId;
       resolvedOutputId = deniedOutputId;
       outputCell.set(blockedCandidate);
       await t.settle();
@@ -2114,8 +2145,6 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         path: [],
         scope: "space",
       });
-      uiShapedDataCell.resolveAsCell = () => uiShapedDataCell;
-      uiShapedDataCell.getMetaRaw = () => undefined;
       const rootCell = new MockCell({
         type: "vnode",
         name: "div",

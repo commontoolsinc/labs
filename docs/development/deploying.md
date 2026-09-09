@@ -36,6 +36,47 @@ deploy. The `deploy-rapids` job still declares GitHub's `toolshed` environment,
 which is where its bastion credentials live; renaming that environment is a
 repository-settings change, and the job has to be updated in the same change.
 
+## One commit, one set of artifacts
+
+The `attest-binaries` job in `.github/workflows/deno.yml` builds the binaries,
+signs them, packs them into `labs-<commit>.tar.gz`, writes that tarball's
+SHA-256 into `labs-<commit>.hash.txt`, and copies both objects into the
+`commontools-build-artifacts` bucket. A deploy is given a commit rather than a
+build, so those two objects are the whole of what a commit means to a host. The
+host downloads them, checks the tarball against the checksum, and unpacks it.
+
+Building one commit twice does not produce the same tarball. The binaries are
+compiled again, and `tar` records the modification time of every file it packs.
+The two objects therefore have to be published together, and what they were
+published as has to stay put. A host holding one build's tarball beside another
+build's checksum fails `sha256sum -c`, and its deploy stops there.
+
+Two things keep a commit to one pair. The workflow's concurrency group keys a
+push by the commit that was pushed, so a second run of a commit waits for the
+first to finish instead of building alongside it. Main does receive the same
+head commit twice from time to time, which is what starts two runs of one
+commit. The second guard is in the publish step: a commit that already has both
+objects in the bucket keeps them, so a later build of that commit leaves alone
+what an earlier build published and a host may already be holding. That covers
+the ways a second build starts without a second run, a re-run of the job among
+them. Removing either object from the bucket by hand lets the next build of
+that commit publish both of them again.
+
+## A host keeps what it has already downloaded
+
+The deploy playbook downloads the tarball and the checksum only when the
+release directory for the commit is missing a binary, and Ansible's `get_url`
+leaves a destination file that is already there as it is. So a release
+directory that failed verification stays as it is across later deploys of that
+commit. The download tasks report no change, the same mismatched pair is
+checked again, and the deploy fails the same way. A re-run cannot recover on
+its own; someone has to remove the directory on the host.
+
+That playbook is `ansible/playbooks/toolshed_binary_deploy.yml` in the
+[infra repository](https://github.com/commontoolsinc/infra), behind the
+`/opt/cf/deploy.sh` wrapper described above. Making the download replace what
+it finds, rather than skip it, is a change in that repository.
+
 ## The wrapper is owned by another repository
 
 `/opt/cf/deploy.sh` is not in this repository. The

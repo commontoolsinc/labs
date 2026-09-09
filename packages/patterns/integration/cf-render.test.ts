@@ -16,7 +16,7 @@ import {
 } from "./pieces-controller.ts";
 import { clickNthCfButton, waitForText } from "./cfc-browser-helpers.ts";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { toIndentedDebugString } from "@commonfabric/data-model";
 
 /** The text of every rendered `#counter-result`, for failure reporting. */
 function readCounterTexts(page: Page): Promise<string[]> {

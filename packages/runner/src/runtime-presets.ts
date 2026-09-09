@@ -64,9 +64,11 @@
  * |                            | rollout)                                         |
  * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
  * |                            | delta (host-controlled rollout)                  |
- * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
+ * | cfcWriteFloor              | core-default (off); remoteClient delta           |
+ * |                            | (host-controlled rollout) — flip in coreOptions  |
+ * |                            | when a first-party rollout begins                |
+ * | cfcTriggerReadGating       | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
- * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
  * |                            | reader resolves stored roots' references         |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
@@ -79,6 +81,11 @@
  * |                            | deployment (value-level provenance Stage 0)      |
  * | cfcTrustConfig             | core-default (none declared) — same              |
  * | cfcSinkMaxConfidentiality  | core-default (none declared) — same              |
+ * | cfcReadMaxConfidentiality  | core-default (none — the owner view); delta on   |
+ * |                            | remoteClient / browserWorker (a per-run or       |
+ * |                            | per-device read ceiling is the host's to set)    |
+ * | cfcReadOnExceed            | core-default (`fail`); delta on the same two,    |
+ * |                            | beside the ceiling it qualifies                  |
  * | patternEnvironment         | pinned from apiUrl in productionServer /         |
  * |                            | remoteClient / browserWorker (patterns fetch     |
  * |                            | against the real deployment, not the builder's   |
@@ -118,16 +125,25 @@
  * One named departure a caller can opt into: `cfcPosture: "max-enforcement"`
  * (a `CoreParams` field) swaps the core-default CFC dial rows above for the
  * {@link MAX_ENFORCEMENT_CFC_OPTIONS} bundle, for that one runtime. The
- * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`) still apply
- * over the bundle, so a session-level raise wins either way.
+ * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`,
+ * `cfcWriteFloor`) still apply over the bundle, so a session-level raise wins
+ * either way, and a session that wants the floor's `observe` rung rather than
+ * the bundle's `enforce` asks for it the same way.
  */
 
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
-import type {
-  CfcEnforcementMode,
-  CfcFlowLabelsMode,
-  SinkMaxConfidentiality,
-  TrustSnapshot,
+import {
+  type CfcConfClause,
+  type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
+  type CfcReadOnExceed,
+  type CfcWriteFloorMode,
+  sinkCeilingsOf,
+  type SinkGovernanceRegistry,
+  type SinkMaxConfidentiality,
+  type TrustSnapshot,
+  ungatedSink,
 } from "./cfc/mod.ts";
 import { parseFlagValue } from "./experimental-posture.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
@@ -183,6 +199,8 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcPrefixProvenanceStats",
   "cfcTrustConfig",
   "cfcSinkMaxConfidentiality",
+  "cfcReadMaxConfidentiality",
+  "cfcReadOnExceed",
   "trustSnapshotProvider",
   "hideInternalStackFrames",
   "commitBackpressure",
@@ -404,7 +422,9 @@ export function parseServerExperimentalOptions(
     if (typeof value !== "boolean") {
       console.warn(
         `[runtime-presets] Ignoring server-published ${key}=` +
-          `${JSON.stringify(value)} — expected a boolean.`,
+          `${
+            toCompactDebugString(value, { backtickQuote: true })
+          } — expected a boolean.`,
       );
       continue;
     }
@@ -560,32 +580,53 @@ export async function experimentalOptionsForDeployedClient(
 export type CfcPosture = "max-enforcement";
 
 /**
- * Confidentiality ceilings of the max-enforcement posture: every network-fetch
- * egress sink is public-only (an empty ceiling admits no confidential atom),
- * so labeled data cannot leave through the network-fetch sinks.
+ * How the max-enforcement posture governs every known sink — total over the
+ * sink registry, so a sink added to the inventory without a decision here is
+ * a compile error rather than a sink that silently releases ungated.
  *
- * The llm sinks (`llm`, `llmDialog`, `generateText`, `generateObject`) carry
- * no ceiling, and a sink with no ceiling gets NO gate: under this posture,
- * llm-sink release is ungoverned — any confidentiality, a secret as much as a
- * risk caveat, reaches the llm sinks without a policy evaluation running for
- * them. Ungated rather than public-only because ceiling membership is exact
- * clause subsumption (`atomsOutsideCeiling`) — a ceiling entry cannot admit
- * "any material-risk caveat regardless of `source`" — while risk-caveated
- * ingested content is exactly what an llm sink exists to process, so a
- * public-only ceiling would refuse the flows the sink is for. Governing llm
- * release needs a boundary-scoped admission mechanism (a public-only ceiling
- * paired with an exchange rule that admits the material-risk family at
- * llm-class boundaries), which this posture does not yet carry.
+ * Every network-fetch egress sink is public-only (an empty ceiling admits no
+ * confidentiality atom), so labeled data cannot leave through them. The
+ * llm-class sinks release ungated, carrying the reason, the owner, and the
+ * condition that retires the gap ({@link SINK_UNGATED_RATIONALES} in the
+ * runner's sink inventory): under this posture, llm-sink release is
+ * ungoverned — any confidentiality, a secret as much as a risk caveat,
+ * reaches them without a policy evaluation running. The posture record
+ * publishes that as a deviation rather than leaving it to be inferred from a
+ * sink's absence from a ceiling list. Building the mechanism that retires the
+ * gap is planned in `docs/plans/cfc-llm-sink-admission.md`.
+ *
+ * Until the §8.12.5 route-2 widening, one path was gated anyway, by accident:
+ * a pattern calling `llm(...)` staged its request in the transaction that also
+ * wrote the builtin's own result store, that store declared nothing, and the
+ * writer-fit misfit refused the commit. It fired on every such call, so under
+ * this posture an llm call over caveated content did not work at all — the
+ * opposite of what the rationale above says the sink is for. The store now
+ * declares what flows into it, so the ungoverned statement holds of the
+ * builtin path too. `max-enforcement-posture.test.ts` pins the hand-staged
+ * request and `builtin-abandoned-request.test.ts` the builtin one; both flip
+ * to asserting the refusal when the admission mechanism lands.
  */
-export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality = Object
+export const MAX_ENFORCEMENT_SINK_GOVERNANCE: SinkGovernanceRegistry = Object
   .freeze({
-    fetchBinary: Object.freeze([]),
-    fetchText: Object.freeze([]),
-    fetchJson: Object.freeze([]),
-    fetchJsonUnchecked: Object.freeze([]),
-    fetchProgram: Object.freeze([]),
-    streamData: Object.freeze([]),
+    fetchBinary: { ceiling: Object.freeze([]) },
+    fetchText: { ceiling: Object.freeze([]) },
+    fetchJson: { ceiling: Object.freeze([]) },
+    fetchJsonUnchecked: { ceiling: Object.freeze([]) },
+    fetchProgram: { ceiling: Object.freeze([]) },
+    streamData: { ceiling: Object.freeze([]) },
+    llm: ungatedSink("llm"),
+    llmDialog: ungatedSink("llmDialog"),
+    generateText: ungatedSink("generateText"),
+    generateObject: ungatedSink("generateObject"),
   });
+
+/**
+ * The ceilings {@link MAX_ENFORCEMENT_SINK_GOVERNANCE} declares, in the
+ * open-map shape `Runtime` takes: an ungated sink is absent, which is what
+ * "no ceiling, therefore no gate" is in `SinkMaxConfidentiality`.
+ */
+export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality =
+  sinkCeilingsOf(MAX_ENFORCEMENT_SINK_GOVERNANCE);
 
 /**
  * The max-enforcement CFC posture: every staged-rollout enforcement dial at
@@ -618,6 +659,42 @@ export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
     cfcSinkMaxConfidentiality: MAX_ENFORCEMENT_SINK_CEILINGS,
   } as const,
 ) satisfies Partial<RuntimeOptions>;
+
+/** The CFC dials a preset caller may state for one runtime. */
+export interface PresetCfcParams {
+  cfcPosture?: CfcPosture;
+  cfcEnforcementMode?: CfcEnforcementMode;
+  cfcFlowLabels?: CfcFlowLabelsMode;
+}
+
+/**
+ * The CFC options a preset composes for `params`: the core pin, then the
+ * named posture bundle where one is selected, then the host dials over both.
+ *
+ * Exported because a host sometimes has to know the posture of a runtime it
+ * has not built yet — cf-harness records the posture of a session whose
+ * runtime is built lazily, and its console prints one at startup. Reading it
+ * from here (and resolving what remains through `resolveCfcDials`) is what
+ * keeps that projection from being a second, drifting statement of the same
+ * resolution.
+ */
+export const presetCfcOptions = (
+  params: PresetCfcParams,
+): Partial<RuntimeOptions> => ({
+  // Pinned, not defaulted: several sites pinned this individually so that a
+  // changed constructor default could not silently relax them; the pin now
+  // lives once. Same value as the constructor default today.
+  cfcEnforcementMode: "enforce-explicit",
+  ...(params.cfcPosture === "max-enforcement"
+    ? MAX_ENFORCEMENT_CFC_OPTIONS
+    : {}),
+  ...(params.cfcEnforcementMode !== undefined
+    ? { cfcEnforcementMode: params.cfcEnforcementMode }
+    : {}),
+  ...(params.cfcFlowLabels !== undefined
+    ? { cfcFlowLabels: params.cfcFlowLabels }
+    : {}),
+});
 
 //
 // Gate 4: the shared core all presets compose.
@@ -668,8 +745,17 @@ interface CoreParams {
  * has no serving host, so it runs the derive-and-commit model (the
  * ambient baseline, OFF) by construction — see
  * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ *
+ * Exported for the deployed-topology test clients that construct a bare
+ * `Runtime` against a lane's toolshed (the runner integration tests, the
+ * runtime-client integration host): they resolve the posture with exactly
+ * this rule — the canonical env mapping, else the first-party default —
+ * so the DEFAULT CI lane's test processes run the arm the lane's server
+ * runs (testing.md §2's uniform posture; a raw env read resolves unset to
+ * the AMBIENT baseline instead, which under default-ON is the P7 review's
+ * finding-7 mixed posture, resurrected by the flip).
  */
-function withServerExecutionDefault(
+export function withServerExecutionDefault(
   experimental: ExperimentalOptions,
 ): ExperimentalOptions {
   return {
@@ -684,21 +770,20 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     apiUrl: params.apiUrl,
     storageManager: params.storageManager,
     experimental: params.experimental,
-    // Pinned, not defaulted: several sites pinned this individually so that a
-    // changed constructor default could not silently relax them; the pin now
-    // lives once. Same value as the constructor default today.
-    cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
     // cfcDecomposedEnvelopes /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
-    // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
+    // cfcTrustConfig / cfcSinkMaxConfidentiality /
+    // cfcReadMaxConfidentiality / cfcReadOnExceed ride the constructor
     // defaults (off / none) — deliberately absent here until a first-party
     // rollout begins. A caller that opts into `cfcPosture` gets the named
     // bundle's values instead, for this one runtime.
-    ...(params.cfcPosture === "max-enforcement"
-      ? MAX_ENFORCEMENT_CFC_OPTIONS
-      : {}),
+    ...presetCfcOptions({
+      ...(params.cfcPosture !== undefined
+        ? { cfcPosture: params.cfcPosture }
+        : {}),
+    }),
   };
 }
 
@@ -713,6 +798,7 @@ export interface ProductionServerPresetParams extends CoreParams {
    * `apiUrl` carries MEMORY_URL.
    */
   patternApiUrl?: URL;
+
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   telemetry?: RuntimeTelemetry;
@@ -739,18 +825,38 @@ export interface RemoteClientPresetParams extends CoreParams {
   patternCoverage?: PatternCoverageCollector;
 
   /**
-   * Host-controlled rollout dials, the browserWorker precedent: a client
-   * host (cf-harness's fabric session) may raise enforcement and turn on
-   * flow-label persistence for one session without moving the fleet posture
-   * in `coreOptions`.
+   * Host-controlled rollout dial, on the browserWorker precedent: a client
+   * host (cf-harness's fabric session) may raise enforcement for one session
+   * without moving the fleet posture in `coreOptions`.
    */
   cfcEnforcementMode?: CfcEnforcementMode;
+
+  /** The other such dial: flow-label persistence, on the same terms. */
   cfcFlowLabels?: CfcFlowLabelsMode;
+
+  /**
+   * A third: the write-side `requiredIntegrity` floor, which the pattern
+   * integration harness sets per session. It is also how a caller reaches the
+   * floor's `observe` rung, since the `max-enforcement` posture names only
+   * `enforce`.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
+
+  /**
+   * The runtime-wide read ceiling for this one session's `db.query` reads
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`): a harness running one
+   * pattern under one clearance sets it here.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The read ceiling's fallback `onExceed`, beside the ceiling it qualifies. */
+  cfcReadOnExceed?: CfcReadOnExceed;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
   /** Mock fetch honoring test-declared `fetchMocks` (CT-1768). */
   fetch?: RuntimeFetch;
+
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   moduleByteCache?: ModuleByteCache;
@@ -769,9 +875,23 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   /** Map from space DIDs to HTTP or HTTPS origins selected by the shell host. */
   spaceHostMap?: Record<string, string>;
 
-  /** Host-controlled rollout dials, from `InitializationData`. */
+  /** Host-controlled rollout dial, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
+  /** The other such dial, from the same source. */
   cfcFlowLabels?: CfcFlowLabelsMode;
+
+  /**
+   * The runtime-wide read ceiling for this worker's `db.query` reads
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`), from `InitializationData`:
+   * a worker is one device's runtime, so a ceiling set here is per device
+   * by construction and never touches the space.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The read ceiling's fallback `onExceed`, from the same source. */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   telemetry?: RuntimeTelemetry;
   consoleHandler?: ConsoleHandler;
@@ -786,6 +906,7 @@ export interface BrowserWorkerPresetParams extends CoreParams {
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
   /** Optional here (unlike the first-party presets): unit tests default to no flags. */
   experimental?: ExperimentalOptions;
+
   fetch?: RuntimeFetch;
   errorHandlers?: ErrorHandler[];
   moduleByteCache?: ModuleByteCache;
@@ -793,6 +914,27 @@ export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
 
   /** Scheduler tests shrink the backoff/retry window. */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
+}
+
+/**
+ * Helper for the host-controlled presets, which passes a read ceiling and its
+ * `onExceed` through as the options the constructor validates: each only
+ * when set, so an unset one stays the constructor default.
+ */
+function readCeilingOptions(
+  params: Pick<
+    RemoteClientPresetParams,
+    "cfcReadMaxConfidentiality" | "cfcReadOnExceed"
+  >,
+): Partial<RuntimeOptions> {
+  return {
+    ...(params.cfcReadMaxConfidentiality !== undefined
+      ? { cfcReadMaxConfidentiality: params.cfcReadMaxConfidentiality }
+      : {}),
+    ...(params.cfcReadOnExceed !== undefined
+      ? { cfcReadOnExceed: params.cfcReadOnExceed }
+      : {}),
+  };
 }
 
 export const runtimePresets = {
@@ -838,6 +980,10 @@ export const runtimePresets = {
       ...(params.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: params.cfcFlowLabels }
         : {}),
+      ...(params.cfcWriteFloor !== undefined
+        ? { cfcWriteFloor: params.cfcWriteFloor }
+        : {}),
+      ...readCeilingOptions(params),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
         : {}),
@@ -915,6 +1061,7 @@ export const runtimePresets = {
       ...(params.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: params.cfcFlowLabels }
         : {}),
+      ...readCeilingOptions(params),
       ...(params.trustSnapshotProvider !== undefined
         ? { trustSnapshotProvider: params.trustSnapshotProvider }
         : {}),

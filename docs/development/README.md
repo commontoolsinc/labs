@@ -69,6 +69,10 @@ mapped in [`../README.md`](../README.md).
   deploy where, and the contract the bastion's deploy wrapper enforces on what
   they pass it. Read this before editing a deploy step, because that wrapper
   lives in the infra repository rather than this one
+- [`staging-space-copy.md`](staging-space-copy.md) — how a *space* reaches a
+  host: snapshotting one space's store and serving the copy from rapids, what
+  installing it commits you to, and the questions a local clone answers more
+  cheaply
 - [`CI_PERFORMANCE.md`](CI_PERFORMANCE.md) — how continuous-integration wall
   time is tracked, and when to start or stop work on splitting and
   rebalancing jobs
@@ -80,6 +84,9 @@ mapped in [`../README.md`](../README.md).
 - [`test-records-adoption.md`](test-records-adoption.md) — implementing the
   test-run record system in another repository of the organization: what is
   shared, what the repository adds, and the rules that are not optional
+- [`test-selection.md`](test-selection.md) — what a test is worth running,
+  how to ask why one did or did not run, where the dials are, and what the
+  publisher does
 - [`deno-coverage-guard-line-artifact.md`](deno-coverage-guard-line-artifact.md)
   — why `deno coverage` reports a one-line guard as uncovered whenever its
   branch is not taken
@@ -104,7 +111,8 @@ mapped in [`../README.md`](../README.md).
 - [`skill-audit.md`](skill-audit.md) — the two mechanisms that keep the facts
   in a skill honest, including the `deno task check-skill-facts` tripwire
 - [`runtime-glossary.md`](runtime-glossary.md) — the storage and memory
-  vocabulary of the runtime. Pattern authors want the
+  vocabulary of the runtime, including the difference between a link and an
+  `$alias` pattern binding. Pattern authors want the
   [author-facing glossary](../common/concepts/glossary.md) instead
 
 ## Tools

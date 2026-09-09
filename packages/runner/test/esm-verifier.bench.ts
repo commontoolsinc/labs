@@ -174,7 +174,7 @@ async function loadParkingCoordinatorProgram(): Promise<RuntimeProgram> {
 }
 
 //
-// Pre-compile everything (outside bench timing)
+// Pre-compilation (outside bench timing)
 //
 
 const parkingCoordinatorProgram = await loadParkingCoordinatorProgram();
@@ -207,10 +207,14 @@ console.error(
     `total body bytes: ${parkingBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
 
-// Bench naming: performance tracking keys each benchmark's timeline by the
-// origin file, group, and verbatim name, so groups and names must stay
-// stable across commits — no content hashes, byte counts, or module counts.
-// Volatile sizes go to stderr.
+//
+// Bench naming, and the module labels it needs
+//
+// Performance tracking keys each benchmark's timeline by the origin file,
+// group, and verbatim name, so groups and names must stay stable across
+// commits — no content hashes, byte counts, or module counts. Volatile
+// sizes go to stderr.
+//
 
 /** Basenames too vague to identify a module on their own. */
 const GENERIC_BASENAMES = new Set([
@@ -363,7 +367,10 @@ Deno.bench(
   },
 );
 
-// Also run the regression delta over all parking bodies summed
+//
+// Regression delta, all parking bodies summed
+//
+
 Deno.bench(
   "two-pass: parking",
   { group: "shadow-delta-all", baseline: true },

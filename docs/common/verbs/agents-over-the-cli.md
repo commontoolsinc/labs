@@ -5,7 +5,7 @@ getting one, and about what an answer is worth once you have it.
 
 That is the shape of an agent's problem rather than a person's. A person opens a
 space in the shell and sees what is in it; an agent gets a space name and a key,
-and every command it can run takes a `--piece` it does not yet have. The
+and every command it can run takes a target it does not yet have. The
 commands that close that gap exist and are current — this collects them, names
 what bounds each one, and states the conclusions a caller is not entitled to
 draw from them.
@@ -26,7 +26,7 @@ Five ways to reach a piece, each bounded by something different:
 | a name someone assigned | `cf piece slugs` | the slug index |
 | text you expect to be in the data | `cf piece search <query>` | registered pieces, matched client-side |
 | a convention a pattern publishes | `cf wish <target>` | the collection that target names |
-| an address you were handed | `--piece <reference>` | nothing — this is not discovery |
+| an address you were handed | `cf cell get <reference>` | nothing — this is not discovery |
 
 All but the last are partial views, and they are partial in different
 directions, so an empty result from one says nothing about the others.
@@ -56,17 +56,22 @@ and that unlisted item reads on its own address regardless.
 registry: `#pieceRegistry` resolves the registry itself, while `#mentionable`
 and `#favorites` resolve the collections of those names. The `#profile` family
 resolves against the identity's home space. It takes the same projection flags
-as `cf get`, so a survey can be narrowed on the way out.
+as `cf cell get`, so a survey can be narrowed on the way out.
 
 ## Orienting on one piece
 
-`cf piece describe` is the first call to make against an unfamiliar piece. It
-prints the piece's man page — what it is, what it holds, what a caller supplies,
-and what it can do — with every sentence compiled from the pattern's own doc
-comments:
+`cf piece verbs --json` is the first call to make against an unfamiliar piece:
+it names the deployed pattern and lists every callable verb with its prose and
+the schemas a payload is judged against, which is what a caller needs to act.
+Each of the reads below is its own cold CLI process. `verbs` and `describe` load
+the stored callable surface and pattern metadata without starting the piece;
+they are still not a preflight to run together, so reach for the others when
+the question they answer comes up. `cf piece describe` prints the piece's man
+page — what it is, what it holds, what a caller supplies, and what it can do —
+with every sentence compiled from the pattern's own doc comments:
 
 ```bash
-cf piece describe --piece <piece>
+cf piece describe --cell <piece>
 ```
 
 ```text
@@ -97,12 +102,16 @@ it does not:
 | `cf piece describe` | the whole piece in prose — purpose, state, inputs, one summary line per verb |
 | `cf piece verbs --json` | each shown verb's input schema, and its result schema where it declares one |
 | `cf piece verbs --json --all` | the same, plus the wrapper-tier and deprecated verbs the default view withholds |
-| `cf call <verb> --help --json` | one verb, in full |
+| `cf piece call <verb> --help --json` | one verb, in full |
 
-`describe` is where to start and rarely where to stop: it summarizes each verb
-in a line and does not carry the schema a payload has to satisfy. Build a
-payload from the `verbs` listing or from a verb's own help page, both of which
-report the schema the dispatcher will judge the payload against.
+The `describe` page summarizes each verb in a line and does not carry the
+schema a payload has to satisfy; `describe --json` carries the same verb rows
+the listing does, schemas included, so prefer `verbs --json` over it for payload
+size, not because `describe` lacks the schema. Build a payload from the `verbs`
+listing or from a verb's own help page, both of which report the schema the
+dispatcher will judge the payload against. Of the two, prefer the listing you
+already have: a verb's help page is served through the dispatch path, which
+also starts the space root, so it is the most expensive read on this ladder.
 
 **Both listings hide wrapper-tier and deprecated verbs by default**, and both
 say so rather than hiding them silently: `--json` carries a `hidden` object
@@ -134,7 +143,7 @@ run:
 
 ```bash
 export CF_INVOCATION_SESSION=$(cf invocation-session new)
-cf call --piece <piece> --invocation add-glaze-1 addGlaze '{"name":"maple"}'
+cf piece call --cell <piece> --invocation add-glaze-1 addGlaze '{"name":"maple"}'
 ```
 
 Replaying that id within that session returns the original result and writes
@@ -144,7 +153,7 @@ it.
 
 **Carry addresses forward instead of searching again.** A verb that creates
 something can hand back the piece it created; `--show-links` adds the address of
-each document behind the result, and `--piece` takes such an address exactly as
+each document behind the result, and a target position takes such an address exactly as
 emitted. Filing a thing and then searching a collection for it is a guess the
 moment two callers write concurrently.
 

@@ -27,6 +27,7 @@ export interface ChurnBucket {
 
   /** Unix seconds for the bucket start — for plotting without re-parsing. */
   startEpoch: number;
+
   commits: number;
   revisions: number;
 }
@@ -43,8 +44,10 @@ export interface ChurnReport {
   bucketSeconds: number;
   branch: string;
 
-  /** First and last bucket start the curve covers (null on an empty window). */
+  /** First bucket start the curve covers; null on an empty window. */
   from: string | null;
+
+  /** Last such bucket start, null under the same condition. */
   to: string | null;
 
   /**
@@ -56,6 +59,7 @@ export interface ChurnReport {
    * without this they render identically.
    */
   lastCommit: string | null;
+
   totals: { commits: number; revisions: number };
 
   /**

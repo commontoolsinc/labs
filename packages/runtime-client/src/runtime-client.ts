@@ -5,11 +5,9 @@
  * for interacting with cells across the worker boundary.
  */
 
+import type { CellScope } from "@commonfabric/api";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type {
-  FabricPlainObject,
-  FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import type {
@@ -42,7 +40,7 @@ import {
 } from "./client/connection.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import { RuntimeTransport } from "./client/transport.ts";
-import { PageHandle } from "./page-handle.ts";
+import { PieceHandle } from "./piece-handle.ts";
 import {
   type CellRef,
   ConsoleMessage,
@@ -66,11 +64,18 @@ import {
   type PieceSourceView,
   type PieceUpdateSourceResponse,
   RequestType,
+  type RuntimeSecurityContext,
+  type SlugRefusal,
   type SpaceAclCapability,
   type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
+import { assertNoKeyMaterial } from "./shared/key-material.ts";
+import {
+  normalizeOrigin,
+  normalizeSpaceHostMap,
+} from "./shared/security-context.ts";
 import { cellRefToInstanceId } from "./shared/utils.ts";
 
 export interface RuntimeClientOptions
@@ -78,6 +83,35 @@ export interface RuntimeClientOptions
   apiUrl: URL;
   identity: Identity;
   spaceIdentity?: Identity;
+}
+
+/**
+ * What a client needs to join a runtime someone else stood up.
+ *
+ * Its own type rather than {@link RuntimeClientOptions} because of one field:
+ * `identity` is a DID here, never an `Identity`. An attaching client states
+ * which principal the runtime acts as and supplies no signer, so a document
+ * holding one of these structurally cannot hand a key across -- there is no
+ * key in it to hand. `RuntimeClientOptions` keeps the `Identity`, and is what
+ * initialization takes.
+ *
+ * The rest is the security posture this client asserts. Nothing here is
+ * declared to the runtime: the runtime is running under a posture of its own,
+ * and an assertion that differs anywhere is refused.
+ */
+export interface RuntimeAttachOptions extends
+  Omit<
+    RuntimeSecurityContext,
+    "apiUrl" | "spaceHostMap" | "identity"
+  > {
+  /** The backend this client believes the runtime reads from. */
+  apiUrl: URL;
+
+  /** The per-space hosts this client believes the runtime resolves against. */
+  spaceHostMap?: Record<string, string>;
+
+  /** The principal this client believes the runtime acts as. */
+  identity: DID;
 }
 
 export type RuntimeClientEvents = {
@@ -89,7 +123,53 @@ export type RuntimeClientEvents = {
   eventneedsattention: [EventAttentionNotice];
 };
 
+/**
+ * The same posture, in the form a client that joins a runtime states it.
+ *
+ * Written out field by field rather than spread, because what is dropped is
+ * the point: the acting principal becomes the DID it derives to, and both
+ * `Identity` values -- the signer and the space identity -- are left behind.
+ * A client that attaches asserts which principal the runtime acts as and
+ * supplies no key, and this is where a page's signer stops.
+ */
+export function attachOptionsFrom(
+  options: RuntimeClientOptions,
+): RuntimeAttachOptions {
+  return {
+    apiUrl: options.apiUrl,
+    spaceHostMap: options.spaceHostMap,
+    identity: options.identity.did(),
+    spaceDid: options.spaceDid,
+    experimental: options.experimental,
+    cfcEnforcementMode: options.cfcEnforcementMode,
+    cfcFlowLabels: options.cfcFlowLabels,
+    cfcReadMaxConfidentiality: options.cfcReadMaxConfidentiality,
+    cfcReadOnExceed: options.cfcReadOnExceed,
+    renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+    renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+    trustSnapshot: options.trustSnapshot,
+  };
+}
+
 export const $conn = Symbol("$request");
+
+/**
+ * Refuses a render-declassification policy that names no known posture.
+ *
+ * It is a security knob, so a host's own config error surfaces here, early and
+ * loudly. The worker side additionally fails CLOSED -- an unknown value there
+ * becomes `deny` -- for peers that do not come through this entry point.
+ *
+ * @throws If `policy` is present and is neither `allow` nor `deny`.
+ */
+function assertRenderDeclassificationPolicy(policy: unknown): void {
+  if (policy === undefined || policy === "allow" || policy === "deny") return;
+  throw new Error(
+    `Invalid renderDeclassificationPolicy: ${
+      JSON.stringify(policy)
+    } (expected "allow" or "deny")`,
+  );
+}
 
 /**
  * RuntimeClient provides a main-thread interface to a Runtime running elsewhere.
@@ -106,11 +186,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private constructor(
     conn: InitializedRuntimeConnection,
-    _options: RuntimeClientOptions,
+    principal: DID | undefined,
   ) {
     super();
     this.#conn = conn;
-    this.#principal = _options.identity?.did();
+    this.#principal = principal;
     this.#conn.on("console", this.#onConsole);
     this.#conn.on("navigaterequest", this.#onNavigateRequest);
     this.#conn.on("error", this.#onError);
@@ -272,25 +352,55 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return this.#conn.signal;
   }
 
+  /**
+   * Joins a runtime a first client already stood up, over a transport already
+   * connected to that runtime's worker.
+   *
+   * What `options` says of the runtime's security posture is asserted rather
+   * than declared: the runtime is running under a posture of its own, and an
+   * attach whose assertion differs anywhere is refused. Everything else in
+   * `options` describes this client, and reaches nothing across the wire.
+   *
+   * @throws If the runtime refuses the attach, or if there is no runtime to
+   *   attach to.
+   */
+  static async attach(
+    transport: RuntimeTransport,
+    options: RuntimeAttachOptions,
+  ): Promise<RuntimeClient> {
+    assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
+    const context: RuntimeSecurityContext = {
+      identity: options.identity,
+      // Normalized as the runtime normalizes what it was initialized with, so
+      // that agreeing on a backend does not depend on agreeing on how to spell
+      // one.
+      apiUrl: normalizeOrigin(options.apiUrl.toString()),
+      spaceHostMap: normalizeSpaceHostMap(options.spaceHostMap),
+      spaceDid: options.spaceDid,
+      experimental: options.experimental,
+      cfcEnforcementMode: options.cfcEnforcementMode,
+      cfcFlowLabels: options.cfcFlowLabels,
+      cfcReadMaxConfidentiality: options.cfcReadMaxConfidentiality,
+      cfcReadOnExceed: options.cfcReadOnExceed,
+      renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+      trustSnapshot: options.trustSnapshot,
+    };
+    // The far side refuses this too, and refusing before the send is what
+    // matters for a shell: `key-material.ts` records why, and the short of it
+    // is that a `MessagePort` between two WKWebViews throws `DataCloneError`
+    // on a key rather than carrying it. A frame refused here never reaches a
+    // port, so that failure has nothing to happen to.
+    assertNoKeyMaterial(context);
+    const attached = await (new RuntimeConnection(transport)).attach(context);
+    return new RuntimeClient(attached, options.identity);
+  }
+
   static async initialize(
     transport: RuntimeTransport,
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
-    // renderDeclassificationPolicy is a security knob: reject unknown values
-    // loudly here, where the host's own config error can surface early. The
-    // worker side additionally fails CLOSED (treats unknown as "deny") for
-    // peers that don't go through this entry point.
-    const renderPolicy = options.renderDeclassificationPolicy;
-    if (
-      renderPolicy !== undefined && renderPolicy !== "allow" &&
-      renderPolicy !== "deny"
-    ) {
-      throw new Error(
-        `Invalid renderDeclassificationPolicy: ${
-          JSON.stringify(renderPolicy)
-        } (expected "allow" or "deny")`,
-      );
-    }
+    assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
@@ -301,6 +411,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
       cfcFlowLabels: options.cfcFlowLabels,
+      cfcReadMaxConfidentiality: options.cfcReadMaxConfidentiality,
+      cfcReadOnExceed: options.cfcReadOnExceed,
       renderDeclassificationPolicy: options.renderDeclassificationPolicy,
       renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
@@ -308,7 +420,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       patternCoverage: options.patternCoverage,
       concurrentWatchRefresh: options.concurrentWatchRefresh,
     });
-    return new RuntimeClient(initialized, options);
+    return new RuntimeClient(initialized, options.identity?.did());
   }
 
   getCellFromRef<T>(
@@ -417,11 +529,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * `options.argument` is the piece's input, which is a record: a piece is
    * created with named inputs or with none.
    */
-  async createPage<T = unknown>(
+  async createPiece<T = unknown>(
     input: string | URL | Program,
     space: DID,
     options?: { argument?: FabricPlainObject; run?: boolean },
-  ): Promise<PageHandle<T>> {
+  ): Promise<PieceHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
       : typeof input === "string"
@@ -437,31 +549,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       : { program: input };
 
     const response = await this.#conn.request<
-      RequestType.PageCreate
+      RequestType.PieceCreate
     >({
-      type: RequestType.PageCreate,
+      type: RequestType.PieceCreate,
       space,
       source,
       argument: options?.argument,
       run: options?.run,
     });
 
-    return new PageHandle<T>(this, response.page);
+    return new PieceHandle<T>(this, response.piece);
   }
 
-  // Page operations name their space explicitly — there is no
+  // Piece operations name their space explicitly — there is no
   // implicit/default space at this layer. The worker resolves each
   // operation against that space's piece context over the same
   // connection.
 
-  async getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  /**
+   * The space's root pattern.
+   *
+   * `start` defaults to true, which is what a view that renders the root
+   * needs. Pass false to read what the root exported without running it —
+   * far cheaper on a space whose root reaches a large piece, and enough for
+   * a caller that only wants an exported sub-page or listing.
+   */
+  async getSpaceRootPattern(
+    space: DID,
+    options: { start?: boolean } = {},
+  ): Promise<PieceHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
       type: RequestType.GetSpaceRootPattern,
       space,
+      ...(options.start === undefined ? {} : { start: options.start }),
     });
-    return new PageHandle<NameSchema>(this, response.page);
+    return new PieceHandle<NameSchema>(this, response.piece);
   }
 
   async resolveSpaceName(name: string): Promise<DID> {
@@ -474,31 +598,33 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   async recreateSpaceRootPattern(
     space: DID,
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.RecreateSpaceRootPattern
     >({
       type: RequestType.RecreateSpaceRootPattern,
       space,
     });
-    return new PageHandle<NameSchema>(this, response.page);
+    return new PieceHandle<NameSchema>(this, response.piece);
   }
 
-  async getPage<T = unknown>(
-    pageId: string,
+  async getPiece<T = unknown>(
+    pieceId: string,
     space: DID,
     runIt?: boolean,
-  ): Promise<PageHandle<T> | null> {
-    const response = await this.#conn.request<RequestType.PageGet>({
-      type: RequestType.PageGet,
-      pageId: pageId,
+    scope?: CellScope,
+  ): Promise<PieceHandle<T> | null> {
+    const response = await this.#conn.request<RequestType.PieceGet>({
+      type: RequestType.PieceGet,
+      pieceId: pieceId,
       runIt,
       space,
+      scope,
     });
 
     if (!response) return null;
 
-    return new PageHandle<T>(this, response.page);
+    return new PieceHandle<T>(this, response.piece);
   }
 
   /**
@@ -508,11 +634,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async getPieceSource(
     pieceId: string,
     space: DID,
+    scope?: CellScope,
   ): Promise<PieceSourceView> {
     const response = await this.#conn.request<RequestType.PieceGetSource>({
       type: RequestType.PieceGetSource,
       pieceId,
       space,
+      scope,
     });
     return response.source;
   }
@@ -522,6 +650,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     pieceId: string,
     space: DID,
     revisionId: string,
+    scope?: CellScope,
   ): Promise<PieceSourceRevisionSourceView> {
     const response = await this.#conn.request<
       RequestType.PieceGetSourceRevision
@@ -530,25 +659,30 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       pieceId,
       space,
       revisionId,
+      scope,
     });
     return response.source;
   }
 
-  /** Create a copy that follows the selected piece's source. */
+  /**
+   * Create a copy that follows the selected piece's source. `options.scope` is
+   * the scope the source piece sits in within `sourceSpace`.
+   */
   async clonePiece(
     pieceId: string,
     sourceSpace: DID,
     destinationSpace: DID,
-    options: { copyData?: boolean } = {},
-  ): Promise<PageHandle> {
+    options: { copyData?: boolean; scope?: CellScope } = {},
+  ): Promise<PieceHandle> {
     const response = await this.#conn.request<RequestType.PieceClone>({
       type: RequestType.PieceClone,
       pieceId,
       sourceSpace,
       destinationSpace,
+      scope: options.scope,
       ...(options.copyData === true ? { copyData: true } : {}),
     });
-    return new PageHandle(this, response.page);
+    return new PieceHandle(this, response.piece);
   }
 
   /**
@@ -559,13 +693,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     pieceId: string,
     space: DID,
     action: PieceSourceAction,
-    options: { confirmationToken?: string } = {},
+    options: { confirmationToken?: string; scope?: CellScope } = {},
   ): Promise<PieceUpdateSourceResponse> {
     return await this.#conn.request<RequestType.PieceUpdateSource>({
       type: RequestType.PieceUpdateSource,
       pieceId,
       space,
       action,
+      scope: options.scope,
       ...(options.confirmationToken === undefined
         ? {}
         : { confirmationToken: options.confirmationToken }),
@@ -609,20 +744,93 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.access;
   }
 
-  async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
-    const response = await this.#conn.request<RequestType.PageGetSlug>({
-      type: RequestType.PageGetSlug,
-      pageId,
+  async getPieceSlug(
+    pieceId: string,
+    space: DID,
+    scope?: CellScope,
+  ): Promise<string | undefined> {
+    const response = await this.#conn.request<RequestType.PieceGetSlug>({
+      type: RequestType.PieceGetSlug,
+      pieceId,
       space,
+      scope,
     });
     return response.slug;
   }
 
-  async removePage(pageId: string, space: DID): Promise<boolean> {
-    const res = await this.#conn.request<RequestType.PageRemove>({
-      type: RequestType.PageRemove,
-      pageId: pageId,
+  /**
+   * Where a slug reference lands: the piece it reached, and the segments the
+   * walk did not spend. The piece comes back unstarted — {@link getPiece},
+   * addressed by its id, is what starts one.
+   *
+   * A name nobody bound, a member a collection does not hold, and a target
+   * that is no piece all come back as a `refusal`: they answer the question
+   * asked, and a caller has to tell them from a fault in the asking, which
+   * wants a retry rather than a report.
+   *
+   * @param member One member name, absent where the reference stops at the
+   *   slug. A member's own fields are a cell path inside the piece it
+   *   resolves to, never a second member name.
+   * @throws When the asking itself fails — a transport that dropped, a
+   *   document that will not decode — or when the answer is neither a piece
+   *   nor a refusal.
+   */
+  async resolveSlug<T = unknown>(
+    slug: string,
+    space: DID,
+    member?: string,
+  ): Promise<
+    | { piece: PieceHandle<T>; pathAfter: string[]; refusal?: undefined }
+    | { piece?: undefined; pathAfter?: undefined; refusal: SlugRefusal }
+  > {
+    const response = await this.#conn.request<RequestType.SlugResolve>({
+      type: RequestType.SlugResolve,
+      slug,
+      member,
       space,
+    });
+
+    // The type makes a response carrying both arms unconstructable; a message
+    // off the wire is not type-checked, so the same exclusivity is asserted
+    // here rather than restated. Exactly one arm: both and neither are the
+    // same fault, and reading the refusal first would report either of them
+    // as an ordinary "no such member".
+    const landed = response.piece !== undefined;
+    const refused = response.refusal !== undefined;
+    if (landed === refused) {
+      throw new Error(
+        `Resolving the slug "${slug}" answered with ${
+          landed
+            ? "both a piece and a refusal"
+            : "neither a piece nor a refusal"
+        }.`,
+      );
+    }
+    if (response.refusal) return { refusal: response.refusal };
+    if (response.piece === undefined || response.pathAfter === undefined) {
+      // A landing is the piece AND what the walk did not spend. Defaulting
+      // the path would turn a truncated answer into "the member was spent",
+      // which is the fact a citation is offered on.
+      throw new Error(
+        `Resolving the slug "${slug}" answered with a piece and no path.`,
+      );
+    }
+    return {
+      piece: new PieceHandle<T>(this, response.piece),
+      pathAfter: response.pathAfter,
+    };
+  }
+
+  async removePiece(
+    pieceId: string,
+    space: DID,
+    scope?: CellScope,
+  ): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.PieceRemove>({
+      type: RequestType.PieceRemove,
+      pieceId: pieceId,
+      space,
+      scope,
     });
     return res.value;
   }
@@ -633,8 +841,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * space. This is not a storage-wide piece listing.
    */
   async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
-    const response = await this.#conn.request<RequestType.PageGetAll>({
-      type: RequestType.PageGetAll,
+    const response = await this.#conn.request<RequestType.PieceGetAll>({
+      type: RequestType.PieceGetAll,
       space,
     });
 
@@ -650,8 +858,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * is the first operation to touch the space.
    */
   async synced(space: DID): Promise<void> {
-    await this.#conn.request<RequestType.PageSynced>({
-      type: RequestType.PageSynced,
+    await this.#conn.request<RequestType.PieceSynced>({
+      type: RequestType.PieceSynced,
       space,
     });
   }

@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { MutableJSONSchema } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
@@ -35,6 +35,7 @@ const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });
+
 const OPAQUE_WRAPPER_NAMES = spellingsWhere({
   OpaqueCell: true,
   Cell: false,

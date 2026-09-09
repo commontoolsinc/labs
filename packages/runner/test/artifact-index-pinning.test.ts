@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
 /**
  * Open question 2 (docs/specs/content-addressed-action-identity.md) resolved:
@@ -58,8 +59,7 @@ describe("artifact index pinning (session-lifetime)", () => {
     const pm = runtime.patternManager;
     // Shrink the bounded module-namespace cache so three compiles overflow it.
     // The ARTIFACT index must not be governed by this bound.
-    (pm as unknown as { maxEvaluatedModuleCacheSize: number })
-      .maxEvaluatedModuleCacheSize = 1;
+    pm.accessForTestingOnly.maxEvaluatedModuleCacheSize = 1;
 
     const first = await pm.compilePattern(program(1));
     const firstRef = pm.getArtifactEntryRef(first);
@@ -91,10 +91,11 @@ describe("artifact index pinning (session-lifetime)", () => {
     // persisted ref has a durable closure behind it.
     const pm = runtime.patternManager;
     const tx = runtime.edit();
+    const writeBacks = observeCacheWriteBacks(runtime);
     await pm.compilePattern(program(7), { space: signer.did(), tx });
+    expect(writeBacks.started()).toBeGreaterThan(0);
+    expect(writeBacks.inFlight()).toBe(0);
+    writeBacks.restore();
     await tx.commit();
-    const pending = (pm as unknown as { pendingCacheWriteBacks: Set<unknown> })
-      .pendingCacheWriteBacks;
-    expect(pending.size).toBe(0);
   });
 });

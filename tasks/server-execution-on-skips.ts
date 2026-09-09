@@ -2,18 +2,13 @@
 
 // The EXPLICIT per-phase skip lists of the server-execution v2 ON arm
 // (docs/specs/server-side-execution/testing.md §2): in CI the integration
-// suites run twice — the DEFAULT lanes (flag unset = the first-party
-// default, which is OFF: Phase 7 landed flip-READY with the constant
-// `false` by owner ruling 2026-08-16, the flip being its own later PR) and
-// the explicit-`EXPERIMENTAL_SERVER_EXECUTION=true` ON lanes (the toolshed
-// server ON, the test processes ON, AND the binary's baked browser shell
-// ON-built — `build-toolshed-on`) — and the ON arm may skip a test only by
-// listing it here, with the plan phase whose not-yet-landed surface it
-// exercises and a reason. Never by silent filtering: the CI step prints
-// every skip from this file, and an empty list means the ON arm runs the
-// full suite. When the flip PR lands the lane roles swap (default = ON
-// with this list; explicit-`false` = the OFF regression guard on an
-// OFF-built binary) — the flip PR MUST land with this list EMPTY.
+// suites run twice — a default role (flag unset = the first-party default)
+// and an opposite role (the inverse explicitly selected in the server, test
+// processes, and baked browser shell). Whichever role resolves ON carries
+// this list. The ON arm may skip a test only by listing it here, with the plan
+// phase whose not-yet-landed surface it exercises and a reason. Never by silent
+// filtering: the CI step prints every skip from this file, and an empty
+// list means the ON arm runs the full suite — the OFF arm never skips.
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists
@@ -222,79 +217,48 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // recommendations, proceed". Under that surface reading this entry's bar
     // was fully met by the evidence above. Full chain: verification-coverage.md
     // OW45 (the PHASE 3 block and the LIFT block that follows it).
-    {
-      // RESTORED (again) 2026-08-28 after the geometry-3 close PR's own
-      // direct-CI unskip probe — PROBE 5 of the arc, run 33198257149,
-      // ON shard 7 job 98941298566 — went RED at the probed surface,
-      // and the red is the PRE-DECLARED GEOMETRY 3b on its exact
-      // signature: ONE closure-replication-failed (entry=Jlzs..., the
-      // same profile-home module, parent -> profile, "source closure
-      // unavailable in origin space", 18:16:15.616) with ZERO
-      // closure-replication-await-inflight lines — the once-await's
-      // announcement, which prints whenever either compile registry is
-      // non-empty at the dry consult (pattern-manager logger level
-      // "info" admits warn; verified in logger.ts) — so BOTH registries
-      // were EMPTY: the supplier compile had NOT STARTED at consult
-      // time. Fallback counters 0 (the module-keyed map correctly dry:
-      // no persist had completed anywhere), then 80 structure-load-stuck
-      // over 40 pattern-unloadable roots 18:16:50-18:20:50, "Unknown
-      // profile #AykQuk", :271 at the 300000ms bound; 11 co-residents
-      // green. What this PR CLOSED red-first (kept; pinned in
-      // packages/runner/test/pattern-replication-sibling-race.test.ts,
-      // 5 steps, every mechanism independently mutation-killed):
-      // geometry 3 — the supplier compile MID-FLIGHT at consult: on a
-      // dry origin AND dry map the replication awaits a snapshot of
-      // BOTH in-flight compile registries once, re-observes
-      // pendingCacheWriteBacks fresh, and re-consults; an empty
-      // snapshot keeps the byte-identical one-shot throw. Geometries
-      // 1+2 (#6484): sibling-await + module-keyed fallback origins.
-      // The residue is now exactly ONE geometry: 3b, the
-      // not-yet-started supplier compile, invisible to any once-await
-      // by construction. The full close — event-driven re-supply (on
-      // each recordPersistedClosureSpaces for identity I, re-issue
-      // failed replications wanting I) — TOUCHES THE ONE-SHOT CONTRACT
-      // and is recorded in the register as an OWNER-COURT fork; that
-      // fork (or a deeper supply redesign, e.g. compiling the home-env
-      // into the parent space before serving profile creation) is this
-      // entry's lift condition, plus the ruled local-plus-CI-probe bar.
-      // Local record at the close head: campaigns I and J 8/8 each
-      // (fresh store + posture probe per run, ensure defaulting ON,
-      // toolshed self-sourced, LLM masked; structureLoadStuck 0,
-      // closure-replication-failed 0, await-inflight 0 — the retry is
-      // dormant locally; the park is a CI boot ORDER). Full chain:
-      // verification-coverage.md OW45's lunch blocks (GEOMETRY-3
-      // CLOSE, LIFT-ATTEMPT, PROBE 5 / 3b CONFIRMED).
-      file: "integration/lunch-poll-vote.test.ts",
-      phase: "phase-7",
-      reason: "OW45 arm B, the structure-load forever-park: the profile " +
-        "space's program closure has NO reliable server-side supplier " +
-        "when the create-profile event beats every persist of the " +
-        "profile-home module. FOUR supplier geometries now mapped on " +
-        "five direct-CI probes (#6484's runs 33160430927, 33164596936, " +
-        "33165960083; the geometry-3 close PR's run 33198257149; the " +
-        "arc's first probe 33138358110 ran pre-PR): the in-flight " +
-        "sibling replication (FIXED, sibling-await), the by-ORDER " +
-        "closure-less parent (FIXED, module-keyed fallback origins), " +
-        "the MID-FLIGHT supplier compile (FIXED, the once-await over " +
-        "both in-flight compile registries with re-consult — the " +
-        "geometry-3 close, red-first), and GEOMETRY 3B: the supplier " +
-        "compile NOT YET STARTED at consult time — CONFIRMED live by " +
-        "probe 5's artifact (one closure-replication-failed with ZERO " +
-        "closure-replication-await-inflight lines = both registries " +
-        "empty at the dry consult; fallback counters 0; 80 " +
-        "structure-load-stuck, 40 roots; 'Unknown profile #AykQuk'; " +
-        ":271 at 300000ms; co-residents green). A once-await cannot " +
-        "see a compile that has not begun; the full close " +
-        "(event-driven re-issue on persist record) touches the " +
-        "one-shot contract and sits with the owner (the register's 3b " +
-        "fork). Local 46/46 GREEN across campaigns F/G/H/I/J + smokes " +
-        "at the fix heads (fresh store + posture probe per run, ensure " +
-        "defaulting ON, self-sourced, LLM masked): the parent's own " +
-        "sidecar compile always persists first locally — the park is " +
-        "a CI boot ORDER, not a race or a load artifact. Lifts on the " +
-        "owner-ruled 3b close (or a deeper supply redesign) plus the " +
-        "ruled local-plus-CI-probe bar.",
-    },
+    // lunch-poll-vote's FILE entry LIFTED 2026-08-28 (the THIRD lift; the
+    // list is EMPTY again) — the entry's own stated lift condition met: the
+    // OWNER RULED the 3b fork 2026-08-28 ("go with (1) plus the (2-D)
+    // kick") and both mechanisms are LANDED red-first. (1) event-driven
+    // re-supply: a supply-class replication failure PARKS under the WANTED
+    // identity (the dependency's own in a recursion frame) and
+    // recordPersistedClosureSpaces re-issues it when a matching supply
+    // records — once per persist event, no timers, bounded; at failure
+    // registration the fallback map is checked once so a record that
+    // landed inside the read window re-issues immediately (review-6502
+    // F1-(b)); the failure line is byte-identical and the park/re-issue/
+    // heal are loud; genuine absence keeps the loud one-shot, now worded
+    // "…and on the next persist event". (2-D) serve-time kick: a cached
+    // sidecar pattern served for a space it did not compile into
+    // replicates its closure there at page-serve time, so the demanding
+    // space's supplier is REGISTERED before any create-profile click and
+    // the child replication's strictly-older-ticket await covers the
+    // lunch class by registration. Pins:
+    // pattern-replication-sibling-race.test.ts steps 7-10 (heal,
+    // module-wake, registration-time check, dependency-frame park) +
+    // executor-cross-space late-carriage + the wish-side kick's own pins,
+    // all watched RED at bare main d569f3722 (those last retired with the
+    // process-global sidecar cache they covered); new mutations N1/N2/N3/N3b/N4
+    // each independently isolated; the existing kill matrix re-verified
+    // cell-for-cell (K1's kill rebound to step 1's zero-failure-lines
+    // assertion — the heal would otherwise mask its END-STATE, the F1
+    // masking class recreated and closed at design time). Entry history
+    // (four geometries mapped on five probe boards; geometries 1-3
+    // closed by #6484/#6502) is in git history and
+    // verification-coverage.md OW45's lunch blocks — the RULING block
+    // records the ruling, the landed mechanism, and what stays open (the
+    // cross-replica never-records supplier — heals at the server's first
+    // matching persist; the prior-session third-space closure; the
+    // recursive-(b) sliver). Lift evidence per the ruled
+    // local-plus-CI-probe bar: campaign R 8/8 quiet-and-loaded at this
+    // head (fresh store + posture probe per run, ensure defaulting ON,
+    // toolshed self-sourced, sha re-verified per run, LLM masked;
+    // structureLoadStuck 0; closure-replication-failed 0 — the heal
+    // machinery dormant locally, exactly the model), and the lift PR's
+    // own ON-lane board as the direct-CI unskip probe (PROBE 6) under
+    // the ruled SURFACE reading — a red at that surface restores the
+    // entry with the accumulated map and the honest classification.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the
@@ -381,8 +345,8 @@ export const serverExecutionOnIgnoreArg = (
  * The step-level guard a test FILE calls (see `ServerExecutionOnSkip.step`):
  * the entry for `step` in `file`, or undefined when the ON arm runs it.
  * Callers pass `ignore: serverExecutionOnStepSkip(...) !== undefined` only
- * when the process actually runs the ON posture (they read
- * EXPERIMENTAL_SERVER_EXECUTION themselves — the OFF arm never skips), and
+ * when the process actually runs the ON posture (they resolve it
+ * themselves, env-else-first-party-default — the OFF arm never skips), and
  * log the entry's reason when they skip, so the skip is never silent.
  */
 export const serverExecutionOnStepSkip = (

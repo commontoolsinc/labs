@@ -42,6 +42,7 @@ import {
   serverSeq,
 } from "@commonfabric/memory/v2/engine";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   static override connectTo(
@@ -67,25 +68,6 @@ const homeSigner = await Identity.fromPassphrase("warm request home");
 const homeSpace = homeSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("warm request service");
 const aliceSigner = await Identity.fromPassphrase("warm request alice");
-
-// Bounded observation of engine/host state that becomes true as a side
-// effect of the serving loop's own cycles — no event boundary exists for
-// a test-side waiter without adding one to production code
-// (waiting-in-tests.md: the no-callback-to-hang-a-promise-on shape; the
-// same helper the neighboring executor E2Es use).
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("executor-warm-request", () => {
   let server: MemoryV2Server.Server;

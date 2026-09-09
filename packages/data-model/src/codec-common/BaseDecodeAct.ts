@@ -1,5 +1,3 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
-
 import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
@@ -13,6 +11,7 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseCodecAct } from "./BaseCodecAct.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
+import { quotedDebugString } from "./quotedDebugString.ts";
 
 /**
  * The state of one act of decoding: what {@link BaseCodecAct} holds, plus how
@@ -56,8 +55,8 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
    *
    * Whether cycles are guarded at all is the format's decision, made by
    * whether this method enters a node: a format whose input it parses for
-   * itself cannot be handed a cycle, so it enters none and this act's set is
-   * never allocated.
+   * itself cannot be handed a cycle, so it enters none and this act's stack
+   * of values in progress is never allocated.
    *
    * An implementation that does guard owes the act one thing: every object it
    * is about to descend through goes through {@link #enterOrReport} first, and
@@ -79,8 +78,9 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
    *
    * Whether a format guards cycles at all is decided by whether its walk
    * calls this: a format whose input it parses for itself is handed a tree by
-   * construction, so it never does, and its set is never allocated. One
-   * handed a tree it did not build enters every node it descends through.
+   * construction, so it never does, and its stack of values in progress is
+   * never allocated. One handed a tree it did not build enters every node it
+   * descends through.
    *
    * @returns `true` if the node was entered, `false` if it was already in
    *   progress -- which is a cycle, and the caller's to report.
@@ -110,7 +110,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
     if (!this.enter(value)) {
       return this.reportMalformed(
         "",
-        toCompactDebugString(value, 50),
+        toCompactDebugString(value, { maxLength: 50 }),
         "circular reference in decoded data",
       );
     }
@@ -236,9 +236,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
       return this.reportMalformed(
         tag,
         this.decodeValue(rawState),
-        `tagged value has a malformed tag: ${
-          backtickQuote(toCompactDebugString(tag, 30))
-        }`,
+        `tagged value has a malformed tag: ${quotedDebugString(tag)}`,
       );
     }
 

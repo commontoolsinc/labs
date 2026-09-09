@@ -58,6 +58,7 @@ export interface PieceDescription {
   /** The piece's display name — its NAME cell. Advisory the way the pattern
    * identity is: absent when the piece is unnamed or the cell unreadable. */
   name?: string;
+
   pattern: PiecePatternRef | null;
 
   /** What the pattern is FOR: the result schema's root description. */
@@ -75,6 +76,7 @@ export interface PieceDescription {
 
   /** The callable surface, exactly as `listPieceCallables` returned it. */
   verbs: PieceCallableListing[];
+
   incomplete?: "pattern-unavailable";
 }
 

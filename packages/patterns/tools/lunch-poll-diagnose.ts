@@ -1,3 +1,17 @@
+/**
+ * Headless lunch-poll scaling probe.
+ *
+ * Use `--production` for the current 14-option single-viewer shape, `--quick`
+ * for a smoke check, or `--cases=<options>x<users>,...` for an explicit
+ * matrix. Diagnostics go to stderr and the machine-readable result is the one
+ * JSON document written to stdout.
+ *
+ * The probe runs the server-execution OFF arm unless
+ * `EXPERIMENTAL_SERVER_EXECUTION` is set explicitly: it is a headless
+ * measurement of the pattern's own graph, not of a deployed topology.
+ */
+
+import { parseLink } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   MultiRuntimeHarness,
@@ -9,17 +23,18 @@ interface PollOutputSummary {
   users: readonly { name?: string }[];
   options: readonly { id?: string; title?: string }[];
   votes: readonly {
-    voterName?: string;
+    /** What names the voter — see `voterIdentity`. */
+    voter: readonly unknown[];
     optionId?: string;
     voteType?: string;
   }[];
-  history: readonly unknown[];
-  adminName: string;
+  hostName: string;
   myName: string;
+  todayDate: string;
+  joinMessage: string;
   userCount: number;
   optionCount: number;
   voteCount: number;
-  historyCount: number;
   isJoined: boolean;
   isAdmin: boolean;
 }
@@ -32,6 +47,7 @@ interface TraceAddressSummary {
 
 interface ActionRunTraceSummary {
   actionId: string;
+  site: string;
   actionType: string;
   durationMs: number;
   declaredWrites: readonly TraceAddressSummary[];
@@ -49,7 +65,7 @@ interface DiagnosticsSummary {
     demanded: number;
     liveEffects: number;
     pullDemandRoots: number;
-    topReadNodes: readonly { id: string; type: string; readCount: number }[];
+    topReadNodes: readonly { site: string; type: string; readCount: number }[];
   };
   settle: {
     totalHistoryEntries: number;
@@ -71,14 +87,14 @@ interface DiagnosticsSummary {
   };
 }
 
-interface MatrixConfig {
+export interface MatrixConfig {
   program: string;
   optionCounts: readonly number[];
   userCounts: readonly number[];
   voteRounds: number;
 }
 
-interface CaseConfig {
+export interface CaseConfig {
   optionCount: number;
   userCount: number;
   voteRounds: number;
@@ -88,7 +104,13 @@ interface CompactSessionSample {
   label: string;
   poll: {
     myName: string;
+    hostName: string;
+    isJoined: boolean;
     isAdmin: boolean;
+    /** Why this session's last join was refused, or "". */
+    joinMessage: string;
+    /** The day votes are filtered to, or "" until the `#now/300` wish lands. */
+    todayDate: string;
     users: number;
     options: number;
     votes: number;
@@ -145,7 +167,7 @@ interface ChurnTotals {
   commitRejected: number;
 }
 
-interface CaseResult {
+export interface CaseResult {
   case: {
     users: number;
     options: number;
@@ -176,7 +198,7 @@ async function collectChurn(
   return totals;
 }
 
-interface ConvergenceResult {
+export interface ConvergenceResult {
   converged: boolean;
   voteCounts: number[];
   optionCounts: number[];
@@ -192,14 +214,15 @@ async function collectConvergence(
 ): Promise<ConvergenceResult> {
   const states = await Promise.all(sessions.map(async (session) => {
     const poll = pollSummary(await session.read());
+    // Each vote renders as JSON of its own, so no option id carrying the
+    // delimiter can run two votes together, and sorting orders values that
+    // are equal exactly when the votes are.
     const fingerprint = poll.votes
       .map((vote) =>
-        `${vote.voterName ?? "?"}|${vote.optionId ?? "?"}|${
-          vote.voteType ?? "?"
-        }`
+        JSON.stringify([vote.voter, vote.optionId ?? "", vote.voteType ?? ""])
       )
       .sort()
-      .join(",");
+      .join("\n");
     return {
       votes: poll.voteCount,
       options: poll.optionCount,
@@ -246,6 +269,40 @@ const asStringArray = (value: unknown): readonly string[] =>
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
 
+/**
+ * What names a vote's voter, for the convergence fingerprint below.
+ *
+ * A vote's voter is a profile cell, and a read of the poll output can hand it
+ * back either way round: resolved to the profile's contents, whose name tells
+ * one voter from another and which this tool gives every session a distinct
+ * one of, or — where the result schema declares the location a cell — as the
+ * link that reaches it, which names the same profile just as well. A vote with
+ * no voter at all is a vote stored by the poll's name-keyed predecessor, which
+ * tallies anonymously.
+ *
+ * Anything else refuses. A voter this cannot name flattens every vote's key to
+ * the same empty string, in every session at once, which leaves the votes
+ * comparing equal and the run reporting a convergence it never checked.
+ *
+ * What comes back is a tagged tuple, which the fingerprint compares whole, so
+ * two voters are equal exactly when they are the same voter. A link's entire
+ * address goes in — a cell's scope names the partition it is stored under, so
+ * one id under two scopes is two cells — and its path stays the array it is,
+ * which no delimiter can run together.
+ */
+export function voterIdentity(value: unknown): readonly unknown[] {
+  if (value === undefined || value === null) return [];
+  const link = parseLink(value);
+  if (link) return ["link", link.space, link.id, link.scope, link.path];
+  if (isObjectNotArray(value)) {
+    const name = asString(value.name);
+    if (name !== "") return ["name", name];
+  }
+  throw new Error(
+    `a vote names a voter this tool cannot identify: ${JSON.stringify(value)}`,
+  );
+}
+
 function pollSummary(value: unknown): PollOutputSummary {
   if (!isObjectNotArray(value)) {
     throw new Error(
@@ -255,14 +312,18 @@ function pollSummary(value: unknown): PollOutputSummary {
   return {
     users: asRecordArray(value.users),
     options: asRecordArray(value.options),
-    votes: asRecordArray(value.votes),
-    history: Array.isArray(value.history) ? value.history : [],
-    adminName: asString(value.adminName),
+    votes: asRecordArray(value.votes).map((vote) => ({
+      voter: voterIdentity(vote.voter),
+      optionId: asString(vote.optionId),
+      voteType: asString(vote.voteType),
+    })),
+    hostName: asString(value.hostName),
     myName: asString(value.myName),
+    todayDate: asString(value.todayDate),
+    joinMessage: asString(value.joinMessage),
     userCount: asNumber(value.userCount),
     optionCount: asNumber(value.optionCount),
     voteCount: asNumber(value.voteCount),
-    historyCount: asNumber(value.historyCount),
     isJoined: asBoolean(value.isJoined),
     isAdmin: asBoolean(value.isAdmin),
   };
@@ -283,18 +344,24 @@ function traceAddressSummary(value: unknown): TraceAddressSummary {
   };
 }
 
-function traceEntrySummary(value: unknown): ActionRunTraceSummary {
+function traceEntrySummary(
+  value: unknown,
+  siteOf: (actionId: string) => string,
+): ActionRunTraceSummary {
   if (!isObjectNotArray(value)) {
     return {
       actionId: "",
+      site: "",
       actionType: "",
       durationMs: 0,
       declaredWrites: [],
       actualWrites: [],
     };
   }
+  const actionId = asString(value.actionId);
   return {
-    actionId: asString(value.actionId),
+    actionId,
+    site: siteOf(actionId),
     actionType: asString(value.actionType),
     durationMs: asNumber(value.durationMs),
     declaredWrites: Array.isArray(value.declaredWrites)
@@ -341,9 +408,20 @@ function diagnosticsSummary(
   let demanded = 0;
   let liveEffects = 0;
   let pullDemandRoots = 0;
+
+  // Where each action was authored, for the ids that carry it. A handler's id
+  // holds its own authored site; a lift's is content-addressed, so its site
+  // reaches this probe only through the graph.
+  const authoredSites = new Map<string, string>();
+  for (const node of diagnostics.graph.nodes) {
+    if (node.src !== undefined) authoredSites.set(node.id, node.src);
+  }
+  const siteOf = (actionId: string): string =>
+    compactActionSite(authoredSites.get(actionId) ?? actionId);
+
   const topReadNodes = diagnostics.graph.nodes
     .map((node) => ({
-      id: node.id,
+      site: siteOf(node.id),
       type: node.type,
       readCount: (node.reads?.length ?? 0) + (node.shallowReads?.length ?? 0),
     }))
@@ -363,7 +441,7 @@ function diagnosticsSummary(
   const previousTraceLength = traceCursors.get(label) ?? 0;
   traceCursors.set(label, diagnostics.actionRunTrace.length);
   const newTrace = diagnostics.actionRunTrace.slice(previousTraceLength)
-    .map(traceEntrySummary);
+    .map((entry) => traceEntrySummary(entry, siteOf));
   const newWritesByPath: Record<string, number> = {};
   for (const entry of newTrace) {
     for (const write of entry.actualWrites) {
@@ -404,19 +482,30 @@ function diagnosticsSummary(
 const maxOf = (values: readonly number[]): number =>
   values.length === 0 ? 0 : Math.max(...values);
 
-function compactActionSite(actionId: string): string {
-  const marker = `lunch-poll/${matrixProgram}:`;
-  const markerIndex = actionId.indexOf(marker);
-  if (markerIndex >= 0) {
-    const rest = actionId.slice(markerIndex + marker.length);
-    const [line = "?", column = "?"] = rest.split(":");
-    return `${matrixProgram}:${line}:${column}`;
-  }
+/**
+ * An authored source location, as the module identity carries it:
+ * `cf:module/<identity>/<path>:<line>:<col>`. A handler's action id ends in
+ * one; so does the `src` the graph reports for a computation.
+ */
+const AUTHORED_SITE = /cf:module\/[^/]+\/(.+:\d+:\d+)$/;
+
+/** The same identity with no authored site: `cf:module/<identity>:<symbol>`. */
+const ADDRESSED_MODULE = /^cf:module\/[^:]+:(.+)$/;
+
+/**
+ * The readable site of an action, from its id or from the authored source the
+ * graph reports for it.
+ */
+export function compactActionSite(actionId: string): string {
+  const authored = AUTHORED_SITE.exec(actionId);
+  if (authored) return authored[1];
   if (actionId.startsWith("raw:")) {
     return actionId.split(":").slice(0, 3).join(":");
   }
   if (actionId.startsWith("pull:")) return "pull:result";
   if (actionId.startsWith("sink:")) return "sink:result";
+  const addressed = ADDRESSED_MODULE.exec(actionId);
+  if (addressed) return addressed[1];
   return actionId.slice(0, 80);
 }
 
@@ -428,10 +517,9 @@ function compactTopReadSites(
     { site: string; readCount: number; type: string }
   >();
   for (const node of diagnostics.graph.topReadNodes) {
-    const site = compactActionSite(node.id);
-    const previous = bySite.get(site);
-    bySite.set(site, {
-      site,
+    const previous = bySite.get(node.site);
+    bySite.set(node.site, {
+      site: node.site,
       readCount: (previous?.readCount ?? 0) + node.readCount,
       type: previous?.type ?? node.type,
     });
@@ -452,7 +540,11 @@ function compactSessionSample(
     label,
     poll: {
       myName: poll.myName,
+      hostName: poll.hostName,
+      isJoined: poll.isJoined,
       isAdmin: poll.isAdmin,
+      joinMessage: poll.joinMessage,
+      todayDate: poll.todayDate,
       users: poll.userCount,
       options: poll.optionCount,
       votes: poll.voteCount,
@@ -480,7 +572,7 @@ function compactSessionSample(
       newTraceEntries: diagnostics.actions.newTraceEntries,
       slowestNew: slowest
         ? {
-          site: compactActionSite(slowest.actionId),
+          site: slowest.site,
           durationMs: slowest.durationMs,
           actualWrites: slowest.actualWrites.length,
         }
@@ -562,6 +654,56 @@ async function samplePhase(
   return sample;
 }
 
+/**
+ * Claim each session's viewer identity through the poll's `overrideViewer`
+ * seam.
+ *
+ * Identity in this poll is a profile cell. A browser viewer gets one from the
+ * `#profile` wish, which has nothing to resolve it in a headless runtime, so
+ * each session mints its own profile cell and claims that. The handler runs in
+ * the sending session's runtime, so every claim lands in that session's own
+ * per-user slot and the sessions stay distinct people on one shared poll.
+ */
+async function claimIdentities(
+  sessions: readonly MultiRuntimeSession[],
+): Promise<void> {
+  await Promise.all(sessions.map(async (session, index) => {
+    const name = `User ${index + 1}`;
+    const profile = await session.createCell(
+      `lunch-poll-diagnose profile ${session.label}`,
+      { name },
+    );
+    await session.send("overrideViewer", { profile, name });
+  }));
+}
+
+/**
+ * Check that a phase's setup took, naming the sessions it did not reach.
+ *
+ * Every step these phases drive is gated in the pattern — joining needs a
+ * resolved profile, adding an option needs the host, casting a vote needs a
+ * roster entry and a resolved clock — and a gate that refuses writes nothing
+ * and reports nothing, leaving the samples that follow reading as an idle
+ * poll. The check asks whether a gate was passed at all, not whether every
+ * write survived: a vote lost to commit contention is what the churn and
+ * convergence sections report.
+ */
+function checkPhase(
+  phase: PhaseSample,
+  requirement: string,
+  reached: (poll: CompactSessionSample["poll"]) => boolean,
+): void {
+  const failures = phase.sessions.filter((session) => !reached(session.poll));
+  if (failures.length === 0) return;
+  throw new Error(
+    `after phase "${phase.phase}", ${failures.length} of ` +
+      `${phase.sessions.length} sessions did not ${requirement}: ` +
+      failures
+        .map((session) => `${session.label} ${JSON.stringify(session.poll)}`)
+        .join("; "),
+  );
+}
+
 async function optionIds(session: MultiRuntimeSession): Promise<string[]> {
   const poll = pollSummary(await session.read());
   return poll.options.map((option) => option.id).filter((id): id is string =>
@@ -584,7 +726,12 @@ async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
   return harness;
 }
 
-async function runCase(config: CaseConfig): Promise<CaseResult> {
+/**
+ * Run one case end to end: open the poll across a runtime per voter, give each
+ * voter an identity, join them, add the options, and vote. Exported so a test
+ * can drive the probe's own setup rather than a copy of it.
+ */
+export async function runCase(config: CaseConfig): Promise<CaseResult> {
   traceCursors.clear();
   const harness = await createHarness(config);
   const phases: PhaseSample[] = [];
@@ -596,46 +743,63 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
   const host = sessions[0];
 
   try {
+    // Standing in for the `#profile` wish, which is what a browser viewer
+    // loads with, so the baseline below is a poll whose viewers have an
+    // identity and have not joined yet.
+    await claimIdentities(sessions);
     phases.push(await samplePhase("baseline-open", harness, async () => {}));
 
-    phases.push(
-      await samplePhase("all-users-join", harness, async () => {
-        await host.send("joinAs", { name: "User 1" });
-        await Promise.all(
-          sessions.slice(1).map((session, index) =>
-            session.send("joinAs", { name: `User ${index + 2}` })
-          ),
-        );
-      }),
-    );
+    // The host joins alone and first: the first joiner takes the host role,
+    // and the phases below need a settled answer to who that is.
+    const joinPhase = await samplePhase("all-users-join", harness, async () => {
+      await host.send("joinAs", {});
+      await Promise.all(
+        sessions.slice(1).map((session) => session.send("joinAs", {})),
+      );
+    });
+    phases.push(joinPhase);
+    checkPhase(joinPhase, "join the poll", (poll) => poll.isJoined);
 
-    phases.push(
-      await samplePhase("host-adds-options", harness, async () => {
+    const optionsPhase = await samplePhase(
+      "host-adds-options",
+      harness,
+      async () => {
         for (let index = 0; index < config.optionCount; index++) {
           await host.send("addOption", { title: `Restaurant ${index + 1}` });
         }
-      }),
+      },
+    );
+    phases.push(optionsPhase);
+    checkPhase(
+      optionsPhase,
+      "see the host's options",
+      (poll) => poll.options > 0,
     );
 
     for (let round = 0; round < config.voteRounds; round++) {
-      phases.push(
-        await samplePhase(
-          `concurrent-vote-round-${round + 1}`,
-          harness,
-          async () => {
-            const ids = await optionIds(host);
-            if (ids.length === 0) return;
-            await Promise.all(
-              sessions.map((session, index) =>
-                session.send("castVote", {
-                  optionId: ids[(round + index) % ids.length],
-                  voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
-                })
-              ),
-            );
-          },
-        ),
+      const votePhase = await samplePhase(
+        `concurrent-vote-round-${round + 1}`,
+        harness,
+        async () => {
+          const ids = await optionIds(host);
+          if (ids.length === 0) return;
+          await Promise.all(
+            sessions.map((session, index) =>
+              session.send("castVote", {
+                optionId: ids[(round + index) % ids.length],
+                voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
+              })
+            ),
+          );
+        },
       );
+      phases.push(votePhase);
+      // Only the first round is checked: a vote recast in the same color on
+      // the same option and the same day toggles off, so a later round can
+      // empty the poll again.
+      if (round === 0) {
+        checkPhase(votePhase, "see any vote", (poll) => poll.votes > 0);
+      }
     }
 
     const churn = await collectChurn(sessions);
@@ -677,9 +841,13 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
   }
 }
 
-function numberArg(name: string, fallback: number): number {
+function numberArg(
+  name: string,
+  fallback: number,
+  args: readonly string[] = Deno.args,
+): number {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return fallback;
   const parsed = Number(arg.slice(prefix.length));
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
@@ -689,9 +857,10 @@ function numberListArg(
   name: string,
   fallback: readonly number[],
   minimum = 0,
+  args: readonly string[] = Deno.args,
 ): number[] {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return [...fallback];
   const values = arg.slice(prefix.length).split(",")
     .map((entry) => Number(entry.trim()));
@@ -706,17 +875,22 @@ function numberListArg(
   return values;
 }
 
-function stringArg(name: string, fallback: string): string {
+function stringArg(
+  name: string,
+  fallback: string,
+  args: readonly string[] = Deno.args,
+): string {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   return arg ? arg.slice(prefix.length) : fallback;
 }
 
 function explicitCasesArg(
   config: MatrixConfig,
+  args: readonly string[],
 ): CaseConfig[] | undefined {
   const prefix = "--cases=";
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return undefined;
   const cases = arg.slice(prefix.length).split(",").flatMap((entry) => {
     const match = entry.trim().match(/^(\d+)x(\d+)$/);
@@ -742,18 +916,37 @@ function validateUserCount(userCount: number, source: string): void {
   }
 }
 
-function matrixConfigFromArgs(): MatrixConfig {
-  const quick = Deno.args.includes("--quick");
+export function matrixConfigFromArgs(
+  args: readonly string[] = Deno.args,
+): MatrixConfig {
+  const quick = args.includes("--quick");
+  const production = args.includes("--production");
+  if (quick && production) {
+    throw new Error("--quick and --production cannot be combined");
+  }
   return {
-    program: stringArg("program", "main.tsx"),
-    optionCounts: numberListArg("options", quick ? [1, 3] : [1, 3, 10]),
-    userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
-    voteRounds: numberArg("rounds", quick ? 1 : 3),
+    program: stringArg("program", "main.tsx", args),
+    optionCounts: numberListArg(
+      "options",
+      production ? [14] : quick ? [1, 3] : [1, 3, 10],
+      0,
+      args,
+    ),
+    userCounts: numberListArg(
+      "users",
+      production ? [1] : quick ? [2] : [2, 5],
+      1,
+      args,
+    ),
+    voteRounds: numberArg("rounds", quick ? 1 : 3, args),
   };
 }
 
-function casesFromConfig(config: MatrixConfig): CaseConfig[] {
-  const explicit = explicitCasesArg(config);
+export function casesFromConfig(
+  config: MatrixConfig,
+  args: readonly string[] = Deno.args,
+): CaseConfig[] {
+  const explicit = explicitCasesArg(config, args);
   if (explicit) return explicit;
   const cases: CaseConfig[] = [];
   for (const optionCount of config.optionCounts) {
@@ -770,9 +963,18 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
 }
 
 async function run(): Promise<void> {
-  const config = matrixConfigFromArgs();
+  // A headless probe measures the derive-and-commit graph of the pattern and
+  // hosts its own in-process memory server, which has no serving loop. Under
+  // the ON posture the harness instead targets the integration environment's
+  // toolshed (`env.API_URL`) and, with none running, waits on it forever. So
+  // when the caller has not chosen a posture, pin the OFF arm for this
+  // process; an explicit `EXPERIMENTAL_SERVER_EXECUTION` still wins.
+  if (Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined) {
+    Deno.env.set("EXPERIMENTAL_SERVER_EXECUTION", "false");
+  }
+  const config = matrixConfigFromArgs(Deno.args);
   matrixProgram = config.program;
-  const cases = casesFromConfig(config);
+  const cases = casesFromConfig(config, Deno.args);
   const startedAt = performance.now();
   const results: ({ ok: true; result: CaseResult } | {
     ok: false;

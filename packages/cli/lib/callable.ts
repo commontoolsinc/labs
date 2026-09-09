@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/runner/cfc/schema-refs";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
+  namesResolvedParts,
   type NormalizedLLMFriendlyRef,
   normalizeLLMFriendlyRef,
 } from "./llm-friendly-ref.ts";
@@ -44,9 +45,12 @@ import {
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
+  LINK_MARKER_KEY,
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { timeCliPhase } from "./trace-timing.ts";
+import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 
@@ -178,20 +182,21 @@ export interface CallableExecutionDeps {
   showLinks?: boolean;
 
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
-   * to arrive in. Answered by the same selection step `cf piece get` reads
+   * to arrive in. Answered by the same selection step `cf cell get` reads
    * through, so one grammar covers reads and calls.
    *
    * It shapes a result that exists rather than deciding what is fetched: the
    * readback has already materialized the whole receipt by the time this
    * applies. (A plain result's receipt does carry a descriptive schema of
    * what it holds — a reactive result's carries none — but either way the
-   * fetch has happened first.) The shared step also awaits the runtime's
-   * global idle plus storage sync, so a shaped call result can wait on
-   * derived recomputation the plain call's transaction-local acknowledgment
-   * does not — a documented cost of shaping at the call
-   * (`deriveSelectedValue`, cell-selection.ts). A verb that returns nothing
-   * keeps returning nothing — there is no value for a selection to be
-   * about. */
+   * fetch has happened first.) The shared step waits for its computed output
+   * with `Cell.pull()`, whose scheduler and linked-document convergence pool
+   * are runtime/manager-wide; a shaped call can therefore still share a wait
+   * with active work that the plain call's transaction-local acknowledgment
+   * does not. Declared object keys are ordered locally from the projection
+   * after that readiness boundary, with an open projection's retained extras
+   * following in value order. A verb that returns nothing keeps returning
+   * nothing — there is no value for a selection to be about. */
   selection?: CellSelection;
 
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
@@ -203,7 +208,7 @@ export interface CallableExecutionDeps {
  * (`packages/cli/lib/llm-friendly-ref.ts`). One string carries the id, the
  * space when it differs from the one the call targeted, the scope, and the
  * path inside the backing document, so the address a call hands back is
- * exactly what a later command takes in as `--piece`. */
+ * exactly what a later command takes in as `--cell`. */
 export type InvocationResultLink = string;
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
@@ -223,7 +228,7 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf get --piece <receipt>` rather than re-invoking the verb.
+   * with `cf cell get --cell <receipt>` rather than re-invoking the verb.
    * The receipt is a COMMIT witness, not an execution witness — a same-id
    * replay
    * runs the handler body again and then loses the race, so effects outside
@@ -252,7 +257,7 @@ export interface InvocationOutcome {
 
   /** Under `--show-links` only: result paths mapped to their backing cell
    * addresses in canonical reference syntax, provenance beside the value the
-   * caller can pass straight back to `--piece`. The root `"/"` entry is the
+   * caller can pass straight back to `--cell`. The root `"/"` entry is the
    * result value's own backing document — the receipt, unless the result is
    * itself a reference, in which case the receipt address rides the
    * reserved bare `"receipt"` key; other entries appear only where a path's
@@ -291,7 +296,7 @@ export function addressArgument(ref: CallableResultRef): string {
 /**
  * `ref` written as the canonical fabric reference with its space embedded —
  * `/@<space>/<id>[@scope]` — the one token that names the cell from any
- * configuration. `--piece` takes it whole: the embedded space supplies the
+ * configuration. `--cell` takes it whole: the embedded space supplies the
  * target space when `--space` is absent, and is checked against it when both
  * are named. The id-and-scope segment is {@link addressArgument}'s, so the
  * two spellings of an address cannot drift apart.
@@ -455,6 +460,19 @@ function isOpaqueReference(value: unknown): boolean {
  * where a caller may write a link in place of a value. */
 function carriesCellMarker(node: Record<string, unknown>): boolean {
   return node.asCell !== undefined || node.asStream !== undefined;
+}
+
+/**
+ * The address inside the `{"$link": "/of:…"}` object a marked read renders
+ * (`composeLinkAddresses`, cell-selection.ts), whether the address stands
+ * alone there or the contents the same read projected sit beside it.
+ * `undefined` for every other value, a `$link` holding no string included:
+ * `{"$link": true}` is the projection-schema marker, not an address.
+ */
+function printedAddressOf(value: unknown): string | undefined {
+  if (!isObjectNotArray(value)) return undefined;
+  const address = (value as Record<string, unknown>)[LINK_MARKER_KEY];
+  return typeof address === "string" ? address : undefined;
 }
 
 /**
@@ -765,7 +783,7 @@ export function eventSchemaJudgesRootFields(
  * never meets that; a caller writing JSON by hand or by model meets it first.
  *
  * Which positions drop, measured against the read a handler's event goes
- * through (`SchemaObjectTraverser.traverseObjectWithSchema`, runner
+ * through (`SchemaObjectTraverser.#traverseObjectWithSchema`, runner
  * traverse.ts, whose `addOptionalProperty` is a no-op on the
  * `validateAndTransform` path), for an object holding one declared and one
  * undeclared field:
@@ -869,7 +887,11 @@ export function verbInputSchemaError(
  * event schema keeps and a link-derived dispatch schema does not, see
  * `CallableResolution.declaredEvent` — a string holding the address a read
  * emits (`/of:…`, the canonical fabric reference) converts to the link
- * envelope dispatch already accepts.
+ * envelope dispatch already accepts. So does the `{"$link": "/of:…"}` object
+ * a marked read renders that address in, alone or joined by the contents the
+ * same read projected: the address inside is what the position takes, and
+ * the contents beside it are the target's own fields, which a reference
+ * never stores.
  * An address printed by one command is now a verb argument in the next,
  * which is the property the CLI surface states for commands, one level in.
  *
@@ -906,17 +928,26 @@ export function resolveEmittedAddressArguments(
   // authored cell wrapper was declared, so the pre-resolution node is
   // checked as well as the target.
   if (!atRoot && (carriesCellMarker(schema) || carriesCellMarker(node))) {
-    if (typeof value === "string") {
+    const spelled = printedAddressOf(value) ?? value;
+    if (typeof spelled === "string") {
       let parsed: NormalizedLLMFriendlyRef | undefined;
       try {
-        parsed = normalizeLLMFriendlyRef(value);
+        parsed = normalizeLLMFriendlyRef(spelled);
       } catch {
         parsed = undefined;
       }
-      if (parsed === undefined || parsed.input) {
+      // A slug and a space name are refused here as firmly as a non-address
+      // is. This value becomes a stored link, which holds the id and the
+      // space verbatim and has no session behind it to resolve a name with —
+      // so the wider vocabulary `cf`'s own intake takes would land a durable
+      // edge pointing at nothing.
+      if (
+        parsed === undefined || parsed.input || !namesResolvedParts(parsed)
+      ) {
         return {
           value,
-          refusal: `${JSON.stringify(value)} at ${path} is not an address — ` +
+          refusal:
+            `${JSON.stringify(spelled)} at ${path} is not an address — ` +
             `the position declares a reference, and takes the /of:… form ` +
             `a read prints`,
         };
@@ -1357,7 +1388,7 @@ export function collectInvocationResultLinks(
 
 /**
  * Shape a call's result the way the caller asked for it, through the same step
- * `cf piece get` reads through — the one place a `--filter`/`--select`/
+ * `cf cell get` reads through — the one place a `--filter`/`--select`/
  * `--schema` grammar is interpreted, so a caller learns it once.
  *
  * `resultCell` is the cell the value was produced from: a handling's receipt,
@@ -1368,7 +1399,7 @@ export function collectInvocationResultLinks(
  * A selection that materializes nothing over a result that exists is refused
  * rather than reported as an absent result: an omitted `result` key means the
  * verb returned nothing, and a projection that kept nothing is a different
- * fact. `cf piece get` refuses the same condition on the same grounds.
+ * fact. `cf cell get` refuses the same condition on the same grounds.
  */
 async function selectCallResult(
   resolved: CallableResolution,
@@ -1476,15 +1507,24 @@ function circularResultPath(value: unknown): string | undefined {
  * Bound a readback that closes a circle with the verb's own declared result,
  * and hand back the value that bounds to.
  *
- * The declaration is the boundary the AUTHOR drew: the position where the
- * declared type re-enters itself is the position that closes the circle, so
- * rendering an address there cuts exactly where the shape says it should, and
- * leaves every other position reading as it already did. The addresses are
- * written by the same walk `--select`/`--schema` compose theirs with, so a
- * derived bound and a hand-written one name the same position the same way.
+ * The declaration is the boundary the AUTHOR drew, and it is applied in two
+ * strengths, the weaker first. Where the declared type re-enters itself, that
+ * position IS the one that closes the circle, so rendering an address there
+ * cuts exactly where the shape says it should and leaves every other position
+ * reading as it already did; the addresses are written by the same walk
+ * `--select`/`--schema` compose theirs with, so a derived bound and a
+ * hand-written one name the same position the same way.
  *
- * The cut is applied to `value` — the result already in hand — and never reads
- * a second one. That is what lets it bound a result a caller ALREADY shaped
+ * Where the circle is somewhere the declaration does not describe at all, that
+ * cut has nowhere to land. A verb that declares a compact row over the piece
+ * it hands back is the case: the row re-enters nowhere, and the piece carries
+ * a view that reaches every piece it renders and back again. The stronger
+ * bound answers that one by reading the declaration as the shape it states —
+ * each object position it CLOSES held to the fields it declares, which is the
+ * boundary an author writing a narrow result already believes they drew.
+ *
+ * Both are applied to `value` — the result already in hand — and never read a
+ * second one. That is what lets them bound a result a caller ALREADY shaped
  * without widening it: a projection can name the re-entering subtree whole,
  * which selects the circle rather than cutting past it, and the cut then
  * removes the closing position from what they selected rather than answering
@@ -1492,11 +1532,11 @@ function circularResultPath(value: unknown): string | undefined {
  * renders, this is never reached at all.
  *
  * Refuses where nothing in reach bounds it: no declaration at all, a
- * declaration whose recursion does not reach the closing position, or a
- * `--filter` beside it — a filtered array's elements no longer say which
- * positions they came from, and the bound is written in addresses, which name
- * positions. A refusal names where the circle closes and how to collect the
- * outcome, which beats a stack trace for a handling that already committed.
+ * declaration that describes no less than the value does, or a `--filter`
+ * beside it — a filtered array's elements no longer say which positions they
+ * came from, and a bound is written in addresses, which name positions. A
+ * refusal names where the circle closes and how to collect the outcome, which
+ * beats a stack trace for a handling that already committed.
  */
 async function boundCyclicResult(
   resolved: CallableResolution,
@@ -1522,17 +1562,30 @@ async function boundCyclicResult(
       "the addresses a bound is written in cannot be composed beside it.";
   } else {
     const declared = await resolved.declaredResult?.();
-    const bounded = await boundReadValue(
-      receiptCell,
-      declared,
-      value,
-      resolved.space,
-    );
-    // The bound is only as good as the declaration: a position the declaration
-    // left wide can still expand into the circle, and answering with a value
-    // that cannot be written would move the same failure one step later.
-    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
-      return bounded;
+    // Two bounds, weakest first, and the order is what keeps the stronger one
+    // from narrowing anything it does not have to. `"recursion"` cuts where
+    // the declared type re-enters itself and leaves every other position
+    // reading what it read; `"shape"` reads the whole declaration as the shape
+    // it states, which is the only bound in reach when the circle is somewhere
+    // the declaration does not describe at all — a verb declaring a compact
+    // row over the piece it returns, whose piece carries a view that reaches
+    // back to it. A value that renders under the weaker one never reaches the
+    // stronger.
+    for (const bound of ["recursion", "shape"] as const) {
+      const bounded = await boundReadValue(
+        receiptCell,
+        declared,
+        value,
+        resolved.space,
+        bound,
+      );
+      // The bound is only as good as the declaration: a position the
+      // declaration left wide can still expand into the circle, and answering
+      // with a value that cannot be written would move the same failure one
+      // step later.
+      if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+        return bounded;
+      }
     }
     if (declared === undefined) {
       whyUnbounded = "This verb declares no result for `cf` to bound the " +
@@ -1550,7 +1603,7 @@ async function boundCyclicResult(
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."
-        : `cf get --piece ${receiptId} ` +
+        : `cf cell get --cell ${receiptId} ` +
           `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
       " Calling the verb again under --select or --schema shapes it at the " +
       "call, but runs the handler body a second time.",
@@ -1585,24 +1638,29 @@ export async function executeResolvedCallable(
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
-    const tx = await new Promise<IExtendedStorageTransaction>(
-      (resolve, reject) => {
-        try {
-          if (invocation !== undefined) {
-            resolved.callableCell.send(dispatchInput, resolve, {
-              // The id and the session that chose it travel together: an id
-              // is the caller's own word, and only the pair decides which
-              // receipt this handling files under.
-              eventId: invocation.id,
-              session: invocation.session,
-            });
-          } else {
-            resolved.callableCell.send(dispatchInput, resolve);
+    // The span runs from the send to the handling's final commit callback:
+    // the dispatch-to-commit time the `--verbose` phases report, beside the
+    // readback spans below.
+    const tx = await timeCliPhase(
+      "executeCallable.dispatch",
+      () =>
+        new Promise<IExtendedStorageTransaction>((resolve, reject) => {
+          try {
+            if (invocation !== undefined) {
+              resolved.callableCell.send(dispatchInput, resolve, {
+                // The id and the session that chose it travel together: an
+                // id is the caller's own word, and only the pair decides
+                // which receipt this handling files under.
+                eventId: invocation.id,
+                session: invocation.session,
+              });
+            } else {
+              resolved.callableCell.send(dispatchInput, resolve);
+            }
+          } catch (error) {
+            reject(error);
           }
-        } catch (error) {
-          reject(error);
-        }
-      },
+        }),
     );
     // Acknowledgment is transaction-local (verb contract, Settlement): the
     // commit callback above fires on THIS handling's final commit. Awaiting
@@ -1624,6 +1682,13 @@ export async function executeResolvedCallable(
         }`,
       );
     }
+
+    // The handling committed, so the space it committed to is named here —
+    // before the early return below, which a call without an invocation id
+    // takes. A deduplicated retry is excluded: it settles on the original
+    // outcome and commits nothing, so a receipt would name a write this
+    // invocation did not perform.
+    if (!deduplicated) noteWroteTo(resolved.space);
 
     if (invocationId === undefined) return {};
 
@@ -1664,7 +1729,10 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
-      const value = await receipt.pull();
+      const value = await timeCliPhase(
+        "executeCallable.receipt.pull",
+        () => receipt.pull(),
+      );
       // A value-less verb's receipt is an empty record — existence-only.
       // Presence is decided on the receipt's STORED value, never on the
       // materialized one: a `FabricInstance` crossing the cell read arrives
@@ -1687,11 +1755,9 @@ export async function executeResolvedCallable(
         // nothing, and that omission is the distinction the empty receipt
         // exists to draw.
         if (deps.selection !== undefined) {
-          result = await selectCallResult(
-            resolved,
-            receipt,
-            deps.selection,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.select",
+            () => selectCallResult(resolved, receipt, deps.selection!, deps),
           );
         }
         // Whatever the value in hand came from — the whole receipt, or the
@@ -1703,13 +1769,17 @@ export async function executeResolvedCallable(
         // has, and the bound below engages only where one does not.
         const cycle = circularResultPath(result);
         if (cycle !== undefined) {
-          result = await boundCyclicResult(
-            resolved,
-            receipt,
-            result,
-            cycle,
-            link.id,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.boundCyclic",
+            () =>
+              boundCyclicResult(
+                resolved,
+                receipt,
+                result,
+                cycle,
+                link.id,
+                deps,
+              ),
           );
         }
       }
@@ -1793,6 +1863,12 @@ export async function executeResolvedCallable(
     await runtime.idle();
     runtime.prepareTxForCommit(tx);
     await tx.commit();
+    // A tool's result cell is durable, so a transaction that wrote one is a
+    // write to the space like a handler's is. Neither `commit()` resolving
+    // nor a `done` status proves that: an empty transaction commits
+    // successfully too. The journal's novelty for this space is what was
+    // actually written, so the receipt follows it.
+    if (transactionWroteTo(tx, resolved.space)) noteWroteTo(resolved.space);
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
     // and every in-flight async builtin finished — so the result is final by the

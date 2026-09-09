@@ -104,6 +104,7 @@ const MOVED_KEY = HEALTHY.replace(".for('items')", ".for('itemList')");
  * only the default export.
  */
 const NESTED_KEY = "vintage-gate-nested.tsx";
+
 const NESTED_TEST_KEY = NESTED_KEY.replace(/\.tsx$/, ".test.tsx");
 
 const nestedSource = (extra: { field?: string; line?: string } = {}) =>
@@ -256,6 +257,7 @@ const NESTED_ROW_ARGS_TIGHTENED = nestedSource()
  * witness a moved storage key.
  */
 const UNDECLARED_KEY = "vintage-gate-undeclared.tsx";
+
 const UNDECLARED_TEST_KEY = UNDECLARED_KEY.replace(/\.tsx$/, ".test.tsx");
 
 const undeclaredSource = (storageKey: string, trailer = "") =>
@@ -326,6 +328,7 @@ const undeclaredTest = [
  * required result without a default (the compatible output-evolution case).
  */
 const CROSS_KEY = "vintage-gate-crossspace.tsx";
+
 const CROSS_TEST_KEY = CROSS_KEY.replace(/\.tsx$/, ".test.tsx");
 
 /**
@@ -1734,6 +1737,40 @@ describe("the vintage gate, end to end", () => {
       expect(problems[0]).toContain("its own tests did not pass");
       // Nothing was written: a refused capture must not leave a partial fixture
       // behind for a later run to mistake for a good one.
+      expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
+    });
+
+    it("refuses a multi-user test, saying the run did not complete", async () => {
+      // A multi-user test's participants instantiate and write in workers of
+      // their own, against a storage server the runner starts, so this
+      // capture's store and observer would see nothing. The runner refuses the
+      // store rather than handing one back unwritten, and a refusal is a run
+      // that did not complete rather than a pattern whose tests failed.
+
+      await setSubjectTest(
+        [
+          "import { assert, multiUserTest, pattern, TESTS } from 'commonfabric';",
+          `import Subject from './${KEY}';`,
+          "export const setup = pattern(() => ({ subject: Subject({}) }));",
+          "export const alice = pattern(() => ({",
+          "  [TESTS]: [{ assertion: assert(() => true) }],",
+          "}));",
+          "export default multiUserTest({ setup, participants: { alice } });",
+          "",
+        ].join("\n"),
+      );
+
+      const { captured, problems } = await captureMissing(
+        roots,
+        [TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+
+      expect(captured).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("the run did not complete");
+      expect(problems[0]).toContain("is a multi-user test");
+      expect(problems[0]).not.toContain("its own tests did not pass");
       expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
     });
 

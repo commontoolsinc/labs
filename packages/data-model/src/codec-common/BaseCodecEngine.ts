@@ -164,7 +164,7 @@ export abstract class BaseCodecEngine<
    * Given anything else, what checking happens is best-effort: nothing on
    * this path spends time on correct input in order to catch incorrect
    * input, so a non-member may encode, may encode to something wrong, or may
-   * throw, and which of those it does is not promised. The same licence
+   * throw, and which of those it does is not promised. The same license
    * reaches a codec's `canEncode()` and `encode()`, both of which may take a
    * valid `FabricValue` as given.
    *

@@ -92,10 +92,6 @@ export class CFChat extends BaseElement {
         margin-bottom: var(--cf-spacing-4, 1rem);
       }
 
-      .message-item.system {
-        margin-bottom: var(--cf-spacing-4, 1rem);
-      }
-
       .tool-attachments-only {
         display: flex;
         flex-direction: column;
@@ -201,12 +197,15 @@ export class CFChat extends BaseElement {
   @property({ type: Object })
   accessor theme: any = {}; // Accept any theme object (partial or full)
 
-  // Consume theme from provider (preferred). If no direct theme prop, use this.
+  /**
+   * The theme consumed from the provider. This is used when there is no
+   * direct `theme` prop.
+   */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor parentTheme: CFTheme = defaultTheme;
 
-  // Internal computed theme for applying CSS variables locally
+  /** Internal computed theme, for applying CSS variables locally. */
   @property({ type: Object, attribute: false })
   accessor _computedTheme: CFTheme = defaultTheme;
 
@@ -300,20 +299,12 @@ export class CFChat extends BaseElement {
 
     const classes = ["message-item"];
 
-    // System messages are never grouped
-    if (currentMessage.role === "system") {
-      classes.push("system");
-      return classes.join(" ");
-    }
-
     // Check if this message should be grouped with the previous one
     const shouldGroupWithPrev = prevMessage &&
-      prevMessage.role !== "system" &&
       this._isSameGroup(prevMessage.role, currentMessage.role);
 
     // Check if this message should be grouped with the next one
     const shouldGroupWithNext = nextMessage &&
-      nextMessage.role !== "system" &&
       this._isSameGroup(currentMessage.role, nextMessage.role);
 
     if (shouldGroupWithPrev || shouldGroupWithNext) {

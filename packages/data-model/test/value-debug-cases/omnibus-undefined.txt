@@ -1,0 +1,16 @@
+{
+  plain: undefined,
+  "via void": void 0,
+}
+
+--
+
+plain:
+undefined
+undefined
+undefined
+
+via void:
+undefined
+undefined
+undefined

@@ -34,6 +34,7 @@ import {
   type EntitySnapshot,
   getServerExecutionConfig,
   type GraphQuery,
+  type GraphQueryRoot,
   isScopeKey,
   resolveScopeKey,
   type ScopeKey,
@@ -78,23 +79,177 @@ export type TrackedGraphState = {
   /** referrerKey → the miss keys it attributed (the reverse index the
    * re-walk clears by). */
   missesOf: Map<string, Set<string>>;
+
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
+
+  /** Every doc key a query has NAMED as a root, absent roots included —
+   * the persistent role record. A refresh re-walk consults it: a named
+   * document is owed its full family on every visit (and a healed absent
+   * root its first), while a merely tracked document keeps the crossing
+   * shape it was reached with — no family — so delivery does not depend
+   * on update history. */
+  roots: Set<string>;
+
+  /** Doc keys whose metadata family this state has chased: every named
+   * root a walk has visited, every document loaded as a member of such a
+   * family, whose own family the chase followed in turn, and every absent
+   * target a family link named, owed its family when it arrives. A
+   * refresh re-walk of a key here chases the family again, so a member
+   * whose metadata link moved delivers the new target. Keys are never
+   * released: the tracker keeps a delivered document for the state's
+   * lifetime too, so a member whose parent's link moved on stays
+   * delivered, and chased, until the state ends. A crossing records
+   * reach in the tracker and none of the family, so coverage of a later
+   * query that names a document requires its key here too: reach without
+   * family is not coverage for a root (see isGraphQueryCoveredByState). */
+  chased: Set<string>;
 };
 
 /**
+ * The costliest single root of one query evaluation.
+ *
+ * A query's roots are the union of every watch's roots on a branch, so a
+ * slow `watch.add` reports its duration against a watch COUNT and says
+ * nothing about which declaration spent it. This names the root that did.
+ *
+ * It names the root that PAID, which is not always the root to blame.
+ * Roots share coverage within an evaluation: the first to reach a document
+ * is charged for it, and a later root that would have reached the same
+ * document is skipped instead. So where several roots declare overlapping
+ * closures, the whole cost lands on whichever ran first, and bounding that
+ * one root moves the charge to the next rather than removing it. Read a
+ * large `slowestRoot` as "the cost is reachable from here", and confirm a
+ * suspected cause by checking that narrowing it lowers the request's own
+ * elapsed time — not merely that it lowers this root's.
+ */
+export type SlowestQueryRoot = {
+  id: string;
+  scope: CellScope;
+
+  /** The explicit scope INSTANCE the root named, on the lease-holder reads
+   * that may name one. Roots alike in every other field but this one are
+   * different reads of different instances, so without it the record
+   * cannot say which instance cost the time. */
+  entityScopeKey?: ScopeKey;
+
+  /** The selector's path, slash-joined; empty for a whole-document root. */
+  path: string;
+
+  /** The selector schema's interned tagged hash, absent when the root
+   * declares none. The hash rather than the schema itself: a board root's
+   * schema runs to kilobytes, and the hash is how the registry names it. */
+  schema?: string;
+
+  elapsedMs: number;
+
+  /** Engine documents read while visiting this root. */
+  reads: number;
+
+  /** The walk this root ran, as counters: how many documents it crossed
+   * (`dagTraversals`), what kind of structure it crossed them through, and
+   * how much the schema memo saved. `elapsedMs` says a root was expensive;
+   * this says what it did to get that way — a wide root crossing thousands
+   * of documents and one deep root re-walking a schema are the same
+   * duration and different bugs. */
+  walk: GraphQueryWalkStats;
+};
+
+/** One root's share of the walk counters its evaluation accumulated. */
+const walkStatsDelta = (
+  after: GraphQueryWalkStats,
+  before: GraphQueryWalkStats,
+): GraphQueryWalkStats => ({
+  coveredSelectorSkips: after.coveredSelectorSkips -
+    before.coveredSelectorSkips,
+  schemaTraversals: after.schemaTraversals - before.schemaTraversals,
+  pointerTraversals: after.pointerTraversals - before.pointerTraversals,
+  arrayTraversals: after.arrayTraversals - before.arrayTraversals,
+  objectTraversals: after.objectTraversals - before.objectTraversals,
+  dagTraversals: after.dagTraversals - before.dagTraversals,
+  getDocAtPathCalls: after.getDocAtPathCalls - before.getDocAtPathCalls,
+  schemaMemoHits: after.schemaMemoHits - before.schemaMemoHits,
+});
+
+/**
  * What one query cost: the walk's own counters, plus how many documents the
- * query read out of the engine.
+ * query read out of the engine, plus which of its roots was the expensive
+ * one.
  */
 export type QueryTraversalStats = GraphQueryWalkStats & {
   managerReads: number;
+
+  /** Roots this evaluation visited. A cache hit visits none. */
+  rootsVisited: number;
+
+  /** Summed elapsed time of those visits. Roots are visited in sequence,
+   * so this is directly comparable with the caller's own elapsed
+   * measurement, and what it leaves over is everything outside the root
+   * loop — entity assembly and schema-closure staging. Read the two
+   * together: they say whether a slow evaluation was slow at a root at
+   * all. */
+  rootsElapsedMs: number;
+
+  /** The costliest one, absent when no root was visited. */
+  slowestRoot?: SlowestQueryRoot;
 };
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
+  rootsVisited: 0,
+  rootsElapsedMs: 0,
   ...createGraphQueryWalkStats(),
 });
+
+/**
+ * Run one root's evaluation, charging what it cost to `stats` and keeping
+ * the costliest root seen so far.
+ *
+ * Two clock reads and one counter read per root, paid unconditionally,
+ * because which evaluation turns out to be the slow one is not knowable
+ * before it runs. The overhead is bounded by the same factor that makes a
+ * query large: a root cheap enough for two `performance.now()` calls to
+ * register against it did no document reads.
+ */
+const chargeRootVisit = (
+  root: GraphQueryRoot,
+  manager: EngineObjectManager,
+  stats: QueryTraversalStats,
+  visit: () => void,
+): void => {
+  const startedAt = performance.now();
+  const readsBefore = manager.readCount;
+  const walkBefore = { ...stats };
+  try {
+    visit();
+  } finally {
+    // Charged from `finally`, so a root that throws is attributed too: a
+    // slow failing root is at least as interesting as a slow passing one.
+    const elapsedMs = performance.now() - startedAt;
+    stats.rootsVisited++;
+    stats.rootsElapsedMs += elapsedMs;
+    if (
+      stats.slowestRoot === undefined ||
+      elapsedMs > stats.slowestRoot.elapsedMs
+    ) {
+      stats.slowestRoot = {
+        id: root.id,
+        scope: root.scope ?? DEFAULT_SCOPE,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { entityScopeKey: root.entityScopeKey }),
+        path: root.selector.path.join("/"),
+        ...(root.selector.schema === undefined ? {} : {
+          schema: internSchemaAsTaggedHashString(root.selector.schema),
+        }),
+        elapsedMs,
+        reads: manager.readCount - readsBefore,
+        walk: walkStatsDelta(stats, walkBefore),
+      };
+    }
+  }
+};
 
 /**
  * The identity a manager's tracked-graph keys resolve against: the
@@ -291,16 +446,20 @@ export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
 };
 
+/** Source of fresh ids for {@link canonicalSelectorId}. */
+let nextCanonicalSelectorId = 0;
+
+/** Ids already issued, keyed by canonical (interned) selector instance. */
+const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
+
 /**
- * Canonical selector identity for evaluation-cache keys. Interning gives
- * structurally equal selectors one canonical instance
+ * Returns the canonical selector identity for evaluation-cache keys.
+ * Interning gives structurally equal selectors one canonical instance
  * (`internPathSelector`), so reference identity is structural equality and
  * the id is exact. Canonical instances are weakly held, so an id can lapse
  * with its selector and a re-interned equal reappears under a fresh id —
  * that costs a cache miss, never a wrong hit.
  */
-let nextCanonicalSelectorId = 0;
-const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
 const canonicalSelectorId = (selector: SchemaPathSelector): number => {
   const interned = internPathSelector(selector);
   let id = canonicalSelectorIds.get(interned);
@@ -340,28 +499,40 @@ export type QueryEvaluationCacheDiagnostics = {
   seq: number;
   entries: number;
   weight: number;
+
   /** Total serves: the sum of the three per-class hit counters. */
   hits: number;
+
   misses: number;
   rotations: number;
+
   /** Serves of a scope-pure entry (identical for every identity). */
   hitsPure: number;
+
   /** Serves of an absent-residue entry — the recording identity's own
    * re-ask included (its keys need no rewrite, but the entry is the
    * same class). */
   hitsAbsentResidue: number;
+
   /** Serves of a tainted entry to the identity it is keyed to. */
   hitsIdentity: number;
+
   /** Absent-residue shares refused because a residue doc is PRESENT
    * for the requester. A refusal is not a miss by itself: the call
    * then serves from the identity entry (an identity hit) or
    * evaluates in full (a miss). */
   residueRefusals: number;
-  /** Live entries by share class. Together with the hit split, this
-   * is the production measure of how often scoped reach actually
-   * forecloses cross-identity sharing. */
+
+  /** Live scope-pure entries. This count and the two below it are the live
+   * entries by share class; together with the hit split they are the
+   * production measure of how often scoped reach actually forecloses
+   * cross-identity sharing. */
   entriesPure: number;
+
+  /** Live absent-residue entries. */
   entriesAbsentResidue: number;
+
+  /** Live tainted entries, each keyed to one identity. */
   entriesTainted: number;
 };
 
@@ -381,6 +552,14 @@ export type QueryEvaluationCacheDiagnostics = {
  * exactly where the cost multiplies: many sessions establishing the same
  * watch corpus between two commits (a reconnect stampede after a process
  * death is this, at its worst).
+ *
+ * Only whole, current-state evaluations consult the cache: an eligible
+ * `graph.query` (without `atSeq` or keyed snapshots), a whole watch-set
+ * establishment, and `session.watch.add` when the session has no tracked graph
+ * for that branch. A subsequent `session.watch.add` for an already tracked
+ * branch extends the session's graph through `extendTrackedGraph()`. An
+ * extension depends on the graph's existing coverage, so it neither serves nor
+ * records a cache entry.
  *
  * Scope purity decides who may share an entry. An evaluation whose whole
  * reach — tracked, missed, and loaded — resolved under the `space` scope is
@@ -409,22 +588,37 @@ export type QueryEvaluationCache = {
    * for the same space rotates the cache exactly as a seq advance does —
    * both entry points accept a caller-supplied engine. */
   engine: Engine.Engine | null;
+
   seq: number;
   entries: Map<
     string,
     { state: TrackedGraphState; share: StateScopeClass; weight: number }
   >;
+
   /** Sum of entry weights (retained entity count — the proxy for the
    * parsed documents an entry keeps alive). The server enforces its
    * cross-space budget against this. */
   weight: number;
-  /** Per-class serve counters ({@link QueryEvaluationCacheDiagnostics}
-   * defines each class); diagnostics report their sum as `hits`. */
+
+  /** Serves of a scope-pure entry. This counter and the two below it are the
+   * per-class serve counters, which diagnostics report summed as `hits`;
+   * {@link QueryEvaluationCacheDiagnostics} defines each class. */
   hitsPure: number;
+
+  /** Serves of an absent-residue entry. */
   hitsAbsentResidue: number;
+
+  /** Serves of a tainted entry to the identity it is keyed to. */
   hitsIdentity: number;
+
+  /** Absent-residue shares refused because a residue doc is present. */
   residueRefusals: number;
+
+  /** Evaluations that found no usable entry. */
   misses: number;
+
+  /** Times the cache was rotated out — a newer engine seq, or a different
+   * engine object for the same space. */
   rotations: number;
 };
 
@@ -679,6 +873,8 @@ export const cloneTrackedGraphState = (
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
+    roots: new Set(state.roots),
+    chased: new Set(state.chased),
   };
 };
 
@@ -1221,6 +1417,8 @@ export const trackGraph = (
   };
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
+  const roots = new Set<string>();
+  const chased = new Set<string>();
   const readCountBefore = manager.readCount;
   const walk = new GraphQueryWalk({
     manager,
@@ -1235,34 +1433,37 @@ export const trackGraph = (
   validateSelectorSchemaRefs(space, manager, branch, query.roots);
 
   for (const root of query.roots) {
-    const selector = toDocumentSelector(root.selector);
-    const rootScope = root.scope ?? DEFAULT_SCOPE;
-    // A root naming an explicit instance (protocol.md §2's read row —
-    // lease-holder only, admission enforced at the server layer) reads
-    // and tracks THAT instance; traversal beyond the root resolves under
-    // the session identity as today (per-run deep threading is the
-    // Phase 2 fan-out work).
-    const loaded = manager.load({
-      id: root.id,
-      scope: rootScope,
-      ...(root.entityScopeKey === undefined
-        ? {}
-        : { scopeKey: root.entityScopeKey }),
-      type: "application/json",
+    chargeRootVisit(root, manager, stats, () => {
+      const selector = toDocumentSelector(root.selector);
+      const rootScope = root.scope ?? DEFAULT_SCOPE;
+      // A root naming an explicit instance (protocol.md §2's read row —
+      // lease-holder only, admission enforced at the server layer) reads
+      // and tracks THAT instance; traversal beyond the root resolves under
+      // the session identity as today (per-run deep threading is the
+      // Phase 2 fan-out work).
+      const loaded = manager.load({
+        id: root.id,
+        scope: rootScope,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { scopeKey: root.entityScopeKey }),
+        type: "application/json",
+      });
+      const rootKey = rootDocKey(space, root, identityOf(manager));
+      roots.add(rootKey);
+      if (loaded !== null) {
+        walk.visit(loaded, selector, rootKey);
+        // The visit chased the named document's full family; an absent
+        // root is still a ROOT (recorded above) but records no family —
+        // its later creation owes it one.
+        chased.add(rootKey);
+      } else {
+        schemaTracker.add(rootKey, selector);
+      }
     });
-    if (loaded !== null) {
-      walk.visit(
-        loaded,
-        selector,
-        rootDocKey(space, root, identityOf(manager)),
-      );
-    } else {
-      schemaTracker.add(
-        rootDocKey(space, root, identityOf(manager)),
-        selector,
-      );
-    }
   }
+
+  for (const key of walk.chasedFamilyKeys) chased.add(key);
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
   const staged = assembleSchemaDocClosures(
@@ -1290,6 +1491,8 @@ export const trackGraph = (
     entities,
     memo: sharedMemo,
     manager,
+    roots,
+    chased,
   };
   if (
     cache !== undefined && cacheKeys !== undefined &&
@@ -1338,26 +1541,35 @@ export const extendTrackedGraph = (
   validateSelectorSchemaRefs(space, manager, state.branch, query.roots);
 
   for (const root of query.roots) {
-    const selector = toDocumentSelector(root.selector);
-    const rootScope = root.scope ?? DEFAULT_SCOPE;
-    const rootKey = rootDocKey(space, root, identityOf(manager));
-    touched.add(rootKey);
-    evaluateTrackedDocument(
-      space,
-      manager,
-      {
-        id: root.id,
-        scope: rootScope,
-        ...(root.entityScopeKey === undefined
-          ? {}
-          : { scopeKey: root.entityScopeKey }),
-      },
-      selector,
-      state.tracker,
-      missRecorderFor(state),
-      state.memo,
-      stats,
-    );
+    chargeRootVisit(root, manager, stats, () => {
+      const selector = toDocumentSelector(root.selector);
+      const rootScope = root.scope ?? DEFAULT_SCOPE;
+      const rootKey = rootDocKey(space, root, identityOf(manager));
+      state.roots.add(rootKey);
+      touched.add(rootKey);
+      const evaluated = evaluateTrackedDocument(
+        space,
+        manager,
+        {
+          id: root.id,
+          scope: rootScope,
+          ...(root.entityScopeKey === undefined
+            ? {}
+            : { scopeKey: root.entityScopeKey }),
+        },
+        selector,
+        state.tracker,
+        missRecorderFor(state),
+        state.memo,
+        stats,
+      );
+      // The visit chased the named document's full family; an absent
+      // root records nothing, so its later creation re-evaluates it.
+      if (evaluated !== null) {
+        state.chased.add(rootKey);
+        for (const key of evaluated.chasedFamilyKeys) state.chased.add(key);
+      }
+    });
   }
 
   for (const address of manager.loadedAddresses()) {
@@ -1423,7 +1635,13 @@ export const isGraphQueryCoveredByState = (
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
     const rootKey = rootDocKey(space, root, identityOf(state.manager));
-    return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
+    // Reach without family is not coverage for a NAMED root: a crossing
+    // may have recorded the selector without chasing the family, and
+    // naming the document entitles the caller to it (extendTrackedGraph's
+    // visit supplies it, cheaply, when the selector itself is already
+    // covered).
+    return schemaTrackerCoversSelector(state.tracker, rootKey, selector) &&
+      state.chased.has(rootKey);
   });
 
 export const queryGraph = (
@@ -1435,6 +1653,11 @@ export const queryGraph = (
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
+
+  /** What the evaluation cost. Carried out so the server can attribute a
+   * slow `graph.query` to a root; it is not part of the wire result, and
+   * the caller drops it before responding. */
+  stats: QueryTraversalStats;
 } => {
   const tracked = trackGraph(space, engine, query, reuse, {
     ...options,
@@ -1448,6 +1671,7 @@ export const queryGraph = (
     : [...tracked.state.entities.values()];
   return {
     serverSeq: tracked.serverSeq,
+    stats: tracked.stats,
     entities: entities
       .toSorted((left, right) => left.id.localeCompare(right.id)),
   };
@@ -1530,10 +1754,33 @@ export const refreshTrackedGraph = (
     releaseReferrerMisses(state, key);
   }
 
+  // A document a query named, or one delivered as a member of a named
+  // document's family, is owed its family on every re-walk; a document the
+  // walks merely reached keeps its crossing shape.
+  const roleOf = (key: QueryDocKey) =>
+    state.roots.has(key) || state.chased.has(key)
+      ? "root" as const
+      : "crossing" as const;
+  // A named root that was absent when first tracked earns its family on
+  // the visit that finds it born, and a chase records every member it
+  // loaded so the member's own re-walk chases in turn.
+  const recordChased = (
+    key: QueryDocKey,
+    role: "root" | "crossing",
+    evaluated: EvaluatedDocument | null,
+  ) => {
+    if (evaluated === null || role !== "root") return;
+    state.chased.add(key);
+    for (const chasedKey of evaluated.chasedFamilyKeys) {
+      state.chased.add(chasedKey);
+    }
+  };
+
   for (const [key, selectors] of affectedDocs) {
     const { id, scope, scopeKey } = fromDocKey(key);
+    const role = roleOf(key);
     for (const selector of selectors) {
-      evaluateTrackedDocument(
+      const evaluated = evaluateTrackedDocument(
         space,
         manager,
         { id, scope, scopeKey },
@@ -1542,7 +1789,10 @@ export const refreshTrackedGraph = (
         recorder,
         sharedMemo,
         stats,
+        undefined,
+        role,
       );
+      recordChased(key, role, evaluated);
     }
   }
   // Re-evaluate the dirtied misses. A BORN target is visited — it enters
@@ -1554,8 +1804,9 @@ export const refreshTrackedGraph = (
   const stillAbsent = new MapSetStringToPathSelectors(true);
   for (const [key, selectors] of affectedMisses) {
     const { id, scope, scopeKey } = fromDocKey(key);
+    const role = roleOf(key);
     for (const selector of selectors) {
-      evaluateTrackedDocument(
+      const evaluated = evaluateTrackedDocument(
         space,
         manager,
         { id, scope, scopeKey },
@@ -1565,7 +1816,9 @@ export const refreshTrackedGraph = (
         sharedMemo,
         stats,
         stillAbsent,
+        role,
       );
+      recordChased(key, role, evaluated);
     }
     // Retirement is decided by THIS evaluation's own outcome — the
     // throwaway sink received the key iff the doc was still absent. The
@@ -1650,6 +1903,12 @@ export const refreshTrackedGraph = (
   };
 };
 
+/** What `evaluateTrackedDocument` reports of a document it found present. */
+type EvaluatedDocument = {
+  /** The walk's `GraphQueryWalk.chasedFamilyKeys`. */
+  chasedFamilyKeys: ReadonlySet<string>;
+};
+
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
@@ -1670,7 +1929,8 @@ const evaluateTrackedDocument = (
   // into one batch, say) keeps waiting for a real arrival, so its
   // caller passes a sink the wire never sees.
   absentSink: MapSetStringToPathSelectors = schemaTracker,
-) => {
+  role: "root" | "crossing" = "root",
+): EvaluatedDocument | null => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
     : toDocKey(
@@ -1682,11 +1942,11 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     absentSink.add(docKey, internPathSelector(selector));
-    return;
+    return null;
   }
   // A fresh walk per document, so each starts with an empty pointer-cycle
   // tracker while sharing the query's reach and its memoized schema results.
-  new GraphQueryWalk({
+  const walk = new GraphQueryWalk({
     manager,
     space: space as MemorySpace,
     schemaTracker,
@@ -1694,7 +1954,9 @@ const evaluateTrackedDocument = (
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
-  }).visit(loaded, selector, docKey);
+  });
+  walk.visit(loaded, selector, docKey, role);
+  return { chasedFamilyKeys: walk.chasedFamilyKeys };
 };
 
 export const toDocKey = (

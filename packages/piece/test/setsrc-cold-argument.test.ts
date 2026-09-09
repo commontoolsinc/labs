@@ -8,6 +8,7 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 // CT-1917 at the `cf piece setsrc` boundary: a slot the piece cannot READ right
 // now is not a slot holding the wrong value.
@@ -121,6 +122,7 @@ describe("setsrc over a cold argument document", () => {
       piece.getCell().withTx(tx).setMetaRaw(
         "argument",
         cold.getAsWriteRedirectLink({ base: piece.getCell() }),
+        rawMetaWriteAuthorization,
       );
     });
     expect(

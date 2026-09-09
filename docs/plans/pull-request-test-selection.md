@@ -1,8 +1,10 @@
 # Choosing which tests a pull request runs
 
-Status: proposed. Nothing here is built yet. The record store this plan
-consumes is live and holds the data the design needs; the gaps it does not
-yet hold are listed under [What the store is
+Status: in progress. Part one is built. Part two is built apart from its
+continuous-integration configuration and the coverage work; part three has
+the reporter and nothing else. [The work](#the-work) carries the detail.
+The record store this plan consumes is live and holds the data the design
+needs; the gaps it does not yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
 work.
 
@@ -196,7 +198,7 @@ subset costs, paid for rather than written off.
 
 ## The shape of the system
 
-Four pieces, with one direction of dependency between them.
+Five pieces, with one direction of dependency between them.
 
 **The topology** lives in the repository, at `tasks/test-topology.ts` and
 the modules it pulls in. It declares each suite: what capabilities the
@@ -212,9 +214,10 @@ result into five lanes, and writes one manifest object into the store. It
 writes nothing into git.
 
 **The lane runner** is `tasks/ci-lane.ts`. The five pull-request jobs all
-run it, passing their lane number. It fetches the newest manifest, reads
-the working tree through the topology, adjusts the plan for what this
-particular pull request changed, works out which batches belong to its own
+run it, passing their lane number. It resolves the manifest from the date
+on the commit it has checked out, reads the working tree through the
+topology, adjusts the plan for what this particular pull request changed,
+works out which batches belong to its own
 lane, sets up the capabilities those batches need, runs them, and records
 the results the same way every other job in this repository does.
 
@@ -260,9 +263,6 @@ interface Suite {
   /** Environment variables its commands run with. */
   env?: Record<string, string>;
 
-  /** Whether a subset of this suite is always run, and on what basis. */
-  mandatory?: "always" | "changed";
-
   /** Every available item and every configured unavailability. */
   enumerate(): Promise<{
     items: Item[];
@@ -300,8 +300,10 @@ because one runner does not imply one scope: `workspace-unit` spans every
 workspace package, and the package integration command spans `runner`,
 `runtime-client`, and `shell`. The optional `variant` is suite-wide because
 the suite declares the configuration in which every one of its items runs.
-Default suites omit it. The two server-execution ON suites set it to
-`server-execution`.
+Default suites omit it. The server-execution `opposite` suites derive their
+variant from the posture they actually exercise: `server-execution` for ON or
+`server-execution-off` for OFF. The registry's summary table states the
+current default; the opposite suites' variant follows it.
 
 `enumerate()` is what makes a new test visible without a workflow edit. It
 reads the working tree — usually a file glob, sometimes a list parsed out
@@ -353,21 +355,20 @@ suite supplies the variant shared by all of them. Direct records already
 carry their kind, scope, and name; the runner checks their record surface
 against the suite before applying that same variant.
 
-`mandatory` is the policy escape hatch. `"always"` means every item runs
-on every pull request, with no exceptions of any kind — it outranks the
-score, the budget, and both exclusion rules, and
-[Two rules that keep a test out](#two-rules-that-keep-a-test-out) explains
-why that has to be literal. `"changed"` means an item runs when the pull
-request touches a file the item covers; the per-package type check is the
-natural user, because the store already records one `typecheck` identity
-per package group and the mapping from a changed file to a package is
-direct. Absent the field, the suite is selected purely on value.
+No suite exempts itself from selection. An item runs because the change
+touches what it covers, because nothing has a record of it, or because it
+is worth what running it costs, and a repository gate is held to those
+rules the way a unit test is. `deno fmt --check` earns its place from the
+failures it has caught; a suite that could declare itself exempt would be
+a suite whose worth nothing measures.
 
-The `always` set is deliberately tiny, and every member of it is a gate
-whose failure means the tree is broken rather than that one test is
-unhappy: `deno fmt --check`, `deno lint`, and the topology drift guard.
-Together they cost seconds. Nothing expensive belongs there, and adding to
-the set is a decision to spend part of every lane's budget forever.
+Answering "what does this item cover" belongs to the suite, because a
+unit that is not a path is one only its suite can map a diff onto. A
+suite whose units are files needs to say nothing: the diff naming the
+file is the whole of the question. A suite whose units are type-check
+groups, gate names, or binaries maps the diff itself, and a suite that
+maps it wrongly runs too much or too little rather than reporting
+anything, so the answer errs toward running.
 
 ### Today's jobs as suites
 
@@ -377,6 +378,7 @@ table is the migration's checklist.
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
 | `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `repo-history-gates` | the two append-only gates in `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `typecheck` | `Check` (the type check) | — | `deno` |
 | `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
 | `runner-unit` | `Runner Tests (1..8)` | — | `deno` |
@@ -385,38 +387,41 @@ table is the migration's checklist.
 | `pattern-vintage` | `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `generated-patterns` | `Generated Patterns Integration Tests (1..2)` | — | `deno`, `compile-cache` |
 | `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` |
-| `package-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
+| `package-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
+| `deployed-topology` | the background-service and cf-harness default-posture gates | — | `deno`, `toolshed`, `bg-piece-service-binary` |
 | `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` |
 | `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` |
 | `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` |
 | `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed`, `browser`, `compile-cache` |
-| `pattern-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
+| `pattern-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
 | `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
 | `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
+| `binaries` | the compile inside `Build Binary (toolshed)` and the two beside it | — | `deno` |
+| `binaries-opposite` | the toolshed compile whose shell is opposite the server-execution default | resolved arm variant | `deno` |
 
-When server execution becomes the default, the unmarked
-`package-integration` and `pattern-integration` suites change their commands
-and capabilities to the ON posture without changing their record identity.
-The `*-integration-on` suites disappear. Any surviving explicit OFF suites
-use `server-execution-off`. No identity alias joins these histories: the
-unmarked default continues by construction, and each non-default posture
-has its own marker.
+The server-execution suites now keep stable `default` and `opposite` roles.
+`default` follows the one first-party constant without changing its unmarked
+record identity. `opposite` explicitly selects the inverse, and its record
+marker names that actual posture. No identity alias joins these histories: the
+unmarked default continues by construction, and each non-default posture keeps
+its own marker.
 
 ### Declared unavailable tests
 
 A configuration-specific skip is neither an unknown test nor evidence that
-the topology missed a surface. The server-execution ON suites therefore
-read `tasks/server-execution-on-skips.ts` as part of their topology. The
-skip registry remains the single source of truth for the phase and reason;
-the selection system does not grow a second list.
+the topology missed a surface. Whichever role resolves the server-execution ON
+posture reads `tasks/server-execution-on-skips.ts` as part of its topology;
+the role that resolves OFF runs every file. The skip registry remains the
+single source of truth for the phase and reason; the selection system does not
+grow a second list.
 
 A whole-file entry removes that file from the variant suite's enumerated
 items. The manifest reports it as unavailable under that suite and variant,
 with the registry's phase and reason. A step-level entry leaves the file
 item in the suite because every other step still runs. It marks only the
 skipped leaf identity unavailable, so that leaf is excluded from the
-unknown-identity and coverage-target rules while the rest of the file's
-identities behave normally.
+unknown-identity rule while the rest of the file's identities behave
+normally.
 
 Removing either kind of skip makes the file or leaf ordinary topology
 again. Until a full `main` run records it, it is unknown and therefore
@@ -425,35 +430,83 @@ adding a new test. The existing rule that the skip registry must be empty
 when server execution becomes the default remains unchanged.
 
 The build jobs (`Build Binary (toolshed)` and the three beside it) do not
-become suites. They are not tests; they are setup, and they become
-capability providers. The deploy and attestation jobs stay exactly as they
+become suites for the reason they exist today. They are not tests; they
+are setup, and as setup they become capability providers.
+
+They do become suites for a different reason. A pull request runs its
+servers and its command line from source and compiles nothing, so a
+compile that breaks would be found on `main`, after the change that broke
+it has merged — where today it is caught before it lands. So `binaries`
+makes each shipped binary a unit whose test is that it still compiles,
+and `binaries-opposite` does the same for the toolshed under the define
+opposite the default, which is the same build in a different configuration and
+therefore a variant of it rather than a second test.
+
+Every one of those builds passes `--no-check`, so this is not a second
+type check: `deno task check` owns that. What a compile catches that
+nothing else does is resolving the whole import graph from an entry
+point, bundling the browser shell, and embedding each `--include`d asset
+from a path that has to still exist.
+
+Nothing forces a build to run. A binary the store has never seen is
+unknown and therefore mandatory, so each is built once; after that it
+sits at the value floor until it catches something. When a compile does
+break, `main` catches it, and a `main` catch is weighted half again for
+being exactly the escape this system exists to stop — one of them lifts a
+build from the floor to several times it, which is enough to be chosen
+against a corpus where almost nothing has ever failed.
+
+The alternative was a map from changed paths to the binaries they can
+break. It is the kind of transcribed table [sharding stops being written
+down](#sharding-stops-being-written-down) exists to delete: a compile
+reaches the whole import graph from an entry point, no short list
+describes that, and the list would go stale the first time an import
+moved. The cost of leaving it out is that the first compile to break
+reaches `main`, which is the trade this design makes everywhere else and
+is what the feedback loop then closes. The deploy and attestation jobs stay exactly as they
 are, since they only ever ran on `main`.
 
-**`cli-fuse` must gain fine granularity, and this is not optional.**
-`packages/cli/integration/fuse-exec.sh` is 1,062 lines that record a
-single identity for the entire run, through one
-`cf_test_record_with_status` at the end. Twenty-three `success` markers
-inside it name the phases it goes through, and not one of them reaches the
-store. So the suite's whole cost — a FUSE mount, a Toolshed server and
-everything the script does with them — hangs off one identity that can
-only be scored as a unit, run as a unit, and skipped as a unit. That is
-the worst shape in the topology, and leaving it would mean a single record
-deciding whether several minutes of work runs.
+**`cli-fuse` carries the fine granularity the rest of this depends on.**
+`packages/cli/integration/fuse-exec.sh` records an identity for each phase
+it goes through, through the `cf_test_step_begin` markers `integration.sh`
+also uses. Its 23 phases record under 25 names, because one of them
+announces under one of three sentences depending on how deeply it probes,
+and each of those is an identity of its own. Each marker leads the phase
+it names, so a phase that fails is the record that carries the failure,
+and the two phases that bring the mount up and wait for it to hydrate
+record like the rest, so a mount that never comes up is reported as the
+mount. Scoring, the flake rate and the 60-second ratchet each get a
+number per phase where they had one covering a FUSE mount, a Toolshed
+server and everything the script does with them.
 
-The change has two halves and they are not equally hard. The cheap half is
-step records: the 23 `success` markers become `cf_test_step_begin`
-markers, exactly as `integration.sh` already uses, and the suite goes from
-one identity to 23 without changing what runs. That is worth doing on its
-own, because scoring, the flake rate and the 60-second ratchet all get
-something to work with where today they get one number.
+The script also takes a section, so a lane can be pointed at part of it.
+Which phases can stand alone was a question about the script rather than
+about selection — the same independence question [asked of unit
+tests](#skipping-assumes-tests-do-not-lean-on-each-other) — and the answer
+is four sections rather than one per phase. A section is a group of phases over one
+mount rather than a phase on its own, because the mount, the daemon and
+the piece cost more than every phase together and each section needs all
+three. Four phases therefore run whichever section was asked for, and are
+not selectable. A fifth is not selectable for the same reason without
+being in that group: the phase that puts the callable files in place is a
+precondition of three of the four sections, so each of those runs it
+first. The rule the topology applies covers both — a phase more than one
+section runs names no single section, so it is a suite-level record
+rather than one belonging to a unit.
 
-The second half is section dispatch, so the script can be asked for a
-subset the way `integration.sh` can. That one is not purely mechanical: a
-linear script builds up a mount, a daemon and a set of pieces, so which
-phases can stand alone is a question about the script rather than about
-selection, and it is the same independence question [asked of unit
-tests](#skipping-assumes-tests-do-not-lean-on-each-other). The answer may
-well be a handful of sections rather than 23, and a handful is enough.
+Two dependencies decide where the boundaries fall, and both are about
+state a phase leaves behind. The handler phases assert `messageCount` as
+an absolute count up from the piece's initial zero, so they stay together
+and in order. The source update ends by asserting `lastMessage` is the
+empty string the truncate phase left, so it sits in the section holding
+that phase. A third ordering is why the entity listing is one of the
+phases that always runs: its assertion is that no entity payload has
+crossed the memory proxy, read from a trace that accumulates over the
+whole run, so nothing may hydrate the piece before it.
+
+`packages/cli/test/fuse-sections.test.ts` holds the dispatch table to
+those orderings, and to every phase being reachable — from `all`, from a
+section smaller than `all`, and from what the workflow dispatches.
 
 `pattern-reload` needs nothing done to it, and is not a special case
 either. `packages/patterns/integration/reload/` holds a single file with a
@@ -479,6 +532,30 @@ need: its job downloads no binary and starts nothing, because
 chosen port offset. Calling that `toolshed` would be wrong, and a lane
 that opened a Toolshed server for it would have paid for the wrong thing
 and still failed.
+
+### What a workspace member's own task decides
+
+A member's test task cannot be handed a subset of its own files: almost
+every one of them lists its own paths, so appending more would add to
+what runs rather than restrict it. What the task does carry is everything
+else a run needs — the permissions, `--no-check`, a fake-clock preload,
+an `ENV` assignment in front — so the topology reads the task for those
+and replaces its paths with the chosen ones.
+
+Thirty-two of the forty-seven members are readable that way, which makes
+1,342 test files individually selectable. The rest are one unit each and
+run whole, which is what every member does today. A member whose task is
+written as a dependency list resolves through it to the `deno test`
+underneath, and the one command substitution the workspace writes —
+naming the running Deno in an `--allow-run` list — is resolved rather
+than treated as a shell metacharacter, so neither shape costs a member
+its granularity.
+
+Two things a member's own `deno test` would apply are applied during
+enumeration instead: the task's `--ignore` globs and the member's
+`exclude` list. Deno filters discovered modules through both and an
+explicit path through neither, so a file arriving as a positional
+argument would otherwise run in spite of being excluded.
 
 ### Sharding stops being written down
 
@@ -635,8 +712,8 @@ mechanism is a skip list rather than a selection list.
 
 ### Every invocation unit, and the identities inside it
 
-There are eight kinds of invocation unit across the topology, and only one
-of them holds more than one identity today. That one holds almost everything:
+There are eight kinds of invocation unit across the topology, and two of
+them hold more than one identity. One of the two holds almost everything:
 the workspace and runner unit shards alone carry 15,997 of the reference
 build's 17,999 executions.
 
@@ -646,17 +723,18 @@ build's 17,999 executions.
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
-| One gate command | `repo-gates` | One, named for the gate that ran | Nothing to reach. |
+| One gate command | `repo-gates`, `repo-history-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
-| A script recording one identity for its whole run | `cli-fuse` | One today, 23 once its `success` markers become step markers | Not reachable until the script is split, which [it must be](#todays-jobs-as-suites). This is the one row the topology is not allowed to leave as it is. |
+| A section of `fuse-exec.sh` | `cli-fuse` | The phases that section alone selects. The phases more than one section runs record against the suite instead, since they name no single section | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
 
-Six of the eight rows are already one identity per invocation, which is
-why this change is smaller than removing a concept sounds. The topology
-does not gain a mechanism for them; they simply stop being described as
-items holding one identity each and start being described as identities.
-The seventh, `cli-fuse`, is one identity only because nothing finer was
-ever recorded, and it is the row this plan requires somebody to fix.
+Six of the eight rows are one identity per invocation, which is why this
+change is smaller than removing a concept sounds. The topology does not
+gain a mechanism for them; they simply stop being described as items
+holding one identity each and start being described as identities. The
+seventh, `cli-fuse`, holds the phases of whichever section ran, and there
+is nothing finer for the topology to reach, since a mount comes up for the
+section rather than for the phase.
 
 `pattern-reload` is in the first row and not in a row of its own, which is
 worth saying because the plan used to treat it as a special case. It runs
@@ -732,12 +810,14 @@ So the check is one invocation per identity with every sibling skipped,
 and the answer is a flag carried in the manifest beside the score.
 
 It cannot be a sweep. One invocation per identity is around 18,000 of
-them, against the roughly 2,000 the weekly coverage attribution job
-already costs three and a half hours for. So `main` checks the identities
-in the files its own run touched, plus a rotating slice of everything else.
-The map fills in over weeks and stays current where the code is moving,
-and an identity whose file changed loses its flag until it is checked
-again.
+them, and every one pays a process start before it runs a test. At the
+rate one invocation per test file costs, which [the consequences
+below](#consequences-we-are-choosing) price at three and a half hours for
+two thousand, that is upwards of thirty hours. So `main` checks the
+identities in the files its own run touched, plus a rotating slice of
+everything else. The flags fill in over weeks and stay current where the
+code is moving, and an identity whose file changed loses its flag until it
+is checked again.
 
 #### When the flag is wrong
 
@@ -774,9 +854,9 @@ What the enum was reaching for does survive, one level down. Whether the
 identities inside an invocation unit can be skipped is a property of that
 unit rather than of the suite around it, and the [table
 above](#every-invocation-unit-and-the-identities-inside-it) is where it is
-written down. `cli-fuse` is the illustration: once its 23 phases record
-separately, a section holding four of them will not be able to skip one of
-the four, while a `deno test` file with 23 tests will. Those two suites
+written down. `cli-fuse` is the illustration: its phases record
+separately, and a section holding four of them cannot skip one of the
+four, while a `deno test` file with four tests can. Those two suites
 would have carried the same declaration under the old field and behaved
 differently, which is the sign the field was in the wrong place.
 
@@ -836,27 +916,34 @@ being imposed.
 
 ### The work this adds
 
-- [ ] The preload reads a skip list keyed by registering file and name,
+- [x] The preload reads a skip list keyed by registering file and name,
       and registers a listed bare `Deno.test` as ignored rather than
       dropping it.
-- [ ] `@commonfabric/test-support` gains a `describe` and `it` that
+- [x] `@commonfabric/test-support` gains a `describe` and `it` that
       re-export the real ones, track the enclosing describe chain, and
       route a listed `it` through `it.ignore`. The root import map points
       `@std/testing/bdd` at it and the real module at a second specifier.
-      No test file's own import changes.
-- [ ] Every `deno test` suite in the topology passes the preload, appended
+      No test file's own import changes. A frame between the test file
+      and `describe` moves the JUnit class name onto the re-export, the
+      same consequence wrapping `Deno.test` already has, so ingestion
+      declines a class name ending in either module and takes the file
+      from the preload's name map.
+- [x] Every `deno test` suite in the topology passes the preload, appended
       the way `--junit-path` already is.
 - [ ] `cost` and the packing passes key on identities, with
       `fileOverhead(file)` fitted from the lane runner's records and the
       density pass sorting by marginal cost.
-- [ ] `command()` returns one invocation per file with its skip list, and
-      omits a file whose every identity is skipped.
+- [x] `command()` returns one invocation per file with its skip list, and
+      omits a file whose every identity is skipped. A suite's runner takes
+      several files at once, so the skip list is per file and the
+      invocation is per package; module load is charged per file either
+      way, which is what `unitOverhead` measures.
 - [ ] The independence flag: a `main`-side check that runs an identity as
       the only test in its file, a rotating slice per run plus every
       identity whose file changed, the flag carried in the manifest, and
       the packer refusing to skip the siblings of an identity that has
       none.
-- [ ] A fixture proving the four properties that make this safe: an
+- [x] A fixture proving the four properties that make this safe: an
       unlisted new test runs, a renamed test runs, a listed test is
       reported as skipped rather than missing, and two files holding the
       same test name skip independently.
@@ -870,18 +957,19 @@ far worse failure than the workflow edit it replaced.
 `deno task check-test-topology` closes that, in two halves that catch the
 two different ways a surface goes missing.
 
-The **tree half** needs no store and runs on every pull request, in the
-`repo-gates` suite marked `mandatory: "always"`. It walks the tree for
-things that look like tests — `*.test.ts`, `*.test.tsx`, the integration
-directories, the shell scripts under `packages/cli/integration/` — and
-fails if any of them is claimed by no suite's `enumerate()`, or more than
-once under the same record surface and variant. A default suite and a
-non-default suite may claim the same source item because they are distinct
-execution surfaces. This is the half that catches a pull request adding a
-test surface nobody registered, at the moment it is added, and it is cheap
-enough to be unconditional. An entry in a configuration's declared skip
-registry accounts for its unavailable file or leaf without pretending it
-ran.
+The **tree half** needs no store, and is a unit of the `repo-gates` suite.
+It walks the tree for things that look like tests — `*.test.ts`,
+`*.test.tsx`, the integration directories, the shell scripts under
+`packages/cli/integration/` — and fails if any of them is claimed by no
+suite's `enumerate()`, or more than once under the same record surface and
+variant. A default suite and a non-default suite may claim the same source
+item because they are distinct execution surfaces. This is the half that
+catches a pull request adding a test surface nobody registered, and it is
+selected the way everything else is: a pull request that does not draw it
+leaves the unregistered surface to the full run on `main`, which is where
+the record of what this guard catches comes from. An entry in a
+configuration's declared skip registry accounts for its unavailable file or
+leaf without pretending it ran.
 
 The **store half** runs on `main`. It reads the most recent successful
 `main` build's records and fails if any recorded identity is one that no
@@ -931,12 +1019,15 @@ batches.
 | `git-history` | Unshallows the checkout | 3–10 seconds |
 | `toolshed` | A Toolshed server listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
-| `toolshed-baked-on` | The same, from a binary whose shell carries the server-execution define | 42 seconds to build, or 17 to restore |
+| `toolshed-baked` | The same, from a compiled binary, whose baked shell a browser can drive | 42 seconds to build, or 17 to restore |
+| `toolshed-baked-opposite` | The same, from a binary whose shell carries the server-execution define opposite the default | 42 seconds to build, or 17 to restore |
+| `bg-piece-service-binary` | The compiled background service used by its deployed-topology gate | about 30 seconds to build, or under a second to restore |
 | `cf` | The `cf` command-line tool on the path | as above |
 | `compile-cache` | Restores a pattern compile byte cache | 3 seconds |
 
-Two capabilities are worth explaining, because the choice made for them is
-what keeps the five-minute budget reachable.
+The three ways of providing a Toolshed server are worth explaining,
+because the choice made among them is what keeps the five-minute budget
+reachable.
 
 **`toolshed` runs from source.** Today a job that needs a server downloads
 a compiled binary produced by a separate build job. On a pull request that
@@ -948,17 +1039,24 @@ source costs a few seconds. The full run on `main` keeps the
 compiled-binary path, because it needs the binary anyway for attestation
 and deployment.
 
-**`toolshed-baked-on` cannot.** The server-execution ON arm depends on a
-compile-time define baked into the browser shell inside the binary, and a
-source run cannot reproduce that. So that capability has a different
-provider: restore the binary from the Actions cache if the key hits, and
-build it in place if it does not. The lane workflow carries one fixed
-`actions/cache` step covering a single directory, keyed on a hash of the
-sources the binaries are built from. That step is in the workflow rather
-than in the runner because the cache service is only reachable through the
-action, and it is written once and never touched again.
+**The baked capabilities cannot.** The browser shell is a bundle compiled
+into the binary, so a server run from source answers the API and serves no
+shell, and a suite that drives a browser at one is told the shell app is
+not available. `toolshed-baked` is the server for the default arm.
+`toolshed-baked-opposite` is the server for the other arm, whose posture is
+a compile-time define baked into that same shell whichever way it goes.
+Both have a different provider: restore the binary from the Actions cache
+if the key hits, and build it in place if it does not. The lane workflow
+carries one fixed `actions/cache` step covering `.ci-cache`, keyed on a
+hash of the sources the binaries are built from. Everything a lane wants
+to keep between runs sits under that one directory — the built binaries,
+and the pattern compile byte cache — because one step covering one
+directory is what keeps the workflow independent of what the lane turns
+out to need. That step is in the workflow rather than in the runner
+because the cache service is only reachable through the action, and it is
+written once and never touched again.
 
-That split is the argument for having capabilities at all. Two ways of
+That split is the argument for having capabilities at all. Three ways of
 providing "a Toolshed server" coexist, suites say which one they need, and
 neither the workflow nor the other suites know the difference.
 
@@ -1047,12 +1145,47 @@ nothing: their identity is the path already.
 The record schema already carries the field, so no format changes, and
 nothing downstream of the store has to know this happened.
 
-**Nothing has compacted a day yet.** The `aggregated/` area is empty and
-the compactor principal is not provisioned. Compaction collapses a day of
-raw records into one object, which is the difference between reading
-11,000 objects for a historical day and reading one. The compactor is
-already designed and implemented; provisioning it is a small infra change
-and this plan recommends doing it, but does not depend on it.
+**Compaction is live.** The compactor's identity was provisioned on
+2026-08-31 and its daily workflow has rolled up every day from 2026-08-19
+up to the newest day it has reached. The floor is where the store's
+records begin. The ceiling moves with the daily run, which only touches
+days that closed a week ago. Compaction collapses a day of raw records
+into a manifest and a few tens of shards, which is the difference between
+reading 15,000 objects for a historical day and reading a manifest and
+seventeen shards. A day is a manifest and shards rather than a single
+object: a day of records is over a gigabyte of NDJSON, against a maximum
+string length of about half that, and an object has to fit in a string
+both to be written and to be read.
+
+**A re-run's earlier attempts can be stored a second time.** An object's
+day partition comes from the run's start time, and GitHub reports that
+per attempt rather than per run: across four re-run builds in this
+repository every one reported a later start for its second attempt, one
+of them nearly six hours later. Artifacts are scoped to the run rather
+than to the attempt, so a later attempt's relay re-ships the earlier
+attempts' as well as its own. Where two attempts fall either side of a
+UTC midnight their partitions differ, so the re-shipped records are
+written as a second object under the later day rather than colliding with
+the first, and the publisher folds both because it keys on the object
+name. A survey of five days of the store, 68,822 objects, found no run
+identifier written into two partitions, so this has not happened yet.
+
+What it would distort is narrower than it first looks, and the rest of
+this paragraph is inference rather than measurement. Catches are safe by
+construction, because each is attributed to the pair of the commit and
+the source that saw it. Costs are a percentile over many observations and
+would barely move. Duplicating a report doubles its failures and its runs
+together, so a ratio over both is largely unmoved — but the report that
+gets duplicated is the earlier attempt's, which is the one somebody
+re-ran because it failed, so `churn` would carry those failures twice
+against run counts that are only partly duplicated.
+
+Fixing it means settling something this plan should not settle on its
+own. The partition wants to be stable across attempts, while a record's
+context honestly wants the attempt's own start, and one field is doing
+both jobs today. The change reaches `ciObjectName`, the compactor, and
+[the record spec](../specs/test-records.md), so it belongs to the store
+rather than to selection, and it is its own piece of work.
 
 ## Scoring
 
@@ -1103,8 +1236,7 @@ commit ten times counts once.
 
 A catch is always a point in the test's favor, and the place it happened
 says something further. The three places are worth keeping apart, because
-they answer different questions and one of them is the measure of whether
-this whole design is working.
+they answer different questions.
 
 A **local catch** is somebody at a workstation, part way through writing
 something, running a test and finding it red. It is the highest-quality
@@ -1141,11 +1273,6 @@ invites the mistake. The first of those is this system's job to fix, and
 it fixes it automatically, because main catches raise the score that gets
 the test selected.
 
-The aggregate of main catches across all tests is the number that says
-whether selecting a subset was a good idea: how often something reaches
-`main` that a test we already had would have caught. It goes on the wall
-as a system measure, and it is the thing to watch after the lanes go live.
-
 ### The inputs
 
 For each complete identity that the topology locates to an item, the
@@ -1153,8 +1280,6 @@ publisher computes:
 
 - `catches` — how many catches it has, over all of history, weighted by
   where each happened.
-- `mainCatches` — how many of those were on `main`, kept separately
-  because they measure escapes as well as the test.
 - `lastCatch` — when the most recent one was.
 - `sources` — how many distinct sources are among those catches. A source
   is the branch for a continuous-integration run and the reporting
@@ -1164,7 +1289,6 @@ publisher computes:
   halved every 14 days as they age.
 - `flakeRate` — how often it disagrees with itself; see
   [Flakes and repeats](#flakes-and-repeats).
-- `mainRed` — whether it failed in the most recent `main` run.
 - `cost` — the ninetieth percentile of its measured durations over the
   last seven days. The ninetieth percentile rather than the maximum,
   because one unlucky runner should not permanently inflate an estimate,
@@ -1172,10 +1296,10 @@ publisher computes:
   blows the time budget.
 
 Variants never fold into one another for scoring. A default test and its
-`server-execution` counterpart have independent catches, flake rates,
-costs, and red-on-`main` state. They may both be selected when their own
-records justify it. History from one configuration does not make an
-unseen configuration look established.
+`server-execution` counterpart have independent catches, flake rates, and
+costs. They may both be selected when their own records justify it.
+History from one configuration does not make an unseen configuration look
+established.
 
 ### The formula
 
@@ -1291,16 +1415,10 @@ B still scores well overall — its catches are permanent — which is exactly
 the intended behavior. What decays is the claim that something is wrong
 *now*, not the claim that the test is good.
 
-### Two rules that keep a test out
+### The rule that keeps a test out
 
-Both of these are subtractions from the selectable set, and both make pull
-requests less red rather than more.
-
-**A test that failed in the most recent `main` run is not selected.** It
-is already known to be broken, `main` owns it, and running it on a pull
-request would fail that pull request for a reason its author cannot act
-on. The exception is a pull request that touches files the failing test
-covers, which is very likely a fix and must be allowed to prove itself.
+This is a subtraction from the selectable set, and it makes pull requests
+less red rather than more.
 
 **A test whose flake rate is above the threshold is not selected.** It is
 too noisy to judge a change by. `main` still runs it, the dashboard still
@@ -1308,33 +1426,47 @@ shows it, and it appears on a work queue. This replaces the usual
 quarantine list, and it is better than one in three ways: it is derived
 from measurement rather than from somebody's judgement at one moment, it
 needs no owner or expiry to stop it rotting, and it reverses on its own
-the moment the test is fixed.
+once the test is fixed. The exception is a change that edits the test
+itself, or that the test's suite maps onto its unit, which is very likely
+a fix and has to be allowed to prove itself.
 
-**Neither rule touches an `always` item.** Both exclusions exist to stop a
-pull request failing for something its author cannot act on, and both
-reason about *tests*, whose individual absence costs one signal. An
-`always` item is not that. It is a gate the repository has decided must be
-green, and the moment it is red the exclusion would remove it from every
-pull request — including the pull requests that are about to make it
-worse, and including, in the drift guard's case, the very pull request
-that added the unregistered test surface it exists to catch. A guard that
-switches itself off exactly when it starts firing is not a guard.
+**The rule reaches a repository gate as well.** Formatting, linting and
+the drift guard are tests of the tree, and the rule says nothing about
+one of them that it does not say about a unit test. A gate above the
+flake threshold leaves the selectable set, and appears on the wall as the
+defect in the gate that it is.
 
-So `always` means always. Two consequences follow and both are intended.
-An `always` item red on `main` blocks every pull request until it is
-fixed. That is correct: with `deno fmt`, `deno lint`, and the topology
-guard, a red one means the tree is broken, the fix is usually a minute's
-work, and letting changes pile on top of it is how a minute becomes an
-afternoon. And an `always` item above the flake threshold keeps running
-rather than being hidden; a gate that is flaky is a defect in the gate,
-reported as one on the wall, and concealing it would be worse than the
-noise.
+The exception the rule carries reaches a gate through the paths the gate
+declares a change reaches it by. A gate's unit is the name of a gate
+rather than a path, so the suite maps a change onto its units from a list
+each gate carries: `check-test-aliases` names
+`tasks/test-identity-aliases.jsonl`, `check-action-pins` names
+`.github/`, and a change touching one of those makes that gate mandatory.
+The pull request that fixes a gate too flaky to judge by therefore runs
+it, which is what the exception is for.
+
+What a gate declares is bounded rather than exhaustive, and two bounds
+are what keep this a fraction of what a lane runs rather than the bulk of
+it. No one gate may be reached by a significant share of the tree, and no
+one file may reach more than a few gates. So a gate whose input is a
+large part of the repository names the small and specific part of it —
+`check-docs` names the documents holding the code blocks, and not the
+modules those blocks compile against — or names nothing at all, which is
+what formatting, linting, the drift guard and the cycle check get. A gate
+naming nothing reaches a lane on what it is worth or because nothing has
+a record of it, so a flaky one stays out of pull requests until it stops
+disagreeing with itself.
+
+The asymmetry is what makes those bounds affordable. A gate named by too
+little is decided by the score, which is the same decision every test
+gets. A gate named by too much takes its share of every lane's budget
+forever, on the strength of a declaration rather than of anything
+measured, which is what the removed exemption did.
 
 What the lane owes people in exchange is clarity about whose problem it
-is. A failing `always` item that was already failing in the latest `main`
-run is labelled in the job summary as pre-existing, with a link to the
-`main` run that first showed it, so nobody spends time looking for it in
-their own diff.
+is. The job summary names what was withheld and why, and says of each
+whether it ran anyway because the change reaches it, so nobody spends time
+looking for a pre-existing failure in their own diff.
 
 ### Two rules that force a test in
 
@@ -1354,10 +1486,14 @@ until a successful `main` run has produced records for it.
 
 **What the change touches must run.** A pull request that edits a test and
 does not run it is not something this repository should permit, so a
-changed test file's items are mandatory. A changed *source* file is
-handled by the coverage attribution map, which knows which test files
-execute which lines: see
-[Choosing tests by what the change touches](#choosing-tests-by-what-the-change-touches).
+changed test file's items are mandatory. A unit that is not a file, such
+as a type-check group or a binary, is one its suite maps the change onto,
+since only the suite knows what its unit covers. A changed *source* file
+forces nothing else in, apart from the whole of a covered package's
+measured set under [the per-package
+gate](#the-one-coverage-gate-that-survives). What runs for it otherwise is
+what the score chose, which is the trade named under [consequences we are
+choosing](#consequences-we-are-choosing).
 
 ### Renames, and the alias file
 
@@ -1390,20 +1526,17 @@ every variant. Resolution preserves the record's variant, so one rename
 bridges the default and every non-default history without joining those
 histories to each other.
 
-What is missing is not mechanism, it is practice. The file is empty. On
-2026-08-20 the store recorded `home rehydration churn (persistent
-scheduler state) > reloading a populated home stays within one known
-conflict`; the tree today has `home rehydration` with two
-differently-named cases, and nothing bridges the split. Nobody did
-anything wrong — there was no reason to care, because nothing read the
-history. Now something does.
+The mechanism is there and so, by now, is the practice: the file holds
+219 lines across nine dates, so renames are being bridged as they happen
+rather than swept up once. What the reporter's suggestion adds is the
+case nobody notices — a rename whose author had no reason to think the
+history mattered.
 
 Three things follow.
 
 **The publisher resolves through `loadAliasResolver`.** The report tool
-and the dashboard collector already do; the publisher must, or the file
-accomplishes nothing for selection. One line, and it is a requirement
-rather than a nicety.
+and the dashboard collector already do, and the publisher does. Without
+it the file accomplishes nothing for selection.
 
 **The tooling writes the line for you.** Everything needed to spot a
 rename is already computed: the drift guard knows which identities the
@@ -1491,22 +1624,33 @@ be counted as a catch. A test failing on `main` a dozen times a year would
 then look like one of the most valuable tests in the repository while
 being one of the least.
 
-The second rule closes it, and it is the same distinction stated as a
-question about what came next. **A failure on `main` that a change fixed
-is a catch. A failure on `main` that went away by itself is a flake.**
-Concretely: the identity failed at `main` commit C and passed at the next
-`main` run, and nothing between the two touched any code the test covers.
-The coverage attribution map is what answers "any code the test covers";
-without it the fallback is the test's own file and scope, which is
-coarser and errs toward calling things catches.
+The second rule is the same distinction stated as a question about what
+came next. **A failure on `main` is judged by the next
+`main` run that passed.** At the same commit the test disagreed with
+itself, so the failure is a flake observation. The two runs can arrive in
+separate batches, which is why this is a rule of its own rather than the
+directly observable case above. At a later commit the failure counts as a
+catch.
+
+A run of failures ended by one pass counts one catch, dated to the first
+of them, so a week of `main` being red is worth one catch and not seven.
+
+That narrows the hole rather than closing it. Nothing separates a failure
+a change fixed from one that healed itself, so a flaky test collects
+catches on `main` it did not earn. The same test runs on pull requests as
+well, where repeats and re-runs put several observations at one commit,
+and a test that disagrees with itself there is seen doing it. I would
+expect that to bound the over-crediting, because a test flaky enough on
+`main` to matter is being run far more often on pull requests, but nothing
+here measures it.
 
 `flakeRate` is the share of a test's failures that fall under either rule.
 
 Two things follow from knowing it.
 
 **Too flaky to judge by, so not selected.** Above the threshold, an item
-leaves the pull-request selectable set entirely, for the reason in [Two
-rules that keep a test out](#two-rules-that-keep-a-test-out). It keeps
+leaves the pull-request selectable set entirely, for the reason in [The
+rule that keeps a test out](#the-rule-that-keeps-a-test-out). It keeps
 running on `main`, and it keeps appearing on the deflake work queue until
 somebody fixes it.
 
@@ -1628,25 +1772,24 @@ budget does not fit its bound.
 
 ### Choosing what to run
 
-The packer starts by removing what must not run: items failing in the
-latest `main` run, and items above the flake exclusion rate. Both are
-listed in the job summary, so what was withheld is visible rather than
-quietly absent.
+The packer starts by removing what must not run: the items above the
+flake exclusion rate. They are listed in the job summary, so what was
+withheld is visible rather than quietly absent.
 
 From what is left, given every item's value and cost and a budget of five
 lanes times 230 seconds each, it fills in four passes.
 
-1. **Mandatory.** Everything marked mandatory goes in first: the `always`
-   suites, the items the diff touched directly, the items the coverage
-   attribution map says execute the changed lines, every item of a
-   covered package the diff touched as described in [The one coverage gate
-   that survives](#the-one-coverage-gate-that-survives), and the items with
-   no history. An item excluded above comes back into this pass if the
-   change touches what it covers, since that is very likely a fix. Every
+1. **Mandatory.** Everything mandatory goes in first: the items the diff
+   touched directly, every item of a covered package the diff touched as
+   described in [The one coverage gate that
+   survives](#the-one-coverage-gate-that-survives), and the items with no
+   history. An item excluded above comes back into this pass if the
+   change edits the test itself, or its suite maps the change onto its
+   unit, since that is very likely a fix. Every
    item taken here leaves the selectable set, so no later pass can run one
-   of them again. This pass can in principle exceed the budget; when it
-   does, the runner says so in the job summary rather than silently
-   dropping work.
+   of them again. This pass can in principle put a lane past its budget;
+   when it does, the runner says in the job summary how far past, rather
+   than silently dropping work.
 2. **Value first, 60 percent of the remaining budget.** Items in
    descending order of value, ignoring cost. This is what gets the
    expensive, genuinely broken integration test into the run.
@@ -1663,8 +1806,9 @@ behind 40 seconds of setup correctly loses to 40 seconds of tests that
 need nothing.
 
 Repeats are applied last, to items already selected, and are charged their
-full cost. An item that would be repeated but no longer fits runs once
-rather than being dropped: one observation beats none.
+full cost. An item that would be repeated but no longer fits gives up runs
+until it does, down to one, rather than being dropped: one observation
+beats none.
 
 ### Filling the lanes
 
@@ -1677,10 +1821,36 @@ cheapest place to put the next batch that needs it. That is the mechanism
 by which "tests needing the same environment are grouped together" falls
 out of the packing rather than being a special case in it.
 
+The cheapest lane is chosen from among the lanes that can still hold the
+work, which is what makes the 230 seconds a constraint on the packing
+rather than a figure it aims at. When the cheapest lane is full the item
+goes to the next-cheapest one with room for it, so a suite whose overhead
+one lane has already paid collects that lane's share of the suite and no
+more. The value, density and exploration passes each spend a share of the
+whole run's budget, and none of the three puts a lane past its own. The
+corpus holds far more than a run can fit, so between them those passes
+fill every lane, and what the pull request waits on is 230 seconds rather
+than whichever lane the grouping favored. Two things are allowed past a
+lane's budget, and the next two paragraphs are about them: the mandatory
+pass, and an item costing more than a whole lane.
+
+The mandatory pass is the one allowed past a lane's budget. It takes its
+items largest first, so an item filling most of a lane is offered the
+lanes that are still empty; an item offered lanes that are already full
+has nowhere to go but past one lane's budget. When a mandatory item fits
+in no lane it goes where the lane's finishing time rises least, which
+spreads an unavoidable overrun across the five rather than settling it on
+one.
+
 A batch that on its own exceeds a lane's budget is split, paying its
 suite's setup twice. A single *item* cannot be split, so an item costing
 more than the planned budget is given a lane to itself and allowed to run
-up to the hard five-minute bound rather than the planned 230 seconds.
+up to the hard five-minute bound rather than the planned 230 seconds. The
+lane carrying it carries nothing else, because everything else would have
+to fit in what is left under the planned budget and there is nothing left.
+Repeats get no such lane, since a repeat is what an item gives up to fit:
+an item wanting three runs of a hundred seconds runs twice inside the
+planned budget rather than three times inside the bound.
 
 The refreshed census finds one item that does not fit. The `piece-call`
 dispatch section of `packages/cli/integration/integration.sh` took 386
@@ -1713,13 +1883,13 @@ already ratchets. 12 distinct identities currently break that rule; their
 split is valuable independently of this plan and becomes more valuable
 with it.
 
-### Why nothing coordinates the plan
+### Why the lanes do not coordinate the plan
 
-The five lanes do not talk to each other and there is no sixth job to tell
-them what to do. Packing is a pure function of the manifest, the diff, and
-the lane number, and all five lanes run the same function over the same
-inputs, so they agree by construction. Adding a mandatory item is part of
-that function, so the five agree about where it lands too.
+The five lanes do not talk to each other. Packing is a pure function of the
+manifest, the diff, and the lane number, and all five lanes run the same
+function over the same inputs, so they agree by construction. Adding a
+mandatory item is part of that function, so the five agree about where it
+lands too.
 
 Joining what the lanes measured is a different thing and does happen, in
 `Status`. The distinction is which side of the lanes the job sits on. A
@@ -1728,12 +1898,23 @@ and every lane would wait for it. A job that joins results sits *after*
 them, in a position that has to be occupied anyway because GitHub wants
 one required check to read. Nothing is bought by refusing to use it.
 
-The full run on `main` does have a job before its lanes, `plan-full`,
-because there the number of lanes is not fixed and GitHub needs the matrix
-before it can start anything. A pull request needs no such job precisely
-because `LANES` is a constant, so each lane can work out its own share.
-The full run pays a job's latency for the flexibility and `main` is the
-right place to pay it.
+The full run on `main` does have a planning job before its lanes,
+`plan-full`, because there the number of lanes is not fixed and GitHub
+needs the matrix before it can start anything. A pull request needs no
+planning job because `LANES` is a constant, so each lane can work out its
+own share. What `plan-full` decides is the lane count and nothing else,
+so `main`'s lanes work out their own shares the same way a pull request's
+do.
+
+What the two runs do differ in is two values handed to the same
+function: the policy, which is `everything` for the full run and
+`budgeted` for a pull request, and the diff, which the full run does not
+have. Under `everything` every identity is required, so the exclusions
+and the value, density and exploration passes have nothing to act on and
+the rest of the packer behaves identically for both. Holding the
+difference to those two values is what stops the two runs drifting into
+enumerating different tests, applying a suite's settings unevenly, or
+packing the same work in reliably different orders.
 
 The function must therefore be deterministic: no wall clock, no unseeded
 randomness, no dependence on anything but its inputs. The exploration
@@ -1744,8 +1925,32 @@ manifest.
 
 Re-running a single failed lane later must not shuffle the work. The lane
 resolves the manifest as *the newest one generated at or before the
-workflow run's start time*, which GitHub exposes as `run_started_at` and
-which is constant across re-runs of the same run.
+commit under test was made*, reading the committer date out of the
+checkout.
+
+What the moment has to be is stable rather than exact: every lane of a
+run has to agree, and every later attempt has to agree with the first.
+Nothing about the run satisfies that. GitHub reports `run_started_at`
+per attempt rather than per run — measured across four re-run builds,
+every one reported a later start for its second attempt, one of them
+nearly six hours later — so an attempt resolving at its own start would
+pick up whatever manifest is newest by then. Its five lanes would agree
+with one another and disagree with the attempt before them, which is
+worse than either: a test the first attempt placed in the lane that
+failed can move to a lane the re-run does not run, leaving `Status` green
+over a set no attempt ran whole.
+
+The commit is stable by construction, and it needs nothing from the
+service that scheduled the run — no credential, no request, and no
+failure path where the request is refused. It is also the same value on a
+workstation as in a job, so `plan --dry-run` answers the question a lane
+would answer instead of resolving against the clock. And it is the better
+anchor on its own terms: the manifest worth reading is the one that was
+current when the tree under test came into being.
+
+The committer date rather than the author date. A rebased or
+cherry-picked commit keeps the author date it was first written at, which
+can be arbitrarily old, while the committer date moves with the tree.
 
 ## What the census can project
 
@@ -1824,9 +2029,22 @@ labs/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
 Write-once naming is not a stylistic choice: the store's writer
 credentials hold `objectCreator` and nothing else, cannot overwrite, and
 that is the property that makes the whole store trustworthy. So there is
-no `current.json`. A reader lists the prefix, which sorts by timestamp
-because the timestamp leads the name, and takes the newest that is not
-after the time it is asking about.
+no `current.json`. The timestamp leading an object's name is the moment
+its publisher started, and it keeps a listing chronologically readable
+without deciding what a resolution compares. When a lane resolves a
+manifest, it lists once and takes the newest object the store had created
+at or before the commit under test, using the full object name to break a
+tie between two created in the same instant. The creation time rather than
+the name, because the publisher names its manifest at the start of a run
+that creates the object at the end, and a lane listing inside that gap
+would otherwise disagree with one listing after it. Every lane and every
+later attempt reads the same commit, and a manifest the store creates
+while the run is going is created after that date and cannot change the
+answer. [The specification](../specs/test-selection.md#determinism) says
+what a commit dated ahead of the store's clock costs. What the answer does depend on is retention: the manifests a
+commit can resolve have to outlive the window in which that run may be
+re-run, which is a retention setting on the bucket rather than anything
+this reads.
 
 The object carries:
 
@@ -1839,30 +2057,27 @@ The object carries:
   `suiteOverhead` and `correction` per suite;
 - every item: its complete identity or identities, optional variants
   included, its suite, its file, its cost, its score, the inputs behind
-  that score, its flake rate, and its repeat count;
-- the withheld sets — failing on `main`, and above the flake exclusion
-  rate — each with the reason, so a lane can say why something is absent;
+  that score, its flake rate, its repeat count, and the last day
+  anything ran it, which is what orders the exploration draw;
+- the withheld set — the items above the flake exclusion rate — with the
+  reason, so a lane can say why something is absent;
 - the tests declared unavailable in a configuration-specific skip
   registry, with their suite, variant, phase, and reason;
 - the reference packing into five lanes;
 - the `unschedulable` list;
 - a count and digest of the known item-level identities, for the
   unknown-item rule;
-- the name of the newest coverage attribution map, which is published
-  beside the manifest on its own weekly cadence rather than inside it.
+- each covered workspace member's own-tests uncovered-line count, against
+  the commit it was measured at, which is what the per-package gate
+  compares a pull request against.
 
-The refreshed run supplies 17,995 stored identities before topology
-classification, not a manifest entry or item count. A unit-test item can
-contain many item-level identities, while suite-level identities do not
-contribute item scores or costs. Every item also adds its own packing and
-explanation data. The manifest implementation therefore builds a
-reference-scale fixture from classified item and suite data, serializes
-and gzips it, and records both sizes. Until that measurement exists the
-bound is what the identity count gives: at most one item entry per stored
-identity, and fewer in practice, so at a couple of 100 bytes an entry the
-ceiling is a few megabytes before compression. That is one fetch of no
-consequence at the start of a job, and the fixture replaces the ceiling
-with a measurement.
+The size is measured rather than bounded. A publisher run over one day of
+the store — 18,849 objects holding 5,487,611 executions — produced 20,091
+identities, and the manifest carrying them is 9.59 megabytes serialized
+and 1.05 megabytes gzipped, which is 478 bytes an entry. Identity names
+dominate that: a describe chain runs to a hundred characters and more, and
+the numbers beside it are rounded to the digits that mean anything. One
+megabyte is a fetch of no consequence at the start of a job.
 
 The same source item in default and non-default suites appears as two
 manifest items. Their suite identifiers and complete record identities
@@ -1873,8 +2088,8 @@ fourth part only when a variant is present.
 The manifest is untrusted input to the lane runner, and is validated the
 same way record lines are: a malformed manifest is rejected whole, and a
 manifest whose schema version the runner does not know is treated as
-absent. Retention is a bucket lifecycle rule deleting manifests after 30
-days, which the infra change adds.
+absent. Retention is a bucket lifecycle rule deleting manifests after 45
+days.
 
 ## The publisher
 
@@ -1887,14 +2102,11 @@ refresh without waiting.
 
 The job:
 
-1. Reads the newest state object, which holds, per day in the window, the
-   set of workflow run identifiers already folded in and the aggregate
-   they produced.
-2. Lists each day's prefix and fetches only the objects whose run
-   identifier is not already in that day's set. Object names carry the run
-   identifier, so this is exact rather than a timestamp heuristic, and it
-   handles a relay re-ship of an old run correctly. In the steady state
-   this is about 2,000 objects per run.
+1. Reads the newest state object, which holds the submission object names
+   and source-and-date rollup receipts already folded, along with the
+   aggregate they produced.
+2. Applies the one input plan described below. In the steady state this is
+   about 2,000 objects per run.
 3. Folds them in, ages the decayed counters by a day, classifies each new
    failure as a catch or as flake evidence, scores everything, reads back
    the lane timing records to update the corrections, calls `plan()` with
@@ -1903,21 +2115,55 @@ The job:
 4. Reports, in the job summary, the projected per-lane times, the spread
    between them, what fell off the budget, and anything unschedulable.
 
-A cold start cannot read 250,000 objects in one job. The
-bootstrap is a manual dispatch with `--bootstrap --days 60` and high
-concurrency, run once; after that the incremental path keeps up. If the
-compactor is provisioned first, the bootstrap reads 53 rollup objects and
-seven days of raw records instead, which is a much better starting
-position, is the reason to do it in that order, and is what makes any
-horizon longer than this one affordable later.
+A cold start reads a much wider window. The bootstrap is a manual
+dispatch with `--bootstrap --days 60`, run once, after which the
+incremental path keeps up. Sixty days of raw objects is hundreds of
+thousands at the volume the store now takes, which is more than one job
+can read, and that is where the rollups earn their place: the bootstrap
+takes one rollup for each closed continuous-integration day, standing in
+for that day's thousands of objects, and reads raw only the days no
+rollup covers and every local source.
 
-The publisher needs a writer credential for its own prefix. That is a new
-service account with `objectCreator` on `labs/test-selection/`, reached
-through a Workload Identity provider pinned to exactly this workflow file
-on `main` — the same pattern, and the same security argument, as the relay
-already uses. It is an infra-repository change under `tofu/test-records`,
-and it must land and be applied before this workflow can do anything. It
-is the one prerequisite [the work](#the-work) has that is not ours.
+### One input plan for bootstrap and ordinary publishing
+
+Bootstrap is permission to start from an empty aggregate and a larger
+default window. It is not a second way to choose inputs. Both modes apply
+the same rule independently to each source and date:
+
+1. A receipt in the aggregate says this pair was folded from its rollup.
+   A rollup records neither the objects it covers nor a point it is
+   complete through, so nothing can say how much a raw object of that
+   pair would repeat. The pair is closed rather than combined with
+   objects whose overlap is unknown.
+2. When nothing of the pair is folded and a rollup covers it, the rollup
+   is the baseline and a receipt is written for it. One object stands in
+   for the day's thousands, which is what makes a cold start over a wide
+   window affordable at all.
+3. Everything else reads raw objects, and two different things reach it.
+   A pair with raw contributions already stays raw, because a rollup
+   written afterwards would overlap them. A pair no rollup covers is raw
+   because there is nothing else to read, which is every local source:
+   rollups cover the continuous-integration area alone.
+
+The current rollups cover CI only. Local submissions always take the raw
+path. A date-only `compactedDays` receipt is therefore not sufficient: it
+can make a CI rollup suppress local submissions from the same date. The
+receipt is scoped by source as well as by date.
+
+This rule lets an ordinary publisher use a rollup for a previously unseen
+old date, such as one reached while catching up after an outage or after
+a window expands. It does not make a steady-state publisher switch a date
+from raw objects to a rollup seven days later, after the raw
+contributions are already in its aggregate.
+
+The publisher needs a writer credential for its own prefix. That is the
+`test-selection-labs` service account with `objectCreator` on
+`labs/test-selection/`, reached through a Workload Identity provider
+pinned to exactly this workflow file on `main` — the same pattern, and
+the same security argument, as the relay already uses. The infra
+repository owns the account and the provider under `tofu/test-records`,
+and both are applied. Nothing else needs a credential: a lane reads the
+manifest it resolves and writes nothing.
 
 When the publisher fails, nothing breaks: the previous manifest is still
 the newest and lanes keep using it. A manifest going stale degrades
@@ -1925,6 +2171,10 @@ selection quality slowly rather than failing anything, which is the right
 direction for a system nothing should gate on.
 
 ## The lane job
+
+Nothing runs before the lanes. Each one resolves the manifest from the
+commit it has checked out, so five lanes reach the same answer without a
+job to tell them what it is:
 
 ```yaml
 pr-tests:
@@ -1936,6 +2186,8 @@ pr-tests:
   timeout-minutes: *lane-job-timeout
   env:
     CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+  permissions:
+    contents: read
   strategy:
     fail-fast: false
     matrix:
@@ -1945,20 +2197,20 @@ pr-tests:
       uses: actions/checkout@v7
       with:
         fetch-depth: 0
+        persist-credentials: false
     - name: 🦕 Setup Deno
       uses: ./.github/actions/deno-setup
     - name: 🔍 Verify lock file & install dependencies
       uses: ./.github/actions/deno-install
     - name: ♻️ Restore the built-binary cache
       uses: actions/cache@v4
-      with: { path: .ci-cache/binaries, key: ... }
+      with: { path: .ci-cache, key: ... }
     - name: 🧪 Run the lane
       timeout-minutes: *lane-work-timeout
       run: >-
         deno run -A tasks/ci-lane.ts
         --lane ${{ matrix.lane }} --of 5
         --base origin/${{ github.base_ref }}
-        --run-started-at ${{ github.run_started_at }}
     - name: 📤 Ship test records
       if: always()
       uses: ./.github/actions/test-records-ship
@@ -2016,13 +2268,21 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Fetch the newest manifest at or before the run's start, and the
-   attribution map it names. On failure, fall back (see [Failure
-   modes](#failure-modes)).
-2. Enumerate every suite against the working tree.
-3. Compute the diff against the merge base, and resolve the changed source
-   lines through the attribution map to the items that execute them.
-4. Call `plan()`, take this lane's plan.
+1. Resolve the manifest from the commit's date and fetch it. No manifest
+   at or before that date, or a fetch failure, takes the fallback (see
+   [Failure modes](#failure-modes)).
+2. Enumerate every suite against the working tree, and read the manifest
+   against that enumeration. The tree decides which tests exist and the
+   manifest decides what each is worth and costs, so an entry naming a
+   unit the tree no longer has drops out and a unit the manifest has
+   never seen gains a stand-in. Everything after this reads the result
+   rather than the manifest the store gave, which is what keeps the full
+   run and a pull request working from one answer about what exists.
+3. Compute the diff against the merge base, and ask each suite which of
+   its units the diff touched. The full run skips this: it has no diff.
+4. Call `plan()`, take this lane's plan. The full run calls it with the
+   `everything` policy, and with the empty diff step 3 left it. Those two
+   values are the whole of the difference between the two runs.
 5. Print the plan to the job summary: which batches, which items, what
    each is expected to cost, why each was chosen, which items were
    withheld and why, and which manifest the plan came from.
@@ -2044,18 +2304,72 @@ What the runner does, in order:
 A push to `main` still runs everything, and it runs it through the same
 topology so that the two paths cannot drift.
 
-`deno.yml` gains a small `plan-full` job that runs on push, calls the
-topology, packs every item into as many lanes as a ten-minute budget
-needs, and emits the result as a job output. A `full-tests` job consumes
-it with `strategy.matrix: fromJSON(...)` and runs the same
-`tasks/ci-lane.ts` with `--full`. The build, attestation, coverage and
-deploy jobs keep their present shape and depend on `full-tests` in place
-of the long dependency lists they carry today.
+`deno.yml` gains a small `plan-full` job that runs on push and emits one
+integer: how many lanes the run needs. It gets that from `deno run -A
+tasks/ci-lane.ts --full --lane-count`, which reads the working tree
+against the manifest and raises the lane count while that reduces the
+total by which the lanes are over the full run's budget. The total
+rather than the worst lane: one test costing more than a whole lane
+holds its own lane over budget at every count, so a search reading the
+worst lane would stop at the first step and leave every other lane
+packed far tighter than the budget it was given.
+
+A `full-tests` job consumes the integer with `strategy.matrix:
+fromJSON(...)` and runs the same `tasks/ci-lane.ts` with `--full`. The
+build, attestation, coverage and deploy jobs keep their present shape
+and depend on `full-tests` in place of the long dependency lists they
+carry today.
+
+An integer is deliberately the whole of what passes from the planning job
+to the lanes. Each lane reads the same tree against the same manifest and
+computes the same packing for itself, exactly as the pull-request lanes
+do, so nothing about which tests run travels through a job output and
+there is no second packing anywhere to disagree with theirs. A planning
+job that emitted the packing would be a second planner, and the two would
+drift.
 
 The full run's packing needs durations but no selection, so it reads the
-manifest for its cost table. When the store is unreachable it falls back
-to one lane per suite: less even, still complete, and requiring no
-committed weight table to maintain.
+manifest for its cost table. Where nothing in the tree has a measured
+cost it falls back to the larger of one lane per suite that has anything
+to run and what packing the stand-ins asks for. Less even, still
+complete, and requiring no committed weight table to maintain.
+
+The condition is what the tree holds rather than whether a manifest
+arrived, because those are not the same question. A manifest published
+before most of a tree existed arrives and still knows almost none of it,
+and a cost model reading that one is as blind as a cost model reading
+nothing at all.
+
+The fallback is a count rather than a cost model on purpose. Where
+nothing is measured, a projection from costs is arithmetic over whatever
+figure stands in for the ones nobody measured, and it is wrong by
+however wrong that figure is. Against this repository the stand-in
+figure puts the whole corpus at 2,403 seconds where the reference build
+measured 9,960, and the count that follows from it is five lanes for a
+run that today takes 67 jobs. The error is also in the direction that
+breaks a run: too few lanes means every one of them runs past the bound
+its job is killed at, where too many means some jobs finish early.
+
+So a lane per suite with anything to run goes in as a floor. It needs no
+number nobody measured, and it grows as test surfaces are added.
+
+The packing is still asked what it would need, and the larger of the two
+wins. Its answer is only as good as the stand-in costs behind it, which
+is why it cannot be the whole of this — but those costs are what the
+lanes will actually be packed against, so an answer below what they
+imply is one the lanes cannot honor whatever else is true. That matters
+most where a stand-in costs more than the bare unmeasured figure. A
+suite whose measured units have all been renamed away carries its old
+median onto every stand-in, and a count that assumed the bare figure
+would be out by that whole multiple.
+
+What comes out is a bound rather than a plan: the lanes still pack
+themselves, and one of them may hold several suites.
+
+A lane packing against stand-in costs says so in its summary, for the
+same reason: a projected time that rests on nothing measured is a
+different thing from one that rests on a week of records, and the job
+summary is where somebody finds out which they are reading.
 
 Before the pull-request path replaces the old matrix, `main` must complete
 at least one successful full run whose records account for every item the
@@ -2148,7 +2462,8 @@ per-package baselines come out of it. And `coverage-comment.yml` is
 generalized into the reporter described in [Telling a pull request what
 `main` found](#telling-a-pull-request-what-main-found) rather than deleted
 — it already does the hard part, which is posting to a pull request from a
-trusted context with a write token.
+trusted context with a write token. It carries both comments now, and is
+named `pull-request-comments.yml` for it.
 
 ## Coverage
 
@@ -2162,9 +2477,9 @@ is no longer the same thing.
 
 What the gate was actually for is worth separating from how it worked. It
 was there so that coverage keeps going up, or at least stops going down
-quietly. That goal survives, and it is served three ways: as a trend on
-`main`, as a gate over the packages a pull request can still measure
-whole, and as information about the diff itself.
+quietly. That goal survives, and it is served two ways: as a trend on
+`main`, and as a gate over the packages a pull request can still measure
+whole.
 
 ### The repository-wide number is a trend, not a gate
 
@@ -2175,14 +2490,21 @@ red build for one uncovered line would make `main`'s color mean nothing.
 One narrower measurement does still gate pull requests, and it is the
 subject of [the next section](#the-one-coverage-gate-that-survives).
 
-It becomes a dashboard tile instead, and the tile follows [the wall's
+It is a dashboard tile instead, and the tile follows [the wall's
 rules](../../packages/dashboard/README.md#philosophy-and-values). It shows
-the direction over weeks rather than a number, because a coverage
-percentage is exactly the kind of figure that stops meaning anything the
-moment somebody optimizes for it. It goes amber when debt has risen
-steadily for several weeks, not when it rose once. And it reports on the
+the count of uncovered lines and, under it, what a median day does to that
+count, which is the part somebody can act on. It is not a percentage:
+a coverage percentage is exactly the kind of figure that stops meaning
+anything the moment somebody optimizes for it. It goes amber when the
+median day over the last three weeks is a rise, which takes more than half
+the days in the window and so cannot be one bad day. And it reports on the
 system: no per-person anything, no ranking, nothing that could be read as
 a scoreboard.
+
+That tile is live, ahead of the rest of this plan. It reads the
+repository-wide `coverage-debt: workspace uncovered lines` figure out of
+each `main` run's `perf-metrics` artifact, which the full run on `main`
+produces today and goes on producing under selection.
 
 The `ACCEPT_COVERAGE_DEBT` markers stay. They are how somebody says "yes,
 knowingly", and they remain the right escape hatch whether or not anything
@@ -2340,6 +2662,27 @@ the exclusion list — all three being decisions about the repository rather
 than about one pull request, which is why they belong to a person and not
 to a threshold.
 
+#### Which packages a change reaches
+
+The gate makes two decisions — which tests to run, and which packages to
+measure — and both are the same question: which covered packages did this
+change reach. It answers that question the way everything else in this
+design answers it, from the declarations described under [what the change
+touches must run](#two-rules-that-force-a-test-in), rather than from a
+rule of its own. A covered package declares the paths a change reaches
+its own measured test set by, which is its own tree; the packages a
+change reaches are the packages whose sets become mandatory and the
+packages the gate scores. Two mechanisms answering one question is two
+things to be wrong about, and the failure they produce is silent: the
+gate would run a package's tests and decline to score it, or score a
+package whose tests it did not force.
+
+That also settles what a package may declare. The bounds the declarations
+are under are the ones stated there — nothing reached by a significant
+share of the tree, and no file reaching a significant share of the things
+declaring — and a package's own tree satisfies the first by construction.
+`LOCAL_COVERAGE_MAX_PACKAGES` is the second, said in packages.
+
 #### A change that touches more than two covered packages is not gated
 
 The mandatory set a covered package adds is its whole measured test set,
@@ -2349,7 +2692,7 @@ the gate's value falls as the change gets broader anyway: over three or
 four packages at once, "did this leave more untested" stops being a
 question about one thing somebody can look at.
 
-So when the diff touches more than `LOCAL_COVERAGE_MAX_PACKAGES` covered
+So when the diff reaches more than `LOCAL_COVERAGE_MAX_PACKAGES` covered
 packages, the gate is off for that pull request entirely. No package's set
 is forced whole, nothing is gated, and `Status` says the gate did not run
 and why. The tests are still selected normally, and the items the diff
@@ -2371,10 +2714,10 @@ gate would have caught.
 
 #### What a pull request does
 
-When the diff touches a covered package's tracked source or its tests, and
-the pull request is under the cap above, every item in that package's
-measured test set becomes mandatory, and runs once with coverage turned
-on. They are packed like any other mandatory items, so a large package
+When the diff reaches a covered package, by the declaration that package
+carries, and the pull request is under the cap above, every item in that
+package's measured test set becomes mandatory, and runs once with
+coverage turned on. They are packed like any other mandatory items, so a large package
 spreads across lanes rather than filling one.
 
 Run once is enforced rather than hoped for. A mandatory item leaves the
@@ -2386,7 +2729,7 @@ ordinary ones, fitted the same way every other cost in this design is.
 
 Each lane converts the coverage it produced into one report per workspace
 member and uploads it. `Status` adds the five together, scores each
-covered package the diff touched, and fails when the uncovered count has
+covered package the diff reached, and fails when the uncovered count has
 risen. A rise is accepted with the marker the repository already has, in
 the same form and with the same rebase-proof meaning:
 
@@ -2419,68 +2762,6 @@ which is the change the author is looking at. That is the whole of the
 argument, and it is why this gate keeps its teeth while the
 repository-wide one gives them up.
 
-### Coverage attribution, and what it unlocks
-
-Deno writes one coverage profile per pair of test file and source file. A
-test file that exercises a source file produces a profile naming that
-source and counting only what that test file reached. This was checked
-rather than assumed: two test files touching different functions of one
-module produce two separate profiles for that module, with the counts
-correctly separated, and it holds under `--parallel`.
-
-The profiles carry no marker saying which test file produced them, so
-attribution needs one coverage directory per test file, which needs one
-`deno test` invocation per test file. At 2,000 test files that is around
-three and a half hours of runner time — impossible per run, and entirely
-affordable as a weekly job sharded across the same lane machinery. Pattern
-coverage needs none of this: `cf test` already writes one coverage file
-per test.
-
-What that buys is an **attribution map**: for every source line, the test
-items that execute it. Published beside the manifest, refreshed weekly,
-and stale in exactly the way a weekly map is stale — which is fine,
-because it is used to *add* tests to a run, never to remove them.
-
-An attribution target is a suite item, not a bare file path. When the same
-file runs in default and non-default suites, the map keeps those targets
-separate. A changed line makes every configuration whose measured item
-executes it mandatory; coverage from one variant does not silently stand
-in for another. A whole file or exact leaf declared unavailable in a
-configuration is not a coverage target for that configuration. The file's
-remaining available leaves continue to participate normally.
-
-### Choosing tests by what the change touches
-
-With the map, a pull request's changed source lines resolve to the test
-items that execute them, and those items become mandatory. This is the
-thing today's continuous integration cannot do at all, and it makes a
-selected run better at its actual job than a scope-based guess would be: a
-change to one function in `packages/runner` runs the tests that execute
-that function, rather than a sample of the 655 test files in that package.
-
-Without the map — before it is first built, or for a brand-new source file
-nothing covers yet — the fallback is the scope-level boost the score
-already carries, and an uncovered new file is reported rather than
-silently passed over.
-
-### Diff coverage on a pull request, as information
-
-The same map gives a number worth showing without gating on it: of the
-lines this change adds or modifies, how many did the tests that actually
-ran execute?
-
-That number needs no baseline, which is what makes it survive selection.
-It is a floor rather than a verdict — some tests that cover those lines
-were not selected — and the comment says so. It appears as part of the
-reporter's comment, framed as what it is: here are the lines your change
-added that nothing ran, and here are the test files that cover the lines
-next to them, which is where a new test would most naturally go.
-
-This is what covers the ground the repository-wide gate used to. For a
-package that carries the per-package gate the ratchet still says no. For
-everything else the comment says where a test would go, which is more
-likely to produce a test than a failure was.
-
 ## Telling a pull request what `main` found
 
 Selection means some regressions land and `main` catches them. That is the
@@ -2488,10 +2769,12 @@ trade, and it is only acceptable if the change that caused it finds out
 without anybody having to go looking.
 
 A reporter workflow follows every `main` run to completion, in the
-base-repository context with a write token, exactly as
-`coverage-comment.yml` already does for the coverage comment. The repository
-squash-merges with the pull request number in the subject, so the pull
-request behind a `main` commit is unambiguous.
+base-repository context with a write token, exactly as the coverage
+comment already does. The repository squash-merges with the pull request
+number in the subject, so the pull request behind a `main` commit is
+unambiguous. Both comments live in
+`.github/workflows/pull-request-comments.yml`, and the reporter is
+`tasks/post-main-report.ts` over `tasks/test-selection/report.ts`.
 
 It comments once, on that pull request, when the run found something the
 pull request's own run could not have:
@@ -2501,22 +2784,28 @@ pull request's own run could not have:
   one. Attribution comes from the store rather than from an assumption,
   which is what stops the comment landing on whoever merged next after
   somebody else broke something.
-- **Whether that test was selected on the pull request.** Only this system
-  can answer it, and the answer changes what to do. Not selected is the
-  expected cost of selection, and the failure will raise the test's score
-  so the next change in that area runs it. Selected and passing is a flake
-  or an interaction between changes, and it is a different conversation.
-- **A coverage debt increase above the threshold**, with the lines and
-  where a test would go. Never as a failure — the run is green — and never
-  for one line.
+- **What the pull request's own run did with that test.** Its records say
+  whether it ran the test; the manifest it resolved says why it did not,
+  which only this system can answer. The answer changes what to do. Not
+  selected is the expected cost of selection, and the failure will raise
+  the test's score so the next change in that area runs it. Ran and
+  passing is a flake or an interaction between changes, and it is a
+  different conversation.
+- **A coverage debt increase above the threshold**, naming the source
+  groups the change touched that rose as well, which is as near as this
+  gets to saying where a test would go. Never as a failure — the run is
+  green — and never for one line.
 - **A rise in a covered package's own-tests number**, named as one the
   per-package gate exists to catch. There are three ways one reaches
-  `main`: the change touched more covered packages than the cap allows, so
-  the gate did not run; a package the change touched is on the exclusion
+  `main`: the change reached more covered packages than the cap allows, so
+  the gate did not run; a package the change reached is on the exclusion
   list; or a change somewhere else moved which lines of that package its
   own tests reach. The comment says which, because the three call for
   different things — nothing, a look at the exclusion list, and a look at
-  the change respectively.
+  the change respectively. A fourth state is possible and the comment
+  names it too: the gate measured the package on the pull request and
+  passed it, which is the two measurements disagreeing rather than any of
+  the three.
 - **A new test that turned out to be flaky**, when a test the pull request
   added has since disagreed with itself.
 - **A rename that discarded history**, with the alias line to append and
@@ -2571,30 +2860,47 @@ intolerable, the escape hatch is a merge queue, which restores the
 guarantee at the cost of merge latency. This plan does not propose one; it
 notes that the option exists and that nothing here forecloses it.
 
+**Outside a covered package, a change to a source file does not pull in
+the tests that execute it.** Selection knows which test files a change
+edited, and which units the declarations reach. Where those reach a
+covered package and the diff stays under the cap, [the per-package
+gate](#the-one-coverage-gate-that-survives) makes that package's whole
+measured set mandatory, which reaches the tests executing the changed
+lines by running every test the package has. Everywhere else, selection
+does not know which tests execute a changed line, so what runs for an
+edited source file is what the score chose. The finer answer is buildable
+and is not being built. Deno writes one coverage profile per pair of test
+file and source file, which was checked rather than assumed, but the
+profiles carry no marker saying which test file produced them. So telling
+them apart takes one coverage directory per test file, which takes one
+`deno test` invocation per test file, and at around 2,000 test files that
+is about three and a half hours of runner time. A job of that size runs on
+a cadence of its own and publishes an artifact of its own, which every
+lane then has to resolve, reconcile against the tree, and fall back from
+when it is absent. What that buys is a better mandatory set, and what it
+costs is a second store to keep and a second thing to be wrong about. Such
+a map only ever adds items to a run, so building one later means adding
+the job and the rules that read it rather than redesigning the packer.
+
 **Pull requests should get *less* red, not more.** This is the opposite of
 what an early draft of this design predicted, and the difference is the
-two exclusion rules. A test that is currently failing on `main` is not
-selected, so nobody's pull request fails for a break somebody else landed.
-A test too flaky to judge by is not selected either. What is left to block
-a pull request is stable tests with a record of catching real things —
-which is the only category where a red build is worth having. Set against
-that, a flaky-but-not-excluded item repeated three times fails three times
-as often as it would have. The net is an empirical question and the
+exclusion rule. A test too flaky to judge by is not selected, so nobody's
+pull request fails for a test that disagrees with itself. Three kinds of
+test are left that can turn one red. One the packing made mandatory,
+which is a test the change touches or one the store has never seen. One
+the score reached, which is the category where a red build is worth
+having. And one the default branch is already failing, which nothing
+holds back; that failure belongs to the default branch, and fixing it
+there is what clears it. Set against all of that, a
+flaky-but-not-excluded item repeated three times fails three times as
+often as it would have. The net is an empirical question and the
 dashboard is where it gets answered.
-
-**Whether this was a good idea is measurable, and the measurement exists
-before the change does.** The escape rate — how often something reaches
-`main` that a test the repository already had would have caught — can be
-computed from the store today, while pull requests still run everything.
-That gives a baseline taken under the old regime to judge the new one
-against, rather than a number that only starts existing once there is
-nothing to compare it to.
 
 **Coverage stops being enforced across the repository, and stays enforced
 per package.** Nothing will fail because a change lowered the repository's
 whole coverage number. What replaces that is a weekly trend somebody has
-to choose to look at, plus a comment saying where a test would go. Over
-the 31 packages that carry the [per-package
+to choose to look at, plus a comment naming the source groups where the
+debt rose. Over the 31 packages that carry the [per-package
 gate](#the-one-coverage-gate-that-survives) the ratchet still fails a pull
 request, because there both sides measure the same complete thing. The
 reduction in enforcement is real and confined to what could no longer be
@@ -2609,23 +2915,23 @@ was chosen — the catches behind its score, the change that made it
 mandatory, or the exploration draw — which makes "this is not mine" a fast
 conclusion rather than a guess. `--explain` answers the same question for
 any identity. Re-running the lane runs the same set, because the manifest
-is pinned to the run's start time. And if none of that settles it,
+is pinned to the commit's date. And if none of that settles it,
 `ci: full` runs everything.
 
 ## Failure modes
 
 | What goes wrong | What happens |
 | --- | --- |
-| The store is unreachable from a lane | The lane runs the mandatory set plus a deterministic slice of the corpus sized to its budget, prints that it is running unselected, and passes or fails on that. Pull requests keep flowing. |
+| The store is unreachable from a lane | The lane reads its share from the tree instead. Nothing has records, so the whole corpus is mandatory and the lanes divide it between them, printing that they are running everything. Pull requests keep flowing, and slower. |
 | The publisher has not run for a day | Lanes use the last manifest. Selection quality decays slowly; nothing fails. |
 | The manifest is malformed or a newer schema | Rejected whole, treated as absent, same path as unreachable. |
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
 | A new test surface nobody registered | `check-test-topology` fails on the next `main` run and names the unclaimed identities. |
 | A record's variant or record surface contradicts its batch | Kept as written and named in the lane summary. The identity then belongs to no suite, so the store half of the drift guard fails on the next `main` run. |
 | A suite gains a new variant with no records | Every available item in that variant is mandatory until a successful full `main` run accounts for every enumerated item under that exact variant, the store drift guard passes, and the next publisher cycle includes the run. Other variants do not stand in for it. |
-| A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown or a coverage target. Removing the skip makes it mandatory until `main` records it. |
-| One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that and it is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
-| The mandatory set alone exceeds the budget | The lane runs it anyway and over-runs, up to the five-minute step bound. The summary says by how much. |
+| A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown. Removing the skip makes it mandatory until `main` records it. |
+| One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that, a mandatory item is still placed and its lane over-runs, while a discretionary one is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
+| The mandatory set alone exceeds the budget | The lane runs it anyway and over-runs, past the five-minute step bound where the set demands it. The summary says by how much, which is what argues for raising the bound. |
 | A covered package has no baseline, or none from an ancestor of the merge base | The lane reports the comparison and does not fail. The next full `main` run supplies one. |
 | A covered package gains a test needing a browser or a server | It goes in the package's `browser-test` half, which the gate does not measure, so the Deno-only half keeps its gate. A package with no such half yet names one. |
 | A covered package's measured set grows expensive | Reported in the publisher's summary and by `deno task test-selection coverage`. Nothing is excluded automatically; somebody splits the tests or adds a line to the exclusion list. |
@@ -2633,14 +2939,13 @@ is pinned to the run's start time. And if none of that settles it,
 | A change touches more than two covered packages | The per-package gate does not run at all, and `Status` says so. The full run on `main` still measures every package, and a rise it finds is reported back to the pull request. |
 | A lane dies without uploading its coverage | `Status` is already failing for the dead lane. It says the coverage total is incomplete rather than gating on a partial one. |
 | A lane exceeds five minutes repeatedly | The correction factors rise on the next publisher run and less is packed. If it persists, the publisher's summary shows the miss and somebody looks. |
+| Two attempts of one run straddle a UTC midnight | The later attempt's relay writes the earlier attempt's records a second time, under the later day, and the publisher folds both. Not observed in the store so far; see [What the store is missing](#what-the-store-is-missing). |
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
-| A re-run of one failed lane | Runs the same set, because the manifest is resolved by the run's start time. |
+| A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
-| An `always` item is red on `main` | Every pull request fails on it, deliberately, and the job summary says it was already red and links the `main` run. See [Two rules that keep a test out](#two-rules-that-keep-a-test-out). |
-| `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
+| `main` is broken and stays broken | Nothing holds a test back for having failed on `main`, so a pull request that selects the broken test fails on it. The failure belongs to the default branch, and fixing it there is what clears it. |
 | The reporter cannot find the pull request behind a `main` commit | It logs the commit and posts nothing. A direct push to `main` with no pull request behind it is the ordinary case for this. |
 | The reporter would comment on a test that is known flaky | It says so in the comment rather than implying the change caused it. |
-| The attribution map is stale or missing | Changed-source selection falls back to the scope-level boost, and the diff-coverage figure says it is a floor. The map only ever adds tests to a run. |
 | Somebody games the coverage number | There is nothing to game: no gate, no per-change target, and a tile that shows a multi-week direction rather than a figure. |
 
 ## Security and trust
@@ -2652,10 +2957,14 @@ should have, which the full run on `main` catches. That bounds the whole
 attack surface, and it is why the manifest is allowed to be an ordinary
 public object rather than a signed artifact.
 
-Write access to the manifest prefix is one service account reachable only
-through a Workload Identity provider pinned to one workflow file on
-`main`, exactly as the relay is. Nothing else in the organization can
-write there, and the account cannot read, list, overwrite, or delete.
+The publisher is the only workflow-scoped writer to the manifest prefix. Its
+service account is reachable through a Workload Identity provider pinned to one
+workflow file on `main`, exactly as the relay is. Its identity-specific
+`objectCreator` grant cannot overwrite or delete, while the dataset's public
+`objectViewer` grant separately lets it read and list objects like any other
+public reader. A bucket administrator can still write anywhere in the
+bucket. That is a risk the infrastructure has to contain, rather than a
+second way to publish a manifest.
 
 The lane runner treats the manifest as untrusted input and validates it
 whole. The only field that reaches a shell is a suite identifier, which is
@@ -2700,7 +3009,7 @@ only to the suite carrying its exact variant. Separate fixtures cover both
 skip shapes from `tasks/server-execution-on-skips.ts`: a whole-file skip is
 declared unavailable and is not enumerated, while a step-level skip leaves
 the file and its other identities available but excludes the named leaf
-from the unknown and coverage rules. A CLI fixture maps step identities to
+from the unknown-identity rule. A CLI fixture maps step identities to
 items and the overlapping `integration.sh` task identity to the suite. The
 task identity is claimed by the drift guard but contributes to neither
 item score nor item cost, so it cannot double-count its steps. The same
@@ -2771,9 +3080,10 @@ test-selection`. Its modes are also how the system is tested by hand.
   is the question this system will be asked most often and the one it
   would otherwise answer badly.
 - `dials` prints every dial with its comment, its current value and the
-  unit that value is in, saying of each whether it is chosen or measured,
-  and for a measured one whether the figure shown is still the checked-in
-  seed or one the publisher has since written back.
+  unit that value is in, saying of each whether somebody chose it, the
+  publisher measures it, or it is computed from other dials, and for a
+  measured one whether the figure shown is still the checked-in seed or
+  one the publisher has since written back.
 - `coverage` prints every workspace member, whether it carries the
   per-package coverage gate, the reason beside it when it does not, the
   task the gate measures, and the baseline the newest manifest holds for
@@ -2795,67 +3105,9 @@ those comments, and every manifest records the values it was built with,
 so a manifest is self-describing and a change in behavior can always be
 traced to a change in a dial.
 
-The **Units** column says what each number counts. Several of the dials
-are bare fractions that do not mean the same thing, and the table holds
-two different `0.25` values as it stands: `WEIGHT_BREADTH` is a share of a
-test's score and `FILL_DENSITY_SHARE` is a share of a lane's budget. A
-share of an item's runs reads the same way again. Naming the unit is what
-keeps them from being compared to each other.
-
-The **Set by** column separates the two kinds. A **chosen** value is a
-decision somebody made, and editing it is how the decision changes. A
-**measured** value is worked out from the data and written back by the
-publisher, so the number in the file is only the seed used before there is
-anything to measure, and editing it changes nothing after the first
-publisher run. The distinction matters because the two look identical in a
-source file, and somebody who tunes a measured value is arguing with a
-tape measure.
-
-| Dial | Default | Units | Set by | Why you would move it, and which way |
-| --- | --- | --- | --- | --- |
-| `LANES` | 5 | lanes | Chosen | Up when pull-request feedback is too thin and runner capacity allows more; down when the wave crowds other workflows off the shared runners. |
-| `LANE_BOUND_SECONDS` | 300 | seconds | Chosen | Up when more should fit in a lane; down when five minutes is longer than anybody will wait for a first answer. Either way `LANE_WORK_TIMEOUT_MINUTES` and `LANE_JOB_TIMEOUT_MINUTES` in `deno.yml` move with it. |
-| `LANE_PROLOGUE_SECONDS` | 40 | seconds | Measured | Never. The publisher overwrites it from the lanes' own timing records, and the checked-in figure is only what the first lane uses before any lane has reported one. |
-| `LANE_SAFETY_SECONDS` | 30 | seconds | Chosen | Up when lanes overrun their bound on slow runners; down when they finish early every time and the headroom is buying nothing. |
-| `FULL_LANE_BUDGET_SECONDS` | 600 | seconds | Chosen | Up when `main`'s run uses more jobs than it needs; down when `main` takes too long to say something broke. |
-| `FULL_RUN_LABEL` | `ci: full` | a label | Chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
-| `VALUE_FLOOR` | 0.05 | score | Chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
-| `WEIGHT_PROVEN` | 0.55 | share of the score | Chosen | Up when a record of catching things should count for more. The three weights are shares of one score, so what this gains the other two lose. |
-| `WEIGHT_BREADTH` | 0.25 | share of the score | Chosen | Up when a test that several distinct sources have hit should count for more; down when breadth is mostly telling you about the environment rather than the test. |
-| `WEIGHT_CHURN` | 0.15 | share of the score | Chosen | Up when something going wrong right now should jump the queue faster; down when the queue keeps being jumped by noise. |
-| `PROVEN_SATURATION` | 2 | catches | Chosen | Up when four catches should outrank one by more; down when one catch should already be worth nearly everything a test can earn. |
-| `FRESHNESS_HALF_LIFE_DAYS` | 120 | days | Chosen | Up when old catches should keep more of their value; down when a test that caught something a year ago crowds out one that caught something last week. |
-| `FRESHNESS_FLOOR` | 0.3 | multiplier | Chosen | Up when a very old catch should keep more of its worth; down when age should be allowed to retire one almost completely. |
-| `CATCH_WEIGHT_LOCAL` | 2.0 | multiplier | Chosen | Up when evidence from a workstation should count for more; down if local records ever arrive in volume and stop being the scarce signal they are today. |
-| `CATCH_WEIGHT_PR` | 1.0 | multiplier | Chosen | Neither. It is the unit the other two are expressed against, so move those instead. |
-| `CATCH_WEIGHT_MAIN` | 1.5 | multiplier | Chosen | Up when an escape should pull harder on what gets selected next; down when `main`'s failures are mostly environmental rather than real. |
-| `CHURN_HALF_LIFE_DAYS` | 14 | days | Chosen | Up when recent trouble should stay relevant for longer; down when a problem already fixed keeps its tests selected for weeks afterwards. |
-| `FILL_VALUE_SHARE` | 0.60 | share of the budget | Chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
-| `FILL_DENSITY_SHARE` | 0.25 | share of the budget | Chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
-| `FILL_EXPLORATION_SHARE` | 0.15 | share of the budget | Chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
-| `FLAKE_EXCLUSION_RATE` | 0.05 | share of runs | Chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
-| `FLAKE_REPEAT_RATES` | 0.01, 0.10 | share of runs | Chosen | Up when repeats cost more lane time than the intermittent failures they catch are worth; down when intermittent failures are still slipping through. |
-| `MAX_REPEATS` | 3 | runs of one item | Chosen | Up when intermittent regressions still get through; down when repeats are crowding a lane. |
-| `SUITE_FLAKE_PRIOR_RATE` | 0.02 | share of runs | Chosen | Up when too many suites count as flake-prone and their new items are repeated needlessly; down when new tests in a noisy suite land unrepeated and then flake. |
-| `COVERAGE_COMMENT_LINES` | 25 | lines | Chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
-| `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | Chosen | Up when too many packages are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
-| `LOCAL_COVERAGE_MAX_PACKAGES` | 2 | packages | Chosen | Up when broader changes should still be gated and the run can afford their packages' whole test sets; down when sweeping changes are crowding lanes. |
-| `EXCLUDED_FROM_COVERAGE_GATE` | nine | workspace members | Chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which turns its gate on. A line goes on when a package's own tests stop being what covers it. |
-| `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | Chosen | Up when branches based further back are being reported for want of an ancestor baseline; down when the manifest carries more history than anybody reads. |
-| `COVERAGE_TREND_WEEKS` | 3 | weeks | Chosen | Up when the tile goes amber too readily; down when debt climbs for a month before anybody is told. |
-| `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | Chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
-| `ATTRIBUTION_MAP_DAYS` | 7 | days | Chosen | Up when rebuilding the map costs more than its staleness does; down when changed lines keep resolving to tests that have moved. |
-| `ALIAS_GATE_MIN_CATCHES` | off | catches | Chosen | Off by default. Turn it on at a catch count to fail a pull request that discards that much history in a rename without an alias line, and lower the count as the alias file becomes routine. |
-
-Three more numbers are measured, and they are not in the table because
-they are not in `policy.ts`: `setupCost` for each capability, and
-`suiteOverhead` and `correction` for each suite. They are fitted from the
-lanes' own timing records and published in the manifest, one set per
-publisher run, which is where to read them. Nothing hand-edits them, and a
-manifest carrying a strange one is a measurement to look at rather than a
-setting to fix. They are listed here so that the answer to "what numbers
-decide what runs" is complete rather than only complete for the ones a
-person owns.
+[Every dial](../development/test-selection.md#every-dial) in the
+test-selection guide tabulates them, one row each with its default, its
+unit, where its value comes from, and the reason to move it.
 
 Of the chosen dials, three are worth revisiting first, because their right
 values are empirical rather than structural. They stay chosen — nothing
@@ -2878,18 +3130,23 @@ The rest of this section is about what a single landing has to satisfy. It
 is worth reading before assuming a split is needed, because two of the
 three reasons that look like they force one turn out not to.
 
-### The one prerequisite that is not ours
+### The prerequisites that are not ours
 
-The publisher needs a writer credential: a `test-selection` service
-account with `objectCreator` on `labs/test-selection/`, a Workload
-Identity provider pinned to `.github/workflows/test-selection.yml` on
-`main`, and a lifecycle rule deleting objects there after 30 days. That is
-the same pattern, and the same security argument, as the relay already
-uses. It also wants the compactor provisioned, which is already designed
-and implemented and only needs its principal. That is an infra-repository
-change under `tofu/test-records`, and it must land and be applied before
-anything here can publish. That is a predecessor rather than a reason to
-split this work, and it is the only hard ordering outside this repository.
+The publisher needs a writer credential: the `test-selection-labs` service
+account with `objectCreator` on the manifest and state prefixes, and a
+Workload Identity provider pinned to
+`.github/workflows/test-selection.yml` on `main`. Manifest and state
+objects expire after 45 days, and that lifecycle rule is what a lane's
+resolution rests on: a commit resolves the newest manifest at or before
+its own date, so the manifests a run may need have to outlive the window
+in which GitHub still permits that run to be re-run. Where the re-run
+window is the longer of the two, the retention is what to raise. The same
+infra root provisions the compactor principal.
+
+All of that lives in the infra repository under `tofu/test-records`, and
+all of it is applied: the accounts, the grants, the pinned providers, and
+the lifecycle rule. Nothing outside this repository has to happen before
+the work here publishes, so this is not a reason to split it.
 
 ### Proving the topology before merging, not after
 
@@ -2928,11 +3185,11 @@ selection have data. That window is one `main` run and one manual
 dispatch, not days.
 
 Pull requests in that window are already handled. A lane that finds no
-manifest takes the same path as a lane that cannot reach the store: it
-runs the mandatory set plus a deterministic slice of the corpus sized to
-its budget, and prints that it is running unselected. Feedback is weaker
-than selection for one afternoon and no worse than a coin toss about which
-tests run, which is what the old shard layout was anyway.
+manifest takes the same path as a lane that cannot reach the store:
+nothing has records, so every unit the tree holds is an identity with none
+and the whole corpus is mandatory. The lanes divide it between them and
+print that they are running everything. Feedback costs the time selection
+would have saved for one afternoon, and it misses nothing.
 
 The calibration numbers converge over the days after that, from the lanes'
 own timing records, which is what they were always going to do.
@@ -2943,13 +3200,13 @@ Nothing about what continuous integration runs changes. This pull request
 only makes the store answer questions it cannot answer yet, and puts the
 answers somewhere people can see them.
 
-- [ ] A preload module in `@commonfabric/test-support` that captures the
+- [x] A preload module in `@commonfabric/test-support` that captures the
       registering module for every `Deno.test` and writes the name-to-file
       map into the spool; `ingestJUnit` joins on it; every `deno test`
       invocation carries the preload.
-- [ ] `packages/deno-web-test/runner.ts` sets `file` on the records it
+- [x] `packages/deno-web-test/runner.ts` sets `file` on the records it
       writes directly.
-- [ ] `tasks/test-selection/{policy,score,manifest,store}.ts` — the dials,
+- [x] `tasks/test-selection/{policy,score,manifest,store}.ts` — the dials,
       the catch and flake derivation, the manifest format and its
       validators, and the reader and writer. Complete identities use the
       canonical test-record key, optional variants included, and variants
@@ -2957,22 +3214,47 @@ answers somewhere people can see them.
       as the report tool and dashboard collector already do. A
       reference-scale fixture records the serialized and gzipped manifest
       sizes instead of deriving item size from the identity count.
-- [ ] `tasks/test-selection/plan.ts`, the pure packing function, tested
+- [x] `tasks/test-selection/plan.ts`, the pure packing function, tested
       offline against recorded manifests.
-- [ ] `tasks/test-selection-publish.ts` and
+- [x] `tasks/test-selection-publish.ts` and
       `.github/workflows/test-selection.yml`, on a four-hourly cron.
-- [ ] The one-off bootstrap dispatch.
+- [x] Hold manifest retention above the window in which GitHub still
+      permits a run to be re-run. A lane resolves the newest manifest at or
+      before the commit's date, so the answer is the same for every lane
+      and every later attempt as long as the object it names still exists.
+      A manifest that expires between an attempt and its re-run is the one
+      way the two can disagree, and the lifecycle rule is where that is
+      settled rather than in anything a lane reads.
+- [x] One source-and-date input plan, which bootstrap and ordinary
+      publishing both apply. A flag is permission to start from an empty
+      aggregate and a wider default window, and nothing else decides what
+      is read.
+- [x] A source-scoped receipt in place of the date-only one, so that a
+      rollup of the shared area cannot say a day is accounted for and
+      take that day's local submissions with it. Local records stay on
+      their raw path until they have rollups of their own.
+- [x] The one-off bootstrap dispatch. On 2026-09-06, [run
+      34020738350](https://github.com/commontoolsinc/labs/actions/runs/34020738350)
+      on `main` folded 12 rollup days and 67,463,235 executions, then created
+      `manifest-2026-09-06T08:02:32.080Z-01M1TWYZZV2PXG5Y5VG3MCY91Q.json.gz`
+      and the matching state object. The public listing shows both, and later
+      incremental runs succeeded from that state. As a later check, scheduled
+      [run
+      34274701451](https://github.com/commontoolsinc/labs/actions/runs/34274701451)
+      on 2026-09-08 folded 1,321,563 executions into 19,904 identities and
+      created
+      `manifest-2026-09-08T20:25:40.387Z-01M21B6E8PQV8ZPP0E21CMR4G3.json.gz`
+      with its matching state object.
 - [x] Repeat the record census after `main` emitted server-execution
       variant records, and replace the plan's projection inputs.
-- [ ] Dashboard tiles: the coverage debt trend, the flake list, what the
-      newest manifest would select, and the escape rate — how often
-      something reaches `main` that a test we already had caught there.
-      That last one is measurable today, before any of this changes what
-      runs, which makes it the baseline everything after is judged
-      against.
-- [ ] The `deno task test-selection` entry point and its modes: `dials`,
+- [x] Dashboard tiles: the flake list, what the newest manifest would
+      select, and the coverage debt trend. The trend reads the
+      repository-wide figure each `main` run's `perf-metrics` artifact
+      already carries, so it needed nothing from the rest of this work.
+- [x] The `deno task test-selection` entry point and its modes: `dials`,
       `coverage`, `explain <identity>`, and `plan` with `--dry-run` and
-      `--verify`.
+      `--verify`. Every mode that packs reads the topology, so the
+      capability setup a lane opens is charged here as it is there.
 
 On its own this part gives the repository a flake list derived from
 evidence rather than from anecdote, and a coverage trend nobody has today.
@@ -2986,31 +3268,61 @@ The topology goes in, and both `main` and the `ci: full` label start using
 it. Nothing here depends on selection, so this part can be finished and
 exercised on the branch on its own.
 
-- [ ] `tasks/test-topology.ts` and one module per suite, including each
+- [x] `tasks/test-topology.ts` and one module per suite, including each
       suite's declared record surfaces and optional variant, and typed
       record-surface descriptors for every JUnit output. `locate()`
       distinguishes item identities from overlapping suite-level
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
-- [ ] The server-execution variant suites consume
+      Twenty-one suites currently hold 2,396 units. The repository gates are two
+      suites rather than one, because a lane opens what a suite needs
+      before it runs any of it: `repo-gates` holds every gate that reads
+      the working tree alone, and `repo-history-gates` the two append-only
+      gates that read the revision the change is measured against.
+- [x] The server-execution ON configuration consumes
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude
-      only the named leaf identity from unknown and coverage rules.
-- [ ] Give `packages/cli/integration/fuse-exec.sh` fine granularity. Its
-      23 `success` markers become `cf_test_step_begin` markers, so the
-      suite records 23 identities rather than one; then it gains a section
-      dispatch over whichever groups of phases can stand alone, so
-      `cli-fuse` becomes an `item` suite like its sibling.
-- [ ] Split the `piece-call` CLI integration dispatch into its eight
-      recorded steps. Seven already have an arm of their own; add the
-      missing one for `run_piece_call` and make the eight single-step arms
-      the `cli-core` items, removing the known item that exceeds the lane's
-      hard five-minute bound. The grouped arms stay for hand runs and are
-      not enumerated.
-- [ ] `tasks/check-test-topology.ts`, both halves, wired into
+      only the named leaf identity from the unknown-identity rule.
+- [x] Give `packages/cli/integration/fuse-exec.sh` fine granularity.
+  - [x] Every phase records, so the suite records 25 identities rather
+        than one, across the 23 phases the script goes through. Each
+        marker leads the phase it names, through the same
+        `cf_test_step_begin` `integration.sh` uses, so a phase that fails
+        is the record that carries the failure rather than the script's
+        own record carrying it. The two phases that bring the mount up
+        are the identities this adds beyond the phases that already
+        named one.
+  - [x] It gains a section dispatch over the four groups of phases that
+        stand alone, so `cli-fuse` becomes an item suite like its sibling.
+        A section is a group of phases over one mount, and the
+        dependencies deciding where the boundaries fall are named in
+        [today's jobs as suites](#todays-jobs-as-suites).
+        `packages/cli/test/fuse-sections.test.ts` holds the dispatch table
+        to the properties that make a section schedulable, the way
+        `integration-sections.test.ts` holds its sibling's.
+- [x] Split the `piece-call` CLI integration dispatch into its eight
+      recorded steps. Seven already had an arm of their own; the missing
+      one for `run_piece_call` is added, and so are the two the
+      `piece-values` group hid, so every recorded step now has an arm that
+      runs it alone. The grouped arms stay for hand runs and are not
+      enumerated. Making those arms the `cli-core` items is the topology's
+      part. `packages/cli/test/integration-sections.test.ts` holds the
+      dispatch table to that property, and to every step being scheduled
+      by some group rather than only by name.
+- [x] `tasks/test-topology/binaries.ts`: each shipped binary is a unit
+      whose test is that it still compiles, and the toolshed under the
+      server-execution define is a variant of that rather than a second
+      test. A pull request runs its servers and its command line from
+      source and compiles nothing, so without these a broken compile
+      would be found only on `main`.
+- [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant.
-- [ ] Extract the part of `tasks/test-records-gather.ts` that reads records,
+      allowed per variant. Eight paths that look like tests and are not
+      are declared as the fixtures they are: the five projects under
+      `packages/deno-web-test/test/` that the harness drives, and the
+      three command-line tours the verb-session gate holds the
+      documentation to rather than running.
+- [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both
       use it. The lane runner gives every batch execution fresh spool and
@@ -3019,8 +3331,6 @@ exercised on the branch on its own.
       and repeats.
 - [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
-- [ ] The weekly coverage attribution job, and the map published beside
-      the manifest.
 - [ ] Repository-wide coverage measurement moves to the full run and stops
       failing anything.
 - [ ] `tasks/write-coverage-lcov.ts` converts each workspace member's
@@ -3065,11 +3375,32 @@ exercised on the branch on its own.
       `Status` depends on `pr-tests` and `full-tests`, with `skipped`
       counting as success for the latter.
 - [ ] The `ci: full` label.
-- [ ] `coverage-comment.yml` generalized into the reporter, with the
+- [x] `coverage-comment.yml` generalized into the reporter, with the
       first-failure attribution, the selected-or-not line, the coverage
       note, the per-package rise note naming which of the three routes let
       it through, the flaky-new-test note, and the rename suggestion with
-      its ready-to-append alias line.
+      its ready-to-append alias line. It is
+      `.github/workflows/pull-request-comments.yml`, which now holds both
+      comments this repository posts from the trusted context, and
+      `tasks/test-selection/report.ts` beside `tasks/post-main-report.ts`.
+      Each of the five properties under [keeping this on the right side of
+      the line](#keeping-this-on-the-right-side-of-the-line) carries a
+      test. It follows the test workflow, because a `workflow_run` payload
+      describes the run it names rather than the run that triggered it,
+      and it compares the run at the commit against the run at the
+      commit's parent: the parent's records and the pull request's come
+      from the store, and the run under report's from its own artifacts,
+      which are readable before the relay has shipped them. Whether the
+      pull request ran a test is settled by its own run's records, and the
+      manifest it resolved answers why it did not; the two together are
+      honest both before and after the lanes land. The per-package rise
+      reads a covered package's own-tests figure out of the run's
+      `perf-metrics` artifact, under the metric name
+      `ownTestsCoverageMetric` builds, so it reads the quantity the gate
+      compares rather than the source group of the same name that a
+      selected run only samples. The gate publishes that figure, so the
+      note is silent until the gate lands and needs nothing further
+      then.
 - [ ] The per-package coverage gate, in two halves. `tasks/ci-lane.ts`
       makes every item of a covered package the diff touches mandatory,
       keeps those items out of later passes and out of repeats, and
@@ -3102,9 +3433,9 @@ exercised on the branch on its own.
 
 ### What would force a split, and what to split first
 
-Nothing mechanical does. The infra credential is a predecessor rather than
-a stage, the topology can be proven on the branch with `ci: full`, and the
-window before the first manifest is one `main` run that the lane fallback
+Nothing mechanical does. The infra credential is already in place, the
+topology can be proven on the branch with `ci: full`, and the window
+before the first manifest is one `main` run that the lane fallback
 already covers.
 
 What could force one is review. This is a large change to the way the

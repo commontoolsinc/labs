@@ -86,10 +86,12 @@ export interface AdoptOptions {
    * `patternIdentity`; each `main` is validated like the root's.
    */
   children?: readonly { cellId: string; main: string }[];
+
   roots: AdoptRoots;
 
   /** Capture stamp; injectable so a test is deterministic. */
   now?: Date;
+
   log?: (line: string) => void;
 }
 

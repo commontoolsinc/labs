@@ -257,7 +257,7 @@ describe("prompt-loop address handles", () => {
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-1", "cat a.txt"),
-        bashCallTurn("call-2", `cf get ${minted.token}`),
+        bashCallTurn("call-2", `cf cell get ${minted.token}`),
         finalTurn("Done."),
       ]),
     });
@@ -267,10 +267,10 @@ describe("prompt-loop address handles", () => {
     // The bash tool prefixes the model-written command with cwd-marker shell
     // lines, so we match on the command's own text.
     const dispatched = sandbox.shellRequests.find((request) =>
-      request.command.includes("cf get ")
+      request.command.includes("cf cell get ")
     );
     expect(dispatched?.command).toContain(
-      `cf get ${minted.table.entries[0]?.ref}`,
+      `cf cell get ${minted.table.entries[0]?.ref}`,
     );
     expect(dispatched?.command).not.toContain(minted.token);
   });
@@ -439,7 +439,10 @@ describe("prompt-loop address handles", () => {
       workspaceHostPath: workspace,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
+      // `view_image` is a read, which this rung admits without direct-command
+      // authorization; the assertions below read the tool's own result, so
+      // the tool has to have run.
+      cfcEnforcementMode: "enforce-explicit",
     });
     await engine.recordHandleTable(minted.table);
     const loop = new CfHarnessPromptLoop({
@@ -761,7 +764,7 @@ describe("prompt-loop address handles", () => {
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-2", "cat a.txt"),
-        bashCallTurn("call-3", `cf get ${minted.token}`),
+        bashCallTurn("call-3", `cf cell get ${minted.token}`),
         finalTurn("Resumed run done."),
       ]),
     });
@@ -783,10 +786,10 @@ describe("prompt-loop address handles", () => {
     expect(reswapped?.content).not.toContain(HASH_A);
     expect(resumedResult.runState.handleTable?.entries.length).toBe(1);
     const dispatched = resumedSandbox.shellRequests.find((request) =>
-      request.command.includes("cf get ")
+      request.command.includes("cf cell get ")
     );
     expect(dispatched?.command).toContain(
-      `cf get ${minted.table.entries[0]?.ref}`,
+      `cf cell get ${minted.table.entries[0]?.ref}`,
     );
     expect(dispatched?.command).not.toContain(minted.token);
   });

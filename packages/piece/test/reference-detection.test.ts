@@ -7,7 +7,6 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
  * without requiring the full PiecesController setup
  */
 describe("Reference detection core functionality", () => {
-  // Test detection of object structures similar to cell links
   it("should identify object structures with cell and path properties", () => {
     // Create an object with a structure similar to a cell link
     const objWithCellAndPath = {
@@ -28,7 +27,6 @@ describe("Reference detection core functionality", () => {
     );
   });
 
-  // Test finding aliases with different structures
   it("should find aliases in nested objects", () => {
     // Create test data with different alias structures
     const testData = {
@@ -82,7 +80,6 @@ describe("Reference detection core functionality", () => {
     assertEquals(arrayAliasIndex, 1, "Should detect alias in array");
   });
 
-  // Test recursive search for references
   it("should recursively search for references in deep structures", () => {
     const foundReferences: string[] = [];
 
@@ -158,7 +155,6 @@ describe("Reference detection core functionality", () => {
     );
   });
 
-  // Test the behavior of our reference detection with mixed reference types
   it("should handle mixed reference types", () => {
     const foundReferences: Array<{ type: string; id: string }> = [];
 

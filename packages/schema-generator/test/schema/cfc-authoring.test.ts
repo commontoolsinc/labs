@@ -171,12 +171,13 @@ describe("Schema: CFC authoring aliases", () => {
     expect(labeled.ifc?.confidentiality).toEqual(["prompt-influence"]);
   });
 
-  // The collection/opaque aliases below are NOT canonical (the helpers were
-  // removed from @commonfabric/api/cfc because the runner rejects those ifc
-  // keys fail-closed) — with explicit type arguments they resolve through
-  // the Cfc carrier as plain payload passthrough, which is the structural
-  // mechanism this test covers alongside the remaining canonical aliases.
   it("lowers the remaining canonical metadata aliases and merges nested Cfc metadata", async () => {
+    // The collection/opaque aliases below are NOT canonical (the helpers were
+    // removed from @commonfabric/api/cfc because the runner rejects those ifc
+    // keys fail-closed) — with explicit type arguments they resolve through
+    // the Cfc carrier as plain payload passthrough, which is the structural
+    // mechanism this test covers alongside the remaining canonical aliases.
+
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;

@@ -4,18 +4,26 @@
  * tags a wire format writes, which say what it became.
  *
  * The question is harder than an `instanceof` because the answer must not be
- * forgeable, and must still be reachable for a value that did not come from
- * here. A class is read off the prototype rather than off the value, since an
- * own `constructor` property is ordinary data that would otherwise let a plain
- * record present itself as an `Error`. A value from another realm, or one
- * whose prototype has been severed, has to be recognized regardless, which is
+ * forgeable. A class is read off the prototype rather than off the value,
+ * since an own `constructor` property is ordinary data that would otherwise
+ * let a plain record present itself as an `Error`.
+ *
+ * Two kinds of value are recognized with no reachable class at all, which is
  * why the constructor switch has fallbacks beneath it rather than standing
- * alone.
+ * alone: an array, by `Array.isArray()`, and an error, by `Error.isError()`.
+ * Each tests an internal slot rather than a prototype, so each holds across
+ * realms and through a severed prototype.
+ *
+ * Nothing else does. A `Date`, `Map`, `Set`, `RegExp` or `Uint8Array` is
+ * recognized by constructor identity, which is a per-realm question, and one
+ * of those from another realm is reported as unrecognized. Values from another
+ * realm are outside what this is asked about.
  */
 
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
 
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
+import { tagFromNativeBuiltinClass } from "./tagFromNativeBuiltinClass.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
@@ -25,82 +33,50 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**
- * Checks whether a value is a native `Error`.
+ * Maps a constructor to its tag. Returns the tag string if the constructor is a
+ * recognized type (JS builtins or system-defined `FabricPrimitive`s), or `null`
+ * otherwise.
  *
- * `Error.isError()` recognizes errors from other realms when the engine
- * provides it. Engines without it fall back to `instanceof`, which recognizes
- * errors that share the current realm's prototype hierarchy.
- */
-export function isNativeError(value: unknown): value is Error {
-  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
-  return typeof isError === "function"
-    ? isError(value)
-    : value instanceof Error;
-}
-
-/**
- * Maps a constructor to its native-instance tag. Returns the tag string if
- * the constructor is a recognized type (JS builtins or system-defined
- * `FabricPrimitive`s), or `null` otherwise.
- *
- * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
- * sequential `instanceof` checks). Falls back to `instanceof Error` on the
- * constructor's prototype to catch exotic `Error` subclasses. (Note:
- * `Error.isError()` doesn't work on prototype objects -- it only recognizes
- * actual `Error` instances, not the prototype chain -- so we use `instanceof`.)
+ * The builtins are asked first, by `tagFromNativeBuiltinClass()`. Order decides
+ * nothing between the two -- a class is in one list or the other, never both --
+ * so what it is chosen for is cost: a `switch` on object identity compares in
+ * order, and plain objects and arrays outnumber everything else this is asked
+ * about by a wide margin.
  */
 export function tagFromNativeClass(
   constructorFn: { prototype: unknown },
 ): ValueTag | null {
+  const builtin = tagFromNativeBuiltinClass(constructorFn);
+  if (builtin !== null) return builtin;
+
   switch (constructorFn) {
-    // `Error` and standard subclasses all map to the `Error` tag.
-    case Error:
-    case TypeError:
-    case RangeError:
-    case SyntaxError:
-    case ReferenceError:
-    case URIError:
-    case EvalError:
-      return VALUE_TAGS.Error;
-
-    case Array:
-      return VALUE_TAGS.Array;
-    case Object:
-      return VALUE_TAGS.Object;
-    case Map:
-      return VALUE_TAGS.Map;
-    case Set:
-      return VALUE_TAGS.Set;
-    case Date:
-      return VALUE_TAGS.Date;
-    case Uint8Array:
-      return VALUE_TAGS.Uint8Array;
-    case RegExp:
-      return VALUE_TAGS.RegExp;
-    case FabricBytes:
+    case FabricBytes: {
       return VALUE_TAGS.FabricBytes;
-    case FabricEpochNsec:
-      return VALUE_TAGS.EpochNsec;
-    case FabricEpochDay:
-      return VALUE_TAGS.EpochDay;
-    case FabricHash:
-      return VALUE_TAGS.Hash;
-    case FabricKeyPair:
-      return VALUE_TAGS.FabricKeyPair;
-    case FabricRegExp:
-      return VALUE_TAGS.FabricRegExp;
+    }
 
-    default:
-      // Catch exotic `Error` subclasses (e.g. custom subclasses with
-      // non-standard constructors). Guard against non-function values
-      // (e.g. null-prototype objects where `constructor()` is undefined).
-      if (
-        typeof constructorFn === "function" &&
-        constructorFn.prototype instanceof Error
-      ) {
-        return VALUE_TAGS.Error;
-      }
+    case FabricEpochNsec: {
+      return VALUE_TAGS.EpochNsec;
+    }
+
+    case FabricEpochDay: {
+      return VALUE_TAGS.EpochDay;
+    }
+
+    case FabricHash: {
+      return VALUE_TAGS.Hash;
+    }
+
+    case FabricKeyPair: {
+      return VALUE_TAGS.FabricKeyPair;
+    }
+
+    case FabricRegExp: {
+      return VALUE_TAGS.FabricRegExp;
+    }
+
+    default: {
       return null;
+    }
   }
 }
 
@@ -140,7 +116,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // tagged `Object` so the object rule decides it by name, the same way an
   // indirect array is decided by the array rule.
   if (proto === null) {
-    return isNativeError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
+    return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
   }
 
   // The class is read from the PROTOTYPE, not from the value. What is being
@@ -161,7 +137,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // `Error`s with no reachable constructor -- e.g. one from another realm. An
   // ordinary subclass (including `DOMException`) never gets here:
   // `tagFromNativeClass()` matches it via `prototype instanceof Error`.
-  if (isNativeError(value)) return VALUE_TAGS.Error;
+  if (Error.isError(value)) return VALUE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
   if (value instanceof FabricInstance) return VALUE_TAGS.FabricInstance;

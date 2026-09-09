@@ -27,11 +27,20 @@ A test's identity has three required parts, scoped within a repository:
   `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
 - **variant**, when present — a stable name for a non-default configuration
   that runs the same test. The default configuration has no variant. The
-  server-execution ON jobs use `server-execution` after variant-aware relay
-  support is on the default branch. When server execution becomes the
-  default, the ON jobs omit that marker, so new runs continue the history of
-  today's unmarked default jobs. The surviving explicit OFF jobs use
-  `server-execution-off` so their history remains separate.
+  server-execution deployed-topology lanes have stable `default` and
+  `opposite` roles. `default` follows the first-party constant and remains
+  unmarked; `opposite` receives the marker for the posture it actually runs:
+  `server-execution` for ON or `server-execution-off` for OFF. Which
+  posture is unmarked follows the constant (the registry's summary table
+  states it); each marker is the continuous history of its posture whenever
+  that posture is not the default, across flips in either direction. The
+  claim is
+  deliberately narrow: the
+  single-process default jobs (the unit suites, `cf test`, the no-server
+  pattern-unit lane — the `patternTest` / `unitTest` presets) never read
+  the first-party default and stay ambient-OFF by construction, so they
+  are unmarked because the flip does not reach them, not because they run
+  ON.
 
 Identity survives moving a test between files, splitting or renaming test
 files, reformatting, editing bodies, and resharding — shard and slice
@@ -59,10 +68,10 @@ label, report under that item's identity.
 
 An uploaded object is gzip-encoded NDJSON (`Content-Encoding: gzip`, so a
 plain HTTPS reader receives text): one context line, then one record line
-per test execution. A rollup object concatenates a day of such reports;
-in every object, a context line opens a report and each record line
-belongs to the report whose context most recently preceded it, which is
-how per-report provenance — the fork flag among it — survives
+per test execution. A rollup shard concatenates a share of a day's such
+reports; in every object, a context line opens a report and each record
+line belongs to the report whose context most recently preceded it, which
+is how per-report provenance — the fork flag among it — survives
 compaction.
 
 ```json
@@ -80,6 +89,27 @@ several packages fake), and optionally `file`, the repository-relative
 source path when the producer reliably knows it — metadata, not identity.
 `cfcheck` items carry a zero duration: the batch is one TypeScript program
 and per-file durations do not exist there.
+
+For a suite ingested from a JUnit report, `file` comes from one of two
+places and the second overrides the first. Deno names a case's class after
+the module that registered the test, so the case a `describe` registers
+carries the file of every leaf beneath it, and the report joins itself: a
+leaf is named as its describe chain, and its file is the one whose
+registered name is the longest prefix of that chain. What the class names
+is the nearest frame of this repository's own code below the runner, so
+that source holds only while nothing of ours sits between a test file and
+the registrar. The `describe` and `it` the import map resolves to are
+therefore the real ones wherever they would have nothing to do, and a
+module that does register on a file's behalf — a fixture runner, a clock
+harness — takes the class name with it.
+
+The registration preload is such a module, and it replaces what it takes:
+it writes a name-to-file map into the spool, and ingestion lays that over
+what the report says. The map holds each name `Deno.test` was called with
+and, for a file written with `describe` and `it`, the whole chain of each
+leaf. A suite title two files share says nothing about either and is
+dropped from the merged map; a leaf's whole chain is what usually
+survives that.
 
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
@@ -126,6 +156,33 @@ such a harness as a child process hands it an empty
 `CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
 empty value is recording off, the same as an unset one.
 
+A check that no lane can be asked to run is not recorded. A record is one
+execution of one test, and every history built from records — flake rate,
+duration, and what a pull request selects — answers whether to run that
+test again. A check reading what the run around it produced exists only
+as part of that run, so there is nothing to select and no suite in the
+test topology to claim its identity. Two checks are of this shape: the
+pull request coverage gate, which reads the coverage artifacts of every
+job in its own run, and the nightly audit over the CFC property corpus,
+which reads what the step before it wrote. A gate resolving a merge base
+against a base ref is not, and records normally.
+
+A test another workflow already records against the same commit is not
+recorded a second time. One execution of one test is one record, so a
+second workflow running those tests on that commit would give each of
+them two entries in its history. The exemption covers tests rather than
+jobs: a test that runs only in such a job is recorded there.
+
+`run-recorded` records the command it wraps, as one line carrying the
+identity the wrapper was given. It is therefore for a command that is
+itself the check — a formatter, a linter, a gate. A command whose own
+tests are the checks is not wrapped: its tests record through their own
+runner, and the wrapper's line would summarize an invocation beside
+them rather than record one execution of one test. The wrapper passes
+recording through to what it runs either way, so wrapping such a
+command adds that summary without changing what the tests below it
+record.
+
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the
 spool under the per-user spool root (`CF_TEST_RECORDS_SPOOL_ROOT`, or the
@@ -158,22 +215,64 @@ area, managed by the infra repository's `tofu/test-records` root:
 ```
 <repo>/test-records/submissions/ci/v1/<yyyy>/<mm>/<dd>/run-<runId>-<artifact>.ndjson
 <repo>/test-records/submissions/local/<username>/v1/<yyyy>/<mm>/<dd>/<reportId>-<slug>.ndjson
-<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/partition.json
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/0003-of-0017.ndjson
+<repo>/test-records/aggregated/ci/v1/<yyyy>/<mm>/<dd>/rollup.json
 ```
 
-The date partition comes from the run's start, so late-shipped orphans
-land in their run's partition; readers list a trailing window rather than
-only the newest partition. The whole dataset is readable by `allUsers`.
-Writers hold `roles/storage.objectCreator` pinned to their own folder,
-which cannot read, list, overwrite, or delete; nothing already stored can
-be modified by any append credential. An incompatible schema writes under
-`v2/` and readers migrate at their own pace.
+One further dataset area sits beside it and is written by the
+test-selection publisher rather than by anything recording:
 
-Three writer principals exist. The **relay** — the only CI principal —
-holds create on `submissions/ci/` through a Workload Identity provider
-pinned to one workflow file on the default branch, with the impersonation
-binding keyed to that exact workflow ref. **People** hold per-person
-service accounts (`test-records-gh-<username>`, the login lowercased)
+```
+<repo>/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
+<repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+```
+
+The timestamp leading a manifest's name is the moment its publisher
+generated it, which keeps a listing chronologically readable but is not
+what a reader compares. A publisher names its manifest when it starts and
+creates the object when it finishes, so a reader takes the newest object
+the store had created at or before the moment it is resolving for, using
+the full object name to break a tie between two created in the same
+instant. There is no object name meaning "the current one": writers hold
+create and nothing else, so nothing can be overwritten, and that is the
+property the whole store rests on.
+[The selection spec](test-selection.md#determinism) says which moment a
+consumer resolves for and why.
+
+The selection area is the one part of this store that expires. A bucket
+lifecycle rule deletes its objects at a fixed age, and that age has to
+exceed the window in which a continuous-integration run may still be
+re-run, because a re-run resolves the same moment as the attempt it
+repeats and has to find the same manifest. Records carry no retention and
+must not acquire one.
+
+A local object's date partition comes from its run's start. The CI relay
+currently takes the date from the workflow run's `run_started_at`. That
+field is the current attempt's start and GitHub advances it when another
+attempt starts. Re-shipping an earlier artifact after a re-run can therefore
+move it to the new attempt's date and create a second object instead of
+colliding with its first shipment.
+
+The planned relay contract puts the immutable start of the attempt that
+produced an artifact inside that artifact. Its context and object name use
+that value on every relay invocation. Late-shipped objects then land in
+the partition where their report was produced, not where it was uploaded.
+A trailing window can make late arrivals likely to be found, but cannot
+make discovery exact; what listing does and does not settle is described
+below. The whole dataset is readable by `allUsers`. Writers hold
+`roles/storage.objectCreator` pinned to their own folder. That
+identity-specific writer grant cannot overwrite or delete, while the public
+reader grant separately lets every principal read and list. Nothing already
+stored can be modified by any append credential. An incompatible schema writes
+under `v2/` and readers migrate at their own pace.
+
+Four writer principals exist, three of them recording. The **relay** —
+the only one that writes what CI produced — holds create on
+`submissions/ci/` through a Workload Identity provider pinned to one
+workflow file on the default branch, with the impersonation binding keyed
+to that exact workflow ref. **People** hold per-person service accounts
+(`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
 requester-generated X25519 identity. Minting revokes the account's
@@ -181,27 +280,96 @@ previous keys before the new one exists — a person holds one live key,
 never two, and re-requesting is how a lost or compromised key is
 rotated — and a daily
 janitor disables accounts after a month without pull-request activity
-and re-enables them on return. The **compactor**, when provisioned,
-holds create on `aggregated/` and rewrites each closed day of raw
-records — after a seven-day late-arrival lag — as one validated rollup
-that keeps each report's context line ahead of its records; a day with
+and re-enables them on return. The **compactor** holds create on
+`aggregated/` through a provider pinned to its own daily workflow file,
+the relay's arrangement again, and rewrites each closed day of raw
+records — after a seven-day late-arrival lag — as validated rollup shards
+that keep each report's context line ahead of its records; a day with
 no records stays open, since a write-once rollup would permanently
-exclude late arrivals. Rollups are a read optimization, and
-full-fidelity readers list the raw area.
+exclude late arrivals. A rollup covers one source and date: today's
+rollups cover CI, and say nothing about local submissions with the same
+date. Rollups are a read optimization, and full-fidelity readers list the
+raw area. The **publisher** holds create on `test-selection/` through a
+provider pinned to its own workflow file on the default branch, on the
+relay's pattern and for the relay's reason.
+
+A day is several shards. A busy day is over a gigabyte of NDJSON, against
+V8's maximum string length of about half that, and an object has to fit in
+a string at both ends: the compactor builds one, and a reader fetches one.
+Each shard is sized for a few tens of megabytes of text, so a day of tens
+of thousands of raw objects becomes tens of shards.
+
+Which shard a raw object's reports go into is a hash of the object's name
+taken modulo the shard count, so the partition is a property of each
+object rather than of the order the compactor read them in. How many
+shards there are is fixed by `partition.json`, written before any shard of
+the day under the same create-only precondition as everything else here,
+so a day is partitioned once however many runs reach it: the write that
+loses reads the count that won and works to that one. A run that finds a
+day part way through finishes it in the partition claimed for it, writing
+the shards that are missing and leaving the rest alone, so no run leaves
+shards of a partition nothing names and no record reaches two shards. The
+count is in every shard's name as well, so a shard says which partition it
+belongs to. What a partition does not fix is which raw objects it covers:
+an object arriving between two runs is in the rollup when its shard is one
+of the ones still to be written, and in the raw area only otherwise, the
+same as any arrival after a day is compacted. The `rollup.json` manifest
+names the day's shards and is written after all of them, so a day counts
+as compacted when its manifest exists. This means that every named shard
+exists, not that the shards are one atomic snapshot or that no more objects
+can arrive for that source and date. A reader that finds no manifest reads
+the raw area for that source and date.
+
+The rollup manifest records neither the source object names it contains
+nor a point through which it is complete. A reader cannot combine one with
+raw objects from the same source and date: it cannot tell whether a raw
+object is a later arrival or is already in a shard. Folding it may count it
+twice, while suppressing it may lose it. A reader that folds a rollup
+therefore closes that source and date to later raw arrivals and records a
+receipt saying so. The receipt is scoped by source as well as by date, so a
+receipt for the continuous-integration area cannot suppress that day's
+local submissions.
+
+Discovery is by listing. A reader names the source-and-date partitions of
+the window it reads, lists each one, and folds the objects it has not
+folded already, identified by object name. That costs what the window holds
+rather than what arrived in it. A reader sees every object that arrives for
+a partition while that partition is still inside its window; an object
+arriving after that is not found until something reads a wider one.
+
+Two limits follow, and both are accepted rather than closed. An object
+arriving for a source and date already folded from its rollup is never
+counted, which needs the relay to write a partition older than the
+compaction lag. And a re-run crossing a UTC midnight ships its earlier
+attempt's artifacts under the later attempt's date, so the same records
+reach two objects and a reader keying on object name folds both. The relay
+contract above is what settles the second.
+
+Recording the exact source object names in a rollup would let a reader
+prove which raw objects overlap it and stop closing the date, at the cost
+of carrying a day of object names in the manifest. That is the change to
+make if a closed partition is ever shown to have lost something.
 
 ## CI movement
 
-Test jobs hold no credentials. Each job spools records (and its JUnit
+Test jobs hold no credentials. Each recording job — which is every job
+running tests that "Recording" above does not exempt — spools records
+(and its JUnit
 XML: leaf cases become records, container cases — one per describe level,
 with overlapping times — are dropped by a name-prefix rule) and uploads
 one credential-free `test-records-<job>-a<attempt>` artifact,
 `if: always()`. The artifact holds `records.ndjson` — always written,
 zero records or not — and `job.json`; an artifact without a readable
 `records.ndjson` is truncated, and the relay fails it visibly rather
-than ship a context-only object that would read as a run with no tests. The attempt lives in the artifact name because artifacts
-are scoped to the run: a re-run's relay re-ships an earlier attempt's
-artifacts into collisions and ships the re-run jobs' new artifacts as new
-objects, so re-runs neither drop nor double-count records.
+than ship a context-only object that would read as a run with no tests.
+The attempt lives in the artifact name because artifacts are scoped to
+the run. The artifact also needs the immutable start of the attempt that
+produced it. Under the planned relay contract, a re-run re-ships earlier
+attempts' artifacts using their own attempt numbers and start times, so
+those objects collide with their first shipment, while the new attempt's
+artifacts create new objects. The current relay instead uses the workflow
+run's mutable `run_started_at` for all of them. That can move an earlier
+artifact to another date and create a second copy instead of a collision.
 
 The shared shipping action's optional `variant` input stamps every spooled
 and JUnit-derived record gathered by that job. Jobs omit it for the default
@@ -214,9 +382,10 @@ first. Test workflows start emitting the field only after that support is on
 the default branch. Otherwise the old relay drops the field before writing a
 create-only object that cannot be repaired in place.
 
-The relay workflow follows the completion of every workflow that runs tests —
-success, failure, cancellation, and timeout alike. It ships a
-same-repository run unconditionally, since only write access creates
+The relay workflow follows the completion of every workflow that records
+tests — success, failure, cancellation, and timeout alike — and follows
+no workflow that "Recording" above leaves recording nothing. The relay
+ships a same-repository run unconditionally, since only write access creates
 one, and a fork run only when the run's actor — read from the trusted
 payload — is on the team member list (`TEST_RECORDS_MEMBER_ACTOR_IDS`,
 an infra-managed variable of numeric actor ids): team members work from
@@ -253,6 +422,22 @@ identity it has no fresh records for as one that must run: records exist
 only for tests that ran, so a selector that never re-runs the unselected
 starves its own data, and a renamed test is an unknown identity until an
 alias line lands.
+
+Test selection reads `submissions/local/` as well, and weighs a failure
+seen there above one seen in continuous integration. That is a deliberate
+widening of the rule above, and the reason is the quality of the
+evidence: somebody at a workstation, part way through writing something,
+ran a test and it went red because of what they had just written. There
+is no ambiguity about what changed, no shared infrastructure to blame,
+and no question about whether the failure was real, because they went on
+to fix it. What it costs is that a local record can now displace another
+test from a budgeted run rather than only ever adding to what runs. Three
+things bound that: local keys are held by people with repository write
+access, which is the trust boundary the continuous-integration records
+already sit inside; every manifest records the inputs behind every score,
+so a strange selection traces back to the records that produced it; and
+the worst outcome is a pull request that ran a less useful set of tests,
+which the full run on the default branch catches.
 
 ## The sixty-second rule
 

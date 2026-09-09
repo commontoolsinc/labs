@@ -10,6 +10,9 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type {
+  FirstPartyHttpSigner,
+} from "@commonfabric/runner/toolshed-http-auth";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import type { FabricPatternInstantiations } from "../src/fabric-instantiations.ts";
@@ -385,16 +388,17 @@ describe("run-pattern over the pattern index", () => {
     index?: IndexStub,
     options: {
       publish?: false;
+      publishDiscoverable?: true;
       taskText?: string;
       startFailure?: string;
       pieces?: PiecesController;
       instantiations?: FabricPatternInstantiations;
+      patternIndexSigner?: FirstPartyHttpSigner;
     } = {},
   ): CfHarnessEngine =>
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-index-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () =>
         Promise.resolve({
           pieces: options.startFailure === undefined
@@ -403,20 +407,27 @@ describe("run-pattern over the pattern index", () => {
           ...(options.instantiations === undefined
             ? {}
             : { instantiations: options.instantiations }),
+          identity: signer,
         }),
       ...(options.taskText === undefined ? {} : { taskText: options.taskText }),
       // Opting out is connection configuration rather than an injection
       // seam, so a run that does not publish is built from a config that
       // says so — the session config beside it is what a pattern index is
       // admitted with.
-      ...(options.publish === false
+      ...(options.publish === false || options.publishDiscoverable === true
         ? {
           fabricSession: {
             apiUrl: "https://toolshed.test/",
             identityKeyPath: "/keys/agent.pkcs8",
             space: "run-pattern-index",
           },
-          patternIndex: { baseUrl: "https://index.test", publish: false },
+          patternIndex: {
+            baseUrl: "https://index.test",
+            ...(options.publish === false ? { publish: false } : {}),
+            ...(options.publishDiscoverable === true
+              ? { publishDiscoverable: true }
+              : {}),
+          },
         }
         : {}),
       ...(index === undefined ? {} : {
@@ -425,7 +436,7 @@ describe("run-pattern over the pattern index", () => {
             new PatternIndexClient({
               baseUrl: "https://index.test",
               fetchFn: index.fetchFn,
-              signer,
+              signer: options.patternIndexSigner ?? signer,
             }),
           ),
       }),
@@ -434,8 +445,8 @@ describe("run-pattern over the pattern index", () => {
   /**
    * Runs the tool and then sends what the session staged for the index, which
    * is what the prompt loop does when a session ends. A publication is held
-   * until then so a session that iterates offers search one entry per
-   * capability rather than one per successful run.
+   * until then so a session that iterates retains one candidate per capability
+   * rather than one per successful run.
    */
   const runAndFlush = async (
     engine: CfHarnessEngine,
@@ -538,6 +549,7 @@ describe("run-pattern over the pattern index", () => {
         patternId: "pat-doubler",
         inputs: { n: 1 },
       });
+      await index.settled("recordEvent", 1);
       const events = index.calls.filter((call) => call.fn === "recordEvent");
       expect(events.map((event) => event.body.eventType)).toContain(
         "instantiated",
@@ -727,6 +739,22 @@ describe("run-pattern over the pattern index", () => {
         },
       });
       expect(publish?.body.dependencies).toEqual([]);
+      expect(publish?.body.discoverable).toBe(false);
+      expect(publish?.body.discoverabilityReason).toBe(
+        "recorded automatically; discoverability is earned by evidence",
+      );
+    });
+
+    it("publishes discoverably only when the run deliberately opts in", async () => {
+      const index = stubIndex({}, { publish: { created: true } });
+      await runAndFlush(
+        createEngine(index, { publishDiscoverable: true }),
+        publishInput,
+      );
+
+      const publish = index.calls.find((call) => call.fn === "publishPattern");
+      expect(publish?.body.discoverable).toBe(true);
+      expect(publish?.body.discoverabilityReason).toBeUndefined();
     });
 
     it("publishes under the compiled pattern's content-addressed identity", async () => {
@@ -844,6 +872,28 @@ describe("run-pattern over the pattern index", () => {
     });
 
     it("reports an indexed run whose piece carries a session-only pointer as failed", async () => {
+      // Holding the first event signature makes instantiation slow while the
+      // terminal event is queued, pinning their delivery order independently
+      // of signature latency. Identify event requests from the proof itself so
+      // changes to how the lookup is signed cannot silently bypass the gate.
+      const firstEventSignature = Promise.withResolvers<void>();
+      let recordEventSignatureCount = 0;
+      const patternIndexSigner: FirstPartyHttpSigner = {
+        did: () => signer.did(),
+        async sign(payload) {
+          const proof = new TextDecoder().decode(payload);
+          if (!proof.includes("\npath: /recordEvent\n")) {
+            return { ok: new Uint8Array(64) };
+          }
+          recordEventSignatureCount += 1;
+          if (recordEventSignatureCount === 1) {
+            await firstEventSignature.promise;
+          } else if (recordEventSignatureCount === 2) {
+            queueMicrotask(firstEventSignature.resolve);
+          }
+          return { ok: new Uint8Array(64) };
+        },
+      };
       const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
       await createEngine(index, {
         instantiations: {
@@ -851,12 +901,15 @@ describe("run-pattern over the pattern index", () => {
           since: () => STRANDED_RECORDS,
           keylessSince: () => STRANDED_RECORDS,
         },
+        patternIndexSigner,
       }).invokeBuiltinTool("run_pattern", {
         patternId: "pat-doubler",
         inputs: { n: 21 },
       });
 
+      firstEventSignature.resolve();
       await index.settled("recordEvent", 2);
+      expect(recordEventSignatureCount).toBe(2);
       expect(
         index.calls.filter((call) => call.fn === "recordEvent")
           .map((call) => call.body.eventType),

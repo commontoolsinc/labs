@@ -54,7 +54,7 @@ export const LLMMessageSchema = internSchema(
   {
     type: "object",
     properties: {
-      role: { type: "string", enum: ["user", "assistant", "system", "tool"] },
+      role: { type: "string", enum: ["user", "assistant", "tool"] },
       content: LLMContentSchema,
     },
     required: ["role", "content"],

@@ -21,6 +21,7 @@ import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 import {
   FragmentWriter,
+  preloadArgument,
   RECORDS_DIR_VARIABLE,
   recordsDir,
 } from "@commonfabric/test-support/records";
@@ -216,7 +217,13 @@ function getCfCommand(rootDir: string): string[] {
 async function findPatternTests(
   rootDir: string,
   filter?: string,
+  only?: readonly string[],
 ): Promise<string[]> {
+  // An explicit list names the files outright, which is what the topology
+  // hands over when a lane was asked for part of this suite. A name
+  // filter cannot express a set of unrelated files, and a list of them is
+  // exactly what selection produces.
+  if (only !== undefined) return selectPatternTestFiles([...only]);
   const { chunkStr, totalChunksStr, nameFilter } = (filter ?? "")
     .match(
       /^(?:(?<chunkStr>[1-9][0-9]*)[/](?<totalChunksStr>[1-9][0-9]*)|(?<nameFilter>.+)|)$/,
@@ -295,9 +302,10 @@ async function runPatternTests(
   rootDir: string,
   filter?: string,
   junitDir?: string,
+  only?: readonly string[],
 ): Promise<boolean> {
   const cfCmd = getCfCommand(rootDir);
-  const testFiles = await findPatternTests(rootDir, filter);
+  const testFiles = await findPatternTests(rootDir, filter, only);
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -521,6 +529,8 @@ export async function findIntegrationTestFiles(
  * matching files are passed as explicit paths under `relDir`. Deno does not
  * filter explicitly-passed paths through a package `test` config's `exclude`,
  * so they run even where that config drops the `integration/` directory.
+ * With a JUnit directory the run also carries the registration preload,
+ * which is what gives the report's cases their files.
  */
 export function buildFilteredTestArgs(
   pkg: string,
@@ -538,6 +548,7 @@ export function buildFilteredTestArgs(
 
   if (junitDir) {
     args.push(`--junit-path=${path.join(junitDir, `${pkg}.xml`)}`);
+    args.push(preloadArgument());
   }
 
   for (const name of testFiles) {
@@ -599,6 +610,7 @@ export async function runPackageIntegration(
   rootDir: string,
   filter?: string,
   junitDir?: string,
+  only?: readonly string[],
 ): Promise<boolean> {
   const packageDirName = pkg === "cli-fuse"
     ? "cli"
@@ -626,7 +638,11 @@ export async function runPackageIntegration(
   if (junitDir) {
     await Deno.mkdir(junitDir, { recursive: true });
     const junitPath = path.resolve(junitDir, `${pkg}.xml`);
-    env.INTEGRATION_TEST_FLAGS = `--junit-path=${junitPath}`;
+    // The preload travels with the JUnit path: the report names each case
+    // by its describe chain, and the map the preload leaves in the spool
+    // is what turns that chain back into a file.
+    env.INTEGRATION_TEST_FLAGS =
+      `--junit-path=${junitPath} ${preloadArgument()}`;
   } else {
     // Pass through INTEGRATION_TEST_FLAGS if set in environment
     const testFlags = Deno.env.get("INTEGRATION_TEST_FLAGS");
@@ -656,7 +672,7 @@ export async function runPackageIntegration(
   let result: { success: boolean; code: number };
 
   if (pkg === "pattern-tests") {
-    return await runPatternTests(rootDir, filter, junitDir);
+    return await runPatternTests(rootDir, filter, junitDir, only);
   } else if (pkg === "cli") {
     // CLI uses a special shell script
     env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
@@ -729,6 +745,11 @@ Arguments:
   filter    Optional. Filter test files by name pattern.
             Only works with deno test packages (not cli or cli-fuse).
 
+  --files=<path>    A file naming the pattern tests to run, one path per
+                    line, in place of the name filter. This is how a
+                    continuous-integration lane asks for the part of the
+                    suite it was given.
+
 Examples:
   deno task integration                       # Run all, auto-cleanup
   deno task integration cli                   # Run only cli tests
@@ -791,6 +812,7 @@ async function main(): Promise<void> {
   // Parse flags
   let cliPortOffset: number | undefined;
   let junitDir: string | undefined;
+  let onlyFilesPath: string | undefined;
   const positionalArgs: string[] = [];
 
   for (const arg of args) {
@@ -798,6 +820,11 @@ async function main(): Promise<void> {
       cliPortOffset = parsePortOffset(arg.split("=")[1], "--port-offset");
     } else if (arg.startsWith("--junit-dir=")) {
       junitDir = arg.split("=")[1];
+    } else if (arg.startsWith("--files=")) {
+      // The file naming the pattern tests to run, one path per line. The
+      // list arrives in a file rather than on the command line because a
+      // selected set runs to hundreds of paths.
+      onlyFilesPath = arg.split("=")[1];
     } else if (!arg.startsWith("-")) {
       positionalArgs.push(arg);
     }
@@ -807,6 +834,10 @@ async function main(): Promise<void> {
   if (junitDir) {
     await Deno.mkdir(junitDir, { recursive: true });
   }
+
+  const onlyFiles = onlyFilesPath === undefined ? undefined : (
+    await Deno.readTextFile(onlyFilesPath)
+  ).split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
 
   const packageFilter = positionalArgs[0];
   const nameFilter = positionalArgs[1];
@@ -952,6 +983,7 @@ async function main(): Promise<void> {
         rootDir,
         nameFilter,
         junitDir,
+        onlyFiles,
       );
       results.push({ pkg, success });
     }
@@ -968,6 +1000,7 @@ async function main(): Promise<void> {
         rootDir,
         nameFilter,
         junitDir,
+        onlyFiles,
       );
       results.push({ pkg, success });
     }

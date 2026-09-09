@@ -17,6 +17,7 @@ import {
   setPatternSource,
   systemPatternSource,
 } from "../src/index.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("piece source reconciliation");
 const PARENT_PATH = "/api/patterns/system/reconcile-parent.tsx";
@@ -103,6 +104,9 @@ describe("piece source reconciliation", () => {
   afterEach(async () => {
     identityGate?.resolve();
     await runtime?.sourceReconciler.idle();
+    // A compile the test started writes its cache entries behind itself, so
+    // teardown waits for them rather than closing storage underneath one.
+    await runtime?.patternManager.flushCompileCacheWrites();
     await runtime?.dispose();
   });
 
@@ -264,16 +268,17 @@ describe("piece source reconciliation", () => {
       expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     });
 
-    it("keeps the same path on another host as the web URL it is", async () => {
+    it("leaves the same path on another host unusable", async () => {
       // Re-pointing it at this toolshed would change which host the piece
-      // follows, which is a change of source rather than of spelling. Nothing
-      // follows a web origin yet, so the piece keeps what it runs.
+      // follows, which is a change of source rather than of spelling. It names
+      // an endpoint outside this deployment, which is no origin at all, so the
+      // piece keeps what it runs and carries a string a person can repair.
       const foreign = `https://elsewhere.test${PARENT_PATH}`;
       const piece = await preparePiece(refuseEveryFetch);
       const originalRef = getPatternIdentityRef(piece);
       await stampSource(piece, foreign);
 
-      expect(await reconcile(piece)).toBe("unsupported");
+      expect(await reconcile(piece)).toBe("unusable");
       expect(getPatternSource(piece)).toBe(foreign);
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
     });
@@ -706,21 +711,6 @@ describe("piece source reconciliation", () => {
       });
     });
 
-    it("records an origin whose kind nothing follows yet", async () => {
-      const piece = await preparePiece(refuseEveryFetch);
-      const origin = `https://programs.test${PARENT_PATH}`;
-      await stampSource(piece, origin);
-
-      expect(await reconcile(piece)).toBe("unsupported");
-
-      // Not a fault, and not a piece nobody has looked at: its owner can ask
-      // this origin by hand, and nothing else will.
-      expect(getPieceReconciliation(piece)).toMatchObject({
-        outcome: "unsupported",
-        origin,
-      });
-    });
-
     it("says nothing about a piece that records no origin", async () => {
       const piece = await preparePiece(refuseEveryFetch);
 
@@ -740,18 +730,23 @@ describe("piece source reconciliation", () => {
     });
   });
 
-  describe("an external web URL", () => {
-    it("recognizes the origin and does not follow it yet", async () => {
-      // Resolving a source outside this deployment is specified and not built,
-      // so the piece keeps what it runs and nothing is fetched on its behalf.
+  describe("an external endpoint", () => {
+    it("is no origin at all, so the piece keeps what it runs", async () => {
+      // A piece follows what this deployment serves and what the fabric
+      // holds. An endpoint outside both names no origin, so nothing is
+      // fetched on the piece's behalf and it carries the string unresolved.
       const piece = await preparePiece(refuseEveryFetch);
       const originalRef = getPatternIdentityRef(piece);
       const origin = `https://programs.test${PARENT_PATH}`;
       await stampSource(piece, origin);
 
-      expect(await reconcile(piece)).toBe("unsupported");
+      expect(await reconcile(piece)).toBe("unusable");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPatternSource(piece)).toBe(origin);
+
+      // An unusable origin is read off the recorded string itself, so a
+      // record would only restate what the piece already says.
+      expect(getPieceReconciliation(piece)).toBeUndefined();
     });
   });
 
@@ -1155,6 +1150,348 @@ describe("piece source reconciliation", () => {
     });
   });
 
+  describe("a piece the runtime supplies", () => {
+    /** A cell for a piece that does not exist yet. */
+    function emptyPiece(fetch: RuntimeFetch) {
+      createRuntime(fetch);
+      return runtime.getCell<{ marker?: string }>(
+        signer.did(),
+        `supplied-${crypto.randomUUID()}`,
+      );
+    }
+
+    function open(piece: Cell<unknown>, origin = PARENT_SOURCE) {
+      return runtime.sourceReconciler.open(piece, origin);
+    }
+
+    it("answers with the source its origin names, for a piece not yet there", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+
+      const pattern = await open(piece);
+      expect(pattern).toBeDefined();
+      // The identity is what the origin advertises. The export is whichever
+      // one compiling the file selects, which this fixture reaches under two
+      // names for one pattern object.
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)?.identity)
+        .toBe(v1Identity);
+    });
+
+    it("records the supplied origin with the piece's creation revision", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      const pattern = await open(piece);
+
+      const result = await runtime.editWithRetry((tx) => {
+        runtime.runner.run(tx, pattern!, {}, piece.withTx(tx), {
+          sourceOrigin: PARENT_SOURCE,
+        });
+      });
+      expect(result.error).toBeUndefined();
+
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["create"]);
+      expect(getPieceSourceRevisions(piece).at(-1)?.origin).toBe(PARENT_SOURCE);
+    });
+
+    it("gives an origin to a piece the runtime made before it claimed one", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = await preparePiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+
+      const pattern = await open(piece);
+
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["baseline", "follow"]);
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!))
+        .toEqual(originalRef);
+    });
+
+    it("gives the origin and its source to a piece whose space holds no source for what it runs", async () => {
+      // A piece the runtime made before it claimed an origin, running a
+      // pattern its own space retains no source for: what the origin names
+      // now is the only code that space can give it, so it takes that in the
+      // same revision that records the origin, and keeps the identity it
+      // displaced. The pattern stays live in this runtime's index, compiled
+      // into another space, because the index answers by identity alone and
+      // an answer from there is not this space holding the source.
+      const v1Identity = await identityFor(source("v1"));
+      const v2Identity = await identityFor(source("v2"));
+      createRuntime(servingFetch(() => v2Identity, () => source("v2")));
+      const elsewhere = (await Identity.fromPassphrase("another space")).did();
+      const v1 = await runtime.patternManager.compilePattern(
+        parentProgram(source("v1")),
+        { space: elsewhere },
+      );
+      const piece = runtime.getCell<{ marker?: string }>(
+        signer.did(),
+        `supplied-${crypto.randomUUID()}`,
+      );
+      await runtime.setup(undefined, v1, {}, piece);
+      await runtime.patternManager.flushCompileCacheWrites();
+      const originalRef = getPatternIdentityRef(piece)!;
+      expect(originalRef.identity).toBe(v1Identity);
+      expect(
+        await runtime.patternManager.getPatternSourceProgramByIdentity(
+          v1Identity,
+          piece.space,
+        ),
+        "the piece's space must hold no source for what it runs",
+      ).toBeUndefined();
+      expect(
+        await runtime.patternManager.loadPatternByIdentity(
+          v1Identity,
+          SYMBOL,
+          piece.space,
+        ),
+        "the pattern must stay live in the runtime's index",
+      ).toBeDefined();
+
+      const pattern = await open(piece);
+
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPatternIdentityRef(piece)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(piece.getMetaRaw("displacedPattern")).toMatchObject(originalRef);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["follow"]);
+      expect(getPieceSourceRevisions(piece).at(-1)?.origin).toBe(PARENT_SOURCE);
+    });
+
+    it("adopts what the origin now names, and answers with that", async () => {
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      const pattern = await open(piece);
+
+      expect(getPatternIdentityRef(piece)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(getPieceSourceRevisions(piece).at(-1)?.operation).toBe(
+        "origin-update",
+      );
+    });
+
+    it("leaves an origin its owner chose alone", async () => {
+      // A surface the runtime supplies is still the space owner's piece. Once
+      // they have pointed it somewhere else, the runtime supplying it is no
+      // longer what decides where its code comes from.
+      const piece = await preparePiece(refuseEveryFetch);
+      const chosen = `https://programs.test${PARENT_PATH}`;
+      await stampSource(piece, chosen);
+
+      await open(piece);
+
+      expect(getPatternSource(piece)).toBe(chosen);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual([]);
+    });
+
+    it("supplies nothing for an origin that is not a system pattern", async () => {
+      const piece = emptyPiece(refuseEveryFetch);
+      expect(await open(piece, "https://programs.test/main.tsx"))
+        .toBeUndefined();
+    });
+
+    it("records nothing for a supplied origin it cannot supply", async () => {
+      // The origin the runtime may supply is settled before either path uses
+      // it, so a piece that already exists is not stamped with one that a
+      // piece not yet there would have been refused.
+      const piece = await preparePiece(refuseEveryFetch);
+
+      expect(await open(piece, "https://programs.test/main.tsx"))
+        .toBeUndefined();
+
+      expect(getPatternSource(piece)).toBeUndefined();
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual([]);
+    });
+
+    it("leaves the space holding the source behind what it answers with", async () => {
+      // What a supplied open owes its caller is not a pattern object: it is
+      // this space holding the source closure behind it, which the creation
+      // revision retains and a later cross-space child replicates out of. An
+      // identity this runtime already holds in memory is held under that
+      // identity alone, with no space attached, so answering from there would
+      // hand back a pattern whose closure this space never received.
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      // Live in this runtime's index, and compiled into another space, so the
+      // only way this space ends up with the closure is by getting it here.
+      const elsewhere = await Identity.fromPassphrase("another space");
+      await runtime.patternManager.compilePattern(
+        parentProgram(source("v1")),
+        { space: elsewhere.did() },
+      );
+
+      const pattern = await open(piece);
+
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)?.identity)
+        .toBe(v1Identity);
+      await runtime.patternManager.flushCompileCacheWrites();
+      expect(
+        await runtime.patternManager.getPatternSourceProgramByIdentity(
+          v1Identity,
+          signer.did(),
+        ),
+        "the space the surface is being created in must hold its source",
+      ).toBeDefined();
+    });
+
+    it("leaves every space it opens a surface in holding that source", async () => {
+      // One runtime serving many spaces is the case a process-global cache
+      // could not answer: it compiles once, and every space after the first is
+      // served a pattern whose closure was never persisted there. Opening per
+      // surface piece has no first space — each one compiles into the space
+      // its own piece lives in.
+      const v1Identity = await identityFor(source("v1"));
+      createRuntime(servingFetch(() => v1Identity, () => source("v1")));
+      const spaces = [
+        signer.did(),
+        (await Identity.fromPassphrase("second served space")).did(),
+      ];
+
+      for (const space of spaces) {
+        const piece = runtime.getCell<{ marker?: string }>(
+          space,
+          `supplied-${crypto.randomUUID()}`,
+        );
+        expect(await runtime.sourceReconciler.open(piece, PARENT_SOURCE))
+          .toBeDefined();
+      }
+
+      await runtime.patternManager.flushCompileCacheWrites();
+      for (const space of spaces) {
+        expect(
+          await runtime.patternManager.getPatternSourceProgramByIdentity(
+            v1Identity,
+            space,
+          ),
+          `${space} was served the surface without being given its source`,
+        ).toBeDefined();
+      }
+    });
+
+    it("supplies nothing when the origin's source cannot be resolved", async () => {
+      // The host advertises an identity and then fails to serve the source
+      // behind it. Nothing is left to run, and the failure is the pass's.
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece((input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        return Promise.resolve(
+          url.searchParams.has("identity")
+            ? new Response(v1Identity)
+            : new Response("gone", { status: 500 }),
+        );
+      });
+
+      expect(await open(piece)).toBeUndefined();
+    });
+
+    it("abandons an in-flight supplied resolve on disposal", async () => {
+      identityGate = defer();
+      const requested = defer();
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(async (input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        if (url.searchParams.has("identity")) {
+          requested.resolve();
+          await identityGate!.promise;
+          return new Response(v1Identity);
+        }
+        return new Response(parentSource);
+      });
+
+      const opening = open(piece);
+      // The request is the witness that the pass is registered: disposal has
+      // to have something in flight to abandon.
+      await requested.promise;
+      const disposing = runtime.sourceReconciler.dispose();
+      identityGate.resolve();
+
+      await disposing;
+      expect(await opening).toBeUndefined();
+    });
+
+    it("answers rather than rejecting when nothing about the open works", async () => {
+      // Opening a surface runs from a launch nothing awaits for its value, so
+      // a rejection escaping it would surface as an unhandled one rather than
+      // as a surface that did not come up. A runtime that cannot even say
+      // which host serves the space is the shortest way to a throw before any
+      // of the paths that answer for themselves.
+      const piece = await preparePiece(refuseEveryFetch);
+      const hostForSpace = runtime.hostForSpace;
+      (runtime as unknown as { hostForSpace: () => URL }).hostForSpace = () => {
+        throw new Error("no route for this space");
+      };
+      try {
+        expect(await open(piece)).toBeUndefined();
+      } finally {
+        (runtime as unknown as { hostForSpace: typeof hostForSpace })
+          .hostForSpace = hostForSpace;
+      }
+      expect(getPatternSource(piece)).toBeUndefined();
+    });
+
+    it("answers nothing for a piece it cannot even read", async () => {
+      // Opening starts by reading the piece, which is what says whether it
+      // exists at all. A read that fails outright — storage closing under a
+      // launch is the ordinary way — leaves nothing to answer with, and the
+      // caller is told so rather than handed a rejection.
+      const piece = emptyPiece(refuseEveryFetch);
+      await storageManager.close();
+
+      expect(await open(piece)).toBeUndefined();
+    });
+
+    it("refuses source that does not compile to the advertised identity", async () => {
+      // The host says one thing and serves another, so what it serves is not
+      // the source that origin names.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = emptyPiece(
+        servingFetch(() => v2Identity, () => source("v1")),
+      );
+      expect(await open(piece)).toBeUndefined();
+    });
+  });
+
   describe("guarding the write", () => {
     it("shares one reconciliation between concurrent openings", async () => {
       const v1Identity = await identityFor(source("v1"));
@@ -1244,7 +1581,11 @@ describe("piece source reconciliation", () => {
       // A detach lands while the update is resolving. The transition it was
       // going to write names an origin the piece no longer follows.
       await runtime.editWithRetry((tx) => {
-        piece.withTx(tx).setMetaRaw("patternSource", undefined);
+        piece.withTx(tx).setMetaRaw(
+          "patternSource",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
       });
       identityGate.resolve();
 
@@ -1285,7 +1626,11 @@ describe("piece source reconciliation", () => {
       const moved = await compileMarkerPattern("v3");
       const movedRef = runtime.patternManager.getArtifactEntryRef(moved)!;
       const { error } = await runtime.editWithRetry((tx) => {
-        piece.withTx(tx).setMetaRaw("patternIdentity", movedRef);
+        piece.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          movedRef,
+          rawMetaWriteAuthorization,
+        );
       });
       expect(error).toBeUndefined();
       identityGate.resolve();
@@ -1314,7 +1659,11 @@ describe("piece source reconciliation", () => {
       ) => {
         const unchanged = await sync(...args);
         const { error } = await runtime.editWithRetry((tx) => {
-          piece.withTx(tx).setMetaRaw("patternIdentity", movedRef);
+          piece.withTx(tx).setMetaRaw(
+            "patternIdentity",
+            movedRef,
+            rawMetaWriteAuthorization,
+          );
         });
         expect(error).toBeUndefined();
         return unchanged;

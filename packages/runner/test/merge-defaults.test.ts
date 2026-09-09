@@ -6,7 +6,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
 import {
   internSchema,
   isInternedSchema,

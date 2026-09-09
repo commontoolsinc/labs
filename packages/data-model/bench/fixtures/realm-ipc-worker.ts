@@ -12,6 +12,8 @@
  * bury exactly that.
  */
 
+import type { BenchWorkerAck } from "@commonfabric/test-support/bench-worker";
+
 import type { RealmEncodedValue } from "@/codec-realm/interface.ts";
 import { fabricFromRealmValue } from "@/codecs.ts";
 
@@ -47,12 +49,6 @@ export type IpcRequest =
     readonly payload: unknown;
   };
 
-/** What the far side reports. One boolean, so the return leg costs nothing. */
-export type IpcAck = {
-  readonly ok: boolean;
-  readonly error?: string;
-};
-
 self.onmessage = (ev: MessageEvent<IpcRequest>) => {
   const request = ev.data;
 
@@ -67,10 +63,10 @@ self.onmessage = (ev: MessageEvent<IpcRequest>) => {
     // the first to isolate the decode, the second because the old far side
     // genuinely had no work to do.
 
-    self.postMessage({ ok: true } satisfies IpcAck);
+    self.postMessage({ ok: true } satisfies BenchWorkerAck);
   } catch (e) {
     self.postMessage(
-      { ok: false, error: (e as Error).message } satisfies IpcAck,
+      { ok: false, error: (e as Error).message } satisfies BenchWorkerAck,
     );
   }
 };

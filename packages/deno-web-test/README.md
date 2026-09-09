@@ -87,6 +87,28 @@ Finally, run `deno-web-test/cli.ts`, which takes a glob of files to test.
 }
 ```
 
+## The browser's lifetime
+
+Everything a run writes goes into one temporary directory, which the run removes
+as the last thing it does. Chrome recreates the directory `--user-data-dir`
+names, every missing parent included, whenever it writes into it, so the removal
+has to follow the last of Chrome's processes rather than the browser process,
+which the crash handler and the rendering processes outlive.
+
+The harness spawns Chrome itself and attaches astral to the running browser with
+`connect()`. Every process Chrome starts inherits the two pipes the browser was
+spawned with, and holds a pipe until it exits or closes that pipe, so spawning
+the browser here is what keeps those pipes in reach. The wait is for the read
+ends of both to reach end of file, which is once the last process holding either
+of them has gone, whichever of the two it held. Piping standard output as well
+keeps what the browser writes out of the harness's own output, which a spawn
+leaves inherited for any stream it asks no pipe for. Both pipes are read to the
+end rather than left alone, because a pipe nobody reads fills up and stops the
+process writing into it, and what a browser writes says nothing the run acts on.
+Closing the browser returns on that end of file, and the removal follows. The
+spawning and the wait are [`BrowserProcess`](../integration/browser-process.ts),
+which the browser integration tests use for the same reason.
+
 ## Support
 
 Currently only the `Deno.test(string, fn)` signature works. Using other
@@ -98,5 +120,6 @@ For testing `deno-web-test` itself, the test suites (running in Deno itself) run
 `deno-web-test` for subprojects to test features. Due to being in a workspace,
 and not wanting to clutter the workspace with these test directories, and Deno
 attempting to enforce this, the test packages are moved to a temporary directory
-and the test task rewritten to target the local `cli.ts` export. This could be
-relaxed if moved outside of the workspace.
+and the test task rewritten to target the local `cli.ts` export. That directory
+is removed once the run it was made for has finished. This could be relaxed if
+moved outside of the workspace.

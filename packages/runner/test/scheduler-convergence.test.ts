@@ -454,11 +454,7 @@ describe("bounded convergence", () => {
   });
 
   it("should preserve dirty effects after pass budget exhaustion", async () => {
-    const schedulerInternal = runtime.scheduler as unknown as {
-      execute: () => Promise<void>;
-      pendingQueueTaskTimer: number | null;
-      scheduled: boolean;
-    };
+    const schedulerInternal = runtime.scheduler.accessForTestingOnly;
     const staleSchedulerInternal = getStaleSchedulerInternals(
       runtime.scheduler,
     );
@@ -638,7 +634,9 @@ describe("bounded convergence", () => {
     expect(cellC.get()).toBeLessThanOrEqual(3);
   });
 
+  //
   // Action Stats Edge Cases
+  //
 
   it("should return undefined for unknown action stats", () => {
     const unknownAction: Action = () => {};
@@ -709,7 +707,9 @@ describe("bounded convergence", () => {
     expect(stats!.averageTime).toBeCloseTo(stats!.totalTime / 3, 5);
   });
 
+  //
   // Cycle Convergence Scenarios
+  //
 
   it("should handle larger cycles without hanging", async () => {
     const cellA = runtime.getCell<number>(space, "4cycle-A", undefined, tx);

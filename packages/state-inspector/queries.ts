@@ -15,6 +15,7 @@ export interface SpaceSummary {
 
   /** Scheduler basis rows (0 even when the table exists empty). */
   schedulerBasisRows: number;
+
   commits: number;
   commitSeqRange: [number, number] | null;
   sessions: number;

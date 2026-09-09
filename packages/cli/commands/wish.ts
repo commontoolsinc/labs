@@ -1,12 +1,13 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import { cliText } from "../lib/cli-name.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
-import { normalizeApiUrl, setQuietMode } from "./piece.ts";
+import { setQuietMode } from "./piece.ts";
 import { projectWishValue, readWish } from "../lib/wish.ts";
 import {
   type CellSelection,
@@ -87,7 +88,7 @@ export async function wishAction(
   const scope = parseScopeFlags(options.scope);
   // Read before the wish is issued: a malformed selection is a fact about the
   // flags, so it is reported without a resolution having been attempted. The
-  // same grammar and the same messages `cf piece get` and `cf piece call`
+  // same grammar and the same messages `cf cell get` and `cf piece call`
   // report, because it is the same parser.
   // Through the command's own exit seam rather than `exitWithDataError`, whose
   // `exit` is typed `never`: this command's seam returns, because its unit
@@ -184,10 +185,14 @@ export const wish = new Command()
     prefix: "CF_",
   })
   .option("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .env("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .option(
     "-s,--space <space:string>",
-    "Space name or DID to connect to. Defaults to the identity's home space " +
-      "(where profile targets resolve regardless).",
+    "Space name or DID to connect to, overriding CF_SPACE. Falls back to " +
+      "CF_SPACE, then to the identity's home space (where profile targets " +
+      "resolve regardless).",
   )
   .option(
     "-p,--path <path:string>",

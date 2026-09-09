@@ -37,7 +37,7 @@ is absent. The identifier is the content.
 
 The single media type this codebase mints is
 `application/vnd.common-fabric.data`, exported as `DATA_URI_MEDIA_TYPE` from
-`packages/data-model/src/data-uri-codec.ts`. A minted identifier looks like
+`packages/data-model/src/codec-data-uri.ts`. A minted identifier looks like
 this:
 
 ```text
@@ -58,7 +58,7 @@ onward is ignored.
 There are two mint functions, and they differ in whether they prepare the value
 first.
 
-`dataUriFromValue(value)` in `packages/data-model/src/data-uri-codec.ts` is the
+`dataUriFromValue(value)` in `packages/data-model/src/codec-data-uri.ts` is the
 single place the identifier's shape is assembled: scheme, media type, and
 base64url payload. It does no preparation of the value at all; callers hand it
 a ready `FabricValue`.
@@ -109,7 +109,7 @@ Representative places that mint one:
 
 ## Reading one
 
-`valueFromDataUri(uri)` in `packages/data-model/src/data-uri-codec.ts` extracts
+`valueFromDataUri(uri)` in `packages/data-model/src/codec-data-uri.ts` extracts
 and decodes the payload. It accepts exactly the shape `dataUriFromValue`
 writes, and throws for anything else — a different media type, a payload that
 is not base64url, an empty payload, or bare JSON where the `fvj1:`-tagged
@@ -141,7 +141,7 @@ identifier repeatedly costs one parse.
 
 ## The two tests, and why both exist
 
-Two predicates in `packages/data-model/src/data-uri-codec.ts` answer different
+Two predicates in `packages/data-model/src/codec-data-uri.ts` answer different
 questions, and they are used at different points of the same path. Swapping one
 for the other changes behavior.
 

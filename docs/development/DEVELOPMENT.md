@@ -29,7 +29,19 @@ about one aspect of the runtime, are indexed in
 - Group imports by source: standard library, external, then internal, with a
   blank line between the groups.
 - Prefer named exports over default exports.
-- Use package names for internal imports.
+- Use package names to import from another package.
+- Use relative paths to import from within your own package. A file that names
+  the package it belongs to reaches a file of that same package the long way
+  round, through the `exports` map and back, so one module ends up with two
+  spellings. Naming the bare package name is worse than that. The entry point
+  reaches every module the package exports, so naming it from inside completes
+  a cycle, and the order in which the package's modules initialize starts to
+  depend on the order the entry point lists its exports. The
+  `cf-package/no-self-import` lint rule (`tasks/lint-self-import.ts`,
+  registered in the root `deno.jsonc`) reports both forms, so a plain
+  `deno lint` catches them. It exempts a package's own tests, which name their
+  package on purpose: the surface a consumer sees is the thing they are there
+  to check.
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
@@ -212,6 +224,123 @@ abstract class Fryer {
   }
 }
 ```
+
+#### Making a private member reachable from a test
+
+A test sometimes needs what a class keeps to itself: a threshold to straddle,
+a table to seed, a step to run on its own. Casting the instance to get at it —
+`as unknown as { ... }`, `as never as { ... }`, `as any` — is not the way, and
+the `#` convention takes it off the table: a `#` name is out of a cast's reach,
+and a member left TypeScript-`private` so that a cast can find it is, if a
+field, an own enumerable property, and either way a member the class promised
+to keep to itself, with a comment apologizing for it. The cast also types the
+member however the test finds convenient, so nothing checks that what the test
+reads is what the class holds, and a renamed member leaves the test reading
+`undefined` and passing.
+
+The way is a public getter named `accessForTestingOnly`, which hands over
+exactly what a test needs and nothing else. The name is the documentation:
+everything behind it is internals free to change, and a reader who sees it in
+a test knows the test is written against them. Its doc comment says what it
+exposes, and the name says the rest. The `cf-source/no-access-for-testing-only`
+lint rule (`tasks/lint-access-for-testing-only.ts`, registered in the root
+`deno.jsonc`) reports a read of the getter from anywhere but a test, a
+benchmark, or a file under a `test/`, `integration/`, or `bench/` directory, so
+a plain `deno lint` catches source that has come to depend on it.
+
+- Instance members go behind an instance getter; static members behind a
+  static one. A class may have both, and never more than one of each.
+- The getter's return type is written inline on the getter, and the body is an
+  object literal. No named type is declared for it, so the class's public
+  surface grows by one member and nothing else.
+- A field the class never reassigns — a `Map` it mutates in place — is handed
+  over as a plain property holding the reference. A field the class reassigns
+  is a getter, so that a read is live, and gains a setter only when a test
+  assigns it. A method is an arrow forwarding to the `#` method. An
+  object-literal getter cannot see the class's `this`, so an accessor with one
+  takes `const outerThis = this;` under `// deno-lint-ignore no-this-alias`;
+  an accessor of plain properties and arrows needs no alias.
+- An entry with no setter is `readonly` in the type. A getter without a
+  setter throws on assignment, and a plain property would take the write into
+  the literal and never reach the instance, so the type refuses the write
+  where a test would make it.
+- Each entry is typed as the class types the member. A stand-in the test
+  supplies then declares itself where it is passed in — an `as` on the
+  argument, or one small helper taking a `Partial<T>` — rather than on the
+  receiver, and a value the test reads back is what the class holds. A test
+  holding the value under an interface type narrows it to the class to reach
+  the getter, `tx as ExtendedStorageTransaction`: that is a cast to the real
+  type, which is what the accessor is typed by, and a different
+  implementation behind the interface would leave the read `undefined` and
+  the call throwing rather than passing.
+- It is a public getter, so it sits where the order above puts public getters,
+  and first among them.
+- Prose names the member `Class.#member`.
+
+```ts
+// Shown at module scope.
+
+/** A fryer that records the temperature each item was fried at. */
+export class Fryer {
+  #temperature = 190;
+  #log = new Map<string, number>();
+
+  /**
+   * The oil temperature, the batch log, and the drain step, which a test
+   * drives directly.
+   */
+  get accessForTestingOnly(): {
+    temperature: number;
+    readonly log: Map<string, number>;
+    drain(): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get temperature() {
+        return outerThis.#temperature;
+      },
+      set temperature(value) {
+        outerThis.#temperature = value;
+      },
+      log: this.#log,
+      drain: () => this.#drain(),
+    };
+  }
+
+  /** Fries one item at the current temperature. */
+  fry(item: string): void {
+    this.#log.set(item, this.#temperature);
+  }
+
+  #drain(): void {
+    this.#temperature = 20;
+  }
+}
+
+// In a test:
+const fryer = new Fryer();
+fryer.accessForTestingOnly.temperature = 200;
+fryer.fry("cruller");
+fryer.accessForTestingOnly.drain();
+```
+
+Three things a test reaches for that the getter does not cover, each wanting a
+different answer:
+
+- **A method the test replaces by assignment** — `obj.step = fake; ...;
+  obj.step = original`. A `#` method cannot be reassigned, and the getter only
+  forwards, so the test is asking for a seam the class does not offer. Offer
+  one — a collaborator passed to the constructor, a hook the class calls — or
+  rewrite the test against public behavior. Until then the member stays
+  TypeScript-`private`, with a comment naming the test that replaces it.
+- **A method called off the prototype against a stand-in receiver** —
+  `Class.prototype.step.call(fake, ...)`. A `#` method is not on the prototype
+  to be called, and a public method reached that way throws the moment it
+  touches a `#` member of a receiver that is not a real instance, so the test
+  wants rewriting to build one.
+- **A helper that uses no instance state.** Make it `static #` behind the
+  static getter, or a module-level function the test imports.
 
 ### Comments
 
@@ -410,6 +539,86 @@ function processData(data: Data) {
   data.process();
 }
 ```
+
+### Walking or comparing a value
+
+A value the runtime holds may be a `FabricSpecialObject` — a byte sequence, a
+temporal value, a content hash, a regular expression, an error, a link, a map,
+a set. Each of those keeps its state in private fields and has no own
+properties at all, so a walk that decides "may I read this by property name?"
+with `isObjectOrArray()`, `isReadonlyObjectOrArray()`, `isObjectNotArray()`, or
+a bare `typeof value === "object"` gets the wrong result: it sees an empty
+record and then merges the value to `{}`, rebuilds it as `{}`, descends into it
+and finds nothing, or writes a property onto it. Two sites already carry a
+`TODO(danfuzz)` naming that defect against `isReadonlyObjectOrArray()` —
+`schema.ts`'s default merge and `cfc/schema-merge.ts` — and they are what these
+predicates are for.
+
+These functions from `@commonfabric/data-model` are what a walk needs, and
+using them is not optional in code that can reach a stored value:
+
+- `isKeyableObjectOrArray(value)` is the container question. Every
+  `FabricSpecialObject` returns `false`, `FabricPrimitive` and any further
+  subclass alike. For a `FabricPrimitive` that says the value has no keys to
+  reach, which is the whole story about one; for a `FabricInstance` it says
+  only that this walk cannot reach what it holds, which is incomplete rather
+  than wrong, and a walk taking that answer records what it under-reports.
+  Everything
+  outside the type is untouched: arrays and non-fabric class instances still
+  return `true`, so it is a drop-in for `isReadonlyObjectOrArray()`, which
+  narrows the same way. Against `isObjectOrArray()` the swap holds only where
+  the caller reads: that one narrows to a mutable `Record<string, unknown>`,
+  and a site that writes through the narrowed value fails to compile with
+  `TS2542`.
+- `isWalkableObjectOrArray(value)` is the same question with a `FabricInstance`
+  refused rather than reported as having no keys. The two differ on an instance
+  and nowhere else, and which one a walk wants turns on what a `false` would
+  cost it. An instance is a container a walk is meant to descend and cannot
+  yet, so a walk that rebuilds, merges, or carries a value forward takes
+  `false` as "carry this whole" and ships an empty record in place of the
+  value: that walk wants the refusal. A walk that only reports what a path
+  finds, or what a change triggers, reports an absence instead — incomplete,
+  not wrong — and takes `isKeyableObjectOrArray()` with a marker recording the
+  gap. So does a walk running where a throw cannot be delivered, under a
+  storage subscription that has to keep delivering.
+- A walk that can reach an instance and has a better answer than either tests
+  for one first — an error its own signature already carries, or a disposition
+  its caller can act on. Refusing is for a walk with nothing else to say.
+- `isKeyableObjectNotArray(value)` and `isWalkableObjectNotArray(value)` are
+  those two with arrays removed, for a walk to which an array is not merely a
+  different shape but something it must not treat as a record.
+- `isFabricPlainContainer(value)` asks the same container question of a value
+  the type system already says is a `FabricValue`, and is the one to reach for
+  where a caller holds one, with two differences to know. It rejects the values
+  a `FabricValue` cannot be — a `Cell`, a `Date`, a query-result proxy over
+  one — which the `isKeyable*` and `isWalkable*` pairs admit. And it returns
+  `false` for a `FabricInstance` rather than refusing one, so a walk that
+  would lose an instance gets no tripwire from it: reach for
+  `isWalkableObjectOrArray()` where that matters, even holding a
+  `FabricValue`.
+- `fabricAwareEqual(a, b)` is the comparison for operands that may hold a
+  `FabricValue` without being known to be one — a schema `const` against a
+  stored value, a schema default against a materialized one, a write against
+  the value it replaces, a request against the snapshot a policy was checked
+  over. It is a structural walk that decides every `FabricSpecialObject` it
+  reaches by content rather than by properties: two of one class go to
+  `valueEqual()`, and a pair whose classes differ, or with a special object on
+  one side only, is unequal without either one's contents being read. Neither half serves alone: `valueEqual()` throws
+  on a `Cell` or any other non-fabric instance, and `deepEqual()` compares by
+  enumerable own properties, of which a special object has none. Where both
+  operands are known to be `FabricValue`s, `valueEqual()` is the cheaper
+  call — it decides a container by a content hash cached on identity, where the
+  walk pays for every level each time — but it is not a drop-in even there. It
+  decides a container by hashing it whole, so it throws on a value holding a
+  cycle and on one holding a class whose codec is a stub, both of which this
+  walk returns for. `valueEqual({ v: aFabricMap }, { v: 5 })` throws where
+  `fabricAwareEqual()` returns `false`.
+
+A walk that must not silently pass a `FabricInstance` by — one whose contents
+are reachable only through its codec — refuses it outright rather than walking
+it. Those refusals are discovery instruments; see "Flag-gated tripwires" in
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md), which states the obligation
+each new one carries.
 
 ### Avoid representing invalid state
 
@@ -640,11 +849,16 @@ suite will break.
    object with a `"test"` entry. The root test runner (`tasks/test.ts`) iterates
    all workspace members and runs `deno task test` in each package directory. If
    a package lacks a test task, Deno resolves the task name against the root
-   workspace instead, which re-runs the entire test suite recursively. This
-   causes exponential process spawning and will time out CI.
+   workspace instead, which would re-run the entire test suite recursively,
+   spawning processes exponentially. The runner reads every member's manifest
+   before it runs any of their test tasks, and refuses to start when one has no
+   `"test"` entry, naming the member; that check is what keeps a missing entry
+   to a message rather than a CI timeout.
 
    Use `"deno test"` for packages with tests, or `"echo 'No tests defined.'"` as
-   a stub for packages that don't have tests yet.
+   a stub for packages that don't have tests yet. A `"test"` task defined by its
+   `"dependencies"` alone counts too: what the check asks is whether the name
+   resolves in the package's own directory.
 
 3. **Minimal `deno.jsonc` example:**
 

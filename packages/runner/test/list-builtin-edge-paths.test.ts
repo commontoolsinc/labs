@@ -27,20 +27,20 @@ import {
 const signer = await Identity.fromPassphrase("list builtin edge paths");
 const space = signer.did();
 
-// These tests exercise edge paths in the three list builtins (map/filter/
-// flatMap) that the resume-preservation tests do not reach:
-//
-//   - The usesIndex re-run branch: a reused per-element run whose element keeps
-//     its identity (a cell link) but lands at a new index re-executes its op so
-//     the index argument it observes is current.
-//   - The non-array guard: a list input that resolves to a non-array value makes
-//     the reconcile throw.
-//
-// Both are driven against a live runtime (no resume needed): cell-link elements
-// give stable identity across a reorder, and a direct set() of a scalar list
-// drives the non-array path.
-
 describe("list builtin edge paths", () => {
+  // These tests exercise edge paths in the three list builtins (map/filter/
+  // flatMap) that the resume-preservation tests do not reach:
+  //
+  //   - The usesIndex re-run branch: a reused per-element run whose element
+  //     keeps its identity (a cell link) but lands at a new index re-executes
+  //     its op so the index argument it observes is current.
+  //   - The non-array guard: a list input that resolves to a non-array value
+  //     makes the reconcile throw.
+  //
+  // Both are driven against a live runtime (no resume needed): cell-link
+  // elements give stable identity across a reorder, and a direct set() of a
+  // scalar list drives the non-array path.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -324,7 +324,7 @@ describe("list builtin edge paths", () => {
 //
 // Resume harness for the owned-cell walk's nested-node branches.
 //
-// The walk (Runner.collectResumeOwnedCells) recurses through nested sub-pattern
+// The walk (Runner.#collectResumeOwnedCells) recurses through nested sub-pattern
 // nodes. A sub-pattern whose result cell carries a non-"space" cell scope makes
 // the walk re-scope the child result cell before recursing, the branch the
 // single-space resume tests do not reach. A cold resume drives the walk.
@@ -337,10 +337,14 @@ function plainLoopback(
 }
 
 class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: plainLoopback(this.getServer()),
+      transport: plainLoopback(this.#getServer()),
     });
     const session = await client.mount(
       spaceId,

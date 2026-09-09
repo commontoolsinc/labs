@@ -505,10 +505,11 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @state()
   private accessor _avatar: string | undefined = undefined;
 
-  // CT-1648: extra details surfaced in the hover/focus tooltip.
+  /** The bio, an extra detail surfaced in the hover/focus tooltip. */
   @state()
   private accessor _bio: string | undefined = undefined;
 
+  /** The pinned count, an extra detail surfaced in the hover/focus tooltip. */
   @state()
   private accessor _pinnedCount = 0;
 
@@ -519,23 +520,33 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @state()
   private accessor _seal: IdentitySeal | undefined = undefined;
 
-  // CT-1750: navigation. `_resolvedCell` is the resolved profile cell;
-  // `_navigable` is true only when it's a root cell (a real profile piece). A
-  // badge bound to a real profile (rosters/lists) navigates to that profile's
-  // page on click; one bound to a derived/sub-path cell (e.g. a self-view
-  // `{name, avatar}` cell on the profile page itself) is non-navigable and the
-  // click is a no-op.
+  /** The resolved profile cell. */
   private _resolvedCell: CellHandle | undefined = undefined;
+
+  /**
+   * Whether a click navigates, which is so only when `noNavigate` is unset and
+   * the resolved cell is a root cell (a real profile piece). A badge bound to
+   * a real profile (rosters/lists) navigates to that profile's page on click;
+   * one bound to a derived/sub-path cell (e.g. a self-view `{name, avatar}`
+   * cell on the profile page itself) is non-navigable and the click is a
+   * no-op.
+   */
   @state()
   private accessor _navigable = false;
 
   private _unsubscribe?: () => void;
   private _resolveGeneration = 0;
 
-  // Liveness: whether this seal is currently registered with the shared cursor
-  // controller, and the last sheen alpha written (so far-from-cursor frames can
-  // skip redundant style writes).
+  /**
+   * Whether this seal is currently registered with the shared cursor
+   * controller.
+   */
   private _livenessRegistered = false;
+
+  /**
+   * The last sheen alpha written, so far-from-cursor frames can skip redundant
+   * style writes.
+   */
   private _lastSheenA = -1;
 
   override connectedCallback(): void {

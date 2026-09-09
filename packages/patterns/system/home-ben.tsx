@@ -5,6 +5,7 @@ import {
   handler,
   NAME,
   pattern,
+  toCompactDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -79,9 +80,8 @@ function captureSnapshot(
 
     const value = schemaCell.get();
     if (value !== undefined) {
-      const str = JSON.stringify(value);
-      // Capture up to 2000 chars to give LLM more context about content
-      valueExcerpt = str.length > 2000 ? str.slice(0, 2000) + "..." : str;
+      // Up to 2000 characters, to give the LLM context about the content.
+      valueExcerpt = toCompactDebugString(value, { maxLength: 2000 });
     }
   } catch {
     // Ignore errors - excerpt is optional

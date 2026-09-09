@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import type { Async, Expected } from "@std/expect";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isObjectOrArray } from "./types.ts";
 
 /**
  * Strips all symbol properties from an object, recursively.

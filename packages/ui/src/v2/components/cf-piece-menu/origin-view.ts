@@ -36,10 +36,11 @@ export function describeOrigin(
     };
   }
   switch (origin.kind) {
-    case "web":
+    case "system":
       return {
-        label: "External web URL",
-        detail: "A program endpoint that can return new source later.",
+        label: "Deployment pattern",
+        detail: "A pattern this deployment serves; a new release of the " +
+          "deployment can replace it.",
       };
     case "fabric-piece":
       return {
@@ -57,8 +58,22 @@ export function describeOrigin(
 }
 
 /** A content identity abbreviated for display; the full value stays in a title. */
-export function shortIdentity(identity: string): string {
+function shortIdentity(identity: string): string {
   return identity.length > 14 ? `${identity.slice(0, 12)}…` : identity;
+}
+
+/**
+ * A pattern named for display: its content identity, abbreviated unless the
+ * whole value is asked for, and the export within it that is the pattern.
+ * Naming the export as one and quoting it marks the name as an identifier
+ * taken from the source.
+ */
+export function patternRefLabel(
+  ref: { identity: string; symbol: string },
+  options?: { whole?: boolean },
+): string {
+  const identity = options?.whole ? ref.identity : shortIdentity(ref.identity);
+  return `${identity} (export symbol "${ref.symbol}")`;
 }
 
 /** A recorded timestamp as a readable local time. */
@@ -79,7 +94,6 @@ export function formatTimestamp(ms: number): string {
 export type FollowState =
   | "following"
   | "unknown"
-  | "unsupported"
   | "unreachable"
   | "refused"
   | "detached"
@@ -184,20 +198,6 @@ export function describeFollowState(
       summary: "Nothing has looked for new source at this origin.",
       detail: "The piece is running the source it last accepted, which may " +
         "or may not be what the origin offers now.",
-      canUpdate: true,
-      canForce: false,
-    };
-  }
-  if (reconciliation.outcome === "unsupported") {
-    return {
-      state: "unsupported",
-      label: "Not followed automatically",
-      summary: "Nothing follows this kind of origin on its own yet.",
-      detail: "The piece is running the source it last accepted, and will " +
-        "go on running it until someone asks this origin for a newer one.",
-      at: reconciliation.at,
-      // Asking by hand does resolve this origin, and is the only thing that
-      // ever will while nothing follows its kind.
       canUpdate: true,
       canForce: false,
     };

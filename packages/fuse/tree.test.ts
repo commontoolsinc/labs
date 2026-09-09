@@ -130,9 +130,7 @@ Deno.test("CFC entry updates rebuild a missing lookup index", () => {
   annotator.annotateJsonScalar(firstIno, ["first"], "old");
   annotator.annotateEntry(parentIno, "first", firstIno);
 
-  const indexes = (tree as unknown as {
-    cfcEntryIndexes: Map<bigint, Map<string, number>>;
-  }).cfcEntryIndexes;
+  const indexes = tree.accessForTestingOnly.cfcEntryIndexes;
   indexes.delete(parentIno);
 
   annotator.annotateEntry(parentIno, "first", firstIno);

@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
 
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model";
 import { internSchema } from "@/schema-intern.ts";
 import { cloneSchemaMutable, toDeepFrozenSchema } from "@/schema-copy.ts";
 

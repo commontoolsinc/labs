@@ -5,7 +5,6 @@ import { join } from "@std/path/posix/join";
 // is shimmed, causing a fail to access `os` from `undefined`.
 import { toFileUrl } from "@std/path/posix/to-file-url";
 
-import { decode } from "@commonfabric/utils/encoding";
 import { isDeno } from "@commonfabric/utils/env";
 
 import { assets } from "./assets.ts";
@@ -19,8 +18,15 @@ const FS_URL = (import.meta.dirname && isDeno())
  * Represents a cached static asset with its content and ETag.
  */
 export interface CachedAsset {
-  buffer: Uint8Array;
-  etag: string;
+  /**
+   * The asset's content. A `Blob` is immutable, so what a consumer reads from
+   * it is always what the ETag was computed over, however long the asset
+   * stays cached and however many consumers share it.
+   */
+  readonly blob: Blob;
+
+  /** Strong ETag over the content. */
+  readonly etag: string;
 }
 
 /**
@@ -56,9 +62,9 @@ export class StaticCache {
   /**
    * Gets the content of a static asset, without its ETag.
    */
-  async get(assetName: string): Promise<Uint8Array> {
+  async get(assetName: string): Promise<Blob> {
     const cached = await this.getWithETag(assetName);
-    return cached.buffer;
+    return cached.blob;
   }
 
   /**
@@ -79,7 +85,8 @@ export class StaticCache {
    * Gets the content of a static asset, decoded as text.
    */
   async getText(assetName: string): Promise<string> {
-    return decode(await this.get(assetName));
+    const blob = await this.get(assetName);
+    return blob.text();
   }
 
   /**
@@ -102,13 +109,13 @@ export class StaticCache {
    */
   async #requestWithETag(assetName: string): Promise<CachedAsset> {
     const url = this.getUrl(assetName);
-    let buffer: Uint8Array;
+    let bytes: Uint8Array<ArrayBuffer>;
 
     if (isDeno()) {
       // In Deno, use readFile rather than `fetch`, as
       // `fetch` doesn't seem to play well with included assets
       // in "compiled" builds
-      buffer = await Deno.readFile(url);
+      bytes = await Deno.readFile(url);
     } else {
       const res = await fetch(url);
       if (!res.ok) {
@@ -116,10 +123,13 @@ export class StaticCache {
           `Could not retrieve "${assetName}" at "${url.toString()}".`,
         );
       }
-      buffer = new Uint8Array(await res.arrayBuffer());
+      bytes = new Uint8Array(await res.arrayBuffer());
     }
 
-    const etag = await generateETag(buffer);
-    return { buffer, etag };
+    const etag = await generateETag(bytes);
+
+    // The `Blob` constructor copies, so the cached content is reachable only
+    // through the `Blob`, which cannot be written to.
+    return { blob: new Blob([bytes]), etag };
   }
 }

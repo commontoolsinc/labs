@@ -70,6 +70,8 @@ Deno.test("importsPollingWaitFor detects an aliased import", () => {
 });
 
 //
+// Type members, and the value imports beside them
+//
 // A type-only import binds the type of `waitFor` and is erased before the test
 // runs, so it cannot poll. The value forms below it still have to be caught.
 //
@@ -130,6 +132,14 @@ Deno.test("importsPollingWaitFor detects a value waitFor after a type member on 
   assert(importsPollingWaitFor(source));
 });
 
+//
+// Names and specifiers that are not the polling import
+//
+// A helper whose name merely begins with `waitFor`, a subpath specifier, and
+// a member call on something else: none of them import the thing the gate
+// exists to find.
+//
+
 Deno.test("importsPollingWaitFor ignores waitFor-prefixed helpers", () => {
   assertEquals(
     importsPollingWaitFor(
@@ -156,6 +166,14 @@ Deno.test("importsPollingWaitFor ignores a harness.waitFor member call", () => {
   assertEquals(importsPollingWaitFor(source), false);
 });
 
+//
+// Occurrences that are not an import
+//
+// Commenting one out is the first step of migrating a test off the polling
+// waitFor, and a specifier inside a string or a template literal is data
+// rather than an import. None of these shapes may be flagged.
+//
+
 Deno.test("importsPollingWaitFor ignores a commented-out member", () => {
   const source = [
     "import {",
@@ -165,11 +183,6 @@ Deno.test("importsPollingWaitFor ignores a commented-out member", () => {
   ].join("\n");
   assertEquals(importsPollingWaitFor(source), false);
 });
-
-//
-// Commenting the import out is the first step of migrating a test off the
-// polling waitFor, so none of these shapes may be flagged.
-//
 
 Deno.test("importsPollingWaitFor ignores an import in a line comment", () => {
   assertEquals(
@@ -215,6 +228,8 @@ Deno.test("importsPollingWaitFor ignores an import inside a template literal", (
 });
 
 //
+// Blanking comments and strings
+//
 // The blanking of comments and strings must not swallow the code around them.
 //
 
@@ -254,7 +269,7 @@ Deno.test("importsPollingWaitFor ignores an import in a line-continued string", 
 });
 
 //
-// A relative path reaches the same waitFor without naming the package.
+// Relative paths that reach the same `waitFor`, and those that do not
 //
 
 Deno.test("importsPollingWaitFor detects a relative import of the package's utils.ts", () => {
@@ -291,6 +306,10 @@ Deno.test("importsPollingWaitFor ignores a sibling utils.ts outside the package"
     false,
   );
 });
+
+//
+// Scoping to integration test files
+//
 
 Deno.test("isIntegrationTestFile scopes to integration test files", () => {
   assert(isIntegrationTestFile("packages/shell/integration/piece.test.ts"));
@@ -333,6 +352,8 @@ Deno.test("isIntegrationTestFile excludes non-integration and non-ts files", () 
 });
 
 //
+// The repository's own tree
+//
 // The following two tests run against the real repository tree. Together they
 // assert that the set of in-scope files importing the polling `waitFor` equals
 // the ALLOWLIST exactly.
@@ -361,8 +382,12 @@ Deno.test("the polling-waitFor ALLOWLIST has no stale entries", async () => {
   );
 });
 
+//
+// The command entry point
+//
 // The next two tests drive the command entry point over a temp fixture tree, so
 // they cover the clean and violation paths without depending on the real tree.
+//
 
 Deno.test(
   "check-no-waitfor main reports success and returns 0 on a clean tree",

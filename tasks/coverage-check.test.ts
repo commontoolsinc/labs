@@ -54,6 +54,7 @@ import {
   type Row,
   selectBaselines,
   selectMergedPRForCommit,
+  unscoredGroupsReport,
   validateBaselineRunsForMainHead,
   walkBaselineRuns,
   workflowRunsPathForBaseline,
@@ -61,6 +62,7 @@ import {
   writeCoverageDebtSuggestion,
   writeCoverageResolved,
 } from "./coverage-check.ts";
+import { writeUnlaunchedMembers } from "./unlaunched-members.ts";
 
 const SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -135,7 +137,7 @@ Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", 
         lcovDir,
         artifactsDir,
       ),
-      { profileFiles: 1, lcovFiles: 2 },
+      { profileFiles: 1, lcovFiles: 2, unlaunchedMembers: [] },
     );
 
     const copiedLcov: string[] = [];
@@ -148,6 +150,47 @@ Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", 
       "profile",
     );
     assert((await Deno.stat(sourceDir)).isDirectory);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("copyCoverageArtifactFiles reads the artifact's unlaunched-member record", async () => {
+  const root = await Deno.makeTempDir({ prefix: "perf-coverage-unlaunched-" });
+  const artifact = makeArtifact(21, "coverage-profile-workspace-3");
+  const artifactsDir = path.join(root, "artifacts");
+  const sourceDir = path.join(artifactsDir, artifact.name);
+  const profileDir = path.join(root, "profiles");
+  const lcovDir = path.join(root, "lcov");
+
+  try {
+    await Promise.all([
+      Deno.mkdir(sourceDir, { recursive: true }),
+      Deno.mkdir(profileDir),
+      Deno.mkdir(lcovDir),
+    ]);
+    await Promise.all([
+      Deno.writeTextFile(path.join(sourceDir, "workspace-3.lcov"), "workspace"),
+      writeUnlaunchedMembers(sourceDir, ["./packages/shell", "./tasks"]),
+    ]);
+
+    assertEquals(
+      await copyCoverageArtifactFiles(
+        artifact,
+        profileDir,
+        lcovDir,
+        artifactsDir,
+      ),
+      {
+        profileFiles: 0,
+        lcovFiles: 1,
+        unlaunchedMembers: ["./packages/shell", "./tasks"],
+      },
+    );
+
+    // The record is read rather than copied: a file `deno coverage` cannot
+    // parse among the profiles would fail the whole conversion.
+    assertEquals([...Deno.readDirSync(profileDir)], []);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -224,7 +267,7 @@ Deno.test("coverage check pre-downloads coverage with strict integrity checks", 
   );
 
   const downloadStep = job.slice(downloadStart, checkStart);
-  assertStringIncludes(downloadStep, "uses: actions/download-artifact@v8");
+  assertStringIncludes(downloadStep, "uses: actions/download-artifact@");
   assertStringIncludes(downloadStep, "pattern: coverage-profile-*");
   assertStringIncludes(downloadStep, "path: coverage-artifacts");
   assertStringIncludes(downloadStep, "merge-multiple: false");
@@ -399,6 +442,7 @@ Deno.test("a merged PR's unreadable acceptance leaves the rest of it standing", 
   // A description that merged before the acceptance form changed cannot be
   // rewritten to suit this parser, so the marker it carries is passed over and
   // the reset marker beside it is still read.
+
   const warnings: string[] = [];
   const overrides = parseMergedBaselineOverrides(
     {
@@ -419,6 +463,7 @@ Deno.test("merged PR legacy coverage-debt acceptance is honored", () => {
   // A baseline PR merged before the marker rename accepted debt with
   // NEW_PERF_BASELINE; its acceptance must still register so it truncates the
   // baseline timeline.
+
   const overrides = parseMergedBaselineOverrides({
     number: 125,
     body:
@@ -1490,9 +1535,13 @@ async function walk(
   return { lines, read };
 }
 
-/** Three `main` runs, newest first, along the ancestry `RANKS` describes. */
+/** The newest of three `main` runs along the ancestry `RANKS` describes. */
 const RUN_AT_BASE = makeRun(3, SHA_C, "2026-08-04T10:40:00Z");
+
+/** The one before it. */
 const RUN_ONE_BACK = makeRun(2, SHA_B, "2026-08-04T10:20:00Z");
+
+/** The one before that. */
 const RUN_TWO_BACK = makeRun(1, SHA_A, "2026-08-04T10:00:00Z");
 
 Deno.test("walkBaselineRuns prefers the base-branch commit's own run", async () => {
@@ -1510,6 +1559,7 @@ Deno.test("walkBaselineRuns prefers the base-branch commit's own run", async () 
 Deno.test("walkBaselineRuns falls back to the nearest ancestor with a run", async () => {
   // The base-branch commit's run uploaded no baseline artifact, so its parent
   // stands in rather than the gate giving up.
+
   const walked = await walk([
     [RUN_AT_BASE, reading(RUN_AT_BASE, {})],
     [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 })],
@@ -1523,6 +1573,7 @@ Deno.test("walkBaselineRuns falls back to the nearest ancestor with a run", asyn
 Deno.test("walkBaselineRuns ranks the ancestry rather than trusting run order", async () => {
   // The nearer ancestor's run arrives second, as a history rewrite or two
   // pushes in one second can leave it. The nearer commit still wins.
+
   const walked = await walk([
     [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
     [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5760 })],
@@ -1545,6 +1596,7 @@ Deno.test("walkBaselineRuns reads the first of two runs for one commit", async (
 
 Deno.test("walkBaselineRuns ignores a run that is not an ancestor", async () => {
   // Landed after this run started, so it measured code the run lacks.
+
   const sibling = makeRun(4, "dddddddddddddddddddddddddddddddddddddddd");
   const walked = await walk([
     [sibling, reading(sibling, { [RUNNER_METRIC]: 5700 })],
@@ -1585,6 +1637,7 @@ Deno.test("walkBaselineRuns takes a cold ancestor when every ancestor is cold", 
 Deno.test("walkBaselineRuns ignores an acceptance that is not an ancestor", async () => {
   // A reset that merged after this run's base-branch commit is not in this
   // run's code, so it sets no floor here and the ancestry still gates.
+
   const later = makeRun(4, "dddddddddddddddddddddddddddddddddddddddd");
   const walked = await walk([
     [later, reading(later, { [RUNNER_METRIC]: 7000 }, { reset: true })],
@@ -1629,6 +1682,7 @@ Deno.test("walkBaselineRuns stops at the run whose PR accepted the debt", async 
   // what later runs are held to. Every run that measured it is cold, so the
   // accepting run stands as the baseline rather than the metric losing one.
   // The memory group was not accepted, so its walk carries on to the warm run.
+
   const walked = await walk(
     [
       [RUN_AT_BASE, reading(RUN_AT_BASE, {}, { cold: true })],
@@ -1680,6 +1734,7 @@ Deno.test("walkBaselineRuns stops every coverage metric at a merged reset", asyn
 Deno.test("walkBaselineRuns walks past an acceptance that measured nothing", async () => {
   // The accepting run uploaded no baseline artifact, so it has no level to
   // hold later runs to and the search continues past it.
+
   const walked = await walk([
     [RUN_ONE_BACK, reading(RUN_ONE_BACK, {}, { accepts: [RUNNER_METRIC] })],
     [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
@@ -1879,7 +1934,11 @@ Deno.test("reportBaselineDistance reports an ancestry it could not read", () => 
   );
 });
 
-/** The three-run ancestry above, with one metric measured at each commit. */
+/**
+ * Two of the three runs in the ancestry above, each carrying one metric.
+ * `RUN_ONE_BACK` is deliberately absent: callers derive their run list from
+ * these readings, so leaving it out is what makes a commit unmeasured.
+ */
 function runnerReadings(): [WorkflowRun, BaselineRunReading][] {
   return [
     [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5746 })],
@@ -2128,6 +2187,7 @@ Deno.test("buildCoverageRows stamps every row with where it was measured", () =>
   // The comment for a regression the pull request did not cause reads these
   // back to say which run produced the numbers and which `main` commit that
   // run merged, so every row carries them whatever the gate decides.
+
   const { rows } = rowsFor(
     { [RUNNER_METRIC]: 5747, [MEMORY_METRIC]: 3 },
     {
@@ -2250,6 +2310,7 @@ Deno.test("buildCoverageRows accepts the same rise after the baseline moves", ()
   // What a rebase does: the base branch uncovers 30 lines of its own, so both
   // the baseline and this run's count rise by 30. The pull request still adds
   // the 54 lines it accepted, and the same acceptance line still passes it.
+
   const overrides = {
     metrics: new Map([[RUNNER_METRIC, 54]]),
     coverageBaselineReset: false,
@@ -2544,9 +2605,58 @@ Deno.test("combinedLcovFromArtifacts joins every artifact's uploaded report", as
   }
 });
 
+Deno.test("unscoredGroupsReport names the members and the groups they cost", () => {
+  assertEquals(
+    unscoredGroupsReport(["./tasks", "./packages/shell"]),
+    "This run never launched ./packages/shell, ./tasks, so it carries no " +
+      "measurement of packages/shell, tasks and does not score them.",
+  );
+});
+
+Deno.test("unscoredGroupsReport says nothing for a run that launched everything", () => {
+  assertEquals(unscoredGroupsReport([]), undefined);
+});
+
+Deno.test("combinedLcovFromArtifacts unions the records its artifacts carry", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "coverage-unlaunched-union-" });
+  try {
+    const artifacts = [
+      { id: 31, name: "coverage-profile-workspace-2" },
+      { id: 32, name: "coverage-profile-workspace-5" },
+      { id: 33, name: "coverage-profile-workspace-6" },
+    ].map((artifact) => ({ ...artifact, size_in_bytes: 64, expired: false }));
+    const records = [["./packages/shell", "./tasks"], ["./packages/shell"], []];
+
+    for (const [index, artifact] of artifacts.entries()) {
+      const artifactDir = path.join(dir, artifact.name);
+      await Deno.mkdir(artifactDir, { recursive: true });
+      await Deno.writeTextFile(
+        path.join(artifactDir, `${artifact.name}.lcov`),
+        "",
+      );
+      await writeUnlaunchedMembers(artifactDir, records[index]);
+    }
+
+    const { unlaunchedMembers } = await combinedLcovFromArtifacts(
+      artifacts,
+      dir,
+    );
+
+    // Every member any artifact names, each of them once, and nothing from the
+    // artifact that carries no record.
+    assertEquals([...unlaunchedMembers].sort(), [
+      "./packages/shell",
+      "./tasks",
+    ]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("combinedLcovFromArtifacts refuses to report on no artifacts at all", async () => {
   // An empty set is not an empty report: it means the run uploaded nothing,
   // which must be an error rather than a workspace scored as uncovered.
+
   await assertRejects(
     () => combinedLcovFromArtifacts([]),
     Error,

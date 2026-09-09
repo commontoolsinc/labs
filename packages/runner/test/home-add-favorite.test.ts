@@ -143,7 +143,11 @@ describe("home favorites handlers", () => {
       tags: [],
       userTags: [],
     });
-    await tx.commit();
+    // A manual test tx prepares the way the runtime's own commit paths do:
+    // an enforcing rung refuses a relevant transaction that arrives
+    // unprepared.
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
     tx = runtime.edit();
     await runtime.idle();
     const seeded =

@@ -61,7 +61,7 @@ export function isRawBuiltinResult(
 }
 
 export class ModuleRegistry {
-  private moduleMap = new Map<string, Module>();
+  #moduleMap = new Map<string, Module>();
   readonly runtime: Runtime;
 
   constructor(runtime: Runtime) {
@@ -73,7 +73,7 @@ export class ModuleRegistry {
       ? module
       : cloneModuleRecord(module);
     defineDebugName(target, ref);
-    this.moduleMap.set(ref, target);
+    this.#moduleMap.set(ref, target);
   }
 
   /**
@@ -92,7 +92,7 @@ export class ModuleRegistry {
    */
   getModule(ref: string, defaultScope?: CellScope): Module {
     if (typeof ref !== "string") throw new Error(`Unknown module ref: ${ref}`);
-    const module = this.moduleMap.get(ref);
+    const module = this.#moduleMap.get(ref);
     if (!module) throw new Error(`Unknown module ref: ${ref}`);
     if (defaultScope === undefined) return module;
     const scoped: Module = { ...module, defaultScope };
@@ -101,7 +101,7 @@ export class ModuleRegistry {
   }
 
   clear(): void {
-    this.moduleMap.clear();
+    this.#moduleMap.clear();
   }
 }
 

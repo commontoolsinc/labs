@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -36,20 +36,21 @@ const PROGRAM: RuntimeProgram = {
   }],
 };
 
-// The resume-time twin of "filter: structure label re-stamps from J when the
-// list grows" in cfc-flow-pointwise.test.ts. There the list grows while the
-// coordinator is live; here it grows while nothing is running, so the taint has
-// to reach the container's shape across a cold resume.
-//
-// What carries the taint across the resume is the coordinator's declaration of
-// its result container, which every reconcile makes at the top of its run,
-// before any of that reconcile's early returns. The resume publishes the
-// rebuilt aggregate from a separate transaction that makes no such declaration,
-// so the label depends on a reconcile running afterwards — which one does,
-// because the element results that drive the rebuild also invalidate the
-// reconcile. This test pins the outcome, so a change to either half is caught
-// here rather than in a space with real labels.
 describe("CFC resume membership taint", () => {
+  // The resume-time twin of "filter: structure label re-stamps from J when the
+  // list grows" in cfc-flow-pointwise.test.ts. There the list grows while the
+  // coordinator is live; here it grows while nothing is running, so the taint
+  // has to reach the container's shape across a cold resume.
+  //
+  // What carries the taint across the resume is the coordinator's declaration
+  // of its result container, which every reconcile makes at the top of its run,
+  // before any of that reconcile's early returns. The resume publishes the
+  // rebuilt aggregate from a separate transaction that makes no such
+  // declaration, so the label depends on a reconcile running afterwards — which
+  // one does, because the element results that drive the rebuild also
+  // invalidate the reconcile. This test pins the outcome, so a change to either
+  // half is caught here rather than in a space with real labels.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
 
   afterEach(async () => {
@@ -61,7 +62,8 @@ describe("CFC resume membership taint", () => {
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageManager!,
-      cfcEnforcementMode: "observe",
+      // Persisting flow labels is what writes the structure stamp this test
+      // reads back through `structureConfidentiality`.
       cfcFlowLabels: "persist",
     });
 
@@ -86,6 +88,7 @@ describe("CFC resume membership taint", () => {
         },
       },
     });
+    rt.prepareTxForCommit(seed);
     expect((await seed.commit()).ok).toBeDefined();
     return id;
   };
@@ -105,6 +108,7 @@ describe("CFC resume membership taint", () => {
     const rtx = rt.edit();
     const id =
       keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
+    rt.prepareTxForCommit(rtx);
     rtx.commit();
     return id;
   };
@@ -142,6 +146,7 @@ describe("CFC resume membership taint", () => {
       tx0,
     );
     rt1.run(tx0, compiled, { items: listCell }, rc1);
+    rt1.prepareTxForCommit(tx0);
     expect((await tx0.commit()).ok).toBeDefined();
     await rc1.pull();
     await rt1.settled();
@@ -170,18 +175,21 @@ describe("CFC resume membership taint", () => {
     const rtMid = newRuntime();
     await seedLabeledDoc(rtMid, "memb-el-2", { n: -1 }, "carol-secret");
     const txMid = rtMid.edit();
-    const el2 = rtMid.getCell(space, "memb-el-2", undefined, txMid);
     const listMid = rtMid.getCell(
       space,
       LIST_CAUSE,
       { type: "array", items: { asCell: ["cell"] } },
       txMid,
     );
-    await listMid.sync();
-    listMid.withTx(txMid).set([
-      ...(listMid.get() as unknown[]),
-      el2,
+    // Each element is named by its cause, so this write states the whole
+    // membership. The labels the stored list carries reach nothing in this
+    // transaction.
+    listMid.set([
+      rtMid.getCell(space, "memb-el-0", undefined, txMid),
+      rtMid.getCell(space, "memb-el-1", undefined, txMid),
+      rtMid.getCell(space, "memb-el-2", undefined, txMid),
     ]);
+    rtMid.prepareTxForCommit(txMid);
     expect((await txMid.commit()).ok).toBeDefined();
     await storageManager.synced();
     await rtMid.dispose({ closeStorage: false });
@@ -198,6 +206,7 @@ describe("CFC resume membership taint", () => {
         compiled.resultSchema,
         tx2,
       );
+      rt2.prepareTxForCommit(tx2);
       expect((await tx2.commit()).ok).toBeDefined();
       await rc2.sync();
       expect(await rt2.start(rc2)).toBe(true);

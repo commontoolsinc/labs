@@ -1,13 +1,12 @@
 import { encodeHex } from "@std/encoding/hex";
 
 import { sha256 } from "@commonfabric/content-hash";
+import { cloneIfNecessary, type FabricValue } from "@commonfabric/data-model";
 import {
-  cloneIfNecessary,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import {
+  CFC_ENFORCEMENT_MODES,
   type CfcEnforcementMode as RunnerCfcEnforcementMode,
   DEFAULT_CFC_ENFORCEMENT_MODE,
+  isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
@@ -206,30 +205,44 @@ export function safeReconcileCfcWritebacks(options: {
   }
 }
 
-const CFC_MODES = [
-  "disabled",
-  "observe",
-  "enforce-explicit",
-  "enforce-strict",
-] as const satisfies readonly CfcEnforcementMode[];
-
-export function parseCfcMode(
-  value: string | undefined,
-): CfcEnforcementMode | undefined {
-  return (CFC_MODES as readonly string[]).includes(value ?? "")
-    ? value as CfcEnforcementMode
-    : undefined;
+/**
+ * The mode a source states, checked against the ladder.
+ *
+ * @throws Error when the source states a name the ladder does not hold.
+ */
+function statedCfcMode(
+  value: string,
+  source: string,
+): CfcEnforcementMode {
+  if (!isCfcEnforcementMode(value)) {
+    throw new Error(
+      `${source}=${value} is not a CFC enforcement mode; expected one of ${
+        CFC_ENFORCEMENT_MODES.join(", ")
+      }`,
+    );
+  }
+  return value;
 }
 
+/**
+ * The mode a mount runs its CFC guardrails at.
+ *
+ * `--cfc-mode` decides when it names a mode, `CF_CFC_MODE` decides otherwise,
+ * and a mount that names a mode nowhere runs at
+ * {@link DEFAULT_CFC_ENFORCEMENT_MODE}. An empty value names nothing: the
+ * mount reads an absent flag as one, and so is an exported but unset
+ * environment variable.
+ *
+ * @throws Error when the deciding source names a mode off the ladder, giving
+ * the value, the source that named it, and the accepted names.
+ */
 export function resolveCfcMode(options: {
   cliMode?: string;
   envMode?: string;
-  runtimeMode?: CfcEnforcementMode;
 }): CfcEnforcementMode {
-  return parseCfcMode(options.cliMode) ??
-    parseCfcMode(options.envMode) ??
-    options.runtimeMode ??
-    DEFAULT_CFC_ENFORCEMENT_MODE;
+  if (options.cliMode) return statedCfcMode(options.cliMode, "--cfc-mode");
+  if (options.envMode) return statedCfcMode(options.envMode, "CF_CFC_MODE");
+  return DEFAULT_CFC_ENFORCEMENT_MODE;
 }
 
 export function shouldEnableCfcAnnotations(options: {

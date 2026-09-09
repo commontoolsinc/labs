@@ -95,6 +95,7 @@ export interface WakeHold {
 
   /** Deliver the leading edge on a fresh macrotask instead of synchronously. */
   defer?: boolean;
+
   deliver: () => void;
 }
 
@@ -106,6 +107,7 @@ interface ThrottleGroup {
 
   /** itemKey -> deliver thunk; unique keys preserve FIFO, shared keys coalesce. */
   pending: Map<string, () => void>;
+
   timer: ReturnType<typeof setTimeout> | undefined;
 
   /** Deferred leading-edge deliveries scheduled but not yet run. */

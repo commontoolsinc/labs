@@ -41,8 +41,8 @@ import type {
   JSONSchemaTypes,
 } from "@commonfabric/api";
 import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricPrimitive } from "@commonfabric/data-model";
+import type { FabricValue } from "@commonfabric/data-model";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";

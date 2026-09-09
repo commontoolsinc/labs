@@ -37,6 +37,7 @@ function nameOffsetOf(doc: Document, name: string): number {
 Deno.test("semantics: createSemantics returns a service for a single-section blob", () => {
   // No section headers: the fallback single section runs, the service builds,
   // and a plain binding types — exercising the non-error setup path.
+
   const blob = `const n: number = 1;\nconst s = n;`;
   const doc = parseDocument(blob);
   const sem = createSemantics(blob, { cwd: CWD });
@@ -47,6 +48,7 @@ Deno.test("semantics: createSemantics returns a service for a single-section blo
 Deno.test("semantics: prewarm builds the program off the query path", () => {
   // prewarm() runs build() ahead of the first real query; a subsequent type
   // query then reuses the cached program and still answers.
+
   const blob = `// transformed: /m.ts
 const value: string = "x";
 const echo = value;`;
@@ -151,6 +153,7 @@ Deno.test("semantics: JSONC import map survives block comments and escapes", () 
   // A block comment AND a string value containing an escaped quote and a `//`
   // sequence force every branch of stripJsonc: the escape step, the block-
   // comment skip, and the in-string passthrough.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -182,6 +185,7 @@ Deno.test("semantics: a deno.json with no usable imports yields an empty map", (
   // imports present but every value is a non-local specifier (jsr:/npm:) — the
   // isLocalSpecifier filter drops them all, leaving an empty import map; and a
   // non-string value is ignored by parseImports.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -224,6 +228,7 @@ Deno.test("semantics: typeStringAt returns null when no node holds the offset", 
   // A run of trailing blank space after the only statement, all inside the
   // single section: those offsets land in no AST node, so nodeAt returns
   // undefined and typeStringAt returns null.
+
   const blob = `// transformed: /m.ts
 const x = 1;
 
@@ -239,6 +244,7 @@ Deno.test("semantics: a section header path TS cannot load types to null", () =>
   // A bare (slashless, extension-less) header path is not a virtual source file
   // the program can serve: build() succeeds, but getSourceFile(section.name)
   // returns undefined, so typeStringAt returns null via its `!sf` guard.
+
   const blob = `// transformed: m
 const x = 1;
 const y = x;`;
@@ -250,6 +256,7 @@ const y = x;`;
 Deno.test("semantics: definitionOf preview on a last line with no trailing newline", () => {
   // The external definition sits on the file's final line, which has no
   // trailing newline — lineAndPreview's `end < 0` branch clamps to the end.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -287,6 +294,7 @@ Deno.test("semantics: classifies a resolved .tsx import (extensionOf Tsx)", () =
   // The import-map value points directly at a `.tsx` file; resolveRelative
   // returns it verbatim, and extensionOf tags it as Tsx during resolution. The
   // service stays usable whether or not the binding's type flows through.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -392,6 +400,7 @@ Deno.test("semantics: a directory named as a dependency reads as undefined", () 
   // The blob imports an absolute path that resolves to a directory. The host's
   // readReal hits the read-failure catch (a directory is not a text file) and
   // returns undefined; the service must not throw.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "deno.json"), JSON.stringify({}));
@@ -412,6 +421,7 @@ Deno.test("semantics: an unreadable in-root dependency degrades to no type", () 
   // (mode 000): the host's readReal hits its read-failure catch and returns
   // undefined, so the binding referencing it has no knowable type and the
   // service stays alive.
+
   const root = Deno.makeTempDirSync();
   const extPath = join(root, "ext.ts");
   try {
@@ -440,6 +450,7 @@ Deno.test("semantics: the same external file is read once and cached by the host
   // cache (fileExists + getScriptSnapshot + readFile all funnel through it)
   // serves the repeat reads from the cache, and the service's realFiles cache
   // serves definitionOf's repeat read.
+
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -762,6 +773,7 @@ function throwingMaps(
 Deno.test("diff semantics: typeAt swallows a throw from the offset map", () => {
   // build() succeeds (real root files), then maps.toFile throws inside typeAt's
   // try — the catch returns null rather than propagating.
+
   const { root, ws, done } = tempDiffRoot();
   try {
     const model = parseDiff(DIFF)!;
@@ -781,6 +793,7 @@ Deno.test("diff semantics: typeAt swallows a throw from the offset map", () => {
 Deno.test("diff semantics: definitionOf swallows a throw and caches empty", () => {
   // After build, maps.fromFile throws while classifying a resolved definition;
   // definitionOf's catch resets to an empty list and caches it.
+
   const { root, ws, done } = tempDiffRoot();
   try {
     const model = parseDiff(DIFF)!;
@@ -804,6 +817,7 @@ Deno.test("diff semantics: a definition resolving to a lib file is skipped", () 
   // `Set` resolves into lib.d.ts (outside the workspace); fromFile returns null
   // (not in the diff) and readReal returns undefined, so the def is skipped via
   // the `content === undefined` continue.
+
   const { root, ws, done } = tempDiffRoot();
   try {
     Deno.writeTextFileSync(

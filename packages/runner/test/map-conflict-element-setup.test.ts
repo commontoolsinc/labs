@@ -106,14 +106,18 @@ const gatedLoopback = (
 class GatedSessionFactory implements SessionFactory {
   gate: FrameGate | undefined;
 
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
 
   async create(
     space: MemorySpace,
     signer?: Signer,
     mountOptions: MemoryV2Client.MountOptions = {},
   ) {
-    const { transport, gate } = gatedLoopback(this.getServer());
+    const { transport, gate } = gatedLoopback(this.#getServer());
     this.gate = gate;
     const client = await MemoryV2Client.connect({ transport });
     const session = await client.mount(

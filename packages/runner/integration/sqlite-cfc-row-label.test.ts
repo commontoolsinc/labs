@@ -43,7 +43,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./sqlite-cfc-row-label.test.tsx", import.meta.url),
+      new URL("./sqlite-cfc-row-label.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,

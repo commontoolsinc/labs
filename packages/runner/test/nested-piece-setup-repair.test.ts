@@ -7,16 +7,18 @@ import { Runtime } from "../src/runtime.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { isMissingStreamMarkerFailure } from "../src/runner.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // A nested/embedded piece — a profile mounted via a `#wish`, say — is
 // instantiated by the runtime's start walk WITHOUT a setup phase and with no
 // pattern watcher armed to self-heal. If its stored doc predates the pattern's
 // setup (here: set up for V1, then re-pointed at the handler-bearing V3 whose
 // `bump` stream marker the V1 doc never materialized), instantiation throws
-// "Handler used as lift … marker was never written". Runner.startCore's initial
-// instantiation re-runs the pinned pattern's OWN setup on that failure and
-// retries — the same repair the home ROOT gets in startEnsuredDefaultPattern,
-// here for the nested pieces that never pass through the PieceController.
+// "Handler used as lift … marker was never written". `Runner.#startCore()`'s
+// initial instantiation re-runs the pinned pattern's OWN setup on that
+// failure and retries — the same repair the home ROOT gets in
+// startEnsuredDefaultPattern, here for the nested pieces that never pass
+// through the PieceController.
 // The repair moves no durable identity pointer; it replays the pattern the
 // pointer already names. The root itself is excluded because its controller
 // owns the repair; a nested piece is never a space's `.defaultPattern`, so it
@@ -61,14 +63,13 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
-//
-// The repair keys on ONE variant of the handler-stream failure — the
-// setup-missing "marker was never written" case. Its two siblings are NOT
-// setup-missing (re-running setup would not fix them), so they must not trigger
-// a repair. These messages mirror `describeHandlerStreamFailure`'s three shapes.
-//
-
 describe("isMissingStreamMarkerFailure discriminates the setup-missing variant", () => {
+  // The repair keys on ONE variant of the handler-stream failure — the
+  // setup-missing "marker was never written" case. Its two siblings are NOT
+  // setup-missing (re-running setup would not fix them), so they must not
+  // trigger a repair. These messages mirror `describeHandlerStreamFailure`'s
+  // three shapes.
+
   it("matches the marker-never-written variant", () => {
     expect(
       isMissingStreamMarkerFailure(
@@ -156,7 +157,7 @@ describe("nested-piece cold-start setup repair", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     // It is not the space's defaultPattern, so the runner repair (not the
     // controller) is what must heal it.

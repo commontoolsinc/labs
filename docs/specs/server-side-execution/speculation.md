@@ -23,6 +23,25 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   not-yet-consequenced event) or `input(bindingId)` (live UI input echo).
 - The overlay is process-memory only. It is NEVER serialized, synced, or
   committed. On reload it is empty and the store is the truth.
+- The seal emits an entry's document operations as WHOLE-DOCUMENT
+  set/delete (`markWholeDocumentWrites`), and refuses a transaction that
+  cannot. The ops are materialized over the confirmed value on every
+  read, and that value moves under them: the space's serving runtime
+  commits the authoritative derivation for the same document, and it
+  arrives before the coverage that retires the entry (§4). A positional
+  array splice re-applied over an array that already carries what it
+  inserts duplicates that element, one that removed elements drops one,
+  and a mergeable append double-applies — so an entry says what its run
+  computed rather than how that differed from the layer it ran over. The
+  mergeable intents the run recorded are abandoned with the ops they
+  would have produced, so the reads those ops would have narrowed out of
+  the commit stay in the entry's read set, which is what its retirement
+  floor and its pending-read documents are built from. Pinned in
+  `speculation-overlay.test.ts` and `array-push-mergeable.test.ts`.
+- A standing entry therefore masks a concurrent authoritative change to
+  any other path of the same document, until the entry retires and the
+  arrived value renders. What a reader sees while it stands is a value
+  some run computed, whole.
 
 ## 2. What may speculate
 
@@ -521,7 +540,7 @@ served round trip, and unbounded for a never-served instance):
 
 - The structural existence/shape precondition — the nonRecursive read
   at the cell's parent (verification-coverage.md OW47's close;
-  `excludeSpeculativeLayers` in `buildReads`).
+  `excludeSpeculativeLayers` in `SpaceReplica.#buildReads()`).
 - CFC prepare's internal-verifier reads (OW47's second producer, the
   name-draft triage; RULED 2026-08-21 — arm (b) of the triage's §9
   fork): the verifier READS and VERIFIES the non-speculative state.
@@ -573,9 +592,40 @@ Both exclusions are about the NAMED BASIS of one commit, never a
 withdrawal: the echo itself stands until its ordinary retirement
 (§4). Value-consuming reads keep the refusal unchanged in every
 transaction shape, and a transaction outside the blind-write family —
-including its verifier reads — keeps naming every layer;
-`speculation-overlay.test.ts` pins the export, the scoping, the
-verify-durable consistency, and the content-addressed exemption.
+including its verifier reads — keeps naming every layer, unless it
+carries the durable-read mark below; `speculation-overlay.test.ts`
+pins the export, the scoping, the verify-durable consistency, the
+content-addressed exemption, and the durable-read mark on both a
+direct transaction and a piece start.
+
+### The durable-read mark, and the piece start that needs it
+
+An authored transaction whose writes must reach the wire can read the
+durable replica view instead of the ordinary one. `markDurableReadTx`
+(`storage/reactivity-log.ts`) is that mark: values and named basis
+both skip the process-local speculation layers, so what such a
+transaction consumed and what it names stay the same set — the
+verify-durable and name-durable pairing again, one shape wider. A
+document still short of its authoritative value re-derives reactively
+once that value lands, which is the recovery path §6's refusal
+message names. Two callers carry the mark. One is the direct SQLite
+capability's exec, an authored write with no reactive run around it.
+The other is the runner's piece start.
+
+A piece start mints its own transaction, instantiates the pattern's
+nodes into it, and commits it fire-and-forget as sanctioned
+bookkeeping (serving-loop.md §3d). It reads whatever the node
+bindings resolve through, which is as likely to be a document a
+standing echo rewrote as any other. Naming that echo's layer turns
+the start's commit into a terminal refusal, and the arm that catches
+one retires the piece's whole registration — taking with it the event
+handlers its graph installed, so the next send to one of those
+streams finds no handler and the scheduler drops the event. A list
+that grows by handler sends stops growing, one send at a time, with
+no error anywhere near the send. Reading durably is what keeps that
+commit exportable. The mark covers only the transaction the runner
+mints for itself; a start handed a caller's transaction keeps that
+caller's read semantics.
 
 One retirement wake completes the ruling's "fix infinitely stuck
 things" half (§4's evaluation detail): a sweep that runs while an

@@ -39,7 +39,10 @@ export {
   experimentalOptionsFromEnv,
   MAX_ENFORCEMENT_CFC_OPTIONS,
   MAX_ENFORCEMENT_SINK_CEILINGS,
+  MAX_ENFORCEMENT_SINK_GOVERNANCE,
   type PatternTestPresetParams,
+  presetCfcOptions,
+  type PresetCfcParams,
   type ProductionServerPresetParams,
   type RemoteClientPresetParams,
   RUNTIME_OPTION_KEYS,
@@ -47,6 +50,7 @@ export {
   runtimePresets,
   SERVER_EXPERIMENTAL_PATH,
   type UnitTestPresetParams,
+  withServerExecutionDefault,
 } from "./runtime-presets.ts";
 export type {
   UnsafeHostTrust,
@@ -55,6 +59,17 @@ export type {
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
+// The seam's vocabulary, which describes a document's shape and is read by
+// hosts. Its write authorization is deliberately not here: it rides the
+// `@commonfabric/runner/meta-seam` subpath, so an import of it names the seam
+// it opens.
+export {
+  isMetaField,
+  META_FIELDS,
+  META_LINK_FIELDS,
+  type MetaField,
+  type MetaLinkField,
+} from "./meta-seam.ts";
 export type { NormalizedFullLink, NormalizedLink } from "./link-types.ts";
 export { encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
@@ -197,6 +212,8 @@ export {
   isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
+  type PatternSetupCommitReceipt,
+  PatternSetupPostCommitError,
   PIECE_SOURCE_MOVED,
   type PieceReconciliation,
   type PieceReconciliationOutcome,
@@ -207,8 +224,12 @@ export {
   type PieceSourceTransition,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
+  type RunSyncedCommitResult,
+  type RunSyncedOptions,
+  type RunSyncedWithCommitOptions,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
+  SEALING_RECEIPT_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,
@@ -351,7 +372,15 @@ export {
   parseFabricRef,
 } from "./sandbox/fabric-import-specifier.ts";
 export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
+export { DEFAULT_CELL_SCOPE } from "./scope.ts";
 export {
+  isPieceDocument,
+  isPieceRoot,
+  parseSlugRedirect,
+  resolveSlugReference,
   resolveSlugTargetCell,
+  resolveSlugTargetInPiece,
+  type SlugReferenceTarget,
   SlugResolutionError,
+  type SlugTargetInPiece,
 } from "./slug-resolution.ts";

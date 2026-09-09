@@ -53,6 +53,7 @@ function twoMeaningsTree() {
 function reportFor(known: {
   /** Option name -> the commands its provider answers on, `null` for all. */
   providerOptions?: Record<string, readonly string[] | null>;
+
   providerArguments?: string[];
   enumerated?: string[];
   allowedOptions?: string[];
@@ -175,6 +176,7 @@ describe("check-completion-slots", () => {
     it("names the commands a scoped provider does not answer on", () => {
       // A provider restricted to one command answers nothing on the other, so
       // the slot there is as silent as one with no entry at all.
+
       expect(
         reportFor({ providerOptions: { from: ["clone"] } }, twoMeaningsTree())
           .undecidedOptions,
@@ -184,6 +186,7 @@ describe("check-completion-slots", () => {
     it("takes no bare allowance for an option a provider answers somewhere", () => {
       // `--from` has candidates on `clone`, so a bare allowance saying it has
       // none is false wherever it is read; the other command needs its own.
+
       const bare = reportFor(
         { providerOptions: { from: ["clone"] }, allowedOptions: ["from"] },
         twoMeaningsTree(),
@@ -214,6 +217,7 @@ describe("check-completion-slots", () => {
     it("names a provider entry that matches no slot on the tree", () => {
       // The same subtraction the other way: this is what found `log-file` and
       // `state-path`, which belonged to commands declaring no Cliffy options.
+
       expect(
         reportFor({
           providerOptions: everywhere("log-file"),
@@ -226,6 +230,7 @@ describe("check-completion-slots", () => {
     it("names a command a scoped provider claims and the tree does not", () => {
       // A scope naming a command that never declared the option is the same
       // dead entry, one level down.
+
       expect(
         reportFor(
           { providerOptions: { from: ["clone", "pull"] } },
@@ -236,6 +241,7 @@ describe("check-completion-slots", () => {
 
     it("names an allowlist entry that decides no slot", () => {
       // A decision cannot outlive the thing it was about.
+
       expect(
         reportFor({ allowedOptions: ["gone"], allowedPositionals: ["gone:x"] })
           .staleAllowlist,
@@ -245,6 +251,7 @@ describe("check-completion-slots", () => {
     it("names an allowance for a slot a provider already answers", () => {
       // Two records of one decision, disagreeing: the provider offers
       // candidates the allowance says are not there.
+
       expect(
         reportFor({
           providerOptions: everywhere("select"),
@@ -271,6 +278,7 @@ describe("check-completion-slots", () => {
     it("names the entry to delete when one reaches nothing", () => {
       // The subtraction run the other way has its own paragraph, and it has to
       // name the dead entry: the fix is to delete that line, not to add a slot.
+
       const text = describeFailures(reportFor({
         providerOptions: everywhere("space", "select", "log-file"),
         providerArguments: ["get:path"],
@@ -287,6 +295,7 @@ describe("check-completion-slots", () => {
     it("returns 0 for the CLI's own command tree", () => {
       // The gate itself. Every slot the CLI declares is answered by a provider,
       // by an enumerated set, or by an allowlist entry carrying its reason.
+
       expect(main()).toBe(0);
     });
 
@@ -304,6 +313,7 @@ describe("check-completion-slots", () => {
     it("lists the undecided slots and succeeds when asked for the list", () => {
       // `--list` is the working view: it answers what is undecided without
       // failing, so the list can be read while it is worked through.
+
       const { code, out } = captureConsole(() =>
         main(["--list"], unknownTree())
       );
@@ -317,6 +327,7 @@ describe("check-completion-slots", () => {
     it("records a reason for every allowance, so none is a bare exemption", () => {
       // Trimmed, because a blank reason and a spaces-only one exempt a slot
       // just as silently.
+
       for (const [key, reason] of [...NO_CANDIDATES, ...NO_OPTION_CANDIDATES]) {
         expect(reason.trim().length, `${key} has no reason`).toBeGreaterThan(0);
       }
@@ -328,6 +339,7 @@ describe("check-completion-slots", () => {
     // or if the permissions the task declares were too narrow to walk the
     // tree. This is the promise the CI job makes: the command exits 0, having
     // done the work.
+
     it("exits 0 reporting the slots it walked", async () => {
       const { code, out } = await runAsProgram();
       expect(code).toBe(0);

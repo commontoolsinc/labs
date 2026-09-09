@@ -8,50 +8,53 @@ import {
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
 
 describe("mergeCfcSchemaEnvelopes", () => {
-  // C5: `observes` is a scalar consumption class, not a set-like claim.
-  // Agreement keeps the class through a merge; any disagreement (including
-  // one covering side) merges to covering — the widest consumption, the
-  // over-taint direction (fail-safe). Dropping it on every merge would
-  // silently defeat the C5 narrowing on the common re-write path.
-  it("keeps observes when both sides agree", () => {
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: {
-        rows: {
-          type: "string",
-          ifc: { confidentiality: ["a"], observes: "value" },
-        },
-      },
-    }, {
-      type: "object",
-      properties: {
-        rows: {
-          type: "string",
-          ifc: { confidentiality: ["a"], observes: "value" },
-        },
-      },
-    }) as JSONSchemaObj;
-    const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
-    expect((rows.ifc as { observes?: string }).observes).toBe("value");
-  });
+  describe("observes through a merge", () => {
+    // C5: `observes` is a scalar consumption class, not a set-like claim.
+    // Agreement keeps the class through a merge; any disagreement (including
+    // one covering side) merges to covering — the widest consumption, the
+    // over-taint direction (fail-safe). Dropping it on every merge would
+    // silently defeat the C5 narrowing on the common re-write path.
 
-  it("merges disagreeing observes to covering", () => {
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: {
-        rows: {
-          type: "string",
-          ifc: { confidentiality: ["a"], observes: "value" },
+    it("keeps observes when both sides agree", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          rows: {
+            type: "string",
+            ifc: { confidentiality: ["a"], observes: "value" },
+          },
         },
-      },
-    }, {
-      type: "object",
-      properties: {
-        rows: { type: "string", ifc: { confidentiality: ["a"] } },
-      },
-    }) as JSONSchemaObj;
-    const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
-    expect((rows.ifc as { observes?: string }).observes).toBeUndefined();
+      }, {
+        type: "object",
+        properties: {
+          rows: {
+            type: "string",
+            ifc: { confidentiality: ["a"], observes: "value" },
+          },
+        },
+      }) as JSONSchemaObj;
+      const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
+      expect((rows.ifc as { observes?: string }).observes).toBe("value");
+    });
+
+    it("merges disagreeing observes to covering", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          rows: {
+            type: "string",
+            ifc: { confidentiality: ["a"], observes: "value" },
+          },
+        },
+      }, {
+        type: "object",
+        properties: {
+          rows: { type: "string", ifc: { confidentiality: ["a"] } },
+        },
+      }) as JSONSchemaObj;
+      const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
+      expect((rows.ifc as { observes?: string }).observes).toBeUndefined();
+    });
   });
 
   it("allows additive required fields when a default preserves old documents", () => {
@@ -689,201 +692,208 @@ describe("mergeCfcSchemaEnvelopes", () => {
       .toThrow(/divergent oneOf branches/);
   });
 
-  // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a
-  // SINGLE ifc-carrying branch whose every sibling is syntactically
-  // type-disjoint is the union's policy carrier and MERGES — the wish
-  // builtin's optional-result shape. Everything the ruling's constraints
-  // name stays refused, pinned one by one below.
-  it("admits a single ifc-carrying branch with type-disjoint siblings (RULING 5)", () => {
-    const optionalIfcView = {
-      type: "object",
-      properties: {
-        result: {
-          anyOf: [
-            { type: "undefined" },
-            {
-              type: "object",
-              properties: {
-                name: { type: "string", ifc: { confidentiality: ["secret"] } },
+  describe("RULING 5: a single ifc-carrying branch with type-disjoint siblings", () => {
+    // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a SINGLE
+    // ifc-carrying branch whose every sibling is syntactically type-disjoint is
+    // the union's policy carrier and MERGES — the wish builtin's
+    // optional-result shape. Everything the ruling's constraints name stays
+    // refused, pinned one by one below.
+
+    it("admits a single ifc-carrying branch with type-disjoint siblings (RULING 5)", () => {
+      const optionalIfcView = {
+        type: "object",
+        properties: {
+          result: {
+            anyOf: [
+              { type: "undefined" },
+              {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    ifc: { confidentiality: ["secret"] },
+                  },
+                },
               },
-            },
-          ],
-        },
-      },
-    } as const;
-    const merged = mergeCfcSchemaEnvelopes(
-      optionalIfcView,
-      optionalIfcView,
-    ) as JSONSchemaObj;
-    const result = (merged.properties?.result ?? {}) as JSONSchemaObj;
-    expect(Array.isArray(result.anyOf)).toBe(true);
-    const carrier = (result.anyOf?.[1] ?? {}) as JSONSchemaObj;
-    expect(
-      ((carrier.properties?.name ?? {}) as JSONSchemaObj).ifc?.confidentiality,
-    ).toEqual(["secret"]);
-  });
-
-  it("admits the single carrier under oneOf and nested positions too (RULING 5)", () => {
-    const nested = {
-      type: "array",
-      items: {
-        oneOf: [
-          { type: "string", ifc: { confidentiality: ["secret"] } },
-          { type: "number" },
-        ],
-      },
-    } as const;
-    const merged = mergeCfcSchemaEnvelopes(nested, nested) as JSONSchemaObj;
-    const items = (merged.items ?? {}) as JSONSchemaObj;
-    expect(Array.isArray(items.oneOf)).toBe(true);
-  });
-
-  it("still rejects a single carrier whose sibling is NOT syntactically disjoint (RULING 5 constraints)", () => {
-    const carrier = {
-      type: "object",
-      properties: {
-        secret: { type: "string", ifc: { confidentiality: ["secret"] } },
-      },
-    } as const;
-    // Same-type sibling: a labeled value could also match it (the dodge).
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [carrier, { type: "object" }] },
-        { anyOf: [carrier, { type: "object" }] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    // No `type` on the sibling: overlap unprovable.
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [carrier, { properties: {} }] },
-        { anyOf: [carrier, { properties: {} }] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    // Type ARRAY on the sibling: not scalar, unprovable.
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [carrier, { type: ["string", "number"] } as never] },
-        { anyOf: [carrier, { type: ["string", "number"] } as never] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    // Combinator sibling: unprovable.
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [carrier, { anyOf: [{ type: "string" }] }] },
-        { anyOf: [carrier, { anyOf: [{ type: "string" }] }] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    // Boolean sibling (`true` matches anything): unprovable.
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [carrier, true] },
-        { anyOf: [carrier, true] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-  });
-
-  it("still rejects an integer/number carrier-sibling pair — value-set overlap, not string equality (RULING 5 constraints; review F1)", () => {
-    // Every JSON-Schema integer IS a number, so a concrete value (e.g. `5`)
-    // matches BOTH branches — the ONE scalar pair whose value-sets overlap
-    // while the type STRINGS differ. Disjointness is decided over value-sets,
-    // so this pair is NOT disjoint and the union must refuse, both branch
-    // orders and either carrier position.
-    const integerCarrier = {
-      type: "integer",
-      ifc: { confidentiality: ["secret"] },
-    } as const;
-    const numberCarrier = {
-      type: "number",
-      ifc: { confidentiality: ["secret"] },
-    } as const;
-    // ifc on the `integer` branch, `number` sibling — both orders.
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [integerCarrier, { type: "number" }] },
-        { anyOf: [integerCarrier, { type: "number" }] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [{ type: "number" }, integerCarrier] },
-        { anyOf: [{ type: "number" }, integerCarrier] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    // ifc on the `number` branch, `integer` sibling — both orders.
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [numberCarrier, { type: "integer" }] },
-        { anyOf: [numberCarrier, { type: "integer" }] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        { anyOf: [{ type: "integer" }, numberCarrier] },
-        { anyOf: [{ type: "integer" }, numberCarrier] },
-      )
-    ).toThrow(/divergent anyOf branches/);
-  });
-
-  it("still admits a genuinely value-disjoint scalar pair beside the numeric fix (RULING 5)", () => {
-    // The fix excludes ONLY the integer/number pair; every other cross-type
-    // pair stays genuinely disjoint and admits. `string` vs `number` is such
-    // a pair (a value is never both), so a single `number` carrier with a
-    // `string` sibling still MERGES.
-    const merged = mergeCfcSchemaEnvelopes(
-      {
-        anyOf: [
-          { type: "number", ifc: { confidentiality: ["secret"] } },
-          { type: "string" },
-        ],
-      },
-      {
-        anyOf: [
-          { type: "number", ifc: { confidentiality: ["secret"] } },
-          { type: "string" },
-        ],
-      },
-    ) as JSONSchemaObj;
-    expect(Array.isArray(merged.anyOf)).toBe(true);
-    const carrier = (merged.anyOf?.[0] ?? {}) as JSONSchemaObj;
-    expect(carrier.ifc?.confidentiality).toEqual(["secret"]);
-  });
-
-  it("still rejects allOf with an ifc-carrying branch (RULING 5 scope)", () => {
-    // allOf is conjunctive: type-disjoint siblings are unsatisfiable by
-    // construction, so no carrier reading exists there.
-    const conjunctive = {
-      allOf: [
-        { type: "object", ifc: { confidentiality: ["secret"] } },
-        { type: "undefined" },
-      ],
-    } as const;
-    expect(() => mergeCfcSchemaEnvelopes(conjunctive, conjunctive))
-      .toThrow(/divergent allOf branches/);
-  });
-
-  it("still recurses INTO the admitted carrier (nested divergence refuses)", () => {
-    const carrierWithNestedDivergence = {
-      anyOf: [
-        { type: "undefined" },
-        {
-          type: "object",
-          properties: {
-            inner: {
-              anyOf: [
-                { type: "string", ifc: { confidentiality: ["a"] } },
-                { type: "number", ifc: { confidentiality: ["b"] } },
-              ],
-            },
+            ],
           },
         },
-      ],
-    } as const;
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        carrierWithNestedDivergence,
-        carrierWithNestedDivergence,
-      )
-    ).toThrow(/divergent anyOf branches/);
+      } as const;
+      const merged = mergeCfcSchemaEnvelopes(
+        optionalIfcView,
+        optionalIfcView,
+      ) as JSONSchemaObj;
+      const result = (merged.properties?.result ?? {}) as JSONSchemaObj;
+      expect(Array.isArray(result.anyOf)).toBe(true);
+      const carrier = (result.anyOf?.[1] ?? {}) as JSONSchemaObj;
+      expect(
+        ((carrier.properties?.name ?? {}) as JSONSchemaObj).ifc
+          ?.confidentiality,
+      ).toEqual(["secret"]);
+    });
+
+    it("admits the single carrier under oneOf and nested positions too (RULING 5)", () => {
+      const nested = {
+        type: "array",
+        items: {
+          oneOf: [
+            { type: "string", ifc: { confidentiality: ["secret"] } },
+            { type: "number" },
+          ],
+        },
+      } as const;
+      const merged = mergeCfcSchemaEnvelopes(nested, nested) as JSONSchemaObj;
+      const items = (merged.items ?? {}) as JSONSchemaObj;
+      expect(Array.isArray(items.oneOf)).toBe(true);
+    });
+
+    it("still rejects a single carrier whose sibling is NOT syntactically disjoint (RULING 5 constraints)", () => {
+      const carrier = {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+        },
+      } as const;
+      // Same-type sibling: a labeled value could also match it (the dodge).
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { type: "object" }] },
+          { anyOf: [carrier, { type: "object" }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // No `type` on the sibling: overlap unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { properties: {} }] },
+          { anyOf: [carrier, { properties: {} }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // Type ARRAY on the sibling: not scalar, unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { type: ["string", "number"] } as never] },
+          { anyOf: [carrier, { type: ["string", "number"] } as never] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // Combinator sibling: unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { anyOf: [{ type: "string" }] }] },
+          { anyOf: [carrier, { anyOf: [{ type: "string" }] }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // Boolean sibling (`true` matches anything): unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, true] },
+          { anyOf: [carrier, true] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+    });
+
+    it("still rejects an integer/number carrier-sibling pair — value-set overlap, not string equality (RULING 5 constraints; review F1)", () => {
+      // Every JSON-Schema integer IS a number, so a concrete value (e.g. `5`)
+      // matches BOTH branches — the ONE scalar pair whose value-sets overlap
+      // while the type STRINGS differ. Disjointness is decided over value-sets,
+      // so this pair is NOT disjoint and the union must refuse, both branch
+      // orders and either carrier position.
+      const integerCarrier = {
+        type: "integer",
+        ifc: { confidentiality: ["secret"] },
+      } as const;
+      const numberCarrier = {
+        type: "number",
+        ifc: { confidentiality: ["secret"] },
+      } as const;
+      // ifc on the `integer` branch, `number` sibling — both orders.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [integerCarrier, { type: "number" }] },
+          { anyOf: [integerCarrier, { type: "number" }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [{ type: "number" }, integerCarrier] },
+          { anyOf: [{ type: "number" }, integerCarrier] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // ifc on the `number` branch, `integer` sibling — both orders.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [numberCarrier, { type: "integer" }] },
+          { anyOf: [numberCarrier, { type: "integer" }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [{ type: "integer" }, numberCarrier] },
+          { anyOf: [{ type: "integer" }, numberCarrier] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+    });
+
+    it("still admits a genuinely value-disjoint scalar pair beside the numeric fix (RULING 5)", () => {
+      // The fix excludes ONLY the integer/number pair; every other cross-type
+      // pair stays genuinely disjoint and admits. `string` vs `number` is such
+      // a pair (a value is never both), so a single `number` carrier with a
+      // `string` sibling still MERGES.
+      const merged = mergeCfcSchemaEnvelopes(
+        {
+          anyOf: [
+            { type: "number", ifc: { confidentiality: ["secret"] } },
+            { type: "string" },
+          ],
+        },
+        {
+          anyOf: [
+            { type: "number", ifc: { confidentiality: ["secret"] } },
+            { type: "string" },
+          ],
+        },
+      ) as JSONSchemaObj;
+      expect(Array.isArray(merged.anyOf)).toBe(true);
+      const carrier = (merged.anyOf?.[0] ?? {}) as JSONSchemaObj;
+      expect(carrier.ifc?.confidentiality).toEqual(["secret"]);
+    });
+
+    it("still rejects allOf with an ifc-carrying branch (RULING 5 scope)", () => {
+      // allOf is conjunctive: type-disjoint siblings are unsatisfiable by
+      // construction, so no carrier reading exists there.
+      const conjunctive = {
+        allOf: [
+          { type: "object", ifc: { confidentiality: ["secret"] } },
+          { type: "undefined" },
+        ],
+      } as const;
+      expect(() => mergeCfcSchemaEnvelopes(conjunctive, conjunctive))
+        .toThrow(/divergent allOf branches/);
+    });
+
+    it("still recurses INTO the admitted carrier (nested divergence refuses)", () => {
+      const carrierWithNestedDivergence = {
+        anyOf: [
+          { type: "undefined" },
+          {
+            type: "object",
+            properties: {
+              inner: {
+                anyOf: [
+                  { type: "string", ifc: { confidentiality: ["a"] } },
+                  { type: "number", ifc: { confidentiality: ["b"] } },
+                ],
+              },
+            },
+          },
+        ],
+      } as const;
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          carrierWithNestedDivergence,
+          carrierWithNestedDivergence,
+        )
+      ).toThrow(/divergent anyOf branches/);
+    });
   });
 
   it("rejects divergent ifc branches nested under a tuple slot", () => {

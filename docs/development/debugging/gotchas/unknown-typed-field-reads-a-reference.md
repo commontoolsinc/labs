@@ -184,14 +184,17 @@ A field you expect to read shows as `{ type: "unknown" }` when the read will
 stop at a reference — the field itself is there and truthy, its properties are
 not — and as the shape you named when it will materialize.
 
-## Where this has bitten
+## The shape that invites it
 
-`packages/patterns/record.tsx` holds each of its modules as
-`SubPieceEntry.piece: unknown`. Every feature that read a field off a module —
-the module's own label in its header, the icon a record-icon module carries, the
-aliases a nickname module carries, the settings dialog's contents, the LLM
-summary's per-module data, and the smart-default label picker — read `undefined`
-and silently fell back, each discovered separately. The label picker was fixed
-by recording the chosen label on the entry beside the piece; the rest read
-through the module, as above. See `packages/patterns/record-module-fields.test.tsx`
-and `packages/patterns/integration/record-module-chrome.test.ts`.
+A pattern that holds a list of other pieces and types the element's piece field
+`unknown` — because the element can hold any of several kinds — hits every arm
+of this at once. Each feature reading a field off one of those pieces gets
+`undefined` and silently falls back, and because the fallbacks differ per
+feature (a generic label here, an empty dialog there) the single cause is
+discovered once per feature rather than once.
+
+Two fixes apply, and which one you need depends on where the read is. A read
+that can go through a lift takes the operand that names the fields, per the
+rules above. A value the holder needs for itself — the label it chose for an
+entry, say — is better recorded on the entry beside the piece than read back
+through it.

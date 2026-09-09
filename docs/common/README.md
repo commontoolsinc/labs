@@ -25,7 +25,7 @@ on the Common Fabric runtime.
 | Task | Read |
 |------|------|
 | Build a pattern | [ai/pattern-development-guide.md](ai/pattern-development-guide.md) |
-| Build an iframe-first pattern | [ai/iframe-pattern-guide.md](ai/iframe-pattern-guide.md) |
+| Build an iframe-first pattern | [plain DOM](ai/iframe-pattern-guide.md), [React](ai/iframe-pattern-react-guide.md), [D3](ai/iframe-pattern-d3-guide.md), [Phaser](ai/iframe-pattern-phaser-guide.md), or [Babylon.js](ai/iframe-pattern-babylon-guide.md) |
 | Write tests | [ai/pattern-testing-guide.md](ai/pattern-testing-guide.md) (mechanics: [workflows/pattern-testing.md](workflows/pattern-testing.md)) |
 | Review / critique a pattern | [ai/pattern-critique-guide.md](ai/pattern-critique-guide.md) |
 | Manual / runtime testing | [ai/manual-testing-guide.md](ai/manual-testing-guide.md) |
@@ -60,6 +60,7 @@ on the Common Fabric runtime.
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
 - [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, reserved built-in tool names, mutation tools as handlers
+- [patterns/held-item-interfaces.md](patterns/held-item-interfaces.md) — shaping what a pattern demands of the pieces it holds, across generations
 - [patterns/primitives.md](patterns/primitives.md) — the composition contract
   for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
@@ -84,6 +85,7 @@ on the Common Fabric runtime.
 
 - [capabilities/llm.md](capabilities/llm.md) — `generateText` / `generateObject`; reactive results, no `await`
 - [capabilities/fetch.md](capabilities/fetch.md) — `fetchJson` / `fetchText` / `fetchJsonUnchecked` / `fetchBinary`; reactive results, no `await`
+- [capabilities/sqlite.md](capabilities/sqlite.md) — reading a `SqliteDb` a pattern was given as an input: `db.query`, one statement per database, bounding a query's rows, session-scoped results under a read ceiling
 
 ### workflows/ — CLI and testing mechanics
 

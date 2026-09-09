@@ -8,8 +8,17 @@ on:
     branches:
       - main
 
+# Runs of a pull request are grouped by the pull request, and a new push to the
+# branch cancels the run already going. Runs of a push to main are grouped by
+# the commit that was pushed, and a push run is never cancelled: it may be
+# part-way through deploying that commit to staging. Main can receive the same
+# head commit twice, which starts two runs of one commit, and the commit as the
+# group makes the second of them wait for the first. Each run publishes a
+# release artifact named after the commit, and two runs publishing at once
+# leave one run's tarball beside the other run's checksum. See "One commit, one
+# set of artifacts" in docs/development/deploying.md.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The bounds the jobs below are built from. They are YAML anchors, used as
@@ -29,8 +38,8 @@ env:
   CLI_WORK_TIMEOUT_MINUTES: &cli-work-timeout 10
   CLI_FUSE_WORK_TIMEOUT_MINUTES: &cli-fuse-work-timeout 15
   CLI_JOB_TIMEOUT_MINUTES: &cli-job-timeout 25
-  # The server-execution posture probes (two curls against a server that is
-  # already up) take this one; sized for a probe, not a suite.
+  # Server-execution role resolution and posture probes take this one; it is
+  # sized for short control-plane checks, not a suite.
   POSTURE_PROBE_TIMEOUT_MINUTES: &posture-probe-timeout 5
 
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
@@ -64,7 +73,7 @@ jobs:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -94,7 +103,7 @@ jobs:
 
       - name: 📤 Upload Deno lint core dump
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: deno-lint-core-a${{ github.run_attempt }}
           path: deno-core.*
@@ -159,6 +168,12 @@ jobs:
           deno task run-recorded gate repo check-verb-session-sync --
           deno task check-verb-session-sync
 
+      - name: 🔎 Check pattern tier markers
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-pattern-tiers --
+          deno task check-pattern-tiers
+
       - name: 🔎 Check for unused import map dependencies
         timeout-minutes: *work-timeout
         run: >-
@@ -170,6 +185,14 @@ jobs:
         run: >-
           deno task run-recorded gate repo check-deno-pins --
           deno task check-deno-pins
+
+      - name: 🔎 Check action pins run the release they name
+        timeout-minutes: *work-timeout
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          deno task run-recorded gate repo check-action-pins --
+          deno task check-action-pins
 
       - name: 🔎 Check single-copy packages resolve once
         timeout-minutes: *work-timeout
@@ -237,7 +260,7 @@ jobs:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -269,7 +292,7 @@ jobs:
         total: [3]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -307,7 +330,7 @@ jobs:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # The baseline check diffs against the merge base and needs real
         # history. The replay step reads the same full checkout.
         with:
@@ -395,7 +418,7 @@ jobs:
         total: [8]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -435,10 +458,17 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-workspace-${{ matrix.shard }}
-          path: coverage/lcov/workspace-${{ matrix.shard }}.lcov
+          # The second path is the record of the packages this shard selected
+          # and never started, which the coverage gate reads to decide which
+          # groups this run can speak for. A shard that started everything it
+          # selected writes no such file; both paths sit in one directory, so
+          # the artifact's layout is the same either way.
+          path: |
+            coverage/lcov/workspace-${{ matrix.shard }}.lcov
+            coverage/lcov/unlaunched-members.txt
           retention-days: 90
           if-no-files-found: error
 
@@ -463,7 +493,7 @@ jobs:
         total: [8]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -486,21 +516,26 @@ jobs:
           printf '  %s\n' $TEST_FILES
           mkdir -p ../../test-results
           # --no-check: the Check job type-checks packages/runner
-          # (tasks/check.sh). --preload runs the fake clock before every test
-          # module, the same as the package test task; without it the global
-          # `clock` the converted tests use is undefined. See
-          # test/clock-preload.ts.
+          # (tasks/check.sh). The first --preload runs the fake clock before
+          # every test module, the same as the package test task; without it
+          # the global `clock` the converted tests use is undefined. See
+          # test/clock-preload.ts. The second captures the file each test
+          # registers from, which is what gives the shipped records their
+          # file metadata; it writes that map into the spool, so the spool
+          # is in the write list beside the temporary directories, or the
+          # preload finds nowhere to put it and declines to install.
           # These permissions mirror the `test` task in
           # packages/runner/deno.jsonc; a test that needs a new one needs it
           # in both places, because this shard runs deno test directly.
           ENV=test deno test \
             --no-check \
             --preload=test/clock-preload.ts \
+            --preload=../../packages/test-support/src/records/preload.ts \
             --junit-path=../../test-results/runner-${{ matrix.shard }}.xml \
             --allow-ffi \
             --allow-env \
             --allow-read \
-            --allow-write=/tmp,/var/folders \
+            --allow-write=/tmp,/var/folders,$CF_TEST_RECORDS_DIR \
             --allow-run=git,deno \
             $TEST_FILES
 
@@ -510,7 +545,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-runner-${{ matrix.shard }}
           path: coverage/lcov/runner-${{ matrix.shard }}.lcov
@@ -533,7 +568,7 @@ jobs:
     timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -593,33 +628,22 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
 
       - name: 📤 Upload toolshed binary
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binary-toolshed
           path: ./dist/toolshed
           if-no-files-found: error
 
-  # The ON-arm toolshed binary (server-execution v2, Phase 7 landed
-  # flip-READY with the first-party default OFF — docs/specs/
-  # server-side-execution/testing.md §2): the browser shell's flag is an
-  # esbuild define burned in at build time (unset = the first-party default,
-  # OFF today), so the explicit-`true` ON lanes need a binary whose shell was
-  # built with EXPERIMENTAL_SERVER_EXECUTION=true — an ON lane on the default
-  # binary above would run an OFF shell against an ON server, the MIXED
-  # posture Phases 4–6's ON lanes actually ran (which is why two two-browser
-  # gates were "green ON" before Phase 7). Same source, same commit; only
-  # the shell define differs, and the ON lanes VERIFY the posture the binary
-  # carries (/api/meta's `shellServerExecutionDefine`, written by
-  # tasks/build-binaries.ts from this same environment) before they test.
-  # When the flip PR lands the roles invert: this job bakes `false` for the
-  # explicit-false OFF regression-guard lanes and the default binary is ON.
-  build-toolshed-on:
-    name: "Build Binary (toolshed, server-execution ON shell)"
+  # The posture opposite the first-party default must be baked into its own
+  # browser shell. The stable role is resolved from the same constant as the
+  # product default, so changing that constant swaps the two CI arms together.
+  build-toolshed-opposite:
+    name: "Build Binary (toolshed, opposite server-execution shell)"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -627,17 +651,20 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 🏗️ Build toolshed binary (ON-arm shell)
+      - name: 🧭 Resolve opposite server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env opposite >> "$GITHUB_ENV"
+
+      - name: 🏗️ Build toolshed binary (opposite shell)
         timeout-minutes: *work-timeout
         run: deno task build-binaries toolshed
         env:
           COMMIT_SHA: ${{ github.sha }}
-          EXPERIMENTAL_SERVER_EXECUTION: "true"
 
-      - name: 📤 Upload toolshed binary (ON-arm shell)
-        uses: actions/upload-artifact@v7
+      - name: 📤 Upload toolshed binary (opposite shell)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binary-toolshed-on
+          name: binary-toolshed-opposite
           path: ./dist/toolshed
           if-no-files-found: error
 
@@ -647,7 +674,7 @@ jobs:
     timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -660,7 +687,7 @@ jobs:
         run: deno task build-binaries bg-piece-service
 
       - name: 📤 Upload bg-piece-service binary
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binary-bg-piece-service
           path: ./dist/bg-piece-service
@@ -672,7 +699,7 @@ jobs:
     timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -685,7 +712,7 @@ jobs:
         run: deno task build-binaries cf
 
       - name: 📤 Upload cf binary
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binary-cf
           path: ./dist/cf
@@ -704,7 +731,7 @@ jobs:
         total: [2]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -714,7 +741,7 @@ jobs:
 
       - name: ♻️ Restore/save generated pattern compile byte cache
         id: compile-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts', 'tasks/select-generated-pattern-files.ts') }}
@@ -754,7 +781,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-generated-patterns-${{ matrix.shard }}
           path: coverage/lcov/generated-patterns-${{ matrix.shard }}.lcov
@@ -763,7 +790,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-generated-patterns-${{ matrix.shard }}
           path: test-results/
@@ -814,7 +841,7 @@ jobs:
             headless: true
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -822,8 +849,12 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: 🧭 Resolve default server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env default >> "$GITHUB_ENV"
+
       - name: 📥 Download toolshed binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-toolshed
           path: common-binaries
@@ -837,6 +868,7 @@ jobs:
           # then returns, so the test steps never race a not-yet-listening
           # server. The server logs to --log-file, which the launcher prints on
           # success and dumps if the server exits before binding.
+          # This lane leaves the flag unset and follows the first-party default.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
@@ -854,29 +886,11 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
-      # This is the DEFAULT-posture lane (server-execution v2: flag unset =
-      # the first-party default, OFF while Phase 7 is landed dark;
-      # testing.md §2) — the regression guard for today's behavior. The
-      # explicit-`true` ON arm is the `-server-execution-on` lane below; the
-      # probe here pins that this lane really is OFF (server not serving,
-      # shell define unset), so a silent flip of the default cannot move the
-      # REQUIRED lanes onto the ON posture unnoticed.
-      - name: ✅ Verify the server-execution posture (default posture — server OFF, shell define unset)
+      - name: ✅ Verify the default server-execution posture
         timeout-minutes: *posture-probe-timeout
         env:
           TOOLSHED_PORT: 8000
-        run: |
-          META=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/meta")
-          STATS=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/health/stats")
-          echo "$META"
-          echo "$META" | jq -e '.shellServerExecutionDefine == null' > /dev/null || {
-            echo "::error::binary-toolshed carries a shell built with an explicit EXPERIMENTAL_SERVER_EXECUTION define; the default lane must run the default-built shell"
-            exit 1
-          }
-          echo "$STATS" | jq -e '.servingLoop == null' > /dev/null || {
-            echo "::error::the toolshed started the serving loop in the DEFAULT lane; the first-party default is OFF (Phase 7 landed dark) — flip the CI lane roles with the flip PR, never silently"
-            exit 1
-          }
+        run: deno run --allow-net tasks/server-execution-ci-command.ts probe default "http://localhost:${TOOLSHED_PORT}"
 
       - name: 🧪 Run ${{ matrix.step_name }}
         timeout-minutes: *work-timeout
@@ -891,8 +905,16 @@ jobs:
           if [ "$HEADLESS_ENABLED" = "true" ]; then
             export HEADLESS=1
           fi
+          SX_ON_IGNORE=""
+          if [ "$SERVER_EXECUTION_ENABLED" = "true" ]; then
+            # The skip registry belongs to the ON arm, whichever stable role
+            # currently carries it.
+            SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
+          else
+            echo "Server execution is OFF; the ON-arm skip registry does not apply."
+          fi
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml" \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
       - name: 🧾 Write coverage report
@@ -901,7 +923,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-package-${{ matrix.suite_name }}
           path: coverage/lcov/package-${{ matrix.suite_name }}.lcov
@@ -910,7 +932,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-package-integration-${{ matrix.suite_name }}
           path: test-results/${{ matrix.junit_name }}.xml
@@ -925,48 +947,37 @@ jobs:
           job: Package Integration Tests (${{ matrix.suite_name }})
           junit: >-
             kind=integration,scope=${{ matrix.suite_name }},prefix=${{ matrix.package_dir }},glob=test-results/${{ matrix.junit_name }}.xml
-  # The server-execution v2 ON arm (docs/specs/server-side-execution/testing.md
-  # §2): the same package integration suites, byte-identical workloads, with
-  # EXPERIMENTAL_SERVER_EXECUTION=true on the toolshed server, on the test
-  # processes (the runner integration harness and the runtime-client worker
-  # declare the posture from the env — the ON lane is UNIFORM, not the mixed
-  # posture the P7 independent review found), AND in the binary's baked
-  # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
-  # probe below before the suite runs. Skips happen only through the explicit
-  # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering. No coverage collection: the default lane
-  # owns coverage, and this arm exists to prove behavior under the flag. When
-  # the flip PR lands the roles invert (default = ON with the skip list;
-  # explicit-`false` = the OFF regression guard on an OFF-built binary).
-  package-integration-test-server-execution-on:
-    name: "Package Integration Tests / server-execution ON (${{ matrix.suite_name }})"
+  # The opposite role runs the same suites with an explicit inverse of the
+  # first-party default in the server, test processes, and baked browser shell.
+  package-integration-test-server-execution-opposite:
+    name: "Package Integration Tests / opposite server-execution (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
-    needs: ["build-toolshed-on"]
+    needs: ["build-toolshed-opposite"]
     strategy:
       fail-fast: false
       matrix:
         include:
           - suite_name: runner
             package_dir: packages/runner
-            junit_name: runner-server-execution-on
+            junit_name: runner-server-execution-opposite
             step_name: runner integration tests
             headless: false
           - suite_name: runtime-client
             package_dir: packages/runtime-client
-            junit_name: runtime-client-server-execution-on
+            junit_name: runtime-client-server-execution-opposite
             step_name: runtime-client integration tests
             headless: false
           - suite_name: shell
             package_dir: packages/shell
-            junit_name: shell-server-execution-on
+            junit_name: shell-server-execution-opposite
             step_name: shell integration tests
             headless: true
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -974,13 +985,17 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download toolshed binary (ON-arm shell)
-        uses: actions/download-artifact@v8
+      - name: 🧭 Resolve opposite server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env opposite >> "$GITHUB_ENV"
+
+      - name: 📥 Download toolshed binary (opposite shell)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: binary-toolshed-on
+          name: binary-toolshed-opposite
           path: common-binaries
 
-      - name: 🔌 Start Toolshed server for testing (flag ON)
+      - name: 🔌 Start Toolshed server for testing (opposite posture)
         env:
           TOOLSHED_PORT: 8000
         run: |
@@ -989,43 +1004,16 @@ jobs:
           # then returns, so the test steps never race a not-yet-listening
           # server. The server logs to --log-file, which the launcher prints on
           # success and dumps if the server exits before binding.
-          # Space-root ensure ON — the production default (unset knob).
-          # The lanes opted out while OW61's crash class was open (the
-          # ensured root's content-addressed computed cells landed in
-          # fixture spaces' plain subscriptions and the arrival throw
-          # killed the consumers); with the arrival containment (#6223)
-          # and the client absorb fix (#6292) merged the lanes run the
-          # production posture again, and these ON lanes ARE the CI
-          # coverage of the ensure at the true topology (the OW45/OW61
-          # rows' flagged gap). `schema-doc-quarantine` log lines are
-          # expected to be ZERO here; a live one is contained (not a
-          # process kill) but is evidence that another client
-          # absorb/ordering defect remains — OW61's residual trigger.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          EXPERIMENTAL_SERVER_EXECUTION=true \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
-      # The posture the binary ACTUALLY carries: the shell define is baked at
-      # build time, so an ON lane on a default-built binary would silently be
-      # the mixed posture; and the server must really be serving.
-      - name: ✅ Verify the server-execution posture (server ON, shell ON-built)
+      - name: ✅ Verify the opposite server-execution posture
         timeout-minutes: *posture-probe-timeout
         env:
           TOOLSHED_PORT: 8000
-        run: |
-          META=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/meta")
-          STATS=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/health/stats")
-          echo "$META"
-          echo "$META" | jq -e '.shellServerExecutionDefine == "true"' > /dev/null || {
-            echo "::error::binary-toolshed-on does not carry an ON-built shell (EXPERIMENTAL_SERVER_EXECUTION=true must reach tasks/build-binaries.ts and the shell build); the ON lane would run a MIXED posture"
-            exit 1
-          }
-          echo "$STATS" | jq -e '.servingLoop != null' > /dev/null || {
-            echo "::error::the toolshed did not start the serving loop under EXPERIMENTAL_SERVER_EXECUTION=true; the ON lane's server posture is OFF"
-            exit 1
-          }
+        run: deno run --allow-net tasks/server-execution-ci-command.ts probe opposite "http://localhost:${TOOLSHED_PORT}"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -1039,7 +1027,7 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
-      - name: 🧪 Run ${{ matrix.step_name }} (flag ON)
+      - name: 🧪 Run ${{ matrix.step_name }} (opposite posture)
         timeout-minutes: *work-timeout
         working-directory: ${{ matrix.package_dir }}
         env:
@@ -1051,21 +1039,19 @@ jobs:
           if [ "$HEADLESS_ENABLED" = "true" ]; then
             export HEADLESS=1
           fi
-          # The explicit ON-arm skip list; the script prints every skip (or
-          # that there are none) and emits the matching --ignore flag. The
-          # flag binds because the package `integration` tasks hand deno a
-          # QUOTED glob it expands itself — `deno test --ignore` filters only
-          # files deno discovers and silently ignores nothing when the same
-          # files arrive as explicit arguments (a shell-expanded glob).
-          SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
+          SX_ON_IGNORE=""
+          if [ "$SERVER_EXECUTION_ENABLED" = "true" ]; then
+            SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
+          else
+            echo "Server execution is OFF; the ON-arm skip registry does not apply."
+          fi
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
-          EXPERIMENTAL_SERVER_EXECUTION=true \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-package-integration-${{ matrix.junit_name }}
           path: test-results/${{ matrix.junit_name }}.xml
@@ -1076,10 +1062,9 @@ jobs:
         if: always()
         uses: ./.github/actions/test-records-ship
         with:
-          artifact: package-integration-server-execution-on-${{ matrix.suite_name }}
-          variant: server-execution
+          artifact: package-integration-server-execution-opposite-${{ matrix.suite_name }}
           job: >-
-            Package Integration Tests / server-execution ON
+            Package Integration Tests / opposite server-execution
             (${{ matrix.suite_name }})
           junit: >-
             kind=integration,scope=${{ matrix.suite_name }},prefix=${{ matrix.package_dir }},glob=test-results/${{ matrix.junit_name }}.xml
@@ -1118,7 +1103,7 @@ jobs:
             run_fuse: true
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -1126,14 +1111,18 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: 🧭 Resolve default server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env default >> "$GITHUB_ENV"
+
       - name: 📥 Download toolshed binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-toolshed
           path: common-binaries
 
       - name: 📥 Download cf binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-cf
           path: common-binaries
@@ -1153,6 +1142,28 @@ jobs:
           CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" \
             ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
+
+      # The server probe verifies the default server and baked shell. The
+      # client check also verifies that `cf` adopts the published arm rather
+      # than silently creating a mixed posture.
+      - name: ✅ Verify the default server-execution posture and cf adoption
+        timeout-minutes: *posture-probe-timeout
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+        run: |
+          deno run --allow-net tasks/server-execution-ci-command.ts probe default "http://localhost:${TOOLSHED_PORT}"
+          META=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/meta")
+          SERVER_ARM=$(echo "$META" | jq -r 'if .experimental.serverExecution == null then "unpublished" else (.experimental.serverExecution | tostring) end')
+          CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"
+          if [ "$SERVER_ARM" != "$SERVER_EXECUTION_ENABLED" ]; then
+            echo "::error::the toolshed publishes serverExecution=$SERVER_ARM; the resolved default is $SERVER_EXECUTION_ENABLED"
+            exit 1
+          fi
+          if [ "$CLIENT_ARM" != "$SERVER_ARM" ]; then
+            echo "::error::MIXED posture in the CLI lane: cf resolves serverExecution=$CLIENT_ARM (an explicit EXPERIMENTAL_SERVER_EXECUTION overrides the deployment's posture) while the toolshed publishes $SERVER_ARM; a mixed run is never a valid arm exercise"
+            exit 1
+          fi
+          echo "cf resolves serverExecution=$CLIENT_ARM against a toolshed publishing $SERVER_ARM with a matching posture."
 
       - name: 📦 Install CLI integration dependencies
         uses: ./.github/actions/apt-install
@@ -1213,6 +1224,11 @@ jobs:
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           FUSE_DEEP_ENTITY_PROBE: "0"
+          # The section of fuse-exec.sh's dispatch table this leg runs, which
+          # `all` makes every phase of it. packages/cli/test/fuse-sections.test.ts
+          # reads this line and holds it to naming an arm the script defines and
+          # to covering every selectable phase between the sections named here.
+          CF_FUSE_INTEGRATION_SECTION: all
           # Single source for the outer step bound: 'timeout' enforces it, and the
           # script's waits give up a few minutes before it (see
           # FUSE_EXEC_OVERALL_TIMEOUT_SECONDS in integration/fuse-exec.sh) so a
@@ -1250,7 +1266,7 @@ jobs:
 
       - name: 📤 Upload CLI integration timing data
         if: ${{ always() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-cli-${{ matrix.timing_name }}
           path: test-results/cli-${{ matrix.timing_name }}-cf-timings.log
@@ -1280,13 +1296,17 @@ jobs:
         total: [10]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
+
+      - name: 🧭 Resolve default server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env default >> "$GITHUB_ENV"
 
       # Cross-run compile cache: persist the per-shard compiled-module-byte cache
       # so unchanged patterns reuse last run's emitted bytes (skip the
@@ -1310,7 +1330,7 @@ jobs:
       # is immutable; newly compiled bytes are saved under a rotated key.
       - name: ♻️ Restore/save compile byte cache
         id: compile-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
           key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts', 'tasks/weighted-shards.ts') }}
@@ -1326,7 +1346,7 @@ jobs:
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download toolshed binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-toolshed
           path: common-binaries
@@ -1353,53 +1373,67 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
-      # Both kinds of coverage: V8 runtime coverage via DENO_COVERAGE_DIR, and
-      # authored-pattern coverage via CF_PATTERN_COVERAGE_DIR, which the shell
-      # integration harness reads to turn on the browser worker's collector and
-      # to place the LCOV it pulls back at teardown. Absolute, because the
-      # harness resolves it against a working directory that differs between the
-      # two integration jobs. See docs/development/COVERAGE.md.
-      # This is the DEFAULT-posture lane (server-execution v2: flag unset =
-      # the first-party default, OFF while Phase 7 is landed dark;
-      # testing.md §2) — the regression guard for today's behavior; the
-      # explicit-`true` ON arm is the `-server-execution-on` lane below. The
-      # probe pins that this lane really is OFF (server not serving, shell
-      # define unset), so a silent flip of the default cannot move the
-      # REQUIRED lanes onto the ON posture unnoticed.
-      - name: ✅ Verify the server-execution posture (default posture — server OFF, shell define unset)
+      - name: ✅ Verify the default server-execution posture
         timeout-minutes: *posture-probe-timeout
-        run: |
-          META=$(curl -fsS "http://localhost:8000/api/meta")
-          STATS=$(curl -fsS "http://localhost:8000/api/health/stats")
-          echo "$META"
-          echo "$META" | jq -e '.shellServerExecutionDefine == null' > /dev/null || {
-            echo "::error::binary-toolshed carries a shell built with an explicit EXPERIMENTAL_SERVER_EXECUTION define; the default lane must run the default-built shell"
-            exit 1
-          }
-          echo "$STATS" | jq -e '.servingLoop == null' > /dev/null || {
-            echo "::error::the toolshed started the serving loop in the DEFAULT lane; the first-party default is OFF (Phase 7 landed dark) — flip the CI lane roles with the flip PR, never silently"
-            exit 1
-          }
+        run: deno run --allow-net tasks/server-execution-ci-command.ts probe default http://localhost:8000
 
       - name: 🧩 Run end-to-end patterns integration tests
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop. A legitimate empty
+          # case can occur only after filtering whichever role carries ON.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t SHARD_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
-          printf '  %s\n' "${TEST_FILES[@]}"
+          printf '  %s\n' "${SHARD_FILES[@]}"
+          if [ "$SERVER_EXECUTION_ENABLED" = "true" ]; then
+            # `--ignore` does not bind to explicit file arguments, so the ON
+            # registry filters this shard before Deno receives it.
+            FILTERED_FILES=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns --filter "${SHARD_FILES[@]}")
+            if [ -z "$FILTERED_FILES" ]; then
+              echo "Every file of this shard is skip-listed for the ON arm; nothing to run."
+              exit 0
+            fi
+            mapfile -t TEST_FILES <<< "$FILTERED_FILES"
+          else
+            echo "Server execution is OFF; the ON-arm skip registry does not apply."
+            TEST_FILES=("${SHARD_FILES[@]}")
+          fi
           mkdir -p ../../test-results
+          # Authored-pattern instrumentation is sound only in the OFF arm's
+          # single-compiler world. V8 runtime coverage remains on the default.
+          if [ "$SERVER_EXECUTION_ENABLED" = "false" ]; then
+            export CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}"
+          fi
           # --no-check: the Check job type-checks packages/patterns/integration
           # (tasks/check.sh).
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
-          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
+
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toolshed-log-pattern-integration-${{ matrix.shard }}
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: 🧾 Write coverage report
         if: always()
@@ -1410,7 +1444,7 @@ jobs:
       # the artifact, so both streams reach the gate.
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-pattern-integration-${{ matrix.shard }}
           path: coverage/lcov/
@@ -1419,7 +1453,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-pattern-integration-${{ matrix.shard }}
           path: test-results/
@@ -1437,31 +1471,15 @@ jobs:
           shard: ${{ matrix.shard }}/${{ matrix.total }}
           junit: >-
             kind=integration,scope=patterns,prefix=packages/patterns,glob=test-results/patterns-${{ matrix.shard }}.xml
-  # The server-execution v2 ON arm of the end-to-end pattern suite
-  # (docs/specs/server-side-execution/testing.md §2): the same shards,
-  # byte-identical workloads, with EXPERIMENTAL_SERVER_EXECUTION=true on the
-  # toolshed server, on the test processes, AND baked into the binary's
-  # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
-  # probe below before the shard runs. Skips happen only through the explicit
-  # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering (ONE `patterns` entry today: the
-  # lunch-poll-vote FILE entry, RESTORED a second time 2026-08-28 after
-  # the geometry-3 close PR's own probe (run 33198257149) went red at
-  # that surface with the register's PRE-DECLARED geometry-3b signature
-  # — the supplier compile NOT YET STARTED at consult, invisible to any
-  # once-await; geometries 1-3 are closed red-first and kept; the 3b
-  # close is the register's owner-court one-shot-contract fork; the flip
-  # PR needs every list EMPTY).
-  # No coverage collection and no cache save-back: the default lane owns
-  # both; the compile byte cache is restored read-only (compiled bytes do not
-  # depend on the flag).
-  pattern-integration-test-server-execution-on:
-    name: "Pattern Integration Tests / server-execution ON (${{ matrix.shard }}/${{ matrix.total }})"
+  # The opposite role runs the same shards with an explicit inverse of the
+  # first-party default in the server, tests, and baked browser shell.
+  pattern-integration-test-server-execution-opposite:
+    name: "Pattern Integration Tests / opposite server-execution (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
-    needs: ["build-toolshed-on"]
+    needs: ["build-toolshed-opposite"]
     strategy:
       fail-fast: false
       matrix:
@@ -1469,7 +1487,7 @@ jobs:
         total: [10]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -1477,54 +1495,42 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: 🧭 Resolve opposite server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env opposite >> "$GITHUB_ENV"
+
       # Read-only seed from the default lane's compile byte cache (same key
       # family): compiled module bytes are a function of sources, not of the
       # runtime flag, so reuse is sound; only the default lane saves. The key
       # mirrors the default lane's, including the total shard count and
       # selector source, so the seed follows its shard topology.
       - name: ♻️ Restore compile byte cache (read-only)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
           key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts', 'tasks/weighted-shards.ts') }}
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-
 
-      - name: 📥 Download toolshed binary (ON-arm shell)
-        uses: actions/download-artifact@v8
+      - name: 📥 Download toolshed binary (opposite shell)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: binary-toolshed-on
+          name: binary-toolshed-opposite
           path: common-binaries
 
-      - name: 🔌 Start Toolshed server for testing (flag ON)
+      - name: 🔌 Start Toolshed server for testing (opposite posture)
         run: |
           chmod +x ./common-binaries/toolshed
           # --background waits until the server has bound its port before it
           # returns, so the test steps never race a not-yet-listening server.
-          # Space-root ensure ON — the production default (see the
-          # package ON lane's note: the opt-out retired with OW61's
-          # arrival containment (#6223) and client absorb fix (#6292)).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          EXPERIMENTAL_SERVER_EXECUTION=true \
           ./common-binaries/toolshed \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
-      # The posture the binary ACTUALLY carries (see the package ON lane).
-      - name: ✅ Verify the server-execution posture (server ON, shell ON-built)
+      - name: ✅ Verify the opposite server-execution posture
         timeout-minutes: *posture-probe-timeout
-        run: |
-          META=$(curl -fsS "http://localhost:8000/api/meta")
-          STATS=$(curl -fsS "http://localhost:8000/api/health/stats")
-          echo "$META"
-          echo "$META" | jq -e '.shellServerExecutionDefine == "true"' > /dev/null || {
-            echo "::error::binary-toolshed-on does not carry an ON-built shell (EXPERIMENTAL_SERVER_EXECUTION=true must reach tasks/build-binaries.ts and the shell build); the ON lane would run a MIXED posture"
-            exit 1
-          }
-          echo "$STATS" | jq -e '.servingLoop != null' > /dev/null || {
-            echo "::error::the toolshed did not start the serving loop under EXPERIMENTAL_SERVER_EXECUTION=true; the ON lane's server posture is OFF"
-            exit 1
-          }
+        run: deno run --allow-net tasks/server-execution-ci-command.ts probe opposite http://localhost:8000
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -1538,53 +1544,74 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
-      - name: 🧩 Run end-to-end patterns integration tests (flag ON)
+      - name: 🧩 Run end-to-end patterns integration tests (opposite posture)
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t SHARD_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t SHARD_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${SHARD_FILES[@]}"
-          # The explicit ON-arm skip list, applied by FILTERING this shard's
-          # file list (the script prints every skip, and which of them it
-          # dropped from THIS list, on stderr): `deno test --ignore` binds
-          # only to files deno discovers itself and silently ignores nothing
-          # when the files arrive as explicit arguments, as they do here.
-          # Command substitution (not a process substitution) so a validation
-          # failure in the script fails this step under `bash -e` instead of
-          # reading as an empty list.
-          FILTERED_FILES=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns --filter "${SHARD_FILES[@]}")
-          if [ -z "$FILTERED_FILES" ]; then
-            echo "Every file of this shard is skip-listed for the ON arm; nothing to run."
-            exit 0
+          if [ "$SERVER_EXECUTION_ENABLED" = "true" ]; then
+            FILTERED_FILES=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns --filter "${SHARD_FILES[@]}")
+            if [ -z "$FILTERED_FILES" ]; then
+              echo "Every file of this shard is skip-listed for the ON arm; nothing to run."
+              exit 0
+            fi
+            mapfile -t TEST_FILES <<< "$FILTERED_FILES"
+          else
+            echo "Server execution is OFF; the ON-arm skip registry does not apply."
+            TEST_FILES=("${SHARD_FILES[@]}")
           fi
-          mapfile -t TEST_FILES <<< "$FILTERED_FILES"
           mkdir -p ../../test-results
+          if [ "$SERVER_EXECUTION_ENABLED" = "false" ]; then
+            export CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}"
+          fi
           # --no-check: the Check job type-checks packages/patterns/integration
           # (tasks/check.sh).
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
-          EXPERIMENTAL_SERVER_EXECUTION=true \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
-            --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
+            --junit-path=../../test-results/patterns-server-execution-opposite-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
+
+      # If this role carries OFF, the harness writes authored-pattern LCOV
+      # under pattern-runtime/. The coverage gate globs every profile artifact.
+      - name: 📤 Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-profile-pattern-integration-opposite-${{ matrix.shard }}
+          path: coverage/lcov/
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: 📋 Upload toolshed log on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}
+          name: toolshed-log-pattern-integration-server-execution-opposite-${{ matrix.shard }}
           path: ${{ runner.temp }}/toolshed.log
           retention-days: 14
           if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-timing-pattern-integration-server-execution-on-${{ matrix.shard }}
+          name: test-timing-pattern-integration-server-execution-opposite-${{ matrix.shard }}
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore
@@ -1593,14 +1620,13 @@ jobs:
         if: always()
         uses: ./.github/actions/test-records-ship
         with:
-          artifact: pattern-integration-server-execution-on-${{ matrix.shard }}
-          variant: server-execution
+          artifact: pattern-integration-server-execution-opposite-${{ matrix.shard }}
           job: >-
-            Pattern Integration Tests / server-execution ON
+            Pattern Integration Tests / opposite server-execution
             (${{ matrix.shard }}/${{ matrix.total }})
           shard: ${{ matrix.shard }}/${{ matrix.total }}
           junit: >-
-            kind=integration,scope=patterns,prefix=packages/patterns,glob=test-results/patterns-server-execution-on-${{ matrix.shard }}.xml
+            kind=integration,scope=patterns,prefix=packages/patterns,glob=test-results/patterns-server-execution-opposite-${{ matrix.shard }}.xml
 
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
@@ -1610,7 +1636,7 @@ jobs:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -1647,7 +1673,7 @@ jobs:
       # The whole directory — see the note on pattern-integration-test above.
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-pattern-reload
           path: coverage/lcov/
@@ -1656,7 +1682,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-pattern-reload-integration
           path: test-results/
@@ -1685,7 +1711,7 @@ jobs:
         total: [4]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -1695,7 +1721,7 @@ jobs:
 
       - name: ♻️ Restore/save pattern unit compile byte cache
         id: compile-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
           key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts') }}
@@ -1711,7 +1737,7 @@ jobs:
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download cf binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-cf
           path: common-binaries
@@ -1733,7 +1759,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-pattern-unit-${{ matrix.chunk }}
           path: coverage/lcov/
@@ -1742,7 +1768,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-timing-pattern-unit-${{ matrix.chunk }}
           path: test-results/
@@ -1757,6 +1783,106 @@ jobs:
           job: Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})
           shard: ${{ matrix.chunk }}/${{ matrix.total }}
 
+  # These gates exercise production construction paths with the flag unset:
+  # the real bg-piece-service binary and cf-harness's fabric-session factory.
+  # Their expectations follow the same first-party default constant.
+  deployed-topology-gate:
+    name: "Deployed Topology Posture Gates"
+    runs-on: ubuntu-latest
+    timeout-minutes: *job-timeout
+    env:
+      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+    needs: ["build-toolshed", "build-bg-piece-service"]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🧭 Resolve default server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        run: deno run tasks/server-execution-ci-command.ts env default >> "$GITHUB_ENV"
+
+      - name: 📥 Download toolshed binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 📥 Download bg-piece-service binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binary-bg-piece-service
+          path: common-binaries
+
+      - name: 🔌 Start Toolshed server for testing
+        env:
+          TOOLSHED_PORT: 8000
+        run: |
+          chmod +x ./common-binaries/toolshed
+          chmod +x ./common-binaries/bg-piece-service
+          # --background waits until the server has bound its port before it
+          # returns. The flag stays unset so the gates exercise the default.
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
+
+      - name: ✅ Verify the default server-execution posture
+        timeout-minutes: *posture-probe-timeout
+        env:
+          TOOLSHED_PORT: 8000
+        run: deno run --allow-net tasks/server-execution-ci-command.ts probe default "http://localhost:${TOOLSHED_PORT}"
+
+      - name: 🧪 Run bg-piece-service posture gate
+        timeout-minutes: *work-timeout
+        working-directory: packages/background-piece-service
+        env:
+          API_URL: http://localhost:8000
+          BG_PIECE_SERVICE_BIN: ${{ github.workspace }}/common-binaries/bg-piece-service
+        run: |
+          mkdir -p ../../test-results
+          deno test --no-check \
+            --junit-path=../../test-results/bg-piece-service-posture-gate.xml \
+            --allow-env --allow-run --allow-net \
+            integration/posture-gate.test.ts
+
+      - name: 🧪 Run cf-harness posture gate
+        timeout-minutes: *work-timeout
+        working-directory: packages/cf-harness
+        env:
+          API_URL: http://localhost:8000
+        run: |
+          mkdir -p ../../test-results
+          deno test --no-check \
+            --junit-path=../../test-results/cf-harness-posture-gate.xml \
+            -A \
+            integration/fabric-session-posture-gate.test.ts
+
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toolshed-log-deployed-topology-gate
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: 📤 Ship test records
+        if: always()
+        uses: ./.github/actions/test-records-ship
+        with:
+          artifact: deployed-topology-gate
+          job: Deployed Topology Posture Gates
+          junit: >-
+            kind=integration,scope=background-piece-service,prefix=packages/background-piece-service,glob=test-results/bg-piece-service-posture-gate.xml
+
+            kind=integration,scope=cf-harness,prefix=packages/cf-harness,glob=test-results/cf-harness-posture-gate.xml
+
   # ---------------------------------------------------------------------------
   # Tier 2 – Post-test gates and deployments
   # ---------------------------------------------------------------------------
@@ -1766,8 +1892,6 @@ jobs:
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
-    env:
-      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     needs:
       - check
       - test
@@ -1777,6 +1901,8 @@ jobs:
       - package-integration-test
       - cli-integration-test
       - pattern-integration-test
+      # Whichever pattern lane resolves OFF carries authored-pattern coverage.
+      - pattern-integration-test-server-execution-opposite
       - pattern-reload-integration-test
       - pattern-unit-test
       - generated-patterns-integration-test
@@ -1790,7 +1916,7 @@ jobs:
       pull-requests: read
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -1799,7 +1925,7 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 📥 Download coverage reports
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-profile-*
           path: coverage-artifacts
@@ -1807,6 +1933,9 @@ jobs:
           skip-decompress: false
           digest-mismatch: error
 
+      # The gate reads the coverage artifacts of every test job in this run, so
+      # no lane can be asked to run it and this job writes no test records.
+      # `docs/specs/test-records.md` under "Recording" holds the criterion.
       - name: 📊 Run coverage check
         timeout-minutes: *work-timeout
         env:
@@ -1815,13 +1944,12 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: >-
-          deno task run-recorded gate repo coverage-check --
           deno run --allow-net --allow-env --allow-read --allow-run
           --allow-write tasks/coverage-check.ts
 
       - name: 📤 Upload coverage regression comment
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-comment
           path: coverage-comment.json
@@ -1834,19 +1962,12 @@ jobs:
       # keeping it avoids a baseline migration.
       - name: 📤 Upload coverage baseline
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perf-metrics
           path: perf-metrics.json
           retention-days: 90
           if-no-files-found: ignore
-
-      - name: 📤 Ship test records
-        if: always()
-        uses: ./.github/actions/test-records-ship
-        with:
-          artifact: coverage-check
-          job: Coverage Check
 
   status:
     name: "Status"
@@ -1859,17 +1980,18 @@ jobs:
       - test
       - runner-test
       - build-toolshed
-      - build-toolshed-on
+      - build-toolshed-opposite
       - build-bg-piece-service
       - build-cf
       - generated-patterns-integration-test
       - package-integration-test
-      - package-integration-test-server-execution-on
+      - package-integration-test-server-execution-opposite
       - cli-integration-test
       - pattern-integration-test
-      - pattern-integration-test-server-execution-on
+      - pattern-integration-test-server-execution-opposite
       - pattern-reload-integration-test
       - pattern-unit-test
+      - deployed-topology-gate
       - coverage-check
     permissions: {}
     runs-on: ubuntu-latest
@@ -1898,6 +2020,8 @@ jobs:
     timeout-minutes: *job-timeout
     # A release artifact must not outlive a failed pattern-migration gate.
     # Production deploys consume this artifact without rerunning those gates.
+    # The deployed-topology gate exercises the binaries this job attests at
+    # the first-party default, so a binary that fails it must not deploy.
     needs:
       [
         "test",
@@ -1914,6 +2038,7 @@ jobs:
         "package-integration-test",
         "cli-integration-test",
         "generated-patterns-integration-test",
+        "deployed-topology-gate",
       ]
     environment: ci
     permissions:
@@ -1923,22 +2048,22 @@ jobs:
       attestations: write
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 📥 Download toolshed binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-toolshed
           path: common-binaries
 
       - name: 📥 Download bg-piece-service binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-bg-piece-service
           path: common-binaries
 
       - name: 📥 Download cf binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-cf
           path: common-binaries
@@ -1953,7 +2078,7 @@ jobs:
       # binary attestation or the deploys that depend on it.
       - name: 📥 Download coverage reports
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-profile-*
           path: coverage-artifacts
@@ -2030,7 +2155,7 @@ jobs:
       - name: 📝 Generate attestation for toolshed binary
         id: attest_toolshed
         timeout-minutes: *work-timeout
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-name: ./dist/toolshed
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
@@ -2038,7 +2163,7 @@ jobs:
       - name: 📝 Generate attestation for bg-piece-service binary
         id: attest_bg_piece_service
         timeout-minutes: *work-timeout
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-name: ./dist/bg-piece-service
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_piece_service_hash }}
@@ -2046,7 +2171,7 @@ jobs:
       - name: 📝 Generate attestation for cf binary
         id: attest_cf
         timeout-minutes: *work-timeout
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-name: ./dist/cf
           subject-digest: sha256:${{ steps.binary_processing.outputs.cf_hash }}
@@ -2054,13 +2179,13 @@ jobs:
       - name: 📝 Generate attestation for tarball
         id: attest_tarball
         timeout-minutes: *work-timeout
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-name: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz
           subject-digest: sha256:${{ steps.binary_processing.outputs.tarball_hash }}
 
       - name: 📤 Upload attestations as artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binary_attestations
           if-no-files-found: error
@@ -2120,19 +2245,38 @@ jobs:
           fi
 
       - name: 🔑 Authenticate to Google Cloud
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@3a3c4c57d294ef65efaaee4ff17b22fa88dd3c69 # v1.3.0
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: ⚙️ Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+        uses: google-github-actions/setup-gcloud@e30db14379863a8c79331b04a9969f4c1e225e0b # v1.1.1
 
+      # A release artifact is named after the commit it was built from, and a
+      # host keeps whatever it has already downloaded under that name. So the
+      # first build of a commit publishes the artifact and a later build of the
+      # same commit leaves it alone. Two builds of one commit do not produce the
+      # same bytes: the binaries are compiled again, and `tar` records
+      # modification times.
+      #
+      # The tarball and its checksum are published as a pair. A commit that has
+      # one of them and not the other was published by a build that stopped
+      # between the two copies, and this publishes both of them again. See "One
+      # commit, one set of artifacts" in docs/development/deploying.md.
       - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
-          gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
-          gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
+          BUCKET=gs://commontools-build-artifacts/workspace-artifacts
+          TARBALL=labs-${{ github.sha }}.tar.gz
+          CHECKSUM=labs-${{ github.sha }}.hash.txt
 
-          # Print clickable links to the uploaded files
+          if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then
+            echo "An earlier build of ${{ github.sha }} published its artifacts; leaving them as they are."
+          else
+            gsutil cp "release/$TARBALL" "$BUCKET/"
+            gsutil cp "release/$CHECKSUM" "$BUCKET/"
+          fi
+
+          # Print clickable links to the published files
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
@@ -2141,7 +2285,7 @@ jobs:
           # combine step produced it. To download it for a given commit:
           #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
           if [ -f release/labs-${{ github.sha }}.lcov ]; then
-            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            gsutil cp "release/labs-${{ github.sha }}.lcov" "$BUCKET/"
             echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
           fi
           echo "::endgroup::"
@@ -2155,7 +2299,7 @@ jobs:
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -2163,7 +2307,7 @@ jobs:
           cache: false
 
       - name: 🚀 Deploy application to Rapids (Staging)
-        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
@@ -2188,7 +2332,7 @@ jobs:
     environment: ci
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -2240,12 +2384,12 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
 
       - name: 🔑 Authenticate to Google Cloud
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@3a3c4c57d294ef65efaaee4ff17b22fa88dd3c69 # v1.3.0
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: ⚙️ Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+        uses: google-github-actions/setup-gcloud@e30db14379863a8c79331b04a9969f4c1e225e0b # v1.1.1
 
       - name: 📤 Upload shell assets to Staging GCS
         run: |

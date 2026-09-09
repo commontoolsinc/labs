@@ -169,10 +169,11 @@ describe("pattern reactivity over a changing argument", () => {
     });
   }
 
-  // The same value and the same read, declared `any` rather than as its class.
-  // This pins the asymmetry: it is the declared type, not the value, that
-  // decides whether the change is observed.
   it("re-runs a computed over a changed value declared `any`", async () => {
+    // The same value and the same read, declared `any` rather than as its
+    // class. This pins the asymmetry: it is the declared type, not the value,
+    // that decides whether the change is observed.
+
     const [firstSeen, secondSeen] = await observeAcrossUpdate(
       "any",
       "any",

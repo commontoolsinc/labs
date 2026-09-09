@@ -1,9 +1,9 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { FabricSpecialObject } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import {
@@ -23,26 +23,26 @@ import {
 import { toCell } from "../../runner/src/back-to-cell.ts";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import {
+  applyPieceSourceCommandAction,
   checkPieceSourceFromCommand,
-  dataCommandAction,
   formatPatternIdentity,
   formatPatternRef,
   getCellValueFromCommand,
   localPatternEntry,
   mergePiecePath,
-  normalizeApiUrl,
   parseLink,
   parsePieceOptions,
   parseSpaceOptions,
   piece,
-  PIECE_DATA_SPELLING_END_DATE,
+  pieceDataCommand,
   readCallTarget,
   readTargetPositionals,
   setCellValueFromCommand,
   setPieceSourceFromCommand,
-  warnDeprecatedPieceSpelling,
-  withDeprecatedSpellingWarning,
+  setsrcSuccessLine,
 } from "../commands/piece.ts";
+import { normalizeApiUrl } from "../lib/api-url.ts";
+import { space } from "../commands/space.ts";
 import {
   CellSelectionError,
   parseCellSelectionOptions,
@@ -68,6 +68,7 @@ import {
 } from "../lib/piece.ts";
 import { safeStringify } from "../lib/render.ts";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -199,6 +200,34 @@ describe("cli piece parsing", () => {
     expect(disposeCalls).toBe(1);
   });
 
+  it("reports both cleanup failures through the sink a caller supplied", async () => {
+    // The two warnings a failed connect's own cleanup writes. A caller
+    // drawing its own screen — the shell holding a prompt in raw mode — takes
+    // them here instead of finding them written behind its frame; a caller
+    // that names no sink still gets them on the process's own stream.
+
+    const reported: string[] = [];
+    const originalError = new Error("sync failed");
+
+    await expect(withRuntimeCleanupOnFailure(
+      {
+        dispose: () => Promise.reject(new Error("dispose failed")),
+        storageManager: {
+          closeNow: () => Promise.reject(new Error("closeNow failed")),
+        },
+      },
+      () => Promise.reject(originalError),
+      (message) => {
+        reported.push(message);
+      },
+    )).rejects.toBe(originalError);
+
+    expect(reported).toEqual([
+      "loadPieces storage cleanup failed: closeNow failed",
+      "loadPieces cleanup failed: dispose failed",
+    ]);
+  });
+
   it("does not dispose loadPieces runtime after successful initialization", async () => {
     let disposeCalls = 0;
 
@@ -294,7 +323,7 @@ describe("cli piece parsing", () => {
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
-      piece: PIECE,
+      cell: PIECE,
     })).toMatchObject(expected);
     expect(parsePieceOptions({
       url: FULL_URL,
@@ -305,7 +334,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
         json: true,
       }).jsonOutput,
     ).toBe(true);
@@ -316,7 +345,7 @@ describe("cli piece parsing", () => {
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
-      piece: `${PIECE}@user`,
+      cell: `${PIECE}@user`,
     })).toMatchObject({
       apiUrl: API_URL,
       space: SPACE,
@@ -337,11 +366,11 @@ describe("cli piece parsing", () => {
   });
   it("parsePieceOptions() resolves an LLM-friendly --piece like the bare handle", () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
-    expect(parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}` })).toEqual(
-      parsePieceOptions({ ...base, piece: LLM_HANDLE }),
+    expect(parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}` })).toEqual(
+      parsePieceOptions({ ...base, cell: LLM_HANDLE }),
     );
     expect(
-      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}@session` }),
+      parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}@session` }),
     ).toMatchObject({
       piece: LLM_HANDLE,
       pieceScope: "session",
@@ -351,7 +380,7 @@ describe("cli piece parsing", () => {
   it("parsePieceOptions() carries an embedded path only where the command accepts one", () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
     const config = parsePieceOptions(
-      { ...base, piece: `/${LLM_HANDLE}/items/0` },
+      { ...base, cell: `/${LLM_HANDLE}/items/0` },
       { acceptsPath: true },
     );
     expect(config).toMatchObject({
@@ -360,7 +389,7 @@ describe("cli piece parsing", () => {
     });
     expect(mergePiecePath(config, "title")).toEqual(["items", 0, "title"]);
     expect(mergePiecePath(config)).toEqual(["items", 0]);
-    expect(() => parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}/items` }))
+    expect(() => parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}/items` }))
       .toThrow(/takes a piece id only/);
   });
 
@@ -369,7 +398,7 @@ describe("cli piece parsing", () => {
     expect(parsePieceOptions({
       ...base,
       space: SPACE_DID,
-      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
     })).toMatchObject({
       space: SPACE_DID,
       piece: LLM_HANDLE,
@@ -378,7 +407,7 @@ describe("cli piece parsing", () => {
       parsePieceOptions({
         ...base,
         space: OTHER_SPACE_DID,
-        piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+        cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
       })
     ).toThrow(
       `Reference names space "${SPACE_DID}" but the command targets ` +
@@ -390,7 +419,7 @@ describe("cli piece parsing", () => {
     expect(parsePieceOptions({
       ...base,
       space: SPACE,
-      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
     })).toMatchObject({
       space: SPACE,
       piece: LLM_HANDLE,
@@ -402,7 +431,7 @@ describe("cli piece parsing", () => {
     const base = { apiUrl: API_URL, identity: ID };
     expect(parseSpaceOptions({
       ...base,
-      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      cell: `/@${SPACE_DID}/${LLM_HANDLE}`,
     })).toMatchObject({
       space: SPACE_DID,
       piece: LLM_HANDLE,
@@ -410,7 +439,7 @@ describe("cli piece parsing", () => {
     });
     // The scope suffix and embedded path ride the same space-carrying token.
     expect(parsePieceOptions(
-      { ...base, piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0` },
+      { ...base, cell: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0` },
       { acceptsPath: true },
     )).toMatchObject({
       space: SPACE_DID,
@@ -419,29 +448,69 @@ describe("cli piece parsing", () => {
       piecePath: ["items", 0],
     });
     // A reference that names no space supplies none: the requirement stands.
-    expect(() => parseSpaceOptions({ ...base, piece: `/${LLM_HANDLE}` }))
+    expect(() => parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}` }))
       .toThrow(/--space/);
-    expect(() => parseSpaceOptions({ ...base, piece: PIECE }))
+    expect(() => parseSpaceOptions({ ...base, cell: PIECE }))
       .toThrow(/--space/);
   });
 
   it('parsePieceOptions() honors "#argument" only where a command takes --input', () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
     expect(parsePieceOptions(
-      { ...base, piece: `/${LLM_HANDLE}#argument` },
+      { ...base, cell: `/${LLM_HANDLE}#argument` },
       { acceptsArgument: true },
     )).toMatchObject({
       piece: LLM_HANDLE,
       pieceInput: true,
     });
     expect(() =>
-      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}#argument` })
+      parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}#argument` })
     )
       .toThrow(/does not take "--input"/);
-    // The alias grammar has no fragments; refusing loudly beats burying the
-    // suffix inside an id that later fails as unknown.
-    expect(() => parseSpaceOptions({ ...base, piece: `${PIECE}#argument` }))
-      .toThrow(/canonical reference form/);
+    // The command's own declaration is what decides, so the bare spelling of
+    // the same selection reaches the same refusal — and the refusal names the
+    // target rather than a reference, which is not what a slug is.
+    expect(() => parsePieceOptions({ ...base, cell: `${PIECE}#argument` }))
+      .toThrow(/does not take "--input"/);
+    expect(() => parsePieceOptions({ ...base, cell: "thermostat#argument" }))
+      .toThrow(
+        'The target selects the arguments cell ("#argument") but this ' +
+          'command does not take "--input".',
+      );
+  });
+
+  it('parseSpaceOptions() reads "#argument" off a bare id and off a slug', () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(parseSpaceOptions({ ...base, cell: `${PIECE}#argument` }))
+      .toMatchObject({ piece: PIECE, pieceInput: true });
+    expect(parseSpaceOptions({ ...base, cell: "thermostat#argument" }))
+      .toMatchObject({ piece: "thermostat", pieceInput: true });
+    // The suffix comes off before the scope is read, so the two compose in
+    // the order the reference form writes them.
+    expect(parseSpaceOptions({ ...base, cell: "thermostat@session#argument" }))
+      .toMatchObject({
+        piece: "thermostat",
+        pieceScope: "session",
+        pieceInput: true,
+      });
+    // A target with no suffix names no cell but the result cell.
+    expect(
+      parsePieceOptions({ ...base, cell: "thermostat" }, {
+        acceptsArgument: true,
+      }).pieceInput,
+    ).toBeUndefined();
+  });
+
+  it("parseSpaceOptions() reports an unknown fragment on a bare target as one", () => {
+    // Left on the id the fragment is a piece nothing resolves, and the
+    // refusal that follows names the piece rather than the "#" that caused
+    // it. One sentence covers both spellings, since one reader splits both.
+
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(() => parseSpaceOptions({ ...base, cell: "thermostat#result" }))
+      .toThrow(/Unknown suffix "#result"/);
+    expect(() => parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}#result` }))
+      .toThrow(/Unknown suffix "#result"/);
   });
 
   it("readTargetPositionals() reads a leading canonical reference as the address", () => {
@@ -454,8 +523,8 @@ describe("cli piece parsing", () => {
       pathString: "items/0",
     });
     // Naming the target twice is refused, like --space beside --url.
-    expect(() => readTargetPositionals({ piece: PIECE }, `/${LLM_HANDLE}`))
-      .toThrow(/"--piece" cannot be provided/);
+    expect(() => readTargetPositionals({ cell: PIECE }, `/${LLM_HANDLE}`))
+      .toThrow(/"--cell" \(or "--piece"\) cannot be provided/);
     // Only an address earns a second positional.
     expect(() => readTargetPositionals({}, "items/0", "title"))
       .toThrow(/Unexpected argument "title"/);
@@ -467,82 +536,184 @@ describe("cli piece parsing", () => {
       tail: ["{}"],
     });
     expect(readCallTarget({}, `/${LLM_HANDLE}`, ["addItem", "{}"])).toEqual({
-      piece: `/${LLM_HANDLE}`,
+      cell: `/${LLM_HANDLE}`,
       callableName: "addItem",
       tail: ["{}"],
     });
-    expect(() =>
-      readCallTarget({ piece: PIECE }, `/${LLM_HANDLE}`, ["addItem"])
-    )
-      .toThrow(/"--piece" cannot be provided/);
+    // The flag does not collide here, it disambiguates: a callable name may
+    // begin with "/", so a written flag makes the positional the callable.
+    // `readTargetPositionals` refuses the same pair, because there the other
+    // reading is a path and a path is never rooted.
+    expect(readCallTarget({ cell: PIECE }, `/${LLM_HANDLE}`, ["addItem"]))
+      .toEqual({ callableName: `/${LLM_HANDLE}`, tail: ["addItem"] });
     expect(() => readCallTarget({}, `/${LLM_HANDLE}`, []))
       .toThrow(/callable name/);
+  });
+
+  it("parseSpaceOptions() names the space and the piece in one reference", () => {
+    const base = { apiUrl: API_URL, identity: ID };
+    // A slug where a handle goes, a name where a DID goes: one token carrying
+    // the whole target, in the spelling a person writes.
+    expect(parsePieceOptions({ ...base, cell: `/@${SPACE}/tracker` }))
+      .toMatchObject({ space: SPACE, piece: "tracker" });
+    // The named space is checked against `--space` rather than ignored, and
+    // two names are settled without a session.
+    expect(() =>
+      parsePieceOptions({
+        ...base,
+        space: "other-space",
+        cell: `/@${SPACE}/tracker`,
+      })
+    ).toThrow(
+      `Reference names space "${SPACE}" but the command targets ` +
+        `space "other-space".`,
+    );
+    // Across spellings only a derivation can compare them, so the reference's
+    // space is carried to the session check instead.
+    expect(
+      parsePieceOptions({ ...base, space: SPACE_DID, cell: "/@n-space/t" }),
+    ).toMatchObject({ space: SPACE_DID, embeddedSpaces: ["n-space"] });
+  });
+
+  it("readTargetPositionals() reads a slug reference as the address", () => {
+    // The rooting is what separates a target from a path, so a slug reaches
+    // this position rooted and a bare word is still read as a path.
+    expect(readTargetPositionals({}, "/tracker", "items/0")).toEqual({
+      address: "/tracker",
+      pathString: "items/0",
+    });
+    expect(readTargetPositionals({}, `/@${SPACE}/tracker`)).toEqual({
+      address: `/@${SPACE}/tracker`,
+    });
+    expect(readTargetPositionals({}, "tracker")).toEqual({
+      pathString: "tracker",
+    });
+  });
+
+  it("readCallTarget() lets a slug reference precede the callable name", () => {
+    expect(readCallTarget({}, "/tracker", ["addItem", "{}"])).toEqual({
+      cell: "/tracker",
+      callableName: "addItem",
+      tail: ["{}"],
+    });
+  });
+
+  it("parseSpaceOptions() decomposes a --url into a transport and a reference", () => {
+    // What `--url` means is an `--api-url` and a reference, so a slug in it
+    // reaches the target the same way a slug written as one does.
+    expect(
+      parsePieceOptions({ url: `${API_URL}/${SPACE}/tracker`, identity: ID }),
+    )
+      .toMatchObject({ apiUrl: API_URL, space: SPACE, piece: "tracker" });
+    // Segments past the piece are that reference's path rather than words the
+    // URL drops without saying so.
+    expect(parsePieceOptions(
+      { url: `${FULL_URL}@user/items/0`, identity: ID },
+      { acceptsPath: true },
+    )).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      piece: PIECE,
+      pieceScope: "user",
+      piecePath: ["items", 0],
+    });
+  });
+
+  it("parseSpaceOptions() takes both URL encodings off a path segment", () => {
+    // A URL escapes with percent-encoding and a cell path is a JSON Pointer,
+    // so a key holding "/" or "~" arrives doubly escaped and a segment taken
+    // verbatim names a key nothing has.
+    expect(parsePieceOptions(
+      { url: `${FULL_URL}/foo~1bar/~0tilde`, identity: ID },
+      { acceptsPath: true },
+    )).toMatchObject({ piecePath: ["foo/bar", "~tilde"] });
+    expect(parsePieceOptions(
+      {
+        url: `${API_URL}/${SPACE}/of%3Afid1%3A${"a".repeat(43)}`,
+        identity: ID,
+      },
+    )).toMatchObject({ piece: `of:fid1:${"a".repeat(43)}` });
+  });
+
+  it("parseSpaceOptions() refuses a URL segment that is not valid escaping", () => {
+    // `new URL()` accepts a malformed escape and keeps it in the pathname, so
+    // the decode is where it surfaces — and a URL naming no readable word
+    // names no cell.
+    expect(() => parseSpaceOptions({ url: `${API_URL}/%ZZ`, identity: ID }))
+      .toThrow(/is not valid percent-encoding/);
+    expect(() =>
+      parsePieceOptions(
+        { url: `${FULL_URL}/%E0%A4%A`, identity: ID },
+        { acceptsPath: true },
+      )
+    ).toThrow(/is not valid percent-encoding/);
+  });
+
+  it("parseSpaceOptions() refuses a URL part holding the reference terminator", () => {
+    // Folded into the reference this decomposes to, "#" would read as the
+    // suffix and silently address the arguments cell instead.
+    expect(() =>
+      parsePieceOptions(
+        { url: `${FULL_URL}/foo%23argument`, identity: ID },
+        { acceptsPath: true, acceptsArgument: true },
+      )
+    ).toThrow(/"#" closes a reference/);
+  });
+
+  it("readCallTarget() lets the flag name the target for a rooted callable", () => {
+    // Nothing reserves the shape of a callable name, so a verb may be called
+    // "/archive". The flag is what reaches it: written, it names the target
+    // and the positional is the callable.
+    expect(readCallTarget({ cell: "board" }, "/archive", ["{}"])).toEqual({
+      callableName: "/archive",
+      tail: ["{}"],
+    });
+    // With no flag the rooted word is still the target, as before.
+    expect(readCallTarget({}, `/${LLM_HANDLE}`, ["archive"])).toEqual({
+      cell: `/${LLM_HANDLE}`,
+      callableName: "archive",
+      tail: [],
+    });
   });
 
   it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
     expect(() => parseLink(`/${LLM_HANDLE}#argument`))
       .toThrow(/does not apply to a link endpoint/);
+    // A link endpoint names a position to store, and the arguments cell is
+    // not one — whichever spelling of the target asks for it.
+    expect(() => parseLink(`${LLM_HANDLE}#argument`))
+      .toThrow(/does not apply to a link endpoint/);
+    expect(() => parseLink("thermostat/draft#argument"))
+      .toThrow(/does not apply to a link endpoint/);
   });
 
-  it("warnDeprecatedPieceSpelling() names the short spelling and the end date", () => {
-    const lines: string[] = [];
-    warnDeprecatedPieceSpelling("piece get", {
-      writeError: (text) => lines.push(text),
+  it("parseLink() keeps a `#` inside a bare endpoint's path key", () => {
+    // Why the refusal above tests `endsWith` rather than reading the fragment
+    // the way the shared reader does. A bare endpoint carries its piece and
+    // path in one word and has no positional path beside it, so reading every
+    // fragment here would leave a key holding `#` with no spelling at all.
+
+    expect(parseLink("tracker/we#ird")).toEqual({
+      pieceId: "tracker",
+      path: ["we#ird"],
     });
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("'cf piece get' is deprecated");
-    expect(lines[0]).toContain("spell it 'cf get'");
-    expect(lines[0]).toContain(
-      `stops working on ${PIECE_DATA_SPELLING_END_DATE}`,
-    );
-  });
-
-  it("withDeprecatedSpellingWarning() warns once, then delegates with `this` intact", () => {
-    const calls: Array<{ self: unknown; args: unknown[] }> = [];
-    const warned: string[] = [];
-    const original = console.error;
-    console.error = (...parts: unknown[]) => {
-      warned.push(parts.join(" "));
-    };
-    try {
-      const wrapped = withDeprecatedSpellingWarning(
-        "piece call",
-        function (this: unknown, ...args: unknown[]) {
-          calls.push({ self: this, args });
-          return "delegated";
-        },
-      );
-      const self = { marker: true };
-      expect(wrapped.call(self, "a", 1)).toBe("delegated");
-    } finally {
-      console.error = original;
-    }
-    // `this` passes through untouched: `call`'s action reads
-    // `this.getLiteralArgs()` off the Cliffy command it runs under.
-    expect(calls).toEqual([{ self: { marker: true }, args: ["a", 1] }]);
-    expect(warned).toHaveLength(1);
-    expect(warned[0]).toContain("'cf piece call' is deprecated");
-  });
-
-  it("dataCommandAction() wraps only the piece-mounted spellings", () => {
-    const action = () => "ran";
-    // The top-level spelling mounts the action untouched — identity, not a
-    // silent wrapper — so the two mounts differ in nothing but the notice.
-    expect(dataCommandAction("get", action)).toBe(action);
-    expect(dataCommandAction("piece get", action)).not.toBe(action);
+    // The reference form reserves `#` outright, which is the difference the
+    // two readers exist for.
+    expect(() => parseLink("/tracker/we#ird"))
+      .toThrow(/Unknown suffix "#ird"/);
   });
 
   it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
     // Silently preferring either target is how a caller reads a piece they
     // did not name; before this rule the URL's piece won without a word.
     expect(() =>
-      parseSpaceOptions({ url: FULL_URL, identity: ID, piece: PIECE })
+      parseSpaceOptions({ url: FULL_URL, identity: ID, cell: PIECE })
     ).toThrow(/cannot be provided when the "--url" names a piece/);
     expect(() =>
       parseSpaceOptions({
         url: FULL_URL,
         identity: ID,
-        piece: `/${LLM_HANDLE}`,
+        cell: `/${LLM_HANDLE}`,
       })
     ).toThrow(/cannot be provided when the "--url" names a piece/);
   });
@@ -551,7 +722,7 @@ describe("cli piece parsing", () => {
     expect(parsePieceOptions({
       url: NO_PIECE_FULL_URL,
       identity: ID,
-      piece: PIECE,
+      cell: PIECE,
     })).toMatchObject({
       apiUrl: API_URL,
       space: SPACE,
@@ -564,7 +735,7 @@ describe("cli piece parsing", () => {
       {
         url: NO_PIECE_FULL_URL,
         identity: ID,
-        piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0`,
+        cell: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0`,
       },
       { acceptsPath: true },
     )).toMatchObject({
@@ -611,6 +782,106 @@ describe("cli piece parsing", () => {
     expect(rendered).toEqual([{ ok: true }, { ok: true }]);
   });
 
+  it('getCellValueFromCommand() reads "#argument" on a bare target as --input does', async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const reads: unknown[][] = [];
+    const deps = {
+      getCellValue: ((...args: unknown[]) => {
+        reads.push(args);
+        return Promise.resolve({ ok: true });
+      }) as never,
+      render: (() => {}) as never,
+    };
+
+    await getCellValueFromCommand(
+      { ...base, cell: "thermostat", input: true },
+      "target",
+      undefined,
+      deps,
+    );
+    await getCellValueFromCommand(
+      { ...base, cell: "thermostat#argument" },
+      "target",
+      undefined,
+      deps,
+    );
+    // Written together the two spellings union: one selection said twice.
+    await getCellValueFromCommand(
+      { ...base, cell: "thermostat#argument", input: true },
+      "target",
+      undefined,
+      deps,
+    );
+
+    expect(reads).toHaveLength(3);
+    for (const read of reads) {
+      expect(read[0]).toMatchObject({ piece: "thermostat" });
+      expect(read.slice(1)).toEqual([
+        ["target"],
+        { input: true, step: undefined },
+      ]);
+    }
+  });
+
+  it('setCellValueFromCommand() writes through "#argument" on a bare target', async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const writes: unknown[][] = [];
+    await setCellValueFromCommand(
+      { ...base, cell: "thermostat#argument" },
+      "target",
+      undefined,
+      {
+        drainStdin: (() => Promise.resolve(30)) as never,
+        setCellValue: ((...args: unknown[]) => {
+          writes.push(args);
+          return Promise.resolve({ piece: "thermostat", path: ["target"] });
+        }) as never,
+        render: (() => {}) as never,
+      },
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[0]).toMatchObject({ piece: "thermostat" });
+    expect(writes[0]?.slice(1)).toEqual([
+      ["target"],
+      30,
+      { input: true, refuseRootWrite: true },
+    ]);
+  });
+
+  it("getCellValueFromCommand() leaves an unresolved path on the caller's sinks rather than exiting", async () => {
+    // The exit the injected one stands in for is `Deno.exit(1)`, which no
+    // long-lived caller survives. An `exit` typed `never` throws instead, so
+    // the report the read failed with — its message, the remedy, and the
+    // code — is left as values the caller still holds.
+
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const printed: string[] = [];
+    const hinted: string[] = [];
+    const exited: number[] = [];
+    await expect(
+      getCellValueFromCommand(base, `/${LLM_HANDLE}/items/0`, "title", {
+        getCellValue: (() =>
+          Promise.reject(
+            new Error('Cannot access path "items/0/title"'),
+          )) as never,
+        render: () => {},
+        printError: (message) => {
+          printed.push(message);
+        },
+        hint: (message) => {
+          hinted.push(message);
+        },
+        exit: (code): never => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        },
+      }),
+    ).rejects.toThrow("exit-sentinel");
+    expect(printed).toEqual(['Cannot access path "items/0/title"']);
+    expect(hinted[0]).toContain("retry with --input");
+    expect(exited).toEqual([1]);
+  });
+
   it("setCellValueFromCommand() writes through a positional address and requires a path", async () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
     const writes: unknown[][] = [];
@@ -619,14 +890,18 @@ describe("cli piece parsing", () => {
       drainStdin: (() => Promise.resolve("Milk")) as never,
       setCellValue: ((...args: unknown[]) => {
         writes.push(args);
-        return Promise.resolve();
+        return Promise.resolve({
+          piece: LLM_HANDLE,
+          path: args[1] as (string | number)[],
+        });
       }) as never,
       render: (() => {}) as never,
       hint: ((text: string) => {
         hints.push(text);
       }) as never,
     };
-    // The embedded path alone satisfies the path requirement.
+    // The embedded path alone satisfies the path requirement, and the write
+    // is still held to a path inside whatever piece the address reaches.
     await setCellValueFromCommand(
       base,
       `/${LLM_HANDLE}/title`,
@@ -636,21 +911,38 @@ describe("cli piece parsing", () => {
     expect(writes[0]?.slice(1)).toEqual([
       ["title"],
       "Milk",
-      { input: undefined },
+      { input: undefined, refuseRootWrite: true },
+    ]);
+    // A positional that is not the empty one is a path, not a root: what it
+    // reaches after resolution is still held to a path inside the piece.
+    await setCellValueFromCommand(base, "/top", "2", deps);
+    expect(writes[1]?.slice(1)).toEqual([
+      [2],
+      "Milk",
+      { input: undefined, refuseRootWrite: true },
     ]);
     expect(hints[0]).toContain("cf piece step");
     // An explicit empty positional has always named the root — the fuse
     // integration writes a whole input cell with `piece set "" --input` —
-    // so it stays a valid spelling, in both target forms.
+    // so it stays a valid spelling, in both target forms, and it is the one
+    // spelling that lets a write land on a whole cell.
     await setCellValueFromCommand(
-      { ...base, piece: `/${LLM_HANDLE}`, input: true },
+      { ...base, cell: `/${LLM_HANDLE}`, input: true },
       "",
       undefined,
       deps,
     );
-    expect(writes[1]?.slice(1)).toEqual([[], "Milk", { input: true }]);
+    expect(writes[2]?.slice(1)).toEqual([
+      [],
+      "Milk",
+      { input: true, refuseRootWrite: false },
+    ]);
     await setCellValueFromCommand(base, `/${LLM_HANDLE}`, "", deps);
-    expect(writes[2]?.slice(1)).toEqual([[], "Milk", { input: undefined }]);
+    expect(writes[3]?.slice(1)).toEqual([
+      [],
+      "Milk",
+      { input: undefined, refuseRootWrite: false },
+    ]);
     // What stays refused is no path in any spelling: a bare pasted address
     // must not silently overwrite a whole cell.
     await expect(
@@ -659,12 +951,44 @@ describe("cli piece parsing", () => {
       .rejects.toThrow(/A path is required/);
     await expect(
       setCellValueFromCommand(
-        { ...base, piece: `/${LLM_HANDLE}` },
+        { ...base, cell: `/${LLM_HANDLE}` },
         undefined,
         undefined,
         deps,
       ),
     ).rejects.toThrow(/A path is required/);
+  });
+
+  it("setCellValueFromCommand() reports the piece and the path the write landed on", async () => {
+    // A collection's name spends its leading segments reaching a member, so
+    // the address the line carries names neither the piece written to nor the
+    // path written at. Both come back from the write.
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const rendered: string[] = [];
+    const hints: string[] = [];
+    const reporting = {
+      drainStdin: (() => Promise.resolve("Oven schedule")) as never,
+      setCellValue:
+        (() =>
+          Promise.resolve({ piece: LLM_HANDLE, path: ["title"] })) as never,
+      render: ((text: string) => {
+        rendered.push(text);
+      }) as never,
+      hint: ((text: string) => {
+        hints.push(text);
+      }) as never,
+    };
+    await setCellValueFromCommand(base, "/top/2", "title", reporting);
+    expect(rendered).toEqual(["Set value at path: title"]);
+    expect(hints[0]).toContain(`cf piece step --cell ${LLM_HANDLE}`);
+
+    // Where the walk spends nothing the address still names the piece, and
+    // the next command is one the reader can paste as they typed it.
+    rendered.length = 0;
+    hints.length = 0;
+    await setCellValueFromCommand(base, "/tracker", "title", reporting);
+    expect(rendered).toEqual(["Set value at path: title"]);
+    expect(hints[0]).toContain("cf piece step --cell tracker");
   });
 
   it("parsePieceOptions() throws on incomplete input", () => {
@@ -690,45 +1014,45 @@ describe("cli piece parsing", () => {
       parsePieceOptions({
         apiUrl: API_URL,
         space: SPACE,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow(/--identity/);
     expect(() =>
       parsePieceOptions({
         apiUrl: API_URL,
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow(/--space/);
     expect(() =>
       parsePieceOptions({
         space: SPACE,
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow(/--api-url/);
     expect(() =>
       parsePieceOptions({
         identity: ID,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
     expect(() =>
       parsePieceOptions({
         space: SPACE,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
     expect(() =>
       parsePieceOptions({
         apiUrl: API_URL,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
     expect(() =>
       parsePieceOptions({
         url: FULL_URL,
-        piece: PIECE,
+        cell: PIECE,
       })
     ).toThrow();
   });
@@ -757,7 +1081,7 @@ describe("cli piece parsing", () => {
   });
 
   it("shows recreate-root as a space-scoped command", async () => {
-    const { code, stdout, stderr } = await cf("piece recreate-root --help");
+    const { code, stdout, stderr } = await cf("space recreate-root --help");
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
@@ -991,9 +1315,13 @@ describe("cli piece parsing", () => {
   });
 
   it("shows source-location options for every local deployment command", () => {
-    const optionFlags = (command: string) =>
-      piece.getCommand(command)!.getOptions().flatMap((option) => option.flags);
-    const newFlags = optionFlags("new");
+    // `set-home` is reached through `cf space` now; the hidden `cf piece`
+    // mount is the same definition and is pinned against it below.
+    const pieceFlags = (command: string) =>
+      piece.getCommand(command, true)!.getOptions().flatMap((o) => o.flags);
+    const spaceFlags = (command: string) =>
+      space.getCommand(command)!.getOptions().flatMap((o) => o.flags);
+    const newFlags = pieceFlags("new");
     expect(newFlags).toContain("--slug");
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
@@ -1001,20 +1329,74 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--datafile");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
-    for (const command of ["setsrc", "set-home"]) {
-      const flags = optionFlags(command);
+    for (const flags of [pieceFlags("setsrc"), spaceFlags("set-home")]) {
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
       expect(flags).toContain("--test");
       expect(flags).toContain("--datafile");
     }
-    expect(optionFlags("setsrc")).toContain(
+    expect(pieceFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
     );
   });
 
+  it("declares the same options on both mounts of a moved command", () => {
+    // One builder, two mount points: a caller who has not migrated yet meets
+    // the surface the new spelling has, not a copy that can drift from it.
+    // Compared on each command's own declarations, because the two nouns
+    // contribute different globals -- see the `--json` case below.
+    const own = (command: { getBaseOptions(): { flags: string[] }[] }) =>
+      command.getBaseOptions().flatMap((o) => o.flags).sort();
+    for (const moved of ["set-home", "recreate-root"]) {
+      expect(own(piece.getCommand(moved, true)!)).toEqual(
+        own(space.getCommand(moved)!),
+      );
+    }
+  });
+
+  it("refuses `--json` on a moved command rather than ignoring it", async () => {
+    const { code, stdout, stderr } = await cf(
+      "space recreate-root --json -i ./k.key -s s -a http://localhost:8000",
+    );
+    expect(code).not.toBe(0);
+    expect(stdout).toEqual([]);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      "has no machine-readable output",
+    );
+  });
+
+  it("inherits `--json` on the `cf space` mount and refuses it", () => {
+    // `cf space` declares --json globally for the store commands, so the two
+    // target-scoped ones inherit an option they have no output to answer
+    // with. Pinned rather than left implicit: the refusal is what keeps it
+    // from silently printing human text to a caller who asked to parse it.
+    const all = (command: { getOptions(): { flags: string[] }[] }) =>
+      command.getOptions().flatMap((o) => o.flags);
+    expect(all(space.getCommand("set-home")!)).toContain("--json");
+    expect(all(piece.getCommand("set-home", true)!)).not.toContain("--json");
+  });
+
+  it("hides the superseded `cf piece` mounts from help", () => {
+    // Hidden is what keeps the old spelling working without teaching it: it
+    // stays reachable for a caller who already wrote it, and is offered to
+    // nobody new.
+    const names = (
+      // deno-lint-ignore no-explicit-any
+      command: any,
+      includeHidden: boolean,
+    ): string[] =>
+      command.getCommands(includeHidden).map((c: { getName(): string }) =>
+        c.getName()
+      );
+    for (const moved of ["set-home", "recreate-root"]) {
+      expect(names(piece, true)).toContain(moved);
+      expect(names(piece, false)).not.toContain(moved);
+      expect(names(space, false)).toContain(moved);
+    }
+  });
+
   it("offers computed transforms for piece reads", () => {
-    const getFlags = piece.getCommand("get")!.getOptions().flatMap((option) =>
+    const getFlags = pieceDataCommand("get").getOptions().flatMap((option) =>
       option.flags
     );
     expect(getFlags).toContain("--step");
@@ -1028,7 +1410,7 @@ describe("cli piece parsing", () => {
     // description is the only place a caller reading `--help` learns so. A
     // description naming one of the two languages sends a caller who wants
     // both a field list and a schema shape to the wrong flag.
-    const schemaOption = piece.getCommand("get")!.getOptions().find((option) =>
+    const schemaOption = pieceDataCommand("get").getOptions().find((option) =>
       option.flags.includes("--schema")
     )!;
     expect(schemaOption.description).toContain("--select field list");
@@ -1075,7 +1457,7 @@ describe("cli piece parsing", () => {
 
   it("refuses a piece get command that names both projection flags", async () => {
     const { code, stderr } = await cf(
-      "piece get " +
+      "get " +
         "--identity ./definitely-missing-piece-get-review.key " +
         "--api-url https://cf.dev --space common-knowledge " +
         `--piece ${PIECE} --select id --schema id`,
@@ -1088,7 +1470,7 @@ describe("cli piece parsing", () => {
 
   it("passes a --select projection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      "piece get " +
+      "get " +
         "--identity ./definitely-missing-piece-get-review.key " +
         "--api-url https://cf.dev --space common-knowledge " +
         `--piece ${PIECE} --select id,title`,
@@ -1101,7 +1483,7 @@ describe("cli piece parsing", () => {
 
   it("passes a parsed selection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      "piece get " +
+      "get " +
         "--identity ./definitely-missing-piece-get-review.key " +
         "--api-url https://cf.dev --space common-knowledge " +
         `--piece ${PIECE} --filter .active --schema id`,
@@ -1339,14 +1721,14 @@ describe("cli piece parsing", () => {
   });
 
   it("offers per-phase timing output for piece call", () => {
-    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+    const callFlags = pieceDataCommand("call").getOptions().flatMap((option) =>
       option.flags
     );
     expect(callFlags).toContain("--verbose");
   });
 
   it("offers wait control for piece call", () => {
-    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+    const callFlags = pieceDataCommand("call").getOptions().flatMap((option) =>
       option.flags
     );
     expect(callFlags).toContain("--await");
@@ -1355,7 +1737,7 @@ describe("cli piece parsing", () => {
   });
 
   it("offers result-link annotation for piece call", () => {
-    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+    const callFlags = pieceDataCommand("call").getOptions().flatMap((option) =>
       option.flags
     );
     expect(callFlags).toContain("--show-links");
@@ -1366,13 +1748,13 @@ describe("cli piece parsing", () => {
     // takes every form the read's does. Its own `--help` line is where a
     // caller learns which, and one naming fewer forms than the parser takes
     // reads as a narrowing that is not there.
-    const schemaOption = piece.getCommand("call")!.getOptions().find((option) =>
+    const schemaOption = pieceDataCommand("call").getOptions().find((option) =>
       option.flags.includes("--schema")
     )!;
     expect(schemaOption.description).toContain("--select field list");
   });
 
-  it("steps, reads, syncs, and stops in one get operation", async () => {
+  it("steps, pulls only the requested result path, syncs, and stops", async () => {
     const order: string[] = [];
     const controller = {
       get: (
@@ -1385,10 +1767,10 @@ describe("cli piece parsing", () => {
         return Promise.resolve({
           input: { get: () => Promise.resolve(undefined) },
           getCell: () => ({
-            pull: () => {
-              order.push("piece.pull");
-              return Promise.resolve();
-            },
+            pull: () =>
+              Promise.reject(
+                new Error("a nested stepped read pulled the piece root"),
+              ),
           }),
           result: {
             getCell: () =>
@@ -1445,7 +1827,6 @@ describe("cli piece parsing", () => {
     expect(value).toBe("ready");
     expect(order).toEqual([
       `get:${PIECE}:true:session`,
-      "piece.pull",
       "result.key:value",
       "result.pull",
       "pieces.synced",
@@ -1455,6 +1836,162 @@ describe("cli piece parsing", () => {
       // The read-path guard classifies the read path after the value read
       // (verb contract WS-F), descending to the same key once more.
       "result.key:value",
+      `stop:${PIECE}`,
+    ]);
+  });
+
+  it("steps an input path read without pulling the piece root either", async () => {
+    // The skipped pull sat ahead of the input/result fork, so the input side
+    // of a stepped path read changed on the same terms as the result side.
+    const order: string[] = [];
+    const controller = {
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve({
+          getCell: () => ({
+            pull: () =>
+              Promise.reject(
+                new Error("a nested stepped input read pulled the piece root"),
+              ),
+          }),
+          input: {
+            getCell: () =>
+              Promise.resolve({
+                key: (segment: string) => {
+                  order.push(`input.key:${segment}`);
+                  return {
+                    pull: () => {
+                      order.push("input.pull");
+                      return Promise.resolve();
+                    },
+                  };
+                },
+              }),
+            get: () => {
+              order.push("input.get");
+              return Promise.resolve(["updated-while-stopped"]);
+            },
+          },
+          result: { get: () => Promise.resolve(undefined) },
+        });
+      },
+      stopPiece: (id: string) => {
+        order.push(`stop:${id}`);
+        return Promise.resolve();
+      },
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
+      synced: () => {
+        order.push("pieces.synced");
+        return Promise.resolve();
+      },
+    };
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["values"],
+      { step: true, input: true },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      },
+    );
+
+    expect(value).toEqual(["updated-while-stopped"]);
+    expect(order).toEqual([
+      `get:${PIECE}:true`,
+      "input.key:values",
+      "input.pull",
+      "pieces.synced",
+      "runtime.idle",
+      "pieces.synced",
+      "input.get",
+      "input.key:values",
+      `stop:${PIECE}`,
+    ]);
+  });
+
+  it("steps a path-less read through the whole result before syncing", async () => {
+    const order: string[] = [];
+    const controller = {
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          getCell: () => ({
+            pull: () => {
+              order.push("piece.pull");
+              return Promise.resolve();
+            },
+          }),
+          result: {
+            getCell: () => {
+              // `rootCell.key(...path)` with an empty path is `key()`: the
+              // root itself, never a descent.
+              const root = {
+                key: (...segments: string[]) => {
+                  if (segments.length > 0) {
+                    throw new Error("a path-less read descended into a key");
+                  }
+                  order.push("result.key:<root>");
+                  return root;
+                },
+                pull: () => {
+                  order.push("result.pull");
+                  return Promise.resolve();
+                },
+              };
+              return Promise.resolve(root);
+            },
+            get: () => {
+              order.push("result.get");
+              return Promise.resolve({ value: "ready" });
+            },
+          },
+        });
+      },
+      stopPiece: (id: string) => {
+        order.push(`stop:${id}`);
+        return Promise.resolve();
+      },
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
+      synced: () => {
+        order.push("pieces.synced");
+        return Promise.resolve();
+      },
+    };
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      { step: true },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      },
+    );
+
+    expect(value).toEqual({ value: "ready" });
+    // The whole-result pull is the path-less read's materialization step;
+    // a nested read replaces it with its own target pull (the test above).
+    expect(order).toEqual([
+      `get:${PIECE}:true`,
+      "piece.pull",
+      "result.key:<root>",
+      "result.pull",
+      "pieces.synced",
+      "runtime.idle",
+      "pieces.synced",
+      "result.get",
       `stop:${PIECE}`,
     ]);
   });
@@ -1703,13 +2240,13 @@ describe("cli piece parsing", () => {
       piece: PIECE,
     };
 
-    it("refuses a root verb path, pointing at cf call", async () => {
+    it("refuses a root verb path, pointing at cf piece call", async () => {
       const deps = guardDeps(guardPiece(RESULT_VALUE));
       const error = await getCellValue(config, ["addItem"], {}, deps)
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
       expect((error as Error).message).toBe(
-        `Path resolves to a verb; use 'cf call --piece ${PIECE} addItem' instead.`,
+        `Path resolves to a verb; use 'cf piece call --cell ${PIECE} addItem' instead.`,
       );
 
       // A root verb on the input cell redirects the same way: the dispatcher
@@ -1719,7 +2256,7 @@ describe("cli piece parsing", () => {
       );
       await expect(
         getCellValue(config, ["setup"], { input: true }, inputDeps),
-      ).rejects.toThrow(/use 'cf call/);
+      ).rejects.toThrow(/use 'cf piece call/);
     });
 
     it("classifies a verb path without projecting the whole parent", async () => {
@@ -1763,7 +2300,7 @@ describe("cli piece parsing", () => {
           guardDeps(pieceWithChild(child)),
         ).catch((error) => error);
         expect(error).toBeInstanceOf(PieceVerbReadError);
-        expect((error as Error).message).toContain("cf call");
+        expect((error as Error).message).toContain("cf piece call");
       }
 
       // And a data field under the same parent still reads: refusing on
@@ -1803,7 +2340,7 @@ describe("cli piece parsing", () => {
         },
       };
       await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
-        .rejects.toThrow(/use 'cf call/);
+        .rejects.toThrow(/use 'cf piece call/);
     });
 
     it("refuses a nested verb path without suggesting an uncallable command", async () => {
@@ -1822,9 +2359,9 @@ describe("cli piece parsing", () => {
         "Path resolves to a verb that is not directly callable: verbs are " +
           "invoked at the piece's root surface. Read the parent object " +
           "instead, or list the callable verbs with " +
-          `'cf piece verbs --piece ${PIECE}'.`,
+          `'cf piece verbs --cell ${PIECE}'.`,
       );
-      expect((error as Error).message).not.toContain("cf call");
+      expect((error as Error).message).not.toContain("cf piece call");
     });
 
     it("reads a probe-classifiable but marker-less output (fails open)", async () => {
@@ -1887,7 +2424,7 @@ describe("cli piece parsing", () => {
       )
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
-      expect((error as Error).message).toContain("cf call");
+      expect((error as Error).message).toContain("cf piece call");
       expect((error as Error).message).not.toContain("--step");
     });
 
@@ -1933,7 +2470,7 @@ describe("cli piece parsing", () => {
           ),
       }).catch((error) => error);
       expect(thrown).toBeInstanceOf(PieceVerbReadError);
-      expect((thrown as Error).message).toContain("cf call");
+      expect((thrown as Error).message).toContain("cf piece call");
 
       // And the same when the selection simply yields nothing.
       const empty = await getCellValue(config, ["addTopic"], options, {
@@ -2112,12 +2649,19 @@ describe("cli piece parsing", () => {
 
   it("forwards the dangerous override through setsrc command behavior", async () => {
     let forwarded: unknown;
-    const pieceConfig = await setPieceSourceFromCommand(
+    const applied = {
+      status: "committed" as const,
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "completed" as const },
+    };
+    const { config, update } = await setPieceSourceFromCommand(
       {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
@@ -2128,19 +2672,20 @@ describe("cli piece parsing", () => {
       {
         setPiecePattern: (config, entry, options) => {
           forwarded = { config, entry, options };
-          return Promise.resolve();
+          return Promise.resolve(applied);
         },
       },
     );
 
-    expect(pieceConfig).toEqual({
+    expect(config).toEqual({
       apiUrl: API_URL,
       space: SPACE,
       identity: "/tmp/test.key",
       piece: PIECE,
     });
+    expect(update).toEqual(applied);
     expect(forwarded).toEqual({
-      config: pieceConfig,
+      config,
       entry: {
         mainPath: "/repo/pattern.tsx",
         mainExport: "named",
@@ -2150,6 +2695,245 @@ describe("cli piece parsing", () => {
       },
       options: { dangerouslyAllowIncompatibleSchema: true },
     });
+  });
+
+  it("prints the committed pattern pointer and revision in the setsrc success line", () => {
+    expect(setsrcSuccessLine(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      {
+        status: "committed",
+        ref: { identity: "B".repeat(43), symbol: "default" },
+        revisionId: "revision-2",
+        detachedOrigin: null,
+        refresh: { status: "completed" },
+      },
+    )).toBe(
+      `Committed source update for piece ${PIECE} ` +
+        `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
+        `Revision: revision-2)`,
+    );
+  });
+
+  it("renders the setsrc transaction receipt returned by the apply", async () => {
+    const applied = {
+      status: "committed" as const,
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "completed" as const },
+    };
+    const rendered: string[] = [];
+    const warned: string[] = [];
+    const hinted: string[] = [];
+    const exitCodes: number[] = [];
+
+    await applyPieceSourceCommandAction(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        cell: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPieceSourceFromCommand: (options, mainPath) => {
+          expect(mainPath).toBe("/repo/pattern.tsx");
+          return Promise.resolve({
+            config: parsePieceOptions(options),
+            update: applied,
+          });
+        },
+        render: (message) => rendered.push(message),
+        warn: (message) => warned.push(message),
+        hint: (message) => hinted.push(message),
+        setExitCode: (code) => exitCodes.push(code),
+      },
+    );
+
+    expect(rendered).toEqual([
+      `Committed source update for piece ${PIECE} ` +
+      `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
+      `Revision: revision-2)`,
+    ]);
+    expect(warned).toEqual([]);
+    expect(exitCodes).toEqual([]);
+    expect(hinted).toHaveLength(1);
+    expect(hinted[0]).toContain(`${API_URL}/${SPACE}/${PIECE}`);
+  });
+
+  it("reports a setsrc refresh failure and exits nonzero", async () => {
+    // A refresh failure does not undo the commit, so the command still
+    // reports what committed while returning a failing process status. Both
+    // halves matter: the warning alone loses the durable receipt, while exit 0
+    // lets an automation mistake the source commit for a healthy deploy.
+    const update = {
+      status: "committed" as const,
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: {
+        status: "failed" as const,
+        warning: "dependency unavailable",
+      },
+    };
+    const rendered: string[] = [];
+    const warned: string[] = [];
+    const hinted: string[] = [];
+    const exitCodes: number[] = [];
+
+    await applyPieceSourceCommandAction(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        cell: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPieceSourceFromCommand: () =>
+          Promise.resolve({
+            config: {
+              apiUrl: API_URL,
+              space: SPACE,
+              identity: "/tmp/test.key",
+              piece: PIECE,
+            },
+            update,
+          }),
+        render: (message) => rendered.push(message),
+        warn: (message) => warned.push(message),
+        hint: (message) => hinted.push(message),
+        setExitCode: (code) => exitCodes.push(code),
+      },
+    );
+
+    expect(rendered).toEqual([
+      `Committed source update for piece ${PIECE} ` +
+      `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
+      `Revision: revision-2)`,
+    ]);
+    expect(warned).toEqual([
+      `Source revision revision-2 committed as ` +
+      `cf:module/${"B".repeat(43)}#default, but refreshing the running ` +
+      `piece failed: dependency unavailable`,
+    ]);
+    expect(hinted).toHaveLength(1);
+    expect(hinted[0]).toContain("this deploy is not healthy");
+    expect(hinted[0]).toContain("cf piece render");
+    expect(exitCodes).toEqual([1]);
+  });
+
+  it("sends the setsrc refresh warning to stderr", async () => {
+    // The success line goes to stdout and the warning must not, or a caller
+    // redirecting stdout to a log keeps the receipt and loses the warning
+    // silently. Asserted against the real default sink rather than an
+    // injected one, since the default is the thing that can regress.
+    const errors: string[] = [];
+    const originalError = console.error;
+    const originalExitCode = Deno.exitCode;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.join(" "));
+    };
+    Deno.exitCode = 0;
+
+    try {
+      await applyPieceSourceCommandAction(
+        {
+          apiUrl: API_URL,
+          space: SPACE,
+          identity: "/tmp/test.key",
+          cell: PIECE,
+        },
+        "/repo/pattern.tsx",
+        {
+          setPieceSourceFromCommand: () =>
+            Promise.resolve({
+              config: {
+                apiUrl: API_URL,
+                space: SPACE,
+                identity: "/tmp/test.key",
+                piece: PIECE,
+              },
+              update: {
+                status: "committed" as const,
+                ref: { identity: "B".repeat(43), symbol: "default" },
+                revisionId: "revision-2",
+                detachedOrigin: null,
+                refresh: {
+                  status: "failed" as const,
+                  warning: "dependency unavailable",
+                },
+              },
+            }),
+          render: () => {},
+          hint: () => {},
+        },
+      );
+      expect(Deno.exitCode).toBe(1);
+    } finally {
+      console.error = originalError;
+      Deno.exitCode = originalExitCode;
+    }
+
+    expect(errors.filter((line) => line.includes("refreshing the running")))
+      .toHaveLength(1);
+  });
+
+  it("prints no setsrc receipt when the update fails to commit", async () => {
+    // A commit failure is the case the receipt exists for: the action must
+    // report nothing that reads as success and must let the failure out, which
+    // is what `cf`'s top-level handler turns into a non-zero exit.
+    const rendered: string[] = [];
+    const warned: string[] = [];
+    const hinted: string[] = [];
+
+    await expect(applyPieceSourceCommandAction(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        cell: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPieceSourceFromCommand: () =>
+          Promise.reject(new Error("commit refused by storage")),
+        render: (message) => rendered.push(message),
+        warn: (message) => warned.push(message),
+        hint: (message) => hinted.push(message),
+      },
+    )).rejects.toThrow("commit refused by storage");
+
+    expect(rendered).toEqual([]);
+    expect(warned).toEqual([]);
+    expect(hinted).toEqual([]);
+  });
+
+  it("propagates a setsrc failure before the setup transaction commits", async () => {
+    await expect(setPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        cell: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPiecePattern: () =>
+          Promise.reject(
+            new Error(
+              "piece pattern changed while the source update was compiling",
+            ),
+          ),
+      },
+    )).rejects.toThrow(
+      "piece pattern changed while the source update was compiling",
+    );
   });
 
   it("aims the setsrc preflight at the same piece and entry the apply would use", async () => {
@@ -2162,7 +2946,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
@@ -2209,7 +2993,7 @@ describe("cli piece parsing", () => {
         apiUrl: API_URL,
         space: SPACE,
         identity: "/tmp/test.key",
-        piece: PIECE,
+        cell: PIECE,
       },
       "/repo/pattern.tsx",
       {
@@ -2975,12 +3759,13 @@ describe("cli piece parsing", () => {
       unregisteredPieceValue.setMetaRaw("patternIdentity", {
         identity: "P".repeat(43),
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       unregisteredKeylessValue.set({ text: "unregistered keyless match" });
       unregisteredKeylessArgument.set({});
       unregisteredKeylessValue.setMetaRaw(
         "argument",
         unregisteredKeylessArgument.getAsWriteRedirectLink(),
+        rawMetaWriteAuthorization,
       );
       ownerResult.set({});
       ownerInput.set({
@@ -3813,7 +4598,16 @@ describe("cli piece parsing", () => {
             Promise.resolve({
               setPattern: (_program: unknown, options: unknown) => {
                 setPatternOptions = options;
-                return Promise.resolve();
+                return Promise.resolve({
+                  status: "committed" as const,
+                  ref: {
+                    identity: "A".repeat(43),
+                    symbol: "default",
+                  },
+                  revisionId: "revision-2",
+                  detachedOrigin: null,
+                  refresh: { status: "completed" as const },
+                });
               },
             }),
         } as any),
@@ -4004,11 +4798,14 @@ describe("cli piece parsing", () => {
     expect(resolved.piece).toBe("of:fid1:piece-123");
   });
 
-  it("preserves URI link endpoints without slug lookup", async () => {
+  it("preserves URI link endpoints and their paths without slug lookup", async () => {
     const token = "of:fid1:piece-123";
-    const resolved = await resolveLinkEndpointAddress({} as any, token);
+    const resolved = await resolveLinkEndpointAddress({} as any, token, [
+      "items",
+      0,
+    ]);
 
-    expect(resolved).toBe(token);
+    expect(resolved).toEqual({ piece: token, pathAfter: ["items", 0] });
   });
 
   it("rejects a bare endpoint with no slug document, even with the fallback", async () => {
@@ -4020,10 +4817,13 @@ describe("cli piece parsing", () => {
     await expect(resolveLinkEndpointAddress(
       manager as any,
       token,
-      () =>
-        Promise.reject(
-          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
-        ),
+      [],
+      {
+        resolvePieceAddress: () =>
+          Promise.reject(
+            new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+          ),
+      },
       { allowMissingSlugFallback: true },
     )).rejects.toThrow(/Slug "a-bare-name" not found/);
   });
@@ -4034,10 +4834,13 @@ describe("cli piece parsing", () => {
     await expect(resolveLinkEndpointAddress(
       manager as any,
       token,
-      () =>
-        Promise.reject(
-          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
-        ),
+      [],
+      {
+        resolvePieceAddress: () =>
+          Promise.reject(
+            new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+          ),
+      },
     )).rejects.toThrow(/Slug "demo" not found/);
   });
 });

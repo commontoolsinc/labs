@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import type {
   Program,
   ProgramResolver,
@@ -124,34 +124,37 @@ function deterministicCompileStep<T>(step: () => T): T {
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
-  private runtimeModuleTypes: Record<string, string> | undefined;
-  private cache: StaticCache;
+  #runtimeModuleTypes: Record<string, string> | undefined;
+  #cache: StaticCache;
   constructor(program: Program, cache: StaticCache) {
     const modules = program.files.reduce((mod, file) => {
       mod[file.name] = file.contents;
       return mod;
     }, {} as Record<string, string>);
     super(program.main, modules);
-    this.cache = cache;
+    this.#cache = cache;
   }
 
-  // Add `.d.ts` files for known supported 3P modules.
+  /**
+   * Resolves a source, adding `.d.ts` files for known supported third-party
+   * modules.
+   */
   override async resolveSource(
     identifier: string,
   ): Promise<Source | undefined> {
-    if (!this.runtimeModuleTypes) {
-      this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
-        this.cache,
+    if (!this.#runtimeModuleTypes) {
+      this.#runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
+        this.#cache,
       );
     }
     if (
       !isRuntimeModuleIdentifier(identifier) &&
-      identifier in this.runtimeModuleTypes &&
-      this.runtimeModuleTypes[identifier]
+      identifier in this.#runtimeModuleTypes &&
+      this.#runtimeModuleTypes[identifier]
     ) {
       return {
         name: identifier,
-        contents: this.runtimeModuleTypes[identifier],
+        contents: this.#runtimeModuleTypes[identifier],
       };
     }
     if (identifier.endsWith(".d.ts")) {
@@ -160,12 +163,12 @@ export class EngineProgramResolver extends InMemoryProgram {
         isRuntimeModuleIdentifier(origSource)
       ) {
         if (
-          origSource in this.runtimeModuleTypes &&
-          this.runtimeModuleTypes[origSource]
+          origSource in this.#runtimeModuleTypes &&
+          this.#runtimeModuleTypes[origSource]
         ) {
           return {
             name: identifier,
-            contents: this.runtimeModuleTypes[origSource],
+            contents: this.#runtimeModuleTypes[origSource],
           };
         }
       }
@@ -175,27 +178,33 @@ export class EngineProgramResolver extends InMemoryProgram {
 }
 
 class RootedProgramResolver implements ProgramResolver {
+  readonly #inner: ProgramResolver;
+  readonly #root: string;
+
   constructor(
-    private readonly inner: ProgramResolver,
-    private readonly root: string,
-  ) {}
+    inner: ProgramResolver,
+    root: string,
+  ) {
+    this.#inner = inner;
+    this.#root = root;
+  }
 
   async main(): Promise<Source> {
-    const source = await this.inner.resolveSource(this.root);
+    const source = await this.#inner.resolveSource(this.#root);
     if (source === undefined) {
-      throw new Error(`Source root "${this.root}" could not be resolved.`);
+      throw new Error(`Source root "${this.#root}" could not be resolved.`);
     }
     return source;
   }
 
   resolveDataFile(name: string): Promise<Source | undefined> {
-    return this.inner.resolveDataFile
-      ? this.inner.resolveDataFile(name)
-      : this.inner.resolveSource(name);
+    return this.#inner.resolveDataFile
+      ? this.#inner.resolveDataFile(name)
+      : this.#inner.resolveSource(name);
   }
 
   resolveSource(identifier: string): Promise<Source | undefined> {
-    return this.inner.resolveSource(identifier);
+    return this.#inner.resolveSource(identifier);
   }
 }
 
@@ -308,28 +317,53 @@ export interface EngineOptions {
 }
 
 export class Engine extends EventTarget {
-  private runtimeInternals: RuntimeInternals | undefined;
-  private compilerInternals: CompilerInternals | undefined;
-  private ctRuntime: Runtime;
-  private sesRuntime: SESRuntime | undefined;
-  private nextEvalId = 0;
-  private readonly executableRegistry = new ExecutableRegistry();
-  private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
-  private readonly patternCoverageByGraph = new WeakMap<
+  #runtimeInternals: RuntimeInternals | undefined;
+  #compilerInternals: CompilerInternals | undefined;
+  #ctRuntime: Runtime;
+
+  #sesRuntime: SESRuntime | undefined;
+
+  #nextEvalId = 0;
+
+  readonly #executableRegistry = new ExecutableRegistry();
+
+  readonly #consoleShim = createSafeConsoleGlobal(new Console(this));
+  readonly #patternCoverageByGraph = new WeakMap<
     CompiledModuleGraph,
     PatternCoverageCollector
   >();
 
+  readonly #options: EngineOptions;
+
   constructor(
     ctRuntime: Runtime,
-    private readonly options: EngineOptions = {},
+    options: EngineOptions = {},
   ) {
     super();
-    this.ctRuntime = ctRuntime;
+    this.#options = options;
+    this.#ctRuntime = ctRuntime;
+  }
+
+  /**
+   * The SES runtime, once one has been made, and the implementation index,
+   * which a test reads directly.
+   */
+  get accessForTestingOnly(): {
+    readonly executableRegistry: ExecutableRegistry;
+    readonly sesRuntime: SESRuntime | undefined;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      executableRegistry: this.#executableRegistry,
+      get sesRuntime() {
+        return outerThis.#sesRuntime;
+      },
+    };
   }
 
   async initializeRuntime(): Promise<RuntimeInternals> {
-    const runtime = this.getSESRuntime();
+    const runtime = this.#getSESRuntime();
     const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();
     return { runtime, runtimeExports, exportsCallback };
   }
@@ -339,7 +373,7 @@ export class Engine extends EventTarget {
     // (typescript + transformers), kept off the worker-boot path.
     const { TypeScriptCompiler } = await ensureCompilerStack();
     const environmentTypes = await Engine.getEnvironmentTypes(
-      this.ctRuntime.staticCache,
+      this.#ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
     return { compiler };
@@ -347,8 +381,8 @@ export class Engine extends EventTarget {
 
   async initialize(): Promise<RuntimeInternals & CompilerInternals> {
     const [runtimeInternals, compilerInternals] = await Promise.all([
-      this.getRuntimeInternals(),
-      this.getCompilerInternals(),
+      this.#getRuntimeInternals(),
+      this.#getCompilerInternals(),
     ]);
     return { ...runtimeInternals, ...compilerInternals };
   }
@@ -360,20 +394,20 @@ export class Engine extends EventTarget {
    * This is how a program is assembled from a source of truth — a directory, a
    * web address, the fabric — so it is where a declaration in the source is
    * acted on. Re-resolving a program the engine already holds goes through
-   * {@link resolveModules}, which follows imports and nothing else.
+   * `#resolveModules()`, which follows imports and nothing else.
    */
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
     return await attachDeclaredDataFiles(
-      await this.resolveModules(program),
+      await this.#resolveModules(program),
       program,
     );
   }
 
   /** Resolve the module closure an entry's imports reach. */
-  private async resolveModules(
+  async #resolveModules(
     program: ProgramResolver,
   ): Promise<RuntimeProgram> {
-    const { compiler } = await this.getCompilerInternals();
+    const { compiler } = await this.#getCompilerInternals();
     logger.timeStart("resolve");
     try {
       return await compiler.resolveProgram(program, {
@@ -384,15 +418,15 @@ export class Engine extends EventTarget {
     }
   }
 
-  private async resolveWithSourceRoots(
+  async #resolveWithSourceRoots(
     resolver: ProgramResolver,
     sourceRoots: readonly string[],
   ): Promise<RuntimeProgram> {
-    const programs = [await this.resolveModules(resolver)];
+    const programs = [await this.#resolveModules(resolver)];
     for (const root of new Set(sourceRoots)) {
       if (root === programs[0].main) continue;
       programs.push(
-        await this.resolveModules(new RootedProgramResolver(resolver, root)),
+        await this.#resolveModules(new RootedProgramResolver(resolver, root)),
       );
     }
 
@@ -455,17 +489,17 @@ export class Engine extends EventTarget {
       assertFabricImportsHaveSpace(codeFiles, options);
       const engineResolver = new EngineProgramResolver(
         { ...mappedProgram, files: codeFiles },
-        this.ctRuntime.staticCache,
+        this.#ctRuntime.staticCache,
       );
       const fabricResolver = options.fabricImports
         ? new FabricAwareResolver(engineResolver, {
-          runtime: this.ctRuntime,
+          runtime: this.#ctRuntime,
           space: options.fabricImports.space,
           allowUnpinned: options.fabricImports.allowUnpinned,
         })
         : undefined;
       const resolver = fabricResolver ?? engineResolver;
-      const resolvedProgram = await this.resolveWithSourceRoots(
+      const resolvedProgram = await this.#resolveWithSourceRoots(
         resolver,
         sourceRoots,
       );
@@ -609,7 +643,7 @@ export class Engine extends EventTarget {
           }
         }
       } else {
-        const { compiler } = await this.getCompilerInternals();
+        const { compiler } = await this.#getCompilerInternals();
         // A cold compile is a seconds-long CPU-bound pipeline. In the browser
         // runtime worker a synchronous run wedges the event loop and stalls
         // every queued IPC delivery until it finishes (measured as
@@ -674,7 +708,7 @@ export class Engine extends EventTarget {
           }
         }
       }
-      const { runtimeExports } = await this.getRuntimeInternals();
+      const { runtimeExports } = await this.#getRuntimeInternals();
       const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
         runtimeExports?.[name]
       );
@@ -707,7 +741,7 @@ export class Engine extends EventTarget {
         storedNameFor: (name) => storedFilenameFor(name, id, mounts),
       });
       if (options.patternCoverage) {
-        this.patternCoverageByGraph.set(graph, options.patternCoverage);
+        this.#patternCoverageByGraph.set(graph, options.patternCoverage);
       }
 
       // Register runtime-module records so cf:runtime/* imports resolve.
@@ -861,7 +895,7 @@ export class Engine extends EventTarget {
         };
       });
       for (const module of modules) {
-        this.ctRuntime.registerCfcPolicyManifests(
+        this.#ctRuntime.registerCfcPolicyManifests(
           undefined,
           module.policyManifests ?? [],
         );
@@ -921,9 +955,9 @@ export class Engine extends EventTarget {
       const mapped = pretransformProgramForModules(program, id);
       const resolver = new EngineProgramResolver(
         { ...mapped, files: partitionDataFiles(mapped).codeFiles },
-        this.ctRuntime.staticCache,
+        this.#ctRuntime.staticCache,
       );
-      const resolved = await this.resolveWithSourceRoots(
+      const resolved = await this.#resolveWithSourceRoots(
         resolver,
         mapped.sourceRoots ?? [],
       );
@@ -938,7 +972,7 @@ export class Engine extends EventTarget {
       files: [...unioned.values()],
     };
 
-    const { compiler } = await this.getCompilerInternals();
+    const { compiler } = await this.#getCompilerInternals();
     const { modules, diagnostics: compileDiagnostics } = compiler
       .compileToModulesCollecting(merged, {
         runtimeModules: Engine.runtimeModuleNames(),
@@ -1026,7 +1060,7 @@ export class Engine extends EventTarget {
       dataFiles?: readonly string[];
     } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
-    const { compiler } = await this.getCompilerInternals();
+    const { compiler } = await this.#getCompilerInternals();
     assertNoReservedFabricPaths(resolvedFiles);
     // Data files carry arbitrary bytes; keep them away from every scan, parse
     // and compile step, and rejoin them at the pristine set below.
@@ -1068,11 +1102,11 @@ export class Engine extends EventTarget {
     );
     const engineResolver = new EngineProgramResolver(
       { main: entryFilename, files: injectedInput.files },
-      this.ctRuntime.staticCache,
+      this.#ctRuntime.staticCache,
     );
     const fabricResolver = options.fabricImports
       ? new FabricAwareResolver(engineResolver, {
-        runtime: this.ctRuntime,
+        runtime: this.#ctRuntime,
         space: options.fabricImports.space,
         allowUnpinned: options.fabricImports.allowUnpinned,
       })
@@ -1080,7 +1114,7 @@ export class Engine extends EventTarget {
     const resolver = fabricResolver ?? engineResolver;
     // Resolution may perform storage/network I/O for fabric mounts. Its
     // failures are intentionally left unmarked and therefore retryable.
-    const resolvedProgram = await this.resolveWithSourceRoots(
+    const resolvedProgram = await this.#resolveWithSourceRoots(
       resolver,
       sourceRoots,
     );
@@ -1251,7 +1285,7 @@ export class Engine extends EventTarget {
       };
     });
     for (const module of modules) {
-      this.ctRuntime.registerCfcPolicyManifests(
+      this.#ctRuntime.registerCfcPolicyManifests(
         undefined,
         module.policyManifests ?? [],
       );
@@ -1277,7 +1311,7 @@ export class Engine extends EventTarget {
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<EvaluateResult> {
     // Ensure runtime exports + exportsCallback are initialized.
-    await this.getRuntimeInternals();
+    await this.#getRuntimeInternals();
     const { id, graph, mainSpecifier } = await this.compileToRecordGraph(
       program,
       options,
@@ -1288,7 +1322,7 @@ export class Engine extends EventTarget {
   /**
    * Evaluate a verified ESM record graph (public so the PatternManager can run
    * compile → cache write-back → evaluate as discrete steps). Thin wrapper over
-   * {@link evaluateGraph} with the source-compile registration strategy: module
+   * `#evaluateGraph()` with the source-compile registration strategy: module
    * identities are recomputed from `files`, paths carry the `/<id>` prefix, and
    * `files` flow into the export map for sub-pattern re-instantiation.
    * `dataFiles` names the members of `files` that are data, so a sub-pattern
@@ -1301,7 +1335,7 @@ export class Engine extends EventTarget {
     program: Pick<RuntimeProgram, "files" | "dataFiles">,
   ): EvaluateResult {
     const prefix = `/${id}`;
-    return this.evaluateGraph(graph, mainSpecifier, {
+    return this.#evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: id,
       fileNameForPath: (path) =>
         path.startsWith(prefix) ? path.slice(prefix.length) : path,
@@ -1324,7 +1358,7 @@ export class Engine extends EventTarget {
    * already in the graph, supply the trusted host APIs). The entry namespace
    * comes back as `main`, alongside the per-module export map.
    */
-  private evaluateGraph(
+  #evaluateGraph(
     graph: CompiledModuleGraph,
     mainSpecifier: string,
     ctx: {
@@ -1341,11 +1375,11 @@ export class Engine extends EventTarget {
       // which scoped CFC identity and registry partitions to a load — is gone
       // (PR E2): identity flows through the content-addressed provenance
       // recorded below.
-      const evalId = `${ctx.evalIdPrefix}:esm:${this.nextEvalId++}`;
+      const evalId = `${ctx.evalIdPrefix}:esm:${this.#nextEvalId++}`;
 
-      const patternCoverage = this.patternCoverageByGraph.get(graph);
+      const patternCoverage = this.#patternCoverageByGraph.get(graph);
       const globals = createModuleCompartmentGlobals({
-        console: this.consoleShim,
+        console: this.#consoleShim,
         ...(patternCoverage
           ? { [PATTERN_COVERAGE_GLOBAL]: patternCoverage.sandboxGlobal() }
           : {}),
@@ -1380,7 +1414,7 @@ export class Engine extends EventTarget {
           return { specifier, source, bodyLineCount };
         },
       );
-      this.getSESRuntime().loadSourceMapLazy(
+      this.#getSESRuntime().loadSourceMapLazy(
         `${evalId}.js`,
         () =>
           composeBundleSourceMap(
@@ -1409,7 +1443,7 @@ export class Engine extends EventTarget {
       for (const [name, specifier] of graph.specifierByPath) {
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
         const bodyLineCount = lineCountBySpecifier.get(specifier) ?? 1;
-        this.getSESRuntime().loadSourceMapLazy(sourceUrl, () => {
+        this.#getSESRuntime().loadSourceMapLazy(sourceUrl, () => {
           const map = moduleSourceMaps.get(specifier) ??
             identitySourceMap(bodyLineCount, name);
           return composeBundleSourceMap(
@@ -1421,7 +1455,7 @@ export class Engine extends EventTarget {
       }
 
       const frame = pushFrame({
-        runtime: this.ctRuntime,
+        runtime: this.#ctRuntime,
         moduleEvaluation: true,
       });
 
@@ -1437,7 +1471,7 @@ export class Engine extends EventTarget {
         // at module scope would otherwise surface with a censored (empty) or
         // raw-coordinate stack. Materialize + source-map it here (once),
         // matching how invoked-function errors are mapped.
-        throw this.getSESRuntime().mapThrownError(error);
+        throw this.#getSESRuntime().mapThrownError(error);
       } finally {
         popFrame(frame);
       }
@@ -1491,7 +1525,7 @@ export class Engine extends EventTarget {
           });
         }
       }
-      this.runtimeInternals?.exportsCallback(exportsByValue);
+      this.#runtimeInternals?.exportsCallback(exportsByValue);
 
       // Content-addressed CFC provenance: record it HERE, where functions
       // become verified (this evaluation), rather than in the PatternManager's
@@ -1504,7 +1538,7 @@ export class Engine extends EventTarget {
       // `__cfReg`-registered factory already wears its
       // `__cfVerifiedBindingIdentity` annotation, which recordModuleProvenance
       // folds into the provenance entry.
-      this.recordModuleProvenance(
+      this.#recordModuleProvenance(
         exportsByIdentity,
         graph.registrationSink,
         graph.builderSourceSitesByIdentity,
@@ -1535,7 +1569,7 @@ export class Engine extends EventTarget {
    * First-write-wins (see `recordVerifiedProvenance`), so an export and a
    * `__cfReg` entry for one artifact agree on a single canonical symbol.
    */
-  private recordModuleProvenance(
+  #recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
     builderSourceSitesByIdentity: ReadonlyMap<
@@ -1592,11 +1626,19 @@ export class Engine extends EventTarget {
       // The strong content-addressed implementation index — the resolution
       // (and eviction-insurance) backing for serialized `$implRef`s; see
       // `ExecutableRegistry.registerVerifiedImplementation`.
-      this.executableRegistry.registerVerifiedImplementation(
+      this.#executableRegistry.registerVerifiedImplementation(
         identity,
         symbol,
         implementation as HarnessedFunction,
       );
+      this.#ctRuntime.telemetry.submit({
+        type: "harness.implementation.register",
+        identity,
+        symbol,
+        ...(bindingIdentity
+          ? { bindingPath: bindingIdentity.bindingPath }
+          : {}),
+      });
     };
     for (const [identity, namespace] of exportsByIdentity) {
       for (const [exportName, value] of Object.entries(namespace)) {
@@ -1632,8 +1674,8 @@ export class Engine extends EventTarget {
       patternCoverage?: PatternCoverageCollector;
     } = {},
   ): Promise<EvaluateResult> {
-    await this.getRuntimeInternals();
-    const { runtimeExports } = await this.getRuntimeInternals();
+    await this.#getRuntimeInternals();
+    const { runtimeExports } = await this.#getRuntimeInternals();
     const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
       runtimeExports?.[name]
     );
@@ -1666,7 +1708,7 @@ export class Engine extends EventTarget {
 
     // The cached bodies carry the coverage probes from the compile that emitted
     // them, and the spans that name the lines those probes stand for. Register
-    // both against this graph so `evaluateGraph` installs the collector as the
+    // both against this graph so `#evaluateGraph` installs the collector as the
     // sandbox global. The spans are what map a probe's `(fileName, id)` back to
     // source lines; a graph registered without them reports nothing for its
     // hits.
@@ -1676,7 +1718,7 @@ export class Engine extends EventTarget {
           module.patternCoverageSpans ?? [],
         );
       }
-      this.patternCoverageByGraph.set(graph, options.patternCoverage);
+      this.#patternCoverageByGraph.set(graph, options.patternCoverage);
     }
 
     // Register runtime-module records so cf:runtime/* imports resolve.
@@ -1732,7 +1774,7 @@ export class Engine extends EventTarget {
     // the load runs before it rather than after (no-op in Deno).
     await interleaveCompileYield();
 
-    return this.evaluateGraph(graph, mainSpecifier, {
+    return this.#evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: entryIdentity,
       fileNameForPath: (path) => path, // already normalized
       filesForExports: options.sourceFiles ?? [],
@@ -1742,48 +1784,53 @@ export class Engine extends EventTarget {
     });
   }
 
-  // Invokes a function that should've came from this SES runtime
-  // (unverifiable). We use this to hook into its source mapping functionality.
+  /**
+   * Invokes a function that should have come from this SES runtime
+   * (unverifiable). We use this to hook into its source mapping functionality.
+   */
   invoke(fn: () => any): any {
     // Scheduler dictates this is a synchronous function,
     // and if we have functions from this source, this should already
     // be set up.
     // Some tests invoke values outside of this SES runtime, so just
     // execute and return if runtime internals have not been initialized.
-    if (!this.runtimeInternals && !this.sesRuntime) {
+    if (!this.#runtimeInternals && !this.#sesRuntime) {
       return fn();
     }
-    return this.getSESRuntime().exec(fn);
+    return this.#getSESRuntime().exec(fn);
   }
 
   getInvocation(source: string): HarnessedFunction {
-    return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
+    return this.#getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
   getVerifiedImplementation(
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedImplementation(identity, symbol);
+    return this.#executableRegistry.getVerifiedImplementation(identity, symbol);
   }
 
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void {
-    this.executableRegistry.trustHostValue(value, options);
+    this.#executableRegistry.trustHostValue(value, options);
   }
 
-  // Parse an error stack trace, mapping all positions back to original sources.
-  // Returns the original stack if runtime internals haven't been initialized.
+  /**
+   * Parses an error stack trace, mapping all positions back to original
+   * sources. Returns the original stack if runtime internals haven't been
+   * initialized.
+   */
   parseStack(stack: string): string {
-    if (!this.runtimeInternals) {
+    if (!this.#runtimeInternals) {
       return stack;
     }
-    return this.runtimeInternals.runtime.parseStack(stack);
+    return this.#runtimeInternals.runtime.parseStack(stack);
   }
 
-  // Returns a map of runtime module types.
+  /** Returns a map of runtime module types. */
   static getRuntimeModuleTypes(cache: StaticCache) {
     return getRuntimeModuleTypes(cache);
   }
@@ -1797,18 +1844,18 @@ export class Engine extends EventTarget {
     return [...RuntimeModuleIdentifiers];
   }
 
-  private async getRuntimeInternals(): Promise<RuntimeInternals> {
-    if (!this.runtimeInternals) {
-      this.runtimeInternals = await this.initializeRuntime();
+  async #getRuntimeInternals(): Promise<RuntimeInternals> {
+    if (!this.#runtimeInternals) {
+      this.#runtimeInternals = await this.initializeRuntime();
     }
-    return this.runtimeInternals;
+    return this.#runtimeInternals;
   }
 
-  private async getCompilerInternals(): Promise<CompilerInternals> {
-    if (!this.compilerInternals) {
-      this.compilerInternals = await this.initializeCompiler();
+  async #getCompilerInternals(): Promise<CompilerInternals> {
+    if (!this.#compilerInternals) {
+      this.#compilerInternals = await this.initializeCompiler();
     }
-    return this.compilerInternals;
+    return this.#compilerInternals;
   }
 
   /**
@@ -1816,28 +1863,28 @@ export class Engine extends EventTarget {
    * Clears accumulated source maps and other state to prevent memory leaks.
    */
   dispose(): void {
-    if (this.sesRuntime) {
-      this.sesRuntime.clear();
+    if (this.#sesRuntime) {
+      this.#sesRuntime.clear();
     }
-    this.sesRuntime = undefined;
-    this.runtimeInternals = undefined;
-    this.compilerInternals = undefined;
-    this.nextEvalId = 0;
-    this.executableRegistry.clear();
+    this.#sesRuntime = undefined;
+    this.#runtimeInternals = undefined;
+    this.#compilerInternals = undefined;
+    this.#nextEvalId = 0;
+    this.#executableRegistry.clear();
   }
 
-  private getSESRuntime(): SESRuntime {
-    if (!this.sesRuntime) {
+  #getSESRuntime(): SESRuntime {
+    if (!this.#sesRuntime) {
       ensureSESLockdown();
-      this.sesRuntime = new SESRuntime({
+      this.#sesRuntime = new SESRuntime({
         globals: createModuleCompartmentGlobals({
-          console: this.consoleShim,
+          console: this.#consoleShim,
         }),
-        hideInternalStackFrames: this.options.hideInternalStackFrames,
+        hideInternalStackFrames: this.#options.hideInternalStackFrames,
         lockdown: false,
       });
     }
-    return this.sesRuntime;
+    return this.#sesRuntime;
   }
 }
 

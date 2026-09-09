@@ -1,4 +1,4 @@
-import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { FabricInstance } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { isCell } from "../cell.ts";

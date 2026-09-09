@@ -58,8 +58,10 @@ export interface PieceContextMenuDetail {
   /** The piece's full schemed id. */
   pieceId: string;
 
-  /** Client coordinates of the click, for placing the menu. */
+  /** Client X coordinate of the click, for placing the menu. */
   x: number;
+
+  /** Client Y coordinate of the click, read the same way. */
   y: number;
 
   /** The variant the piece was rendered at. */
@@ -286,7 +288,7 @@ export class CFRender extends BaseElement {
   declare cell: CellHandle | undefined;
   declare variant: UIVariant | undefined;
 
-  // Use Lit ref directive for stable container reference across re-renders
+  /** Lit ref to the container, which stays stable across re-renders. */
   private _containerRef: Ref<HTMLDivElement> = createRef();
 
   private _cleanup?: () => void;
@@ -295,11 +297,17 @@ export class CFRender extends BaseElement {
   private _linkTargetSetup?: Promise<CellHandle | undefined>;
   private _linkTargetToken?: object;
   private _linkTargetUnsubscribe?: () => void;
-  // Each render captures a generation so older asynchronous work cannot
-  // install a result after the cell or variant changes.
+
+  /**
+   * Render generation. Each render captures one, so older asynchronous work
+   * cannot install a result after the cell or variant changes.
+   */
   private _renderGeneration = 0;
-  // The root piece cell after resolving the (possibly link) `cell`. Reset
-  // whenever `cell` changes.
+
+  /**
+   * The root piece cell after resolving the (possibly link) `cell`. Reset
+   * whenever `cell` changes.
+   */
   private _resolvedCell?: CellHandle;
 
   @state()

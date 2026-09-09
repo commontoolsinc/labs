@@ -6,6 +6,8 @@
  */
 
 import type {
+  CompactDebugStringOptions,
+  DebugValueOptions,
   FabricBytes,
   FabricHash,
   FabricValue,
@@ -142,7 +144,7 @@ export declare const CELL_INNER_TYPE: unique symbol;
  * Nothing reads this at runtime — a verb's result schema travels on
  * `module.resultSchema`, never on the stream cell's own schema, which stays
  * the event/payload schema that `cf piece verbs` publishes and that
- * `piece call` validates against.
+ * `cf piece call` validates against.
  */
 export declare const CELL_RESULT_TYPE: unique symbol;
 
@@ -261,50 +263,6 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
-export type MetaLinkField =
-  | "pattern"
-  | "argument"
-  | "result";
-
-/**
- * The `pattern` field links a result cell to its pattern
- * The `argument` field links a result cell to its argument cell
- * The `internal` field contains a manifest with links to derived internal cells.
- * The `schema` field stores the schema for a result cell
- * The `patternSetupIdentity` field records the pattern identity whose complete
- * setup state was installed on a result cell.
- * The `result` field lets a result cell link to its parent result cell,
- * and also lets the argument and derived internal cells link back to the result cell.
- *
- * `cfc` is deliberately NOT a MetaField: the `["cfc"]` document field holds
- * raw label metadata (Caveat.source and other principal identities), which
- * must not ride the raw meta seam (inv-12 Stage 0 / SC-14 / SC-25). The cfc
- * code reads the field directly through its own verifier seams; display
- * consumers get the redacted view via getCfcLabel.
- */
-export type MetaField =
-  | MetaLinkField
-  | "patternIdentity" // content-addressed {identity, symbol} pattern reference
-  | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // active web or `cf:` source origin
-  | "pieceSourceHistory" // append-only source revisions and retention roots
-  | "pieceReconciliation" // what following the active origin last did:
-  // {outcome, at, origin, offered?, reason?, detail?} — a piece that refused
-  // or could not reach its origin looks otherwise exactly like one that is
-  // running what its origin offers
-  | "patternRepository" // optional caller-supplied repository locator
-  | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
-  // reference recorded when system-pattern auto-update replaces an unloadable
-  // sourceless root — the recovery pointer for a displaced custom program
-  | "internal"
-  | "schema"
-  | "slug";
-
-export interface IMetaCell {
-  getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
-  setMetaRaw(metaField: MetaField, value: FabricValue): void;
-}
-
 /**
  * Writable cells can update their value.
  *
@@ -356,6 +314,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
    * concurrent increments sum against durable state rather than clobber.
    */
   increment(this: IsThisNumber, by?: number): void;
+
   remove(
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
@@ -370,6 +329,7 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
   ): void;
+
   removeAll(
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
@@ -1142,7 +1102,6 @@ export interface ICell<T>
     IEquatable,
     IKeyable<T, AsCell>,
     IDerivable<T>,
-    IMetaCell,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
@@ -1155,6 +1114,7 @@ export declare const Cell: CellTypeConstructor<AsCell>;
  * all data in patterns is reactive by default, whether wrapped or not.
  */
 export type Writable<T = unknown> = Cell<T>;
+
 export declare const Writable: CellTypeConstructor<AsCell>;
 
 /**
@@ -1293,15 +1253,22 @@ export type Reactive<T> = T;
 //
 
 /**
- * CellLike is a cell (AnyCell) whose nested values are valid factory inputs.
- * The top level must be AnyCell, but nested values can be plain or wrapped.
- *
- * Note: This is primarily used for type constraints that require a cell.
+ * The cell half of {@link CellLike}: the top level must be a branded cell, and
+ * its nested values can be plain or wrapped. Used for type constraints that
+ * require a cell.
  */
 type CellWrappedValue<T> = AnyBrandedCell<CellWrappedData<T>> & {
   [CELL_LIKE]?: unknown;
 };
+
+/**
+ * A `T`, either plain or wrapped in a cell whose nested values are valid
+ * factory inputs ({@link CellWrappedValue}). The accepting type for a position
+ * — a JSX prop, for instance — that takes a live cell in place of the plain
+ * value.
+ */
 export type CellLike<T> = CellWrappedValue<T> | T;
+
 type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
@@ -1856,8 +1823,16 @@ export type BuiltInLLMContentPart =
 
 export type BuiltInLLMContent = string | BuiltInLLMContentPart[];
 
+/**
+ * One message in the conversation an LLM request carries.
+ *
+ * A system instruction is not a message. It travels in the request's separate
+ * `system` field, because the model-provider SDK the request reaches refuses a
+ * system-role message inside `messages` and takes system content from an
+ * option of its own instead.
+ */
 export type BuiltInLLMMessage = {
-  role: "user" | "assistant" | "system" | "tool";
+  role: "user" | "assistant" | "tool";
   content: BuiltInLLMContent;
 };
 
@@ -2040,6 +2015,7 @@ export type BuiltInGenerateObjectParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   }
   | {
@@ -2069,6 +2045,7 @@ export type BuiltInGenerateObjectParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   };
 
@@ -2095,6 +2072,7 @@ export type BuiltInGenerateTextParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   }
   | {
@@ -2119,6 +2097,7 @@ export type BuiltInGenerateTextParams =
      * `search: true` is the friendly shorthand for `["google_search"]`.
      */
     nativeModelToolIds?: readonly string[];
+
     queue?: string;
   };
 
@@ -2142,6 +2121,7 @@ export interface BuiltInCompileAndRunParams<T> {
    * reads one with `dataFile()`; nothing compiles, imports, or transforms it.
    */
   dataFiles?: string[];
+
   input?: T;
 }
 
@@ -2681,7 +2661,16 @@ export type CellFromUrlFunction = (
     url: string;
     hosts?: string[];
   }>,
-) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
+) => Reactive<{
+  pending: boolean;
+
+  /**
+   * The cell the URL named, once resolved, and absent when it named none. Its
+   * value is unconstrained: a URL addresses any cell, and resolution neither
+   * requires a piece nor supplies one's `[NAME]`.
+   */
+  cell?: ReadonlyCell<unknown>;
+}>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
@@ -2731,14 +2720,25 @@ export type DataFileFunction = (path: string) => string;
 // SQLite builtins (docs/specs/sqlite-builtin)
 //
 
-declare const __sqliteDb: unique symbol;
+/**
+ * Brand symbol keying {@link SqliteDatabase}, so a handle value is nominal
+ * rather than an empty object any value satisfies. Exported because a pattern
+ * naming `SqliteDb` in an exported signature emits a declaration that refers
+ * to it, and declaration emit cannot name a symbol the pattern's module has
+ * no route to.
+ */
+export declare const SQLITE_DB_BRAND: unique symbol;
 
 /**
- * Database handle. Empty to pattern code; a cell reference to the runtime
- * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
- * / sqliteExecute / reactOn), never read it.
+ * Database handle. Nominal to pattern code — the brand is the whole of the
+ * type — and a cell reference to the runtime via the `toCell` back-pointer.
+ * A pattern normally just *forwards* it (to `db.query` / `db.exec` /
+ * `sqliteQuery` / `reactOn`). Its readable value is the descriptor
+ * `{ id, tables, rev }` (docs/specs/sqlite-builtin/01-api.md), which is what
+ * the compiler emits for a `SqliteDb` position, so a pattern that wants the
+ * declared columns can read `tables`.
  */
-export type SqliteDatabase = { readonly [__sqliteDb]: true };
+export type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 
 /** Imperative write on a SqliteDb handle: records a SQLite write onto the
  *  current transaction so it commits atomically with surrounding cell writes
@@ -2791,6 +2791,14 @@ export interface ISqliteQueryable {
        *  `table(…, { allowReadClearance: true })`; never for aggregates. The
        *  count of withheld rows is reported as `withheld`. */
       readClearance?: boolean;
+
+      /** Scope of the result cell. A `session`-scoped result is one each
+       *  session reads alone, which a runtime-wide read ceiling
+       *  (`cfcReadMaxConfidentiality`) requires; absent, the result takes the
+       *  narrowest of the db's scope, the pattern's output scope, and — when
+       *  `readClearance` is set — `user`, since a cleared result is one
+       *  reader's view. */
+      scope?: CellScope;
     },
   ): Reactive<
     {
@@ -2866,23 +2874,47 @@ export type SqliteQueryParams = {
    *  of withheld rows is reported back as `withheld`. */
   readClearance?: boolean;
 };
-export type SqliteQueryFunction = <Row = Record<string, unknown>>(
-  params: FactoryInput<SqliteQueryParams>,
-) => Reactive<
-  {
-    pending: boolean;
-    result?: SqliteQueryRow<Row>[];
-    error?: any;
-    withheld?: number;
-  }
->;
+export type SqliteQueryFunction = {
+  <Row = Record<string, unknown>>(
+    params: FactoryInput<SqliteQueryParams>,
+  ): Reactive<
+    {
+      pending: boolean;
+      result?: SqliteQueryRow<Row>[];
+      error?: any;
+      withheld?: number;
+    }
+  >;
+
+  /** Bind the query's result cell to a scope: a `session`-scoped result is
+   *  one each session reads alone, which a runtime-wide read ceiling
+   *  (`cfcReadMaxConfidentiality`) requires. The `scope` option of
+   *  `db.query` is the same binding. */
+  asScope(scope: CellScope): SqliteQueryFunction;
+};
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
 // is no standalone reactive sqliteExecute builder.
 
+/**
+ * An explicitly declared column: a JSON Schema type, plus the verbatim SQLite
+ * column type and constraints used to generate the `CREATE TABLE` statement.
+ */
+export interface SqliteColumnSchema {
+  type: JSONSchemaTypes;
+  /** Verbatim SQLite column type/constraints, e.g. `"integer primary key"`.
+   *  Defaults to `"text"` when a column is declared without one. */
+  sqlType?: string;
+  /** Marks a `_cf_link` column: stored as TEXT, surfaced as a `Cell`. */
+  cfLink?: true;
+  /** A column carries the rest of the JSON Schema vocabulary too, and a table
+   *  schema is stored as fabric data, so every member is a fabric value. */
+  [keyword: string]: FabricValue;
+}
+
 /** Column spec for `table()`: a shorthand SQL type string or a column schema. */
-export type SqliteColumnSpec = string | JSONSchema;
+export type SqliteColumnSpec = string | SqliteColumnSchema;
 
 /** A reference to a declared column, handed to a row-label rule as `f.<col>`
  *  (CFC Phase 3; see `@commonfabric/memory/sqlite/row-label`). */
@@ -2943,13 +2975,14 @@ export interface CfSqliteHelpers {
 
   /** The db's owner (fixed, from the db ref — never the acting reader). */
   dbOwner(): unknown;
+
   endorsedBy(p: unknown): unknown;
   authoredBy(p: unknown): unknown;
 
   /** A literal atom (escape hatch). */
   constant(atom: unknown): unknown;
 }
-export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
 
@@ -2988,7 +3021,7 @@ export type NavigateToFunction = (cell: Reactive<any>) => Reactive<boolean>;
 export interface WishFunction {
   <T = unknown>(
     target: FactoryInput<WishParams>,
-  ): Reactive<WishState<T> & UIRenderable>;
+  ): Reactive<WishState<T>>;
 }
 
 /**
@@ -3058,10 +3091,6 @@ export type InspectConfLabelFunction = (
   targetPath: FactoryInput<string>,
   query: FactoryInput<ConfLabelQuery>,
 ) => Reactive<InspectConfLabelResult>;
-
-export type CreateNodeFactoryFunction = <T = any, R = any>(
-  moduleSpec: Module,
-) => ModuleFactory<T, R>;
 
 // Symbol used to brand Default<T,V> types so RequireDefaults<T> can detect them.
 // This is a compile-time-only brand; at runtime Default<> is just T.
@@ -3288,9 +3317,12 @@ export interface PatternEnvironment {
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 export type ToCompactDebugStringFunction = (
   value: unknown,
-  maxLength?: number,
+  options?: CompactDebugStringOptions,
 ) => string;
-export type ToIndentedDebugStringFunction = (value: unknown) => string;
+export type ToIndentedDebugStringFunction = (
+  value: unknown,
+  options?: DebugValueOptions,
+) => string;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -3346,6 +3378,7 @@ export declare const uiVariant: UIVariantFunction;
 
 /** @deprecated Use generateText() or generateObject() instead */
 export declare const llm: LLMFunction;
+
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
@@ -3375,10 +3408,9 @@ export declare const wish: WishFunction;
 export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
   descriptor: T,
 ) => T;
-export declare const createNodeFactory: CreateNodeFactoryFunction;
-
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
+
 export declare const equals: EqualsFunction;
 export declare const valueEqual: ValueEqualFunction;
 export declare const byRef: ByRefFunction;
@@ -3424,6 +3456,7 @@ export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
 export type GetEntityIdFunction = (
   value: any,
 ) => { "/": string } | FabricHash | undefined;
+
 export declare const getEntityId: GetEntityIdFunction;
 
 /**
@@ -3434,6 +3467,7 @@ export declare const getEntityId: GetEntityIdFunction;
 export type EntityRefToStringFunction = (
   value: { "/": string } | FabricHash,
 ) => string;
+
 export declare const entityRefToString: EntityRefToStringFunction;
 
 export declare const schema: SchemaFunction;

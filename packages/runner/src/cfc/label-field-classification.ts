@@ -49,6 +49,7 @@ export type LabelFieldClassificationEntry = {
    * walks, so nesting needs no extra rows.
    */
   readonly field: readonly string[];
+
   readonly class: LabelFieldRepresentationClass;
 };
 

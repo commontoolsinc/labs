@@ -10,12 +10,12 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { FabricInstance } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -73,12 +73,13 @@ describe("llm-dialog-special-objects", () => {
     });
   });
 
-  // The tests above hand the walk a value built in place. What this function
-  // actually serializes is a value read back out of a cell, and the read path
-  // does not hand back what was written: `getAsQueryResult()` returns a
-  // `FabricPrimitive` raw but wraps everything else in a proxy. So the two arms
-  // arrive differently, and only driving them from a real cell shows it.
   describe("reading back through a cell", () => {
+    // The tests above hand the walk a value built in place. What this function
+    // actually serializes is a value read back out of a cell, and the read path
+    // does not hand back what was written: `getAsQueryResult()` returns a
+    // `FabricPrimitive` raw but wraps everything else in a proxy. So the two
+    // arms arrive differently, and only driving them from a real cell shows it.
+
     let runtime: Runtime;
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let tx: IExtendedStorageTransaction;

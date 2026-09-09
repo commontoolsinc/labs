@@ -187,13 +187,16 @@ stream is passed to other spaces, which then append intents to it.
   carriage-less or UNGRANTED foreign write — the lunch-wall class,
   and an actor reaching beyond its authority — still refuses at
   accumulation, action-scoped and counted (`foreignWriteRefusals`).
-  The serving side's sidecar compile-cache context is the SERVED
-  space, never the service identity's own (the same class of
-  ambient-identity leak, closed with the same lift), and the sidecar
-  SURFACES key per demanding identity — the result/ready cells AND
-  the builtin's per-node closure caches alike (one wish node serves
-  every demander; a shared cache slot would hand demander #2
-  demander #1's create surface and clobber the pending input).
+  A sidecar's compile-cache context is the space its own piece lives
+  in — the SERVED space on the serving side, never the service
+  identity's own (the same class of ambient-identity leak, closed
+  with the same lift) — which is also where the source lifecycle
+  requires that piece's source to be resolvable. The sidecar
+  SURFACES key per demanding identity: the result/ready cells, and
+  the builtin's per-node record of the pattern each surface's piece
+  runs (one wish node serves every demander; a shared slot would
+  hand demander #2 demander #1's create surface and clobber the
+  pending input).
   Client wishes are byte-identical to before (cardinality 1: the
   runtime's own user; the client suggestion-cell cause carries no
   user key, exactly as before). *Phase 7: on a flag-ON NON-serving

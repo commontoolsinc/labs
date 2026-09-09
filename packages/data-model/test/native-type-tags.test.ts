@@ -5,9 +5,7 @@
  * A prototype can be severed, an `Error` can arrive from another realm or from
  * a subclass nobody here knows, an array can be an `Array` subclass, and an
  * object can have no prototype at all. Each still has a right answer, so these
- * cases are mostly the awkward shapes rather than the ordinary ones --
- * including a run with `Error.isError` removed, to reach the fallback beneath
- * it.
+ * cases are mostly the awkward shapes rather than the ordinary ones.
  *
  * One group pins where the class is read FROM: a value's own `constructor`
  * property is data, and must not be able to present a plain record as an
@@ -21,12 +19,16 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
-import {
-  isNativeError,
-  tagFromNativeClass,
-  tagFromNativeValue,
-} from "@/native-type-tags.ts";
-import { isValidFabricNativeObject } from "@/native-conversion.ts";
+import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
+import { isValidFabricNativeObject } from "@/validity-check.ts";
+import { tagFromNativeBuiltinClass } from "@/tagFromNativeBuiltinClass.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {
@@ -120,28 +122,6 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(obj)).toBe(VALUE_TAGS.Object);
     });
 
-    it("classifies values when `Error.isError` is unavailable", () => {
-      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
-      Object.defineProperty(Error, "isError", {
-        value: undefined,
-        writable: true,
-        configurable: true,
-      });
-
-      try {
-        expect(isNativeError(new Error("test"))).toBe(true);
-        expect(tagFromNativeValue(Object.create(null))).toBe(
-          VALUE_TAGS.Object,
-        );
-      } finally {
-        if (descriptor) {
-          Object.defineProperty(Error, "isError", descriptor);
-        } else {
-          delete (Error as { isError?: unknown }).isError;
-        }
-      }
-    });
-
     it("returns `null` for class instances", () => {
       class Custom {}
       expect(tagFromNativeValue(new Custom())).toBe(null);
@@ -184,12 +164,46 @@ describe("native-type-tags", () => {
       });
     });
 
+    describe("an array is decided by the array rule, whatever its prototype", () => {
+      // A prototype can be re-pointed, so "an array's class is `Array`" is only
+      // usually true. `Array.isArray()` is what is actually true of every array,
+      // and it is why the array rule runs before any class is consulted -- in
+      // both dispatches, since either one reporting an array as a convertible
+      // `Date` would be a walk rebuilding it as one.
+      for (
+        const [label, value] of [
+          ["an ordinary array", [1, 2]],
+          [
+            "an array whose `prototype` is `Date.prototype`",
+            Object.setPrototypeOf([1, 2], Date.prototype),
+          ],
+          [
+            "an array whose `prototype` is `Map.prototype`",
+            Object.setPrototypeOf([1, 2], Map.prototype),
+          ],
+          [
+            "an array whose prototype was severed",
+            Object.setPrototypeOf([1, 2], null),
+          ],
+        ] as ReadonlyArray<[string, unknown]>
+      ) {
+        it(`tags ${label} \`Array\``, () => {
+          expect(tagFromNativeValue(value)).toBe(VALUE_TAGS.Array);
+        });
+
+        it(`reports ${label} as no \`FabricNativeObject\``, () => {
+          expect(isValidFabricNativeObject(value)).toBe(false);
+        });
+      }
+    });
+
     describe("`toJSON()` is intentionally not supported", () => {
       // `toJSON` is an ordinary property name here, with no say in what a value
       // is. These pin that at each of the shapes it can be carried on, because a
       // classifier that consulted it would let one assignment --
       // `Array.prototype.toJSON`, an own key on a record -- redirect values
       // wholesale.
+
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
         expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(
           VALUE_TAGS.Object,
@@ -308,6 +322,56 @@ describe("native-type-tags", () => {
       it("returns `Date` tag for `Date`, whose `toJSON` is not consulted", () => {
         expect(tagFromNativeClass(Date)).toBe(VALUE_TAGS.Date);
       });
+    });
+  });
+
+  describe("the builtin lookup and the full class lookup", () => {
+    // `tagFromNativeClass()` asks `tagFromNativeBuiltinClass()` first and its
+    // own switch second, so the builtin lookup's `Error` fallback -- which
+    // claims any `Error` subclass -- is reached ahead of the fabric classes.
+    // No fabric class is an `Error` subclass, which is what leaves that
+    // fallback nothing of theirs to claim; the group below holds it so.
+    const fabricClasses = [
+      FabricBytes,
+      FabricEpochDay,
+      FabricEpochNsec,
+      FabricHash,
+      FabricKeyPair,
+      FabricRegExp,
+    ];
+
+    const constructors = LAYER_CORPUS
+      .filter(([, value]) => (value !== null) && (typeof value === "object"))
+      .map(([label, value]) =>
+        [label, Object.getPrototypeOf(value as object)?.constructor] as const
+      )
+      .filter(([, ctor]) => typeof ctor === "function");
+
+    // Partitioned here rather than inside a test, so that each assertion below
+    // is unconditional: a test that only asserts on one side of an `if` skips
+    // the case it was written for.
+    const builtinBacked = constructors
+      .filter(([, ctor]) => tagFromNativeBuiltinClass(ctor) !== null);
+
+    for (const [label, ctor] of builtinBacked) {
+      it(`passes ${label} through the delegation unchanged`, () => {
+        expect(tagFromNativeClass(ctor)).toBe(tagFromNativeBuiltinClass(ctor));
+      });
+    }
+
+    for (const cls of fabricClasses) {
+      it(`leaves \`${cls.name}\` to the fabric switch`, () => {
+        // The disjointness the delegation rests on, asserted against the
+        // fabric classes by name rather than against whatever the builtin
+        // lookup happens to decline.
+        expect(tagFromNativeBuiltinClass(cls)).toBe(null);
+        expect(tagFromNativeClass(cls)).not.toBe(null);
+      });
+    }
+
+    it("reaches classes on both sides of the split", () => {
+      expect(builtinBacked.length).toBeGreaterThan(0);
+      expect(fabricClasses.length).toBeGreaterThan(0);
     });
   });
 });

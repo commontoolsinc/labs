@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
@@ -67,10 +67,17 @@ const seedLabeledDoc = async (
   expect((await seed.commit()).ok).toBeDefined();
 };
 
+// The sink names the admin endorsement twice on `out`: it is required there,
+// and it is minted there. The mint is what the write-side floor credits the
+// written value with. The read-side gate these steps exercise quantifies over
+// the reads the transaction consumed, so the mint leaves it alone.
 const SINK_SCHEMA = {
   type: "object",
   properties: {
-    out: { type: "string", ifc: { requiredIntegrity: [ADMIN_ATOM] } },
+    out: {
+      type: "string",
+      ifc: { requiredIntegrity: [ADMIN_ATOM], addIntegrity: [ADMIN_ATOM] },
+    },
   },
   required: ["out"],
 } as const satisfies JSONSchema;
@@ -81,7 +88,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // A lookup doc whose stored label is entirely provenance: a link
@@ -124,7 +130,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedLabeledDoc(runtime, "ri-empty-lookup", "lookup", {});
@@ -157,7 +162,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedLabeledDoc(runtime, "ri-conf-src", "briefing", {
@@ -193,7 +197,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedLabeledDoc(runtime, "ri-mixed-src", "data", {
@@ -237,7 +240,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const seed = runtime.edit();

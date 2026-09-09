@@ -52,7 +52,8 @@ microkernel for networked software in the AI era.
 - well over a hundred running patterns, including a live demonstration
   of prompt injection being structurally contained
   (`packages/patterns/cfc-agent-prompt-injection-demo/`)
-- an attestation pipeline running on Intel TDX hardware
+- the verifiable-execution spec the attestation mesh will follow, and
+  signed build provenance for every binary built on main
 
 ## Policies travel with the data
 
@@ -272,13 +273,15 @@ of trust is the whole unlock.
 
 The layers are at different stages, and each is useful without the ones
 above it. The runtime, the compiler, and the sandboxing work today. The
-flow checking runs, with enforcement hardening from observe toward
-strict; the trusted base is still larger than the microkernel it is
-meant to shrink to, and shrinking it is part of the work. The
-attestation pipeline runs; the mesh protocol around it is specified in
-`docs/specs/verifiable-execution/`. The semantics are in place;
-robustness and performance are not yet, and they are the current work.
-That is the ordinary condition of a young kernel.
+flow checking runs, enforcing at explicit boundaries by default and
+hardening toward strict; the trusted base is still larger than the
+microkernel it is meant to shrink to, and shrinking it is part of the
+work. Confidential hardware is provisioned and every release binary
+carries signed provenance; the attestation protocol that would let a
+peer refuse an unproven runtime is specified in
+`docs/specs/verifiable-execution/` and not yet built. The semantics are
+in place; robustness and performance are not yet, and they are the
+current work. That is the ordinary condition of a young kernel.
 
 `docs/tutorial/` walks the mechanisms; `packages/patterns/` is where to
 start.

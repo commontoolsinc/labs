@@ -1,3 +1,4 @@
+import { hashOf } from "@commonfabric/data-model";
 import {
   type EntityRef,
   entityRefFrom,
@@ -6,7 +7,6 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-bases";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { isReactive } from "./builder/types.ts";

@@ -9,22 +9,25 @@ import {
   encodePlan,
   type PatternCompatibilityReport,
   type PatternRef,
+  type PatternUpdateReceipt,
   type PieceDiffStatus,
   type PiecePatternRef,
   type PiecePlan,
   type PieceSelector,
   type PlanDiff,
   type RepairReport,
+  type RepairRow,
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
-import { parseCellPath, UI } from "@commonfabric/runner";
+import { isSlugAddress, parseCellPath, UI } from "@commonfabric/runner";
 import {
-  matchLLMFriendlyLink,
+  encodeJsonPointer,
   parseScopedIdSegment,
 } from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import {
   type PhaseRetarget,
   readSourcePin,
@@ -36,7 +39,14 @@ import {
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import { listFlags } from "../lib/refusal.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
+import {
+  parseReadSection,
+  readSectionAsksVerbHelp,
+  refuseProjectionBeforeSection,
+  sectionWithVerbHelp,
+} from "../lib/verb-section.ts";
 import type {
   InvocationIdentity,
   InvocationOutcome,
@@ -48,12 +58,21 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import { cliCommand, cliText } from "../lib/cli-name.ts";
+import {
+  type CommandSpellingNotice,
+  commandSpellingNotice,
+  noCommandSpellingNotice,
+} from "../lib/deprecated-spelling.ts";
 import type { FabricValue } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
-import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
+import {
+  isReference,
+  normalizeLLMFriendlyRef,
+  splitArgumentSuffix,
+} from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import type {
   PieceDescription,
@@ -80,7 +99,9 @@ import {
   MapFormat,
   newPiece,
   partitionVerbListing,
+  pathRequiredRefusal,
   PieceConfig,
+  pieceIdOnlyPathRefusal,
   PieceResultProjectionError,
   PieceVerbReadError,
   recreateSpaceRootPattern,
@@ -101,6 +122,7 @@ import type {
   ExecutedPieceCallable,
   PieceCallablesListing,
   PieceInspection,
+  SlugSummary,
 } from "../lib/piece.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
@@ -113,10 +135,16 @@ import {
   type UnreportedRunDeps,
 } from "../lib/unreported-run.ts";
 import { absPath } from "../lib/utils.ts";
+import { noteWroteTo } from "../lib/write-receipt.ts";
 
-// Hint system: print helpful next-step suggestions after operations
+// Hint system: print helpful next-step suggestions after operations. The
+// posture is the process's rather than one call's, so it stands as the last
+// caller left it until the next caller sets it. That is sound while one
+// command is in flight at a time, which is what
+// `docs/plans/shuttle/runtime-integration.md` holds a long-lived caller to.
 let quietMode = false;
 
+/** Sets whether hints print, for every caller in this process. */
 export function setQuietMode(quiet: boolean) {
   quietMode = quiet;
 }
@@ -130,23 +158,12 @@ function hint(message: string, showQuietTip = true) {
 
 /**
  * A fact the operator is owed whether or not they asked for quiet: what a
- * run deliberately left out of what it was asked to do. A hint is advice and
- * `--quiet` silences it; this is not advice, and a quiet script is the
- * caller most in need of it.
+ * run deliberately left out of what it was asked to do, or a caveat on what
+ * it did. A hint is advice and `--quiet` silences it; this is not advice,
+ * and a quiet script is the caller most in need of it.
  */
 function note(message: string) {
   console.error(message);
-}
-
-export function normalizeApiUrl(apiUrl: string): string {
-  const parsed = new URL(apiUrl);
-  const normalized = new URL(parsed);
-  const basePath = parsed.pathname.split("/").filter(Boolean).join("/");
-  normalized.pathname = basePath ? `/${basePath}` : "/";
-  normalized.search = "";
-  normalized.hash = "";
-  const href = normalized.toString();
-  return basePath ? href : href.slice(0, -1);
 }
 
 function summarizeForDisplay(value: unknown): unknown {
@@ -179,11 +196,36 @@ export function formatPatternRef(
 }
 
 export function formatPatternIdentity(
-  patternRef: PiecePatternRef | undefined,
+  patternRef: { identity: string; symbol: string } | undefined,
 ): string {
   return patternRef === undefined
     ? "<unknown>"
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+/**
+ * The success line `piece setsrc` prints from its accepted setup transaction
+ * receipt. Held apart from the command action so the exact text a caller sees
+ * is assertable without driving Cliffy.
+ */
+export function setsrcSuccessLine(
+  config: PieceConfig,
+  update: PatternUpdateReceipt,
+): string {
+  return `Committed source update for piece ${config.piece} (Pattern Ref: ${
+    formatPatternIdentity(update.ref)
+  }, Revision: ${update.revisionId})`;
+}
+
+/** A warning for work which failed after storage accepted the source update. */
+export function setsrcRefreshWarning(
+  update: PatternUpdateReceipt,
+): string | undefined {
+  return update.refresh.status === "failed"
+    ? `Source revision ${update.revisionId} committed as ${
+      formatPatternIdentity(update.ref)
+    }, but refreshing the running piece failed: ${update.refresh.warning}`
+    : undefined;
 }
 
 /** The parenthesised notes under a `cf piece verbs` listing, in print order.
@@ -603,12 +645,13 @@ export function renderPieceSummaries(
   if (rows.length > 1) render(Table.from(rows).toString());
 }
 
-/** `cf piece slugs` output: one row per indexed name, the piece it resolves
- * to where it resolves to one, and the resolution's own error where it does
- * not. The error rides the JSON too — a machine reader has no table to read
- * a `<error: …>` marker off. */
+/** `cf piece slugs` output: one row per indexed name, where it points — the
+ * piece, or the piece and the path inside it, printed `piece/path` in the
+ * table and as a `path` array in the JSON — and the resolution's own error
+ * where it points into no piece. The error rides the JSON too — a machine
+ * reader has no table to read a `<error: …>` marker off. */
 export function renderSlugSummaries(
-  slugs: Array<{ slug: string; piece?: string; error?: string }>,
+  slugs: SlugSummary[],
   json: boolean,
 ): void {
   if (json) {
@@ -616,6 +659,7 @@ export function renderSlugSummaries(
       slugs.map((entry) => ({
         slug: entry.slug,
         piece: entry.piece ?? null,
+        ...(entry.path !== undefined ? { path: entry.path } : {}),
         ...(entry.error !== undefined ? { error: entry.error } : {}),
       })),
       { json: true },
@@ -627,7 +671,11 @@ export function renderSlugSummaries(
     ["SLUG", "PIECE"],
     ...slugs.map((entry) => [
       entry.slug,
-      entry.error !== undefined ? `<error: ${entry.error}>` : entry.piece!,
+      entry.error !== undefined
+        ? `<error: ${entry.error}>`
+        : entry.path !== undefined
+        ? `${entry.piece}/${entry.path.join("/")}`
+        : entry.piece!,
     ]),
   ];
   if (rows.length > 1) render(Table.from(rows).toString());
@@ -654,7 +702,7 @@ export function localPatternEntry(
 }
 
 /**
- * A `piece get` failure caused by a data condition rather than bad arguments:
+ * A `cf cell get` failure caused by a data condition rather than bad arguments:
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
  * selected value (CellSelectionError), or a path that lands on a verb
@@ -672,7 +720,7 @@ export function isPieceGetDataError(error: unknown): error is Error {
 }
 
 /**
- * Build the stderr report for a `piece get` failure. Returns null when the
+ * Build the stderr report for a `cf cell get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
  * already carries its own `--step` guidance, selection errors stand alone,
@@ -696,7 +744,7 @@ export function pieceGetDataErrorReport(
   return {
     message: error.message,
     hint: cliText(
-      `TIP: The path was read from the result cell. If the field is an input, retry with --input, or run 'cf piece inspect --piece ${opts.piece} ...' to see both cells.`,
+      `TIP: The path was read from the result cell. If the field is an input, retry with --input, or run 'cf piece inspect --cell ${opts.piece} ...' to see both cells.`,
     ),
   };
 }
@@ -705,7 +753,7 @@ export function pieceGetDataErrorReport(
  * Build the stderr report for a `piece link` validation failure. Returns null
  * when the error is not a LinkValidationError (the caller should rethrow).
  * Link validation fails on data conditions — a source/target piece or path
- * that doesn't exist, read over the network — so it reports like `piece get`'s
+ * that doesn't exist, read over the network — so it reports like `cf cell get`'s
  * unresolved-path data error rather than as a Cliffy usage error.
  */
 export function pieceLinkDataErrorReport(
@@ -716,13 +764,13 @@ export function pieceLinkDataErrorReport(
   return {
     message: error.message,
     hint: cliText(
-      `TIP: Run 'cf piece inspect --piece ${opts.sourcePieceId} ...' and '--piece ${opts.targetPieceId} ...' to see the fields each piece actually has.`,
+      `TIP: Run 'cf piece inspect --cell ${opts.sourcePieceId} ...' and '--cell ${opts.targetPieceId} ...' to see the fields each piece actually has.`,
     ),
   };
 }
 
 /**
- * Build the stderr report for a `piece call` payload rejection. Returns null
+ * Build the stderr report for a `cf piece call` payload rejection. Returns null
  * when the error is not a VerbInputValidationError (the caller should
  * rethrow). The flags parsed fine and the piece resolved — the values simply
  * do not fit the verb — so it reports like the other data errors rather than
@@ -736,16 +784,19 @@ export function verbInputErrorReport(
   return {
     message: error.message,
     hint: cliText(
-      `TIP: Run 'cf piece verbs --piece ${opts.piece} --json' to see each verb's expected input.`,
+      `TIP: Run 'cf piece verbs --cell ${opts.piece} --json' to see each verb's expected input.`,
     ),
   };
 }
 
 /**
  * Print a data-error report — message plus optional hint — to stderr and exit
- * 1. The single exit path for the `piece get` / `piece link` data errors
- * above. The `deps` seam lets unit tests observe the wiring without a real
- * process exit; runtime callers use the defaults.
+ * 1. The single exit path for the `cf cell get` / `piece link` data errors
+ * above. The `deps` seam puts both sinks and the exit itself in the caller's
+ * hands: a one-shot verb takes the defaults and ends the process, while a
+ * caller that has to survive the report supplies an `exit` that throws and
+ * reads what its own sinks were handed. `exit` is typed `never`, so throwing
+ * is the only way such a caller can write one.
  */
 export function exitWithDataError(
   report: { message: string; hint?: string },
@@ -764,19 +815,20 @@ export function exitWithDataError(
 }
 
 /**
- * Turn a failed `piece call` into its stderr report, or re-throw.
+ * Turn a failed `cf piece call` into its stderr report, or re-throw.
  *
- * A named function rather than an inline `.catch` in the command action: the
- * action body only ever runs under Cliffy, so anything written there is
- * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
+ * A named function rather than an inline `.catch` in the command action:
+ * which of the two it does is decided by the error alone, so a test states
+ * the error and reads the answer instead of provoking one out of a payload
+ * a resolved callable rejects. The `deps` seam is `exitWithDataError`'s,
  * threaded so a test can observe the report without a real process exit.
  *
- * `observer` is the call's phase observer: this exit bypasses the action's
- * catch (it terminates the process from inside the promise chain), so the
- * verbose in-flight span must be closed HERE — otherwise a pre-dispatch
- * payload rejection under --verbose would leave the initial_sync span
- * dangling with no failure timing. A rethrown error is closed by the
- * action's own failure exit instead.
+ * `observer` is the call's phase observer, and its verbose in-flight span is
+ * closed HERE. The exit leaves from inside the dispatch's promise chain,
+ * ending the process by default and throwing where a caller supplied its
+ * own, so a pre-dispatch payload rejection under --verbose would otherwise
+ * leave the initial_sync span dangling with no failure timing. A rethrown
+ * error is closed by the action's own failure exit instead.
  */
 export function reportVerbInputErrorOrRethrow(
   error: unknown,
@@ -801,9 +853,11 @@ export function reportVerbInputErrorOrRethrow(
  * the retry key, before exiting 1. A wait-bound expiry additionally writes
  * the Invocation JSON with that phase as its `status` to stdout — the same
  * machine surface as a settled call, so a script parses one shape either
- * way. A named export rather than catch-block prose because the action body
- * only runs under Cliffy and is unreachable from a unit test; the seams let
- * a test observe the exact exit contract, and the action's catch calls THIS
+ * way. A named export rather than catch-block prose because the error and
+ * the phase together pick which of those reports comes out, and both are
+ * parameters a test names — a wait-bound expiry at a chosen phase is
+ * otherwise a call held open until its bound passes. The seams let a test
+ * observe the exact exit contract, and the action's catch calls THIS
  * function, so what the tests observe is what a user gets.
  */
 export function exitPieceCallFailure(
@@ -847,76 +901,42 @@ export function exitPieceCallFailure(
   return exit(1);
 }
 
-export function pieceCallRawArgs(
-  tail: string[],
-  literalArgs: string[],
-): string[] {
-  if (literalArgs.length > 0) {
-    // Schema-derived flags after `--`. A payload token before `--` (inline
-    // JSON or the `-` stdin sentinel) would be silently dropped here, so
-    // reject the combination loudly instead — the same no-op this family of
-    // fixes is stamping out. Mirrors the `tail.length > 1` rejection below.
-    if (tail.length > 0) {
-      throw new ValidationError(
-        'Callable arguments cannot appear on both sides of "--". ' +
-          'Pass either a payload argument (inline JSON or "-" for stdin) ' +
-          'or schema-derived flags after "--", not both.',
-      );
-    }
-    return literalArgs;
-  }
-
-  if (tail.length === 0) {
-    return [];
-  }
-
-  if (tail[0] === "--help") {
-    if (tail.length === 1) {
-      return tail;
-    }
-    if (tail.length === 2 && tail[1] === "--json") {
-      return tail;
-    }
-    throw new ValidationError(
-      'Use "-- --help <value>" to set an input field named "help".',
-    );
-  }
-
-  // Explicit two-token stdin sentinels (a JSON/value flag plus "-"), forwarded
-  // to the exec layer so the friendly surface matches `cf exec` and the bare
-  // "-" form. Without this they'd hit the multi-argument rejection below.
-  if (
-    tail.length === 2 && tail[1] === "-" &&
-    (tail[0] === "--json" || tail[0] === "--json-file" ||
-      tail[0] === "--value-file")
-  ) {
-    return [tail[0], "-"];
-  }
-
-  if (tail[0] === "--json") {
+/**
+ * The callable's section, as the schema-derived parser reads it.
+ *
+ * The verb opens the section, so every word after it belongs to the callable
+ * and reaches its parser as written — its own flags, its `invoke`/`run`
+ * keyword, `--help`, and the generic input flags alike. Nothing here decides
+ * what those words mean; that is the verb's own vocabulary, and this command
+ * does not hold it.
+ *
+ * One shape is translated rather than forwarded: a lone positional payload.
+ * Inline JSON is the same argument as the flags that would replace it, so it
+ * sits in the same section, and `--json` is the spelling the parser takes it
+ * in. `-` is the conventional stdin sentinel and routes through `--json-file`
+ * so empty stdin still fails loudly. A payload written beside flags is
+ * forwarded untranslated and refused by the parser that owns both, which
+ * names the verb's vocabulary rather than this command's.
+ */
+export function pieceCallRawArgs(tail: string[]): string[] {
+  // The verb keyword is the callable's own word and stays where it was
+  // written; it is skipped here only so a payload behind it is still seen as
+  // the one positional it is.
+  const keyword = tail[0] === "invoke" || tail[0] === "run" ? 1 : 0;
+  const payload = tail.slice(keyword);
+  if (payload.length !== 1 || payload[0].startsWith("--")) {
     return tail;
   }
-
-  if (tail.length > 1) {
-    throw new ValidationError(
-      'Use a single inline JSON argument or "--" before schema-derived flags.',
-    );
-  }
-
-  // "-" is the conventional stdin sentinel; route it through the existing
-  // --json-file stdin path so empty stdin still fails loudly.
-  if (tail[0] === "-") {
-    return ["--json-file", "-"];
-  }
-
-  return ["--json", tail[0]];
+  return [
+    ...tail.slice(0, keyword),
+    ...(payload[0] === "-" ? ["--json-file", "-"] : ["--json", payload[0]]),
+  ];
 }
 
 export function pieceCallInvocation(
   tail: string[],
-  literalArgs: string[],
 ): { rawArgs: string[]; jsonOutput: boolean } {
-  const rawArgs = pieceCallRawArgs(tail, literalArgs);
+  const rawArgs = pieceCallRawArgs(tail);
   const argumentOffset = rawArgs[0] === "invoke" || rawArgs[0] === "run"
     ? 1
     : 0;
@@ -1077,9 +1097,14 @@ export function pieceCallPhaseObserver(
 }
 
 /**
- * The success tail of `cf piece call`, extracted from the command action so
- * it is unit-coverable — command action bodies never execute under the unit
- * suite, the same convention that keeps `cf test` out of its action body
+ * The success tail of `cf piece call`: a settled invocation's JSON, a tool's
+ * output, or a help page, through the `render`/`hint` sinks a caller
+ * supplies. Standing apart from the action is what lets a test drive each
+ * outcome shape directly rather than through argv and a dispatch; the action
+ * body does run under the unit suite, so what that buys is reaching the
+ * cases, not reaching the lines. `cf test` sits in
+ * `commands/test-command.ts` for a different reason — `deno coverage` drops
+ * a source file whose path ends in `test.ts` from the report
  * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
  * finishes: no invocation ran, so there is no span to close.
  */
@@ -1121,15 +1146,15 @@ export function renderPieceCallOutcome(
       const ref = addressArgument(result.resultRef);
       hintOut(
         `Tool result cell: ${ref} (read it back with ` +
-          `\`cf get --piece ${ref}\`)`,
+          `\`cf cell get --cell ${ref}\`)`,
         false,
       );
     }
     return;
   }
   const nextSteps = cliText(`NEXT STEPS:
-  → Verify state:  cf get --piece ${piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${piece} ...`);
+  → Verify state:  cf cell get --cell ${piece} <path> ...
+  → Full inspect:  cf piece inspect --cell ${piece} ...`);
   if (result.invocation) {
     // The machine surface for a handler invocation: stdout carries the
     // Invocation JSON — settled, or stopped at "committed" under --no-wait —
@@ -1139,7 +1164,7 @@ export function renderPieceCallOutcome(
     // It leads the detached next steps because it collects the outcome
     // without running the verb again, and it composes into the command named
     // beside it: the envelope publishes it as one canonical reference string,
-    // which `--piece` takes back in unchanged. The scope rides inside it, so
+    // which `--cell` takes back in unchanged. The scope rides inside it, so
     // reopening a user- or session-scoped receipt cannot land on the
     // space-scoped instance, a different cell (CallableResultRef).
     const receiptId = result.invocation.receipt;
@@ -1153,20 +1178,20 @@ export function renderPieceCallOutcome(
             // the replay as a recovery would be offering a duplicate.
             ? `NEXT STEPS:
   → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
-  → Verify state:     cf get --piece ${piece} <path> ...`
+  → Verify state:     cf cell get --cell ${piece} <path> ...`
             // The replay names its session through the environment rather
             // than `--invocation-session`, because a session is what keeps an
             // outcome's address out of reach of anyone who can guess a piece,
             // a verb and an id — and an argument is readable in a process
             // listing where an environment variable is not.
             : `NEXT STEPS:
-  → Read the outcome: cf get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
+  → Read the outcome: cf cell get --cell ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
   → Or replay it:     CF_INVOCATION_SESSION=${
               opts.invocation?.session ?? "<session>"
-            } cf call --piece ${piece} --invocation ${
+            } cf piece call --cell ${piece} --invocation ${
               opts.invocation?.id ?? "<id>"
             } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
-  → Verify state:     cf get --piece ${piece} <path> ...`,
+  → Verify state:     cf cell get --cell ${piece} <path> ...`,
         )
         : nextSteps,
     );
@@ -1293,15 +1318,9 @@ export function resolveWaitControl(
   return { mode: "settle" };
 }
 
-/** Flag names as prose: "--a", "--a and --b", "--a, --b and --c". */
-function listFlags(flags: readonly string[]): string {
-  if (flags.length <= 1) return flags.join("");
-  return `${flags.slice(0, -1).join(", ")} and ${flags.at(-1)}`;
-}
-
 /**
  * Parse `cf piece call`'s selection flags into the shape the result should
- * arrive in, through the same parser `cf piece get` uses — one grammar, one
+ * arrive in, through the same parser `cf cell get` uses — one grammar, one
  * set of error messages, whichever command a caller reaches for.
  *
  * The one combination refused here is `--filter` with `--show-links`. A link
@@ -1411,21 +1430,33 @@ export function handlePieceRenderNoUi(
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
   `--identity <identity> --url <url> --api-url <api-url> --space <space>`;
-const pieceUsage = `${spaceUsage} --piece <piece>`;
+const pieceUsage = `${spaceUsage} --cell <cell>`;
 
-// Render out args for the examples for both `--url`,
-// and for the individual components (`--api-url`, `--piece`, `--space`)
-const RAW_EX_URL = "https://cf.dev/personal-notes/baed..43mi";
-const RAW_EX_COMP = parseUrl(RAW_EX_URL);
+// The parts of the example target, and the URL built from them: `--url` means
+// those parts, so writing the URL as their composition is what keeps the two
+// example spellings naming one thing.
+const EX_HOST = "https://cf.dev";
+const EX_SPACE = "personal-notes";
+const EX_PIECE = "baed..43mi";
+const RAW_EX_URL = `${EX_HOST}/${EX_SPACE}/${EX_PIECE}`;
 const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
-const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
-const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const EX_COMP = `--api-url ${EX_HOST} --space ${EX_SPACE}`;
+const EX_COMP_PIECE = `${EX_COMP} --cell ${EX_PIECE}`;
+
+/**
+ * How a refusal names the target flag. Both spellings are one option, so a
+ * message that named only the taught one would not be recognizable to the
+ * caller who wrote the other.
+ */
+const CELL_FLAG = `"--cell" (or "--piece")`;
+
 const PIECE_OPTION_HELP =
-  "The target piece: an id, slug, or canonical LLM-friendly reference " +
-  "(/of:fid1:.../). A space embedded in the reference (/@did:.../of:.../) " +
-  "supplies --space when the flag is absent, and must agree with it when " +
-  "both are given.";
+  "The target cell: an id, slug, or reference (/tracker, /of:fid1:.../). A " +
+  "space embedded in the reference (/@my-space/tracker) supplies --space " +
+  "when the flag is absent, and must agree with it when both are given. " +
+  '"--piece" is a deprecated name for this flag, still accepted and meaning ' +
+  "the same thing.";
 const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
   `the reference prefixes the positional path.`;
 const PIECE_REGISTRY_LINK_EXAMPLE = [
@@ -1439,7 +1470,8 @@ const PIECE_REGISTRY_LINK_EXAMPLE = [
 function pieceEnvStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
   const apiUrl = Deno.env.get("CF_API_URL");
-  if (!identity && !apiUrl) return "";
+  const space = Deno.env.get("CF_SPACE");
+  if (!identity && !apiUrl && !space) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
     lines.push(
@@ -1451,6 +1483,11 @@ function pieceEnvStatus(): string {
       `  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`,
     );
   }
+  if (space) {
+    lines.push(
+      `  CF_SPACE    = ${space} (set, no need to pass --space)`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -1458,24 +1495,22 @@ const pieceDescription = cliText(`Interact with pieces running on a server.
 
 COMMON WORKFLOWS:
   Deploy:    cf piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
-  Update:    cf piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
-  Test:      cf call --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space callableName
-  Inspect:   cf piece inspect --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Update:    cf piece setsrc --cell <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Test:      cf piece call --cell <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space callableName
+  Inspect:   cf piece inspect --cell <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
-  • After 'set', run 'step' to trigger computed value updates
+  • After 'cf cell set', run 'cf piece step' to update computed values
   • Path format: forward slashes only (items/0/name, not items[0].name)
-  • JSON values: strings need quotes: echo '"hello"' | cf set ...`);
+  • JSON values: strings need quotes: echo '"hello"' | cf cell set ...`);
 
 /**
  * The target-selection surface every piece data command carries: quiet, the
  * combined URL, the API URL and identity with their environment fallbacks,
- * and the space. One function defines them for both surfaces that must
- * agree — `piece` declares them as globals its subcommands inherit, and the
- * top-level `cf get`/`cf set`/`cf call` instances carry them as their own,
- * having no parent globals to inherit — so the two spellings of a command
- * cannot drift apart in what they accept.
+ * and the space. `piece` declares them as globals its subcommands inherit;
+ * `cf cell get`, `cf cell set` and `cf piece call` have no parent globals, so each carries
+ * them as its own.
  */
 export function targetOptions(
   // deno-lint-ignore no-explicit-any
@@ -1497,70 +1532,9 @@ export function targetOptions(
   option("-a,--api-url <url:string>", "URL of the fabric server instance.");
   env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.");
   option("-i,--identity <path:string>", "Path to an identity keyfile.");
+  env("CF_SPACE=<space:string>", "The space name or DID.");
   option("-s,--space <space:string>", "The space name or DID");
   return cmd;
-}
-
-/**
- * The day the `cf piece get`, `cf piece set`, and `cf piece call` spellings
- * stop working: two weeks after step 6a reached main
- * (docs/plans/cli-surface-shape.md). A literal rather than a window computed
- * at runtime, because a caller who reads the warning today and acts on it
- * next week must be told the same date both times. Step 6b removes the
- * spellings and their notices on this day.
- */
-export const PIECE_DATA_SPELLING_END_DATE = "2026-08-31";
-
-/**
- * The 6a deprecation notice for a piece-mounted data spelling. stderr and
- * never stdout: `get` and `call` reserve stdout for machine-readable
- * output, and a notice on stdout would corrupt exactly the piping scripts
- * this notice exists to migrate. Unconditional rather than behind
- * `--quiet`, because a quiet script is the caller most in need of the date.
- */
-export function warnDeprecatedPieceSpelling(
-  spelling: string,
-  deps: { writeError?: (text: string) => void } = {},
-): void {
-  const writeError = deps.writeError ?? console.error;
-  const short = spelling.replace(/^piece /, "");
-  writeError(
-    `'cf ${spelling}' is deprecated; spell it 'cf ${short}'. The ` +
-      `'cf ${spelling}' spelling stops working on ` +
-      `${PIECE_DATA_SPELLING_END_DATE}.`,
-  );
-}
-
-/**
- * An action wrapped with the 6a notice. The `this` binding passes through
- * untouched because `call`'s action reads `this.getLiteralArgs()`.
- */
-export function withDeprecatedSpellingWarning<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, action: F): F {
-  // deno-lint-ignore no-explicit-any
-  return function (this: any, ...args: any[]) {
-    warnDeprecatedPieceSpelling(spelling);
-    return action.apply(this, args);
-  } as F;
-}
-
-/**
- * The action a data-command builder mounts: the piece-mounted spelling
- * warns (step 6a), the top-level spelling does not. Decided here, on the
- * one definition both mounts share, because a per-mount implementation is
- * how the two surfaces drift — and this is the single respect in which
- * they are allowed to differ (test/piece-data-spellings.test.ts pins
- * exactly that).
- */
-export function dataCommandAction<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, action: F): F {
-  return spelling.startsWith("piece ")
-    ? withDeprecatedSpellingWarning(spelling, action)
-    : action;
 }
 
 /**
@@ -1585,35 +1559,65 @@ export function withNoSectionMarker<
 }
 
 /**
- * The one definition of `get`, mounted under `cf piece` and, through
- * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
- * how the command names itself in its own help — and, since 6a, whether
- * its action carries the deprecation notice.
+ * The step-7 notice this mount carries, which is none when the mount is the
+ * blessed one.
+ *
+ * `replacedBy` is what distinguishes the two mounts of one builder: the
+ * blessed spelling passes nothing and stays silent. Each builder takes the
+ * notice through both halves — around its action, and around the command it
+ * returns — so a caller is told whether they ran the command or only asked
+ * what it is.
+ */
+function mountNotice(
+  spelling: string,
+  replacedBy: string | undefined,
+): CommandSpellingNotice {
+  return replacedBy === undefined
+    ? noCommandSpellingNotice
+    : commandSpellingNotice(spelling, replacedBy);
+}
+
+/**
+ * The definition of `get`, blessed as `cf cell get` and mounted a second time
+ * at the superseded `cf get`. `spelling` is only how the command names itself
+ * in its own help; `replacedBy` is what makes a mount carry the step-7 notice.
  */
 // deno-lint-ignore no-explicit-any
-function buildGetCommand(spelling = "piece get"): Command<any> {
-  return new Command()
+function buildGetCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       `Get a value from a piece at a specific path. Omit path to return the full result.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
 
-ADDRESS: The target can sit in the first positional instead of --piece when
-written as a canonical reference (it begins with "/"): cf ${spelling}
-/of:fid1:.../items 0/name. A trailing #argument selects the arguments cell
-the way --input does.`,
+ADDRESS: The target is best written in the first positional, as a reference
+(it begins with "/"): cf ${spelling} /tracker/items 0/name. A reference names
+the piece by handle or by slug, and may carry the space by name or by DID
+(/@my-space/tracker). --cell takes the same word when a flag suits better, and
+is where the bare id and slug spellings go. A trailing #argument selects the
+arguments cell the way --input does, on any of them.`,
     )
     .usage(`${pieceUsage} [addressOrPath] [path]`)
     .example(
       cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} name`),
-      `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
+      `Get the "name" field from piece result "${EX_PIECE}".`,
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP} /tracker/items 0/name`),
+      "Read through a positional reference naming the piece by slug; its " +
+        "embedded path applies.",
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP} /of:fid1:abc.../items 0/name`,
+        `cf ${spelling} ${EX_ID} --api-url ${EX_HOST} /@${EX_SPACE}/tracker`,
       ),
-      "Read through a positional canonical address; its embedded path applies.",
+      "Name the space inside the reference instead of on --space.",
     )
     .example(
       cliText(
@@ -1625,18 +1629,17 @@ the way --input does.`,
       cliText(
         `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
       ),
-      `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
+      `Get a nested field value from piece input "${EX_PIECE}".`,
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
-          .piece!}@session draft`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP} --cell ${EX_PIECE}@session draft`,
       ),
       `Get a value from a session-scoped piece instance.`,
     )
     .example(
       cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE}`),
-      `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
+      `Get the full result of piece "${EX_PIECE}".`,
     )
     .example(
       cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} --step`),
@@ -1667,11 +1670,11 @@ the way --input does.`,
       ),
       "Return each item's address instead of its contents.",
     )
-    .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
     .option(
       "--input",
       "Read from the piece's input cell instead of result cell (the " +
-        '"#argument" reference suffix spells the same selection)',
+        '"#argument" suffix on the target spells the same selection)',
     )
     .option(
       "--step",
@@ -1689,7 +1692,7 @@ the way --input does.`,
       "--select <fields:string>",
       "Project output to comma-separated field paths; a trailing @ asks for " +
         "a position's address, and @ alone for the source's own. An address " +
-        "comes back as one reference string, which --piece takes back in",
+        "comes back as one reference string, which --cell takes back in",
     )
     .option(
       "--schema <schema:string>",
@@ -1700,20 +1703,26 @@ the way --input does.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
+    // The notice is outermost, so a line that is refused before the action
+    // runs is told too: the refusal quotes the spelling the caller wrote,
+    // which is the one thing on screen that must not stand unqualified.
     .action(
-      dataCommandAction(
-        spelling,
-        withNoSectionMarker(spelling, getCellValueFromCommand),
-      ),
+      notice.action(withNoSectionMarker(spelling, getCellValueFromCommand)),
     );
+  return notice.helpPage(command);
 }
 
 /**
  * The one definition of `set`; see {@link buildGetCommand} for the shape.
  */
 // deno-lint-ignore no-explicit-any
-function buildSetCommand(spelling = "piece set"): Command<any> {
-  return new Command()
+function buildSetCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       cliText(
         `Set a value in a piece at a specific path. Reads JSON from stdin.
@@ -1723,10 +1732,13 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
 
 JSON VALUES: Strings need quotes: echo '"hello"' | cf ${spelling} ...
 
-ADDRESS: The target can sit in the first positional instead of --piece when
-written as a canonical reference (it begins with "/"): a path embedded in it
-counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
-#argument selects the arguments cell the way --input does.`,
+ADDRESS: The target is best written in the first positional, as a reference
+(it begins with "/"): a path embedded in it counts, so cf ${spelling}
+/tracker/title needs no path argument. A reference names the piece by handle
+or by slug, and may carry the space (/@my-space/tracker). --cell takes the
+same word when a flag suits better, and is where the bare id and slug
+spellings go. A trailing #argument selects the arguments cell the way --input
+does, on any of them.`,
       ),
     )
     .usage(`${pieceUsage} [addressOrPath] [path]`)
@@ -1734,13 +1746,13 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
       cliText(
         `echo '"New Name"' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} name`,
       ),
-      `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
+      `Set the "name" field in piece result "${EX_PIECE}".`,
     )
     .example(
       cliText(
         `echo '{"foo": "bar"}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} config --input`,
       ),
-      `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
+      `Set a nested object value in piece input "${EX_PIECE}".`,
     )
     .example(
       cliText(
@@ -1748,19 +1760,20 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
       ),
       "Write through a positional canonical address; the embedded path is the path.",
     )
-    .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
     .option(
       "--input",
       "Write to the piece's input cell instead of result cell (the " +
-        '"#argument" reference suffix spells the same selection)',
+        '"#argument" suffix on the target spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
+    // The notice is outermost, so a line that is refused before the action
+    // runs is told too: the refusal quotes the spelling the caller wrote,
+    // which is the one thing on screen that must not stand unqualified.
     .action(
-      dataCommandAction(
-        spelling,
-        withNoSectionMarker(spelling, setCellValueFromCommand),
-      ),
+      notice.action(withNoSectionMarker(spelling, setCellValueFromCommand)),
     );
+  return notice.helpPage(command);
 }
 
 /**
@@ -1768,33 +1781,40 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
  * shape.
  */
 // deno-lint-ignore no-explicit-any
-function buildCallCommand(spelling = "piece call"): Command<any> {
-  return new Command()
+function buildCallCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
     .description(
       `Invoke a callable within a piece.
 
-The callable name separates piece-call options from the callable's arguments.
-Arguments after the callable use the same parser as cf exec. Use --json with an
-optional inline value for complete JSON input; bare --json reads JSON from
-stdin. A single positional JSON value or "-" stdin sentinel is also accepted.
-Use --help --json for machine-readable schema help. Put schema-derived flags
-after --. Handlers interpret piped input when no input argument is present.
+The callable name opens the callable's section and "--" closes it: piece-call
+options come before the name, the callable's own arguments after it, and the
+read options (--select, --schema, --filter) past the marker. Arguments in the
+section use the same parser as cf exec. Use --json with an optional inline
+value for complete JSON input; bare --json reads JSON from stdin. A single
+positional JSON value or "-" stdin sentinel is also accepted. Use --help --json
+for machine-readable schema help. Handlers interpret piped input when no input
+argument is present.
 
-ADDRESS: The target can precede the callable name instead of riding --piece
-when written as a canonical reference (it begins with "/"):
-cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
+ADDRESS: The target is best written before the callable name, as a reference
+(it begins with "/"): cf ${spelling} /tracker addItem '{"title":"Milk"}'. A
+reference names the piece by handle or by slug, and may carry the space
+(/@my-space/tracker). --cell takes the same word when a flag suits better.`,
     )
     .usage(`${pieceUsage} [address] <callable> [input]`)
     .example(
       cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} increment`),
-      `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
+      `Call the "increment" handler on piece "${EX_PIECE}".`,
     )
     .example(
       cliText(
         `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
       ),
-      `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
-        .piece!}".`,
+      `Call the "setName" handler with JSON arguments on piece "${EX_PIECE}".`,
     )
     .example(
       cliText(
@@ -1810,9 +1830,10 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} search --query milk`,
       ),
-      `Run the "search" tool using schema-derived flags after "--".`,
+      `Run the "search" tool using schema-derived flags, which the callable ` +
+        `name opens the section for.`,
     )
     .example(
       cliText(
@@ -1822,20 +1843,20 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} --select topic.title addTopic ` +
-          `'{"title":"Ship it"}'`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} addTopic ` +
+          `'{"title":"Ship it"}' -- --select topic.title`,
       ),
       "Return only the selected fields of the verb's result.",
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} ` +
-          `--schema '{"properties":{"topic":{"$link":true}}}' addTopic ` +
-          `'{"title":"Ship it"}'`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} addTopic ` +
+          `'{"title":"Ship it"}' -- ` +
+          `--schema '{"properties":{"topic":{"$link":true}}}'`,
       ),
       "Return the address of what the verb returned instead of its contents.",
     )
-    .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
     .option(
       "--invocation <id:string>",
       "Idempotency key for a handler call (before the callable name), and " +
@@ -1887,7 +1908,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       "--no-wait",
       "Exit once this handling's commit is acknowledged (before the callable " +
         "name), skipping only the receipt readback: stdout reports status " +
-        '"committed" plus the receipt address, so `cf get --piece <that ' +
+        '"committed" plus the receipt address, so `cf cell get --cell <that ' +
         "address>` collects the outcome later without re-running the handler; " +
         "a call naming the same session and --invocation recovers it too, but " +
         "runs the handler body again. The handler still executes here and its " +
@@ -1897,162 +1918,388 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       "--show-links",
       "Annotate the Invocation JSON with a links dictionary mapping result " +
         "paths to their backing cell addresses, each one reference string " +
-        "--piece takes back in (before the callable name). " +
+        "--cell takes back in (before the callable name). " +
         'The root "/" entry is the result\'s own backing document — the ' +
         "receipt, unless the result is itself a reference, in which case a " +
         'separate "receipt" entry keeps the receipt address; other entries ' +
         "appear only where a path is backed by a different document. Handler " +
         "invocations only — a tool already reports its result cell on stderr.",
     )
+    // The three read options are declared so this page names them and a
+    // caller who writes one before the callable meets a refusal that can say
+    // where it belongs. They are READ from the words past `--`, which is the
+    // one position the grammar accepts them in; see lib/verb-section.ts.
     .option(
       "--filter <predicate:string>",
-      "Filter an array with a jq-inspired predicate",
+      'Filter an array with a jq-inspired predicate (past the "--" that ' +
+        "closes the callable's section)",
     )
     .option(
       "--select <fields:string>",
-      "Project output to comma-separated field paths",
+      'Project output to comma-separated field paths (past the "--" that ' +
+        "closes the callable's section)",
     )
     .option(
       "--schema <schema:string>",
       "Project output with an inline JSON Schema, @file, or the --select " +
-        "field list",
+        'field list (past the "--" that closes the callable\'s section)',
       // Both flags carry the one projection, so a command naming both has not
       // said which shape it wants. Refuse before the call rather than pick.
       { conflicts: ["select"] },
     )
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
-    .action(dataCommandAction(spelling, async function (
-      // Spelled out because this builder stands alone: the target options
-      // arrive as `piece` globals on one mount and as own options on the
-      // other, so neither inference sees the whole surface.
-      options:
-        & PieceCLIOptions
-        & PieceCallReadbackFlags
-        & {
-          quiet?: boolean;
-          verbose?: boolean;
-          await?: boolean;
-          wait?: number | boolean;
-          invocation?: string;
-          invocationSession?: string;
-        },
+    .action(notice.action(function (
+      options: PieceCallCLIOptions,
       callableArg: string,
       ...tailArgs: string[]
     ) {
-      // Positional-address intake first: it is a fact about the argv alone,
-      // so a refusal here names no invocation and no phase.
-      const { piece, callableName, tail } = readCallTarget(
+      // Wrapped here rather than around `callFromCommand`, so the notice
+      // fires when the command runs and never when a test drives the tail
+      // directly.
+      //
+      // Both argv-derived arrays are returned by methods on the command
+      // Cliffy binds as this action's `this`, so they are read here and
+      // handed on as values: the raw arguments a grammar refusal quotes
+      // back, and the words past `--` the read step parses. Nothing below
+      // this line needs the binding.
+      return callFromCommand(
         options,
+        spelling,
         callableArg,
         tailArgs,
+        this.getRawArgs(),
+        this.getLiteralArgs(),
       );
-      const identity = resolveInvocationIdentity(
-        options.invocation,
-        options.invocationSession,
-      );
-      const invocationId = identity.id;
-      const waitControl = resolveWaitControl(options);
-      let phase: InvocationPhase = "initial_sync";
-      const observer = pieceCallPhaseObserver(
-        !!options.verbose,
-        (next) => phase = next,
-      );
-      setQuietMode(!!options.quiet);
-      // Read outside the invocation's failure wrapper below. Nothing is
-      // dispatched here — no callable resolved, no id spent — so a malformed
-      // selection is a data error about the flags, the same one `cf piece get`
-      // reports. Inside the wrapper it would name an id and a phase to retry
-      // from for a call that was never made; a selection that fails against a
-      // RESULT does sit inside it, and does name one.
-      let selection: CellSelection | undefined;
-      try {
-        selection = await parsePieceCallSelection(options);
-      } catch (error) {
-        // Both exits below leave without reaching the action's catch, so the
-        // verbose in-flight span is closed here.
-        observer.finish("failed");
-        if (error instanceof CellSelectionError) {
-          exitWithDataError({ message: error.message });
-        }
-        throw error;
-      }
-      try {
-        const invocation = pieceCallInvocation(
-          tail,
-          this.getLiteralArgs(),
-        );
-        const pieceConfig = parsePieceOptions({
-          ...options,
-          ...(piece !== undefined && { piece }),
-          json: invocation.jsonOutput,
-        });
-        const result = await boundedSettlement(
-          executePieceCallable(
-            pieceConfig,
-            callableName,
-            invocation.rawArgs,
-            {
-              invocation: identity,
-              // The verb help page names the mount that was invoked, so the
-              // blessed spelling never renders usage lines teaching the
-              // deprecated one — and the deprecated mount names itself,
-              // beside its own notice.
-              helpCommandPrefix: cliCommand(
-                [...spelling.split(" "), "...", callableName],
-              ),
-              skipReadback: waitControl.mode === "commit",
-              showLinks: !!options.showLinks,
-              ...(selection === undefined ? {} : { selection }),
-              onPhase: invocationPhaseReporter(
-                identity,
-                observer.onPhase,
-                undefined,
-                Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
-              ),
-            },
-          ).catch((error) =>
-            reportVerbInputErrorOrRethrow(
-              error,
-              pieceConfig.piece,
-              undefined,
-              observer,
-            )
-          ),
-          waitControl.boundSeconds,
-        );
-        renderPieceCallOutcome(
-          observer,
-          result,
-          callableName,
-          pieceConfig.piece,
-          {},
-          { detached: waitControl.mode === "commit", invocation: identity },
-        );
-      } catch (error) {
-        exitPieceCallFailure(observer, error, invocationId, phase);
-      }
     }));
+  return notice.helpPage(command);
 }
 
 /**
- * A top-level instance of a piece data command: the same builder the
- * `piece` chain mounts under the same name, carrying the target options
- * itself. `cf get`, `cf set`, and `cf call` are these — one definition per
- * command, two spellings that parse and behave identically in every
- * respect but one: the piece-mounted spelling is deprecated (step 6a) and
- * its invocations print the dated stderr notice `dataCommandAction`
- * attaches, until {@link PIECE_DATA_SPELLING_END_DATE} removes it with the
- * spelling (docs/plans/cli-surface-shape.md, steps 5–6).
+ * One of the three data commands, built for one of its mounts.
+ *
+ * There is one definition per command and two mounts of it: blessed under the
+ * noun it acts on — `cf cell get`, `cf cell set`, `cf piece call` — and hidden
+ * at the top-level spelling it had, which warns and is dated.
+ *
+ * `name` picks the definition. `spelling` is how that mount names itself in
+ * its own help and examples, because a caller reads back the line they typed
+ * rather than the key it is registered under; it defaults to `name`, which is
+ * the spelling the top-level mounts answer at. `replacedBy` names the spelling
+ * that supersedes this mount, and is what makes it carry the step-7 notice.
  */
 // deno-lint-ignore no-explicit-any
-export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
+export function pieceDataCommand(
+  name: "get" | "set" | "call",
+  mount: { spelling?: string; replacedBy?: string } = {},
+): Command<any> {
   const builders = {
     get: buildGetCommand,
     set: buildSetCommand,
     call: buildCallCommand,
   };
-  return targetOptions(builders[name](name), { global: false });
+  const spelling = mount.spelling ?? name;
+  return targetOptions(
+    builders[name](spelling, mount.replacedBy),
+    { global: false },
+  );
+}
+
+/**
+ * Refuse `--json` on a command that has no machine-readable output.
+ *
+ * `cf space` declares `--json` globally, so its two target-scoped subcommands
+ * inherit an option they have nothing to answer with. Accepting it silently
+ * would hand a caller human text where they asked for something to parse.
+ */
+function refuseJsonOutput(spelling: string, options: { json?: boolean }): void {
+  if (!options.json) return;
+  throw new ValidationError(
+    `'cf ${spelling}' has no machine-readable output, so '--json' does ` +
+      `nothing here. Drop it, and read the printed result.`,
+    { exitCode: 1 },
+  );
+}
+
+/**
+ * The shared target options, plus the flags the two space-level commands add.
+ *
+ * `quiet` and `reset` reach an action from Cliffy's parse rather than from
+ * {@link PieceCLIOptions}, which describes only what a target is named with.
+ */
+interface SpaceCommandCLIOptions extends PieceCLIOptions {
+  quiet?: boolean;
+  reset?: boolean;
+}
+
+/**
+ * `recreate-root`, which rebuilds a space's root pattern.
+ *
+ * `spelling` is how the command names itself in its own help and examples.
+ * `replacedBy`, when given, names the spelling that supersedes this mount and
+ * makes it carry the step-7 notice.
+ *
+ * The target options are attached per command rather than globally, because
+ * `cf space` is not a target-scoped noun the way `cf piece` is: its other
+ * subcommands read a store on disk and take no server, identity or space.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildRecreateRootCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  const act = async (options: SpaceCommandCLIOptions) => {
+    refuseJsonOutput(spelling, options);
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const pieceId = await recreateSpaceRootPattern(spaceConfig);
+    render(pieceId);
+    hint(cliText(`NEXT STEPS:
+  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Inspect state:         cf piece inspect --cell ${pieceId} ...`));
+  };
+  // The options arrive from targetOptions() below, after this chain is built,
+  // so the chain is named as `Command<any>` rather than letting Cliffy infer
+  // an empty option set for the action from what it can see here.
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      "Recreate the root pattern for the explicitly targeted space.",
+    )
+    .usage(spaceUsage)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP}`),
+      `Recreate the root pattern for "${EX_SPACE}".`,
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_URL}`),
+      `Recreate the root pattern for "${EX_SPACE}".`,
+    );
+  return notice.helpPage(
+    targetOptions(command.action(notice.action(act)), { global: false }),
+  );
+}
+
+/**
+ * `set-home`, which deploys a custom home-space pattern or resets the
+ * identity's home space to the system default.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildSetHomeCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  const act = async (options: SpaceCommandCLIOptions, main?: string) => {
+    refuseJsonOutput(spelling, options);
+    setQuietMode(!!options.quiet);
+
+    if (!options.reset && !main) {
+      throw new ValidationError(
+        "Provide a pattern file path or use --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && main) {
+      throw new ValidationError(
+        "Cannot use --reset with a pattern file path.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.repository !== undefined) {
+      throw new ValidationError(
+        "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.test !== undefined) {
+      throw new ValidationError(
+        "Cannot use --test with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.datafile !== undefined) {
+      throw new ValidationError(
+        "Cannot use --datafile with --reset.",
+        { exitCode: 1 },
+      );
+    }
+
+    const baseConfig = parseSetHomeOptions(options);
+
+    if (options.reset) {
+      await resetHomePattern(baseConfig);
+      render("Reset home pattern to system default.");
+    } else {
+      await setHomePattern(baseConfig, localPatternEntry(main!, options));
+      render("Deployed custom home pattern.");
+    }
+
+    // The hint names the spelling to write next, which is the blessed one
+    // even when this run arrived through the superseded mount: a next step
+    // that teaches the spelling the notice just told the caller to stop
+    // writing is the notice arguing with itself.
+    hint(cliText(`NEXT STEPS:
+  → Open home in browser: ${baseConfig.apiUrl}
+  → Reset to default:     cf ${replacedBy ?? spelling} --reset ...`));
+  };
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      "Deploy a custom home-space pattern or reset the identity's home space to system default.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
+      ),
+      `Deploy a custom pattern to the identity's home space.`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
+      ),
+      `Reset the identity's home space to the system default pattern.`,
+    )
+    .option("--reset", "Reset to the system default home pattern")
+    .option(
+      "--main-export <export:string>",
+      'Named export from entry for pattern definition. Defaults to "default".',
+    )
+    .option(
+      "--root <path:string>",
+      "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+    )
+    .option(
+      "--repository <repository:string>",
+      "Repository locator associated with the authored source (stored exactly as supplied).",
+    )
+    .option(
+      "--test <path:string>",
+      "Attach a test pattern source file to the deployed source package. Repeatable.",
+      { collect: true },
+    )
+    .option(
+      "--datafile <path:string>",
+      "Attach a data file to the deployed source package. Repeatable.",
+      { collect: true },
+    )
+    .arguments("[main:string]");
+  return notice.helpPage(
+    targetOptions(command.action(notice.action(act)), { global: false }),
+  );
+}
+
+/**
+ * `get-label`, which reports the effective CFC label view at a cell path.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildGetLabelCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      `Get the effective CFC label view for a piece data path.
+
+The returned paths are relative to the selected path. The view includes
+declared, derived, and link-carried labels. Omit path to inspect the root.`,
+    )
+    .usage(`${pieceUsage} [path]`)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
+      "Get the effective label on a nested result value.",
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} secret --input`),
+      "Get the effective label on an input value.",
+    )
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
+    .option(
+      "--input",
+      "Read from the piece's input cell instead of result cell (the " +
+        '"#argument" reference suffix spells the same selection)',
+    )
+    .option(
+      "--json",
+      "Select JSON output explicitly. This command always outputs JSON.",
+    )
+    .arguments("[path:string]");
+  return notice.helpPage(
+    targetOptions(
+      command.action(notice.action(getCellCfcLabelFromCommand)),
+      { global: false },
+    ),
+  );
+}
+
+/**
+ * `set-label`, which records a declared CFC label at a cell path.
+ *
+ * `spelling` and `replacedBy` carry the meanings they have in
+ * {@link buildRecreateRootCommand}.
+ */
+// deno-lint-ignore no-explicit-any
+export function buildSetLabelCommand(
+  spelling: string,
+  replacedBy?: string,
+): Command<any> {
+  const notice = mountNotice(spelling, replacedBy);
+  // deno-lint-ignore no-explicit-any
+  const command: Command<any> = new Command()
+    .description(
+      cliText(
+        `Set the declared CFC label at a piece data path from JSON on stdin.
+
+INPUT: An object with confidentiality and/or integrity arrays, plus an optional
+observes value: value, shape, enumerate, or followRef.
+
+The command records the label through the same checked write operation used for
+piece data. It never changes raw CFC metadata. Confidentiality may only become
+more restrictive. An integrity update may keep or remove existing claims, but
+cannot add trust. Conflicting observation classes are rejected. If observes is
+omitted, an existing unambiguous class is preserved. The command returns the
+updated effective label view.`,
+      ),
+    )
+    .usage(`${pieceUsage} [path]`)
+    .example(
+      cliText(
+        `echo '{"confidentiality":["team"]}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} notes`,
+      ),
+      "Add a confidentiality requirement to a result value.",
+    )
+    .example(
+      cliText(
+        `echo '{"integrity":[],"observes":"value"}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} draft --input`,
+      ),
+      "Remove declared integrity claims from an input value.",
+    )
+    .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
+    .option(
+      "--input",
+      "Write to the piece's input cell instead of result cell (the " +
+        '"#argument" reference suffix spells the same selection)',
+    )
+    .option(
+      "--json",
+      "Select JSON output explicitly. This command always outputs JSON.",
+    )
+    .arguments("[path:string]");
+  return notice.helpPage(
+    targetOptions(
+      command.action(notice.action(setCellCfcLabelFromCommand)),
+      { global: false },
+    ),
+  );
 }
 
 export const piece = targetOptions(
@@ -2073,11 +2320,11 @@ export const piece = targetOptions(
   .usage(spaceUsage)
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_COMP}`),
-    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${EX_SPACE}".`,
   )
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
-    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${EX_SPACE}".`,
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
@@ -2091,7 +2338,7 @@ export const piece = targetOptions(
   .usage(spaceUsage)
   .example(
     cliText(`cf piece slugs ${EX_ID} ${EX_COMP}`),
-    `List the slugs of "${RAW_EX_COMP.space}".`,
+    `List the slugs of "${EX_SPACE}".`,
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listSlugsFromCommand)
@@ -2126,6 +2373,12 @@ export const piece = targetOptions(
     ),
     `Create a piece that can import from parent directories within ./patterns.`,
   )
+  .example(
+    cliText(
+      `cf piece new ${EX_ID} ${EX_COMP} ./main.tsx --slug project-notes --force`,
+    ),
+    `Create a piece and take "project-notes" from whatever it names now.`,
+  )
   .arguments("<main:string>")
   .option("--no-start", "Only set up the piece without starting it")
   .option(
@@ -2152,28 +2405,15 @@ export const piece = targetOptions(
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .option(
+    "--force",
+    "Take the slug even when it already points somewhere.",
+    { depends: ["slug"] },
+  )
+  .option(
     "--dangerously-allow-incompatible-schema",
     "Accepted for deploy-script symmetry; a new piece has no previous schema to compare.",
   )
-  .action(async (options, main) => {
-    setQuietMode(!!options.quiet);
-    const spaceConfig = parseSpaceOptions(options);
-    const pieceId = await newPiece(
-      spaceConfig,
-      localPatternEntry(main, options),
-      {
-        start: options.start,
-        slug: options.slug,
-      },
-    );
-    render(pieceId);
-    const browserPieceRef = options.slug ?? pieceId;
-    hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
-  → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
-  → Test a callable: cf call --piece ${pieceId} <callableName> ...
-  → Inspect state:   cf piece inspect --piece ${pieceId} ...`));
-  })
+  .action(newPieceFromCommand)
   /* piece set-slug */
   .command(
     "set-slug",
@@ -2190,10 +2430,20 @@ export const piece = targetOptions(
     ),
     `Set slug "latest-note" to the cell currently resolved by "old-slug".`,
   )
+  .example(
+    cliText(
+      `cf piece set-slug ${EX_ID} ${EX_COMP} project-notes fid1:piece2 --force`,
+    ),
+    `Take "project-notes" from whatever it names now.`,
+  )
   .arguments("<slug:string> <source:string>")
   .option(
     "--resolve-before-linking",
     "Resolve the source cell before writing it as the slug redirect target.",
+  )
+  .option(
+    "--force",
+    "Take the name even when it already points somewhere.",
   )
   .action(async (options, slug, sourceRef) => {
     setQuietMode(!!options.quiet);
@@ -2208,6 +2458,7 @@ export const piece = targetOptions(
       {
         sourceScope: source.scope,
         resolveBeforeLinking: !!(options as any).resolveBeforeLinking,
+        force: !!(options as any).force,
       },
     );
     render(`Set slug ${slug} to ${sourceRef}`);
@@ -2219,9 +2470,9 @@ export const piece = targetOptions(
   .usage(pieceUsage)
   .example(
     cliText(`cf piece step ${EX_ID} ${EX_COMP_PIECE}`),
-    `Start, wait for idle+synced, then stop piece "${RAW_EX_COMP.piece!}".`,
+    `Start, wait for idle+synced, then stop piece "${EX_PIECE}".`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await stepPiece(pieceConfig);
@@ -2232,28 +2483,30 @@ export const piece = targetOptions(
   .usage(pieceUsage)
   .example(
     cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_COMP_PIECE}`),
-    `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
+    `Applies the input '{"foo":5}' to piece "${EX_PIECE}".`,
   )
   .example(
     cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`),
-    `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
+    `Applies the input '{"foo":5}' to piece "${EX_PIECE}".`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .action(async (options) =>
     applyPieceInput(parsePieceOptions(options), await drainStdin())
   )
+  /* piece call */
+  .command("call", pieceDataCommand("call", { spelling: "piece call" }))
   /* piece getsrc */
   .command("getsrc", "Retrieve the pattern source for the given piece.")
   .usage(`${pieceUsage} <outpath>`)
   .example(
     cliText(`cf piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`),
-    `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
+    `Retrieve the source for "${EX_PIECE}" and place in ./out`,
   )
   .example(
     cliText(`cf piece getsrc ${EX_ID} ${EX_URL} ./out`),
-    `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
+    `Retrieve the source for "${EX_PIECE}" and place in ./out`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .arguments("<outpath:string>")
   .action((options, outPath) =>
     savePiecePattern(parsePieceOptions(options), absPath(outPath))
@@ -2263,13 +2516,17 @@ export const piece = targetOptions(
   .usage(`${pieceUsage} <main>`)
   .example(
     cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
-    `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
+    `Update the source for "${EX_PIECE}" with ./main.tsx`,
   )
   .example(
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
-    `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
+    `Update the source for "${EX_PIECE}" with ./main.tsx`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .example(
+    cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} --check ./main.tsx`),
+    `Check whether ./main.tsx can replace the source for "${EX_PIECE}" without writing.`,
+  )
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option(
     "--main-export <export:string>",
     'Named export from entry for pattern definition. Defaults to "default".',
@@ -2313,28 +2570,23 @@ export const piece = targetOptions(
       );
       render(summary);
       hint(cliText(`NEXT STEPS:
-  → Apply it: cf piece setsrc --piece ${config.piece} ${mainPath} ...`));
+  → Apply it: cf piece setsrc --cell ${config.piece} ${mainPath} ...`));
       return;
     }
-    const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
-    render(`Updated source for piece ${pieceConfig.piece}`);
-    hint(cliText(`NEXT STEPS:
-  → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
-  → Test a callable: cf call --piece ${pieceConfig.piece} <callableName> ...
-  → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
+    await applyPieceSourceCommandAction(options, mainPath);
   })
   /* piece inspect */
   .command("inspect", "Inspect detailed information about a piece")
   .usage(pieceUsage)
   .example(
     cliText(`cf piece inspect ${EX_ID} ${EX_COMP_PIECE}`),
-    `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
+    `Inspect detailed information about piece "${EX_PIECE}".`,
   )
   .example(
     cliText(`cf piece inspect ${EX_ID} ${EX_URL}`),
-    `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
+    `Inspect detailed information about piece "${EX_PIECE}".`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .option(
     "--summary",
@@ -2359,7 +2611,7 @@ export const piece = targetOptions(
     "Survey the holder's topics collection into plan.jsonl.",
   )
   .option(
-    "-c,--piece <piece:string>",
+    "-c,--cell, --piece <cell:string>",
     `${PIECE_OPTION_HELP} The holder whose collection is surveyed.`,
   )
   .option(
@@ -2373,7 +2625,7 @@ export const piece = targetOptions(
   .option(
     "--list <piece:string>",
     "Survey this piece instead of a collection. Repeatable.",
-    { collect: true, conflicts: ["piece", "path", "side"] },
+    { collect: true, conflicts: ["cell", "path", "side"] },
   )
   .option(
     "--retarget <spec:string>",
@@ -2430,7 +2682,7 @@ export const piece = targetOptions(
     "Report what the fixer would change, writing nothing.",
   )
   .option(
-    "-c,--piece <piece:string>",
+    "-c,--cell, --piece <cell:string>",
     `${PIECE_OPTION_HELP} The holder whose collection is repaired.`,
   )
   .option(
@@ -2444,7 +2696,7 @@ export const piece = targetOptions(
   .option(
     "--list <piece:string>",
     "Repair this piece instead of a collection. Repeatable.",
-    { collect: true, conflicts: ["piece", "path", "side"] },
+    { collect: true, conflicts: ["cell", "path", "side"] },
   )
   .option(
     "--fixer <path:string>",
@@ -2556,7 +2808,7 @@ export const piece = targetOptions(
     "List the revisions this piece could be returned to.",
   )
   .option(
-    "-c,--piece <piece:string>",
+    "-c,--cell, --piece <cell:string>",
     `${PIECE_OPTION_HELP} The piece to restore.`,
   )
   .option(
@@ -2577,13 +2829,13 @@ export const piece = targetOptions(
   .usage(pieceUsage)
   .example(
     cliText(`cf piece view ${EX_ID} ${EX_COMP_PIECE}`),
-    `Display the view for piece "${RAW_EX_COMP.piece!}".`,
+    `Display the view for piece "${EX_PIECE}".`,
   )
   .example(
     cliText(`cf piece view ${EX_ID} ${EX_URL}`),
-    `Display the view for piece "${RAW_EX_COMP.piece!}".`,
+    `Display the view for piece "${EX_PIECE}".`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
@@ -2604,17 +2856,17 @@ export const piece = targetOptions(
   .usage(pieceUsage)
   .example(
     cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE}`),
-    `Render the UI for piece "${RAW_EX_COMP.piece!}" to HTML.`,
+    `Render the UI for piece "${EX_PIECE}" to HTML.`,
   )
   .example(
     cliText(`cf piece render ${EX_ID} ${EX_URL}`),
-    `Render the UI for piece "${RAW_EX_COMP.piece!}" to HTML.`,
+    `Render the UI for piece "${EX_PIECE}" to HTML.`,
   )
   .example(
     cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`),
-    `Watch and re-render piece "${RAW_EX_COMP.piece!}" when UI changes.`,
+    `Watch and re-render piece "${EX_PIECE}" when UI changes.`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option("--json", "Output HTML as JSON")
   .option("-w,--watch", "Watch for changes and re-render")
   .option(
@@ -2749,7 +3001,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
       );
       render(`Linked ${sourceRef} to ${targetRef} (read-only on-disk source)`);
       hint(cliText(`NEXT STEPS:
-  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
+  → Inspect target piece:  cf piece inspect --cell ${target.pieceId} ...`));
       return;
     }
 
@@ -2791,7 +3043,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     } catch (error) {
       // A link that fails validation is a data error (the pieces/paths read
       // over the network don't support the link), not a usage error — report
-      // it like `piece get` does instead of letting Cliffy dump the help
+      // it like `cf cell get` does instead of letting Cliffy dump the help
       // screen over it.
       const report = pieceLinkDataErrorReport(error, {
         sourcePieceId: source.pieceId,
@@ -2804,87 +3056,24 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     render(`Linked ${sourceRef} to ${targetRef}`);
     hint(cliText(`NEXT STEPS:
   → Visualize connections: cf piece map -i ... -a ... -s ...
-  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
+  → Inspect target piece:  cf piece inspect --cell ${target.pieceId} ...`));
   })
-  /* piece get */
-  .command("get", buildGetCommand())
-  /* piece get-label */
+  /* piece get-label — moved to `cf cell get-label` */
   .command(
     "get-label",
-    `Get the effective CFC label view for a piece data path.
-
-The returned paths are relative to the selected path. The view includes
-declared, derived, and link-carried labels. Omit path to inspect the root.`,
+    buildGetLabelCommand("piece get-label", "cell get-label").hidden(),
   )
-  .usage(`${pieceUsage} [path]`)
-  .example(
-    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
-    "Get the effective label on a nested result value.",
-  )
-  .example(
-    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
-    "Get the effective label on an input value.",
-  )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Read from the piece's input cell instead of result cell (the " +
-      '"#argument" reference suffix spells the same selection)',
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .arguments("[path:string]")
-  .action(getCellCfcLabelFromCommand)
-  /* piece set-label */
+  /* piece set-label — moved to `cf cell set-label` */
   .command(
     "set-label",
-    cliText(`Set the declared CFC label at a piece data path from JSON on stdin.
-
-INPUT: An object with confidentiality and/or integrity arrays, plus an optional
-observes value: value, shape, enumerate, or followRef.
-
-The command records the label through the same checked write operation used for
-piece data. It never changes raw CFC metadata. Confidentiality may only become
-more restrictive. An integrity update may keep or remove existing claims, but
-cannot add trust. Conflicting observation classes are rejected. If observes is
-omitted, an existing unambiguous class is preserved. The command returns the
-updated effective label view.`),
+    buildSetLabelCommand("piece set-label", "cell set-label").hidden(),
   )
-  .usage(`${pieceUsage} [path]`)
-  .example(
-    cliText(
-      `echo '{"confidentiality":["team"]}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
-    ),
-    "Add a confidentiality requirement to a result value.",
-  )
-  .example(
-    cliText(
-      `echo '{"integrity":[],"observes":"value"}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
-    ),
-    "Remove declared integrity claims from an input value.",
-  )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Write to the piece's input cell instead of result cell (the " +
-      '"#argument" reference suffix spells the same selection)',
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .arguments("[path:string]")
-  .action(setCellCfcLabelFromCommand)
-  /* piece set */
-  .command("set", buildSetCommand())
   /* piece map */
   .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP}`),
-    `Display registered pieces and connections in "${RAW_EX_COMP.space}".`,
+    `Display registered pieces and connections in "${EX_SPACE}".`,
   )
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP} --format dot`),
@@ -2902,8 +3091,6 @@ updated effective label view.`),
     const map = await generateSpaceMap(spaceConfig, format);
     render(map);
   })
-  /* piece call */
-  .command("call", buildCallCommand())
   /* piece verbs */
   .command(
     "verbs",
@@ -2912,13 +3099,13 @@ updated effective label view.`),
   .usage(pieceUsage)
   .example(
     cliText(`cf piece verbs ${EX_ID} ${EX_COMP_PIECE}`),
-    `List every verb piece "${RAW_EX_COMP.piece!}" exposes.`,
+    `List every verb piece "${EX_PIECE}" exposes.`,
   )
   .example(
     cliText(`cf piece verbs ${EX_ID} ${EX_URL} --json`),
     "Machine-readable listing: name, kind, and input schema per verb.",
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option("--json", "Output machine-readable JSON.")
   .option(
     "--all",
@@ -2946,7 +3133,7 @@ updated effective label view.`),
     if (shown.length === 0) return;
     hint(
       cliText(
-        `TIP: --json includes each verb's input schema; 'cf call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
+        `TIP: --json includes each verb's input schema; 'cf piece call --cell ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
       ),
     );
   })
@@ -2958,13 +3145,13 @@ updated effective label view.`),
   .usage(pieceUsage)
   .example(
     cliText(`cf piece describe ${EX_ID} ${EX_COMP_PIECE}`),
-    `Document piece "${RAW_EX_COMP.piece!}" from its own pattern.`,
+    `Document piece "${EX_PIECE}" from its own pattern.`,
   )
   .example(
     cliText(`cf piece describe ${EX_ID} ${EX_URL} --json`),
     "Machine-readable description: purpose, fields, and verb rows.",
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option("--json", "Output machine-readable JSON.")
   .option(
     "--all",
@@ -2978,137 +3165,52 @@ updated effective label view.`),
   .usage(pieceUsage)
   .example(
     cliText(`cf piece rm ${EX_ID} ${EX_COMP_PIECE}`),
-    `Remove piece "${RAW_EX_COMP.piece!}".`,
+    `Remove piece "${EX_PIECE}".`,
   )
   .example(
     cliText(`cf piece rm ${EX_ID} ${EX_URL}`),
-    `Remove piece "${RAW_EX_COMP.piece!}".`,
+    `Remove piece "${EX_PIECE}".`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await removePiece(pieceConfig);
     render(`Removed piece ${pieceConfig.piece}`);
   })
-  /* piece recreate-root */
+  /* piece recreate-root — moved to `cf space recreate-root` */
   .command(
     "recreate-root",
-    "Recreate the root pattern for the explicitly targeted space.",
+    buildRecreateRootCommand("piece recreate-root", "space recreate-root")
+      .hidden(),
   )
-  .usage(spaceUsage)
-  .example(
-    cliText(`cf piece recreate-root ${EX_ID} ${EX_COMP}`),
-    `Recreate the root pattern for "${RAW_EX_COMP.space}".`,
-  )
-  .example(
-    cliText(`cf piece recreate-root ${EX_ID} ${EX_URL}`),
-    `Recreate the root pattern for "${RAW_EX_COMP.space}".`,
-  )
-  .action(async (options) => {
-    setQuietMode(!!options.quiet);
-    const spaceConfig = parseSpaceOptions(options);
-    const pieceId = await recreateSpaceRootPattern(spaceConfig);
-    render(pieceId);
-    hint(cliText(`NEXT STEPS:
-  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
-  → Inspect state:         cf piece inspect --piece ${pieceId} ...`));
-  })
-  /* piece set-home */
+  /* piece set-home — moved to `cf space set-home` */
   .command(
     "set-home",
-    "Deploy a custom home-space pattern or reset the identity's home space to system default.",
-  )
-  .example(
-    cliText(
-      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
-    ),
-    `Deploy a custom pattern to the identity's home space.`,
-  )
-  .example(
-    cliText(
-      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
-    ),
-    `Reset the identity's home space to the system default pattern.`,
-  )
-  .option("--reset", "Reset to the system default home pattern")
-  .option(
-    "--main-export <export:string>",
-    'Named export from entry for pattern definition. Defaults to "default".',
-  )
-  .option(
-    "--root <path:string>",
-    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
-  )
-  .option(
-    "--repository <repository:string>",
-    "Repository locator associated with the authored source (stored exactly as supplied).",
-  )
-  .option(
-    "--test <path:string>",
-    "Attach a test pattern source file to the deployed source package. Repeatable.",
-    { collect: true },
-  )
-  .option(
-    "--datafile <path:string>",
-    "Attach a data file to the deployed source package. Repeatable.",
-    { collect: true },
-  )
-  .arguments("[main:string]")
-  .action(async (options, main?: string) => {
-    setQuietMode(!!options.quiet);
-
-    if (!options.reset && !main) {
-      throw new ValidationError(
-        "Provide a pattern file path or use --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && main) {
-      throw new ValidationError(
-        "Cannot use --reset with a pattern file path.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.repository !== undefined) {
-      throw new ValidationError(
-        "Cannot use --repository with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.test !== undefined) {
-      throw new ValidationError(
-        "Cannot use --test with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.datafile !== undefined) {
-      throw new ValidationError(
-        "Cannot use --datafile with --reset.",
-        { exitCode: 1 },
-      );
-    }
-
-    const baseConfig = parseSetHomeOptions(options);
-
-    if (options.reset) {
-      await resetHomePattern(baseConfig);
-      render("Reset home pattern to system default.");
-    } else {
-      await setHomePattern(baseConfig, localPatternEntry(main!, options));
-      render("Deployed custom home pattern.");
-    }
-
-    hint(cliText(`NEXT STEPS:
-  → Open home in browser: ${baseConfig.apiUrl}
-  → Reset to default:     cf piece set-home --reset ...`));
-  });
+    buildSetHomeCommand("piece set-home", "space set-home").hidden(),
+  );
 
 /** Shared flags accepted by piece commands that resolve a target or source. */
 export interface PieceCLIOptions {
-  piece?: string;
+  /**
+   * The target cell, as `--cell` or its deprecated name `--piece` — one
+   * option under two names, so the two can never disagree. Cliffy keys it by
+   * the leading name.
+   */
+  cell?: string;
+
   apiUrl?: string;
   identity?: string;
   space?: string;
+
+  /**
+   * Whether `space` was written on the command line rather than supplied by
+   * `CF_SPACE`. Cliffy merges an environment value into the option and keeps
+   * no record of which it was, and only an explicit one refuses `--url`.
+   * Defaults to reading the process arguments; a caller driving this function
+   * directly states it.
+   */
+  explicitSpace?: boolean;
+
   url?: string;
   mainExport?: string;
   repository?: string;
@@ -3142,23 +3244,50 @@ export interface PieceGetCLIOptions extends PieceLabelCLIOptions {
   schema?: string;
 }
 
+/**
+ * The collaborators {@link getCellValueFromCommand} and
+ * {@link setCellValueFromCommand} read, write, and report through.
+ */
 export interface PieceCellCommandDependencies {
+  /** The read, which a caller holding its own connection supplies. */
   getCellValue?: typeof getCellValue;
+
+  /** The write, which a caller holding its own connection supplies. */
   setCellValue?: typeof setCellValue;
+
+  /** Where the written value comes from, standard input by default. */
   drainStdin?: typeof drainStdin;
+
+  /** Where the value goes, stdout unless the caller says otherwise. */
   render?: typeof render;
+
+  /** Where the next steps go, stderr unless the caller says otherwise. */
   hint?: typeof hint;
+
+  /** The data-error report itself, for a caller replacing the whole exit. */
   exitWithDataError?: typeof exitWithDataError;
+
+  /** Where a data error's message goes, stderr unless the caller says so. */
+  printError?: (message: string) => void;
+
+  /**
+   * How a data error ends the caller. `Deno.exit` by default, which a shell
+   * replaces with a shim that throws, so the error arrives as a value.
+   */
+  exit?: (code: number) => never;
 }
 
 /**
- * The `cf piece get` action: the target may ride `--piece` or sit in the
+ * The `cf cell get` action: the target may ride `--cell` or sit in the
  * first positional as a canonical address ({@link readTargetPositionals}
  * decides which the positionals name), and either spelling may end in
  * `#argument`, which reads the arguments cell the way `--input` does.
  *
- * A named export with seams rather than an inline action body because action
- * bodies never execute under the unit suite (docs/development/COVERAGE.md).
+ * A named export with seams rather than an arrow function at the `.action()`
+ * call: what the intake decided is the thing under test — which spelling
+ * named the target, the path segments it merged, the read options it
+ * settled — and a caller supplying its own `getCellValue` reads all three
+ * off the call it receives, with no runtime, socket, or server behind it.
  */
 export async function getCellValueFromCommand(
   options: PieceGetCLIOptions,
@@ -3170,7 +3299,7 @@ export async function getCellValueFromCommand(
   const target = readTargetPositionals(options, first, second);
   const pieceConfig = {
     ...parsePieceOptions(
-      target.address ? { ...options, piece: target.address } : options,
+      target.address ? { ...options, cell: target.address } : options,
       { acceptsPath: true, acceptsArgument: true },
     ),
     jsonOutput: true,
@@ -3198,19 +3327,30 @@ export async function getCellValueFromCommand(
       input,
       piece: pieceConfig.piece,
     });
-    if (report) (deps.exitWithDataError ?? exitWithDataError)(report);
+    if (report) {
+      (deps.exitWithDataError ?? exitWithDataError)(report, {
+        printError: deps.printError,
+        printHint: deps.hint,
+        exit: deps.exit,
+      });
+    }
     throw error;
   }
 }
 
 /**
- * The `cf piece set` action, with the same positional-address intake as
- * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
- * — embedded in the address, positionally, or both — and an explicit empty
- * positional (`""`) is a spelling: it has always named the root, and the
- * fuse integration writes a whole input cell with it. What is refused is a
- * bare positional address with no path anywhere, so a pasted address cannot
- * silently overwrite a whole cell.
+ * The `cf cell set` action, with the same positional-address intake as
+ * {@link getCellValueFromCommand}. The write needs a path inside the piece it
+ * reaches, spelled in the address, positionally, or both. An explicit empty
+ * positional (`""`) is the exception, and the only spelling under which a
+ * write lands on a whole cell: it has always named the root, and the fuse
+ * integration writes a whole input cell with it. Everything else that reaches
+ * a root is refused, so no address silently overwrites a cell.
+ *
+ * Refused at two points, because the two halves are known at different
+ * moments. A line carrying no path at all is refused here, before stdin is
+ * drained; a line whose path a collection spends reaching a member is refused
+ * by the write, which is where what the address resolves to is known.
  */
 export async function setCellValueFromCommand(
   options: PieceLabelCLIOptions,
@@ -3221,27 +3361,277 @@ export async function setCellValueFromCommand(
   setQuietMode(!!options.quiet);
   const target = readTargetPositionals(options, first, second);
   const pieceConfig = parsePieceOptions(
-    target.address ? { ...options, piece: target.address } : options,
+    target.address ? { ...options, cell: target.address } : options,
     { acceptsPath: true, acceptsArgument: true },
   );
   const pathSegments = mergePiecePath(pieceConfig, target.pathString);
+  // An empty positional is the one spelling that names the root, so it is
+  // the one spelling under which a write may land on a whole cell.
+  const rootSpelled = target.pathString === "";
   if (pathSegments.length === 0 && target.pathString === undefined) {
-    throw new ValidationError(
-      `A path is required: embed it in the address (/of:.../title) or ` +
-        `pass it as an argument ("" writes the root).`,
-      { exitCode: 1 },
-    );
+    throw new ValidationError(pathRequiredRefusal(), { exitCode: 1 });
   }
   const value = await (deps.drainStdin ?? drainStdin)();
-  await (deps.setCellValue ?? setCellValue)(pieceConfig, pathSegments, value, {
-    input: options.input || pieceConfig.pieceInput,
-  });
-  (deps.render ?? render)(`Set value at path: ${pathSegments.join("/")}`);
+  const written = await (deps.setCellValue ?? setCellValue)(
+    pieceConfig,
+    pathSegments,
+    value,
+    {
+      input: options.input || pieceConfig.pieceInput,
+      refuseRootWrite: !rootSpelled,
+    },
+  );
+  (deps.render ?? render)(`Set value at path: ${written.path.join("/")}`);
+  // The address as written is what a reader pastes into the next command, and
+  // it still names the piece written to whenever the walk spent none of the
+  // path. Where the walk spent some, the address names a collection and only
+  // the piece it reached says what was written.
+  const wroteTo = written.path.length === pathSegments.length
+    ? pieceConfig.piece
+    : written.piece;
   (deps.hint ?? hint)(
     cliText(
-      `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
+      `TIP: Computed values may be stale. Run 'cf piece step --cell ${wroteTo} ...' to trigger recomputation.`,
     ),
   );
+}
+
+/**
+ * The flags `cf piece call` reads. Spelled out rather than read off the command
+ * chain because `targetOptions` attaches the target options after the builder
+ * returns, so what the builder declares on its own is not the whole surface
+ * the action receives.
+ */
+export interface PieceCallCLIOptions
+  extends PieceCLIOptions, PieceCallReadbackFlags {
+  /** Suppress hints and next-step suggestions. */
+  quiet?: boolean;
+
+  /** Stream one wall-clock span per observed phase transition to stderr. */
+  verbose?: boolean;
+
+  /**
+   * The explicit spelling of the default wait, which `wait: false`
+   * contradicts.
+   */
+  await?: boolean;
+
+  /**
+   * Patience bound in seconds, or `false` for `--no-wait`, which exits once
+   * this handling's commit is acknowledged and skips the receipt readback.
+   */
+  wait?: number | boolean;
+
+  /** Idempotency key for this dispatch, which needs a session beside it. */
+  invocation?: string;
+
+  /**
+   * Session the invocation id was chosen within, over
+   * `CF_INVOCATION_SESSION`.
+   */
+  invocationSession?: string;
+}
+
+/** The collaborators {@link callFromCommand} dispatches and reports through. */
+export interface PieceCallCommandDependencies {
+  /** The dispatch, which a caller holding its own connection supplies. */
+  executePieceCallable?: typeof executePieceCallable;
+
+  /** Where the outcome goes, stdout unless the caller says otherwise. */
+  render?: typeof render;
+
+  /** Where the next steps go, stderr unless the caller says otherwise. */
+  hint?: typeof hint;
+
+  /** Where a failure's report goes, stderr unless the caller says so. */
+  printError?: (message: string) => void;
+
+  /**
+   * Where the call's in-flight lines go, stderr unless the caller says
+   * otherwise: the invocation pair as the dispatch happens, the spans under
+   * `--verbose`, and the per-phase lines `CF_TEST_ANNOUNCE_INVOCATION_PHASES`
+   * adds. One sink rather than several because the three interleave in one
+   * temporal stream, and splitting them would leave a caller rendering them
+   * as ordered events to reassemble an order it was handed already sorted.
+   *
+   * Distinct from `printError` because these are published while the call
+   * is in flight and whether or not it goes on to fail.
+   */
+  announce?: (message: string) => void;
+
+  /**
+   * How a failed call ends the caller. `Deno.exit` by default, which a shell
+   * replaces with a shim that throws, so the failure arrives as a value.
+   */
+  exit?: (code: number) => never;
+}
+
+/**
+ * The `cf piece call` action: settle the grammar against the argv, resolve the
+ * target, dispatch the named callable, and report what came back.
+ *
+ * `spelling` is how the mount names itself, the word a caller writes after
+ * `cf`. Both the corrected line a grammar refusal prints and the callable's
+ * own help page are written in terms of it.
+ *
+ * `rawArgs` is this command's own arguments — the line past `cf <spelling>`,
+ * as they were typed — and `literalArgs` the words past `--`, as Cliffy split
+ * them. A refusal prepends `cf <spelling>` itself, so a caller handing in the
+ * whole line gets it printed twice; nothing checks the two arrays against
+ * each other either, so they come from one split or the corrected line names
+ * words the caller never wrote. Taking both as parameters leaves every input
+ * an ordinary argument, so a caller with no command to bind drives the whole
+ * action: a test over a stubbed dispatch, or a sibling holding a connection
+ * of its own.
+ */
+export async function callFromCommand(
+  options: PieceCallCLIOptions,
+  spelling: string,
+  callableArg: string,
+  tailArgs: string[],
+  rawArgs: readonly string[],
+  literalArgs: readonly string[],
+  deps: PieceCallCommandDependencies = {},
+): Promise<void> {
+  // The grammar and the positional-address intake come first, and both are
+  // facts about the argv alone: a projection written before the verb, the
+  // words past the marker, and an address standing where `--cell` would, are
+  // all settled before an invocation exists for a refusal to name a phase to
+  // retry from.
+  refuseProjectionBeforeSection(spelling, "the verb", rawArgs, options);
+  // `-- --help` reaches the verb's own page rather than this command's, so
+  // those words rejoin the section rather than being read here.
+  const asksVerbHelp = readSectionAsksVerbHelp(literalArgs);
+  const readSection = asksVerbHelp
+    ? {}
+    : await parseReadSection(spelling, rawArgs, literalArgs);
+  const { cell, callableName, tail: sectionTail } = readCallTarget(
+    options,
+    callableArg,
+    tailArgs,
+  );
+  // Into the section, at the position the verb's parser reads `--help`. The
+  // address intake runs first, since it may take the section's own first word
+  // as the callable name.
+  const tail = asksVerbHelp
+    ? sectionWithVerbHelp(sectionTail, literalArgs)
+    : sectionTail;
+  const readback = { ...readSection, showLinks: options.showLinks };
+  const identity = resolveInvocationIdentity(
+    options.invocation,
+    options.invocationSession,
+  );
+  const invocationId = identity.id;
+  const waitControl = resolveWaitControl({ ...options, ...readback });
+  let phase: InvocationPhase = "initial_sync";
+  // The in-flight lines — the invocation pair as the dispatch happens, and
+  // the spans under --verbose — go where `announce` puts them. Raw stderr
+  // suits a command that owns the terminal for the length of one
+  // invocation; a caller drawing its own screen is corrupted by a line
+  // written behind the frame, and it needs these as events it can place.
+  //
+  // They stay apart from `printError` for all that: both are published
+  // while the call is in flight and whether or not it goes on to fail, so a
+  // failure sink would be naming a failure that has not happened.
+  const observer = pieceCallPhaseObserver(
+    !!options.verbose,
+    (next) => phase = next,
+    deps.announce,
+  );
+  setQuietMode(!!options.quiet);
+  // Both data-error reports below end the caller, so each goes to the
+  // caller's own sinks rather than to the process's: a shell supplies an
+  // `exit` that throws, and reads the report as the value it acts on.
+  //
+  // A supplied `exit` throws, where `Deno.exit` does not come back at all,
+  // and that difference is what `exitTaken` is for: the payload rejection is
+  // reported from inside the dispatch's promise chain, so its throw lands in
+  // the catch at the bottom of this function, which would otherwise describe
+  // the caller's own exit as a second, invented failure of the call.
+  let exitTaken = false;
+  const dataErrorSinks = {
+    printError: deps.printError,
+    printHint: deps.hint,
+    exit: (code: number): never => {
+      exitTaken = true;
+      return (deps.exit ?? Deno.exit)(code);
+    },
+  };
+  // Read outside the invocation's failure wrapper below. Nothing is
+  // dispatched here — no callable resolved, no id spent — so a malformed
+  // selection is a data error about the flags, the same one `cf cell get` reports.
+  // Inside the wrapper it would name an id and a phase to retry from for a
+  // call that was never made; a selection that fails against a RESULT does sit
+  // inside it, and does name one.
+  let selection: CellSelection | undefined;
+  try {
+    selection = await parsePieceCallSelection(readback);
+  } catch (error) {
+    // Both exits below leave without reaching the catch clause underneath, so
+    // the verbose in-flight span is closed here.
+    observer.finish("failed");
+    if (error instanceof CellSelectionError) {
+      exitWithDataError({ message: error.message }, dataErrorSinks);
+    }
+    throw error;
+  }
+  try {
+    const invocation = pieceCallInvocation(tail);
+    const pieceConfig = parsePieceOptions({
+      ...options,
+      ...(cell !== undefined && { cell }),
+      json: invocation.jsonOutput,
+    });
+    const result = await boundedSettlement(
+      (deps.executePieceCallable ?? executePieceCallable)(
+        pieceConfig,
+        callableName,
+        invocation.rawArgs,
+        {
+          invocation: identity,
+          // The verb help page names the mount that was invoked, so the
+          // blessed spelling never renders usage lines teaching the
+          // deprecated one — and the deprecated mount names itself, beside
+          // its own notice.
+          helpCommandPrefix: cliCommand(
+            [...spelling.split(" "), "...", callableName],
+          ),
+          skipReadback: waitControl.mode === "commit",
+          showLinks: !!options.showLinks,
+          ...(selection === undefined ? {} : { selection }),
+          onPhase: invocationPhaseReporter(
+            identity,
+            observer.onPhase,
+            deps.announce,
+            Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
+          ),
+        },
+      ).catch((error) =>
+        reportVerbInputErrorOrRethrow(
+          error,
+          pieceConfig.piece,
+          dataErrorSinks,
+          observer,
+        )
+      ),
+      waitControl.boundSeconds,
+    );
+    // The bag goes whole, here and at the failure exit below. Re-listing the
+    // fields a callee accepts is a claim about that callee's type which
+    // nothing rechecks when it grows a sink, and a dropped one is invisible:
+    // the default writes to the process and the caller sees no gap.
+    renderPieceCallOutcome(
+      observer,
+      result,
+      callableName,
+      pieceConfig.piece,
+      deps,
+      { detached: waitControl.mode === "commit", invocation: identity },
+    );
+  } catch (error) {
+    if (exitTaken) throw error;
+    exitPieceCallFailure(observer, error, invocationId, phase, deps);
+  }
 }
 
 export async function getCellCfcLabelFromCommand(
@@ -3391,6 +3781,7 @@ export interface SurveyCLIOptions extends BulkSelectionOptions {
 
   /** A plan this survey is reported against rather than emitted beside. */
   diff?: string;
+
   out?: string;
 }
 
@@ -3474,6 +3865,7 @@ export function planDiffConverged(diff: PlanDiff): boolean {
 export interface BulkSelectionOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   path?: string;
   side?: string;
   list?: string[];
@@ -3504,6 +3896,13 @@ export function readBulkSelection(
           throw new ValidationError(
             `A scoped piece cannot be selected for a bulk operation; drop ` +
               `the @scope suffix on ${JSON.stringify(entry)}.`,
+            { exitCode: 1 },
+          );
+        }
+        if (splitArgumentSuffix(entry).input) {
+          throw new ValidationError(
+            `A bulk operation reads whole pieces; drop the #argument suffix ` +
+              `on ${JSON.stringify(entry)}.`,
             { exitCode: 1 },
           );
         }
@@ -3557,6 +3956,19 @@ export function readBulkSelection(
     throw new ValidationError(
       "A scoped piece cannot hold the selected collection; drop the " +
         "@scope suffix.",
+      { exitCode: 1 },
+    );
+  }
+  // The holder is a piece, and `--path` is what names the collection inside
+  // it, so a path on the address has nowhere to go. Refused here rather than
+  // carried, because this is where the selector is built and a path it does
+  // not carry is a path the run would drop. The `--list` branch above refuses
+  // its own entries' paths for the same reason.
+  if (pieceConfig.piecePath?.length) {
+    throw new ValidationError(
+      `A bulk operation reads whole pieces; drop the path on ` +
+        `${JSON.stringify(pieceConfig.piecePath.join("/"))} and name the ` +
+        `collection with --path.`,
       { exitCode: 1 },
     );
   }
@@ -3727,16 +4139,16 @@ export async function repairFromCommand(
     fixerName: options.fixer,
     ...(options.plan === undefined ? {} : { planPath: absPath(options.plan) }),
     ...(options.apply === true ? { apply: true } : {}),
+    onRow: (row: RepairRow) => countApplyRow(progress, row),
   };
   // The repair runs one session rather than the retarget's grouped ones, but
   // it ends the same way: an await that stops settling drains the process at
   // code 0 with the fixer's writes half-made and nothing said about them.
   //
-  // Unwatched, because `repairPieces` reports its rows only in the report it
-  // returns — there is no row callback to hand it. So the guard says the
-  // count is unknown rather than zero: this run's rows really do settle, and
-  // a process that never saw them must not report their absence.
-  const progress = newApplyRunProgress(false);
+  // Watched, through the row reporter `repairPieces` offers: a run that stops
+  // settling can then be described by the rows that did, rather than by an
+  // admission that this process cannot see any.
+  const progress = newApplyRunProgress(true);
   const guard = guardRunReport(
     () => describeUnreportedApplyRun("Repair", progress),
     deps.guard ?? {},
@@ -3751,6 +4163,12 @@ export async function repairFromCommand(
   // As the retarget does: the guard stays armed over the writing of what the
   // engine returned, and says that is where the process ended.
   progress.phase = "reporting";
+  // Before any of the reporting below, which writes files and renders: a
+  // throw there must not swallow the receipt for writes that already landed.
+  // `applied` is the engine's own count of rows it wrote, which settles what
+  // a row's verdict alone cannot — a failed row may have failed at the write,
+  // after it, or before reaching one.
+  if (report.applied > 0) noteWroteTo(spaceConfig.space);
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   if (options.json) {
@@ -3835,6 +4253,7 @@ export async function repairFromCommand(
 export interface RetargetCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   plan: string;
   acceptUnretained?: string[];
   apply?: boolean;
@@ -3992,6 +4411,7 @@ export async function retargetFromCommand(
     report,
     {
       verb: "Retarget",
+      space: spaceConfig.space,
       ...(options.apply === true ? { apply: true } : {}),
       ...(options.out === undefined ? {} : { out: options.out }),
       ...(options.json === true ? { json: true } : {}),
@@ -4012,7 +4432,10 @@ function newApplyRunProgress(observed: boolean): ApplyRunProgress {
 }
 
 /** Count one settled row toward what a process-end report would say. */
-function countApplyRow(progress: ApplyRunProgress, row: ApplyRow): void {
+function countApplyRow(
+  progress: ApplyRunProgress,
+  row: { verdict: string },
+): void {
   progress.verdicts.set(
     row.verdict,
     (progress.verdicts.get(row.verdict) ?? 0) + 1,
@@ -4028,12 +4451,22 @@ function countApplyRow(progress: ApplyRunProgress, row: ApplyRow): void {
  */
 async function reportApplyRun(
   report: ApplyReport,
-  run: { verb: string; apply?: boolean; out?: string; json?: boolean },
+  run: {
+    verb: string;
+    apply?: boolean;
+    out?: string;
+    json?: boolean;
+    space?: string;
+  },
   deps: ApplyCommandDependencies,
   guard?: RunReportGuard,
 ): Promise<void> {
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
+  // A dry run classifies and writes nothing, so the receipt follows the
+  // applied count rather than the flag: an `--apply` over a plan whose rows
+  // have all landed already writes nothing either.
+  if (run.space !== undefined && report.applied > 0) noteWroteTo(run.space);
   // The canonical FabricValue encoding, as the repair's report uses: one
   // encoding for one document, whichever destination it goes to.
   const encoded = jsonFromFabricValue(report as unknown as FabricValue);
@@ -4150,6 +4583,7 @@ async function reportApplyRun(
 export interface RollbackCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   plan: string;
   acceptUnretained?: string[];
   apply?: boolean;
@@ -4236,6 +4670,7 @@ export async function rollbackFromCommand(
     report,
     {
       verb: "Rollback",
+      space: spaceConfig.space,
       ...(options.apply === true ? { apply: true } : {}),
       ...(options.out === undefined ? {} : { out: options.out }),
       ...(options.json === true ? { json: true } : {}),
@@ -4248,6 +4683,7 @@ export async function rollbackFromCommand(
 export interface RestoreCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   revision?: string;
   apply?: boolean;
 }
@@ -4306,6 +4742,9 @@ export async function restoreFromCommand(
     ...(options.revision === undefined ? {} : { revisionId: options.revision }),
     ...(options.apply === true ? { apply: true } : {}),
   });
+  // Before the reporting below, which renders and can exit: a restore that
+  // landed is named whatever happens to the output describing it.
+  if (outcome.restored) noteWroteTo(pieceConfig.space);
   if (options.json) {
     print(outcome, { json: true });
   } else if (options.revision === undefined) {
@@ -4351,6 +4790,44 @@ export async function restoreFromCommand(
   }
 }
 
+export interface NewPieceCommandDependencies {
+  newPiece?: typeof newPiece;
+}
+
+/**
+ * `cf piece new`'s action, as a function a test can call.
+ *
+ * The registration chain around it is not reachable from a test, so an action
+ * left inline is not either — and what this one decides is worth reaching:
+ * which options become the naming request `newPiece` receives, and that the
+ * address it points a reader at is the slug when there is one.
+ */
+export async function newPieceFromCommand(
+  // deno-lint-ignore no-explicit-any
+  options: any,
+  main: string,
+  deps: NewPieceCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const spaceConfig = parseSpaceOptions(options);
+  const pieceId = await (deps.newPiece ?? newPiece)(
+    spaceConfig,
+    localPatternEntry(main, options),
+    {
+      start: options.start,
+      slug: options.slug,
+      force: !!options.force,
+    },
+  );
+  render(pieceId);
+  const browserPieceRef = options.slug ?? pieceId;
+  hint(cliText(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
+  → Update code:     cf piece setsrc --cell ${pieceId} ${main} ...
+  → Test a callable: cf piece call --cell ${pieceId} <callableName> ...
+  → Inspect state:   cf piece inspect --cell ${pieceId} ...`));
+}
+
 export interface SlugListCommandDependencies {
   listSpaceSlugs?: typeof listSpaceSlugs;
   renderSlugSummaries?: typeof renderSlugSummaries;
@@ -4368,6 +4845,12 @@ export async function listSlugsFromCommand(
 
 export interface PieceDescribeCommandDependencies {
   describePiece?: typeof describePiece;
+
+  /** Where the page goes, stdout unless the caller says otherwise. */
+  render?: typeof render;
+
+  /** Where the next steps go, stderr unless the caller says otherwise. */
+  hint?: typeof hint;
 }
 
 /** `cf piece describe`'s action, held apart from the cliffy chain the way
@@ -4377,22 +4860,23 @@ export interface PieceDescribeCommandDependencies {
 export async function describePieceFromCommand(
   options:
     & PieceSummaryCLIOptions
-    & { piece?: string; all?: boolean; quiet?: boolean },
+    & { all?: boolean; quiet?: boolean },
   deps: PieceDescribeCommandDependencies = {},
 ): Promise<void> {
   setQuietMode(!!options.quiet);
   const pieceConfig = parsePieceOptions(options);
+  const print = deps.render ?? render;
   const description = await (deps.describePiece ?? describePiece)(pieceConfig);
   if (options.json) {
-    render(pieceDescribeJson(description, !!options.all), { json: true });
+    print(pieceDescribeJson(description, !!options.all), { json: true });
     return;
   }
   for (const line of pieceDescribeLines(description, !!options.all)) {
-    render(line);
+    print(line);
   }
-  hint(
+  (deps.hint ?? hint)(
     cliText(
-      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
+      `TIP: 'cf piece verbs --cell ${pieceConfig.piece} --json' has each verb's schemas; 'cf piece call --cell ${pieceConfig.piece} <verb> --help' documents one verb.`,
     ),
   );
 }
@@ -4417,6 +4901,16 @@ export async function searchPiecesFromCommand(
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */
 export interface SetPieceSourceCommandDependencies {
   setPiecePattern?: typeof setPiecePattern;
+}
+
+/** Injectable effects for testing the `piece setsrc` action. */
+export interface ApplyPieceSourceCommandDependencies {
+  setPieceSourceFromCommand?: typeof setPieceSourceFromCommand;
+  render?: (message: string) => void;
+  warn?: (message: string) => void;
+  hint?: (message: string) => void;
+  /** Exit-status seam for a committed source whose running refresh failed. */
+  setExitCode?: (code: number) => void;
 }
 
 /** Injectable dependencies for testing `piece setsrc --check`. */
@@ -4455,7 +4949,7 @@ export async function checkPieceSourceFromCommand(
   if (!report.compatible) {
     // A refusal is a data condition — this source and this piece's stored
     // state don't fit — not an arg-parse failure, so it reports like the
-    // `piece get` / `piece link` data errors above: plain stderr and exit 1,
+    // `cf cell get` / `piece link` data errors above: plain stderr and exit 1,
     // never a Cliffy ValidationError, which would dump the usage screen over
     // the verdict.
     exitWithDataError({
@@ -4470,22 +4964,64 @@ export async function checkPieceSourceFromCommand(
   };
 }
 
-/** Apply the parsed `piece setsrc` command while preserving its safety flag. */
+/**
+ * Apply the parsed `piece setsrc` command while preserving its safety flag.
+ *
+ * `update` is the accepted setup transaction's receipt. Its pattern pointer
+ * names what this command committed even when a concurrent command commits a
+ * newer source before this one finishes its post-commit work.
+ */
 export async function setPieceSourceFromCommand(
   options: PieceCLIOptions,
   mainPath: string,
   deps: SetPieceSourceCommandDependencies = {},
-): Promise<PieceConfig> {
-  const pieceConfig = parsePieceOptions(options);
-  await (deps.setPiecePattern ?? setPiecePattern)(
-    pieceConfig,
+): Promise<{
+  config: PieceConfig;
+  update: Awaited<ReturnType<typeof setPiecePattern>>;
+}> {
+  const config = parsePieceOptions(options);
+  const update = await (deps.setPiecePattern ?? setPiecePattern)(
+    config,
     localPatternEntry(mainPath, options),
     {
       dangerouslyAllowIncompatibleSchema:
         options.dangerouslyAllowIncompatibleSchema,
     },
   );
-  return pieceConfig;
+  return { config, update };
+}
+
+/** Applies `piece setsrc` and renders the receipt returned by the commit. */
+export async function applyPieceSourceCommandAction(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: ApplyPieceSourceCommandDependencies = {},
+): Promise<void> {
+  const { config, update } = await (
+    deps.setPieceSourceFromCommand ?? setPieceSourceFromCommand
+  )(options, mainPath);
+  (deps.render ?? render)(setsrcSuccessLine(config, update));
+  const refreshWarning = setsrcRefreshWarning(update);
+  if (refreshWarning !== undefined) {
+    (deps.warn ?? note)(refreshWarning);
+    (deps.hint ?? hint)(cliText(`RECOVERY CHECKS:
+  → Start the piece:  cf piece render --cell ${config.piece} ...
+  → Inspect state:    cf piece inspect --cell ${config.piece} ...
+  → Read saved source: cf piece getsrc --cell ${config.piece} <outpath> ...
+
+The source commit is durable, but this deploy is not healthy until the piece
+starts. The command exits non-zero so scripts cannot mistake the receipt for a
+successful refresh.`));
+    (deps.setExitCode ?? ((code: number) => {
+      Deno.exitCode = code;
+    }))(1);
+    return;
+  }
+  (deps.hint ?? hint)(cliText(`NEXT STEPS:
+  → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}
+  → Test a callable: cf piece call --cell ${config.piece} <callableName> ...
+  → Verify state:    cf cell get --cell ${config.piece} <path> ...
+  → Full inspect:    cf piece inspect --cell ${config.piece} ...`));
 }
 
 /**
@@ -4529,23 +5065,26 @@ export function parsePieceOptions(
   const options = parseSpaceOptions(input);
   if (!("piece" in options) || !options.piece) {
     throw new ValidationError(
-      `Missing required option: "--piece".`,
+      `Missing required option: ${CELL_FLAG}.`,
       { exitCode: 1 },
     );
   }
   const config = options as PieceConfig;
-  if (config.piecePath?.length && !parseOptions?.acceptsPath) {
-    throw new ValidationError(
-      `The piece reference embeds a path ("${
-        config.piecePath.join("/")
-      }") but this command takes a piece id only.`,
-      { exitCode: 1 },
-    );
+  // A slug's path is not refused here: a slug may name a collection, whose
+  // member the path selects, and only resolution can tell. What the walk
+  // leaves is refused there, in these words.
+  if (
+    config.piecePath?.length && !parseOptions?.acceptsPath &&
+    !isSlugAddress(config.piece)
+  ) {
+    throw new ValidationError(pieceIdOnlyPathRefusal(config.piecePath), {
+      exitCode: 1,
+    });
   }
   if (config.pieceInput && !parseOptions?.acceptsArgument) {
     throw new ValidationError(
-      `The piece reference selects the arguments cell ("#argument") but ` +
-        `this command does not take "--input".`,
+      `The target selects the arguments cell ("#argument") but this ` +
+        `command does not take "--input".`,
       { exitCode: 1 },
     );
   }
@@ -4556,27 +5095,29 @@ export function parsePieceOptions(
  * Decide what a read or write command's positionals name: an address, a
  * path, or nothing.
  *
- * The deciding grammar: a positional address is written in the canonical
- * reference form, which begins with `/` (`matchLLMFriendlyLink`), and a
- * relative cell path never does. The bare id, slug, and scoped spellings
- * stay on `--piece`, where no path competes for the position — a slug and a
- * path's first segment are indistinguishable.
+ * The deciding grammar: a positional address is written in the reference
+ * form, which begins with `/` ({@link isReference}), and a relative cell path
+ * never does. The bare id, slug, and scoped spellings stay on the flag, where
+ * no path competes for the position — a bare slug and a path's first segment
+ * are indistinguishable, which is why a slug reaches this position rooted.
  *
- * A caller naming the target twice — `--piece` beside a positional address —
- * is refused rather than resolved, the same rule `--space` beside `--url`
- * follows. So is a second positional behind a path: only an address earns a
+ * A caller naming the target twice — the flag beside a positional address —
+ * is refused rather than resolved, the same rule an explicitly written
+ * `--space` beside `--url` follows. A space that arrived from `CF_SPACE` is
+ * not a second naming and does not refuse; `--url` supplies the space itself.
+ * So is a second positional behind a path refused: only an address earns a
  * path after it.
  */
 export function readTargetPositionals(
-  options: { piece?: string },
+  options: { cell?: string },
   first?: string,
   second?: string,
 ): { address?: string; pathString?: string } {
   if (first === undefined) return {};
-  if (matchLLMFriendlyLink.test(first.trim())) {
-    if (options.piece) {
+  if (isReference(first)) {
+    if (options.cell) {
       throw new ValidationError(
-        `"--piece" cannot be provided when the address is positional.`,
+        `${CELL_FLAG} cannot be provided when the address is positional.`,
         { exitCode: 1 },
       );
     }
@@ -4596,35 +5137,58 @@ export function readTargetPositionals(
 }
 
 /**
- * `cf piece call`'s positional intake: when the first positional is a
- * canonical address it replaces `--piece`, and the callable name follows
- * it. The same `/`-leading grammar decides as in
- * {@link readTargetPositionals}; a bare callable name can never match it.
+ * `cf piece call`'s positional intake: when the first positional is a reference it
+ * replaces the flag, and the callable name follows it.
+ *
+ * The `/`-leading grammar decides, as in {@link readTargetPositionals}, but
+ * what it decides against differs and so the tie-break does too. There the
+ * other reading is a cell path, which never begins with `/`, so a rooted
+ * positional can only be a target and the flag beside it is a target named
+ * twice. Here the other reading is a callable name, and nothing reserves the
+ * shape of one — a verb may be named `/archive`. So the flag disambiguates
+ * rather than collides: written, it names the target and the positional is
+ * the callable, which is the only spelling that reaches a verb whose name
+ * begins with `/`.
  */
 export function readCallTarget(
-  options: { piece?: string },
+  options: { cell?: string },
   callableName: string,
   tail: string[],
-): { piece?: string; callableName: string; tail: string[] } {
-  if (!matchLLMFriendlyLink.test(callableName.trim())) {
+): { cell?: string; callableName: string; tail: string[] } {
+  if (options.cell || !isReference(callableName)) {
     return { callableName, tail };
-  }
-  if (options.piece) {
-    throw new ValidationError(
-      `"--piece" cannot be provided when the address is positional.`,
-      { exitCode: 1 },
-    );
   }
   const [nextCallable, ...rest] = tail;
   if (nextCallable === undefined) {
     throw new ValidationError(
       `Missing argument "callable": the positional address ` +
-        `"${callableName}" replaces "--piece", and the callable name ` +
+        `"${callableName}" replaces ${CELL_FLAG}, and the callable name ` +
         `follows it.`,
       { exitCode: 1 },
     );
   }
-  return { piece: callableName, callableName: nextCallable, tail: rest };
+  return { cell: callableName, callableName: nextCallable, tail: rest };
+}
+
+/**
+ * Was the space written on the command line? `explicit` answers for a caller
+ * driving {@link parseSpaceOptions} directly; otherwise the process arguments
+ * do, which is where the distinction actually lives once cliffy has merged the
+ * environment into the option.
+ */
+export function spaceWasWritten(
+  explicit?: boolean,
+  argv: readonly string[] = Deno.args,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  // Only the command's own section counts. `--` hands everything after it to
+  // a callable, where `--space` is that verb's argument and says nothing
+  // about which space the command targets.
+  const end = argv.indexOf("--");
+  const own = end === -1 ? argv : argv.slice(0, end);
+  return own.some((arg) =>
+    arg === "--space" || arg === "-s" || arg.startsWith("--space=")
+  );
 }
 
 // With args and env vars shadowing each other, and multiple
@@ -4632,18 +5196,31 @@ export function readCallTarget(
 // "required" with cliffy. Ensure that all required values are
 // available after parsing both args and env vars.
 //
-// The space can arrive three ways: `--url` embeds it, `--space` names it, and
-// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
-// reference's space fills an absent `--space`; a present one must agree —
-// checked at parse time when the target space is a DID, and at session open
-// through `validateEmbeddedSpaces` when it is a name still to be resolved.
-// The piece arrives through `--piece` (or the positional address it carries)
-// or inside the `--url`: a URL that names one excludes the flag, and a
-// piece-less URL composes with it.
+// The space can arrive four ways: `--url` carries it, `--space` names it,
+// `CF_SPACE` supplies it when the flag is absent, and a reference may carry it
+// as a `/@<space>/` prefix. Only a written `--space` refuses `--url`; an
+// ambient one yields to the space the URL carries. A reference's space fills an
+// absent `--space`; a present one must agree — checked at parse time when the
+// two are written the same way, and at session open through
+// `validateEmbeddedSpaces` when only a derivation can compare them. The cell
+// arrives through the flag (or the positional address it carries) or inside
+// the `--url`: a URL that names a piece excludes the flag, and a piece-less URL
+// composes with it.
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
-  if (input.url && input.space) {
+  // The refusal is about two explicit spellings of one target, not about an
+  // ambient default a more specific spelling overrides: a caller who exports
+  // `CF_SPACE` for a session must still be able to paste a URL. `--url`
+  // supplies the space itself below, so the ambient value is replaced rather
+  // than reconciled.
+  //
+  // Cliffy merges an environment value into the option and keeps no record of
+  // which it was, so provenance is read off the command line. Comparing the
+  // value against `CF_SPACE` instead would call an explicit `--space` ambient
+  // whenever it happened to name the same space, which is the one case where
+  // a caller stated the target twice and deserves the refusal.
+  if (input.url && input.space && spaceWasWritten(input.explicitSpace)) {
     throw new ValidationError(
       `"--space" cannot be provided when using "--url".`,
       { exitCode: 1 },
@@ -4662,39 +5239,39 @@ export function parseSpaceOptions(
   };
   if (input.json) output.jsonOutput = true;
 
-  // The space the piece reference below is checked against: `--space`, or
-  // the space a `--url` embeds.
+  // The space the reference below is checked against: `--space`, or the space
+  // a `--url` carries.
   let targetSpace = input.space;
+  // The reference the command targets, from whichever spelling wrote one.
+  let cell = input.cell;
 
   if (input.url) {
-    const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);
-    output.apiUrl = apiUrl;
-    output.space = space;
-    targetSpace = space;
-    if (piece) {
-      // Two pieces named at once is refused rather than resolved, the same
-      // rule "--space" beside "--url" follows: silently preferring either
-      // one is how a caller reads a target they did not name. `input.piece`
-      // may carry a positional address, so the message names both spellings.
-      if (input.piece) {
+    const decomposed = decomposeUrl(input.url);
+    output.apiUrl = decomposed.apiUrl;
+    output.space = decomposed.space;
+    targetSpace = decomposed.space;
+    if (decomposed.reference !== undefined) {
+      // Two targets named at once is refused rather than resolved, the same
+      // rule "--space" beside "--url" follows: silently preferring either one
+      // is how a caller reads a target they did not name. The flag may carry
+      // a positional address, so the message names that spelling too.
+      if (input.cell) {
         throw new ValidationError(
-          `A piece reference ("--piece" or a positional address) cannot ` +
+          `A cell reference (${CELL_FLAG} or a positional address) cannot ` +
             `be provided when the "--url" names a piece.`,
           { exitCode: 1 },
         );
       }
-      output.piece = piece;
-      if (pieceScope) output.pieceScope = pieceScope;
-      return output as PieceConfig;
+      cell = decomposed.reference;
     }
-    // A piece-less URL supplies the host and space; the piece may still
-    // arrive through "--piece" (or the positional address it carries).
+    // A piece-less URL supplies the host and space; the cell may still
+    // arrive through the flag (or the positional address it carries).
   }
 
-  if (input.piece) {
-    // Do not validate here -- piece is only
+  if (cell) {
+    // Do not validate here -- the target is only
     // required via `parsePieceOptions`
-    const llmRef = normalizeLLMFriendlyRef(input.piece, {
+    const llmRef = normalizeLLMFriendlyRef(cell, {
       space: targetSpace,
     });
     if (llmRef) {
@@ -4707,16 +5284,12 @@ export function parseSpaceOptions(
         if (!targetSpace) output.space = llmRef.embeddedSpace;
       }
     } else {
-      // The alias grammar has no fragments, and letting one through would
-      // bury the suffix inside the id and fail as an unknown piece later.
-      if (input.piece.includes("#")) {
-        throw new ValidationError(
-          `The "#argument" suffix rides the canonical reference form ` +
-            `(/of:fid1:...#argument), not the bare piece id.`,
-          { exitCode: 1 },
-        );
-      }
-      const parsedPiece = parseScopedId(input.piece);
+      // A bare id and a slug designate the piece a reference designates, so
+      // the suffix means the same on them. It comes off first: left on, it
+      // sits inside the id and surfaces as an unknown piece.
+      const bare = splitArgumentSuffix(cell);
+      if (bare.input) output.pieceInput = true;
+      const parsedPiece = parseScopedId(bare.target);
       output.piece = parsedPiece.id;
       if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
     }
@@ -4760,7 +5333,7 @@ function collectEmbeddedSpace(
 
 /**
  * The full path a piece data command addresses: any path embedded in an
- * LLM-friendly `--piece` reference, followed by the positional path argument.
+ * LLM-friendly `--cell` reference, followed by the positional path argument.
  */
 export function mergePiecePath(
   pieceConfig: PieceConfig,
@@ -4797,6 +5370,25 @@ export function parseLink(
     };
   }
 
+  // The bare spelling reaches the same refusal, so the suffix is turned down
+  // wherever it is written rather than buried in an id nothing resolves.
+  //
+  // This suffix and no other fragment, which is why the test is `endsWith`
+  // rather than the shared reader: a bare endpoint carries its path in the
+  // same word and has no positional path to fall back on, so a `#` elsewhere
+  // in one is part of the key it sits in and stays readable. A reference
+  // endpoint is already past `normalizeLLMFriendlyRef`, which reserves `#`
+  // outright, so the two spellings differ here on purpose. What holds this
+  // apart from the shared reader is one case in
+  // `packages/cli/test/piece.test.ts`, "parseLink() keeps a `#` inside a bare
+  // endpoint's path key".
+  if (ref.endsWith("#argument")) {
+    throw new ValidationError(
+      `The "#argument" suffix does not apply to a link endpoint.`,
+      { exitCode: 1 },
+    );
+  }
+
   const parts = ref.split("/");
   if (parts.length < 1) {
     throw new ValidationError(
@@ -4822,9 +5414,52 @@ export function parseLink(
   };
 }
 
-function parseUrl(
+/** A URL segment with its percent-encoding removed. */
+function decodeUrlSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new ValidationError(
+      `"--url" segment "${segment}" is not valid percent-encoding.`,
+      { exitCode: 1 },
+    );
+  }
+}
+
+/**
+ * A URL path segment as the cell key it stands for.
+ *
+ * Two encodings sit on one segment and both have to come off. A URL escapes
+ * with percent-encoding; a path within a cell is a JSON Pointer, which
+ * `createLLMFriendlyLink` writes and which escapes `/` as `~1` and `~` as
+ * `~0` — so a key holding either arrives doubly escaped, and a segment taken
+ * verbatim names a key nothing has. This is the reading `parseFabricUrl`
+ * already gives a page URL of this shape.
+ */
+function decodeUrlPathSegment(segment: string): string {
+  return decodeUrlSegment(segment)
+    .replace(/~1/g, "/")
+    .replace(/~0/g, "~");
+}
+
+/**
+ * Take a `--url` apart into the two things it carries: the transport it
+ * names, and the reference it carries.
+ *
+ * A browser URL puts a host in front of a target, which conflates the two —
+ * the same space and piece are the same space and piece whichever host serves
+ * them, and `--api-url` is what names the host. So `--url` is a convenience
+ * for pasting rather than a spelling of its own: what it means is an
+ * `--api-url` and a reference, and both are read on from here exactly as if
+ * they had been written.
+ *
+ * `reference` is absent for a URL naming only a space, which names no cell.
+ * Segments past the piece are its path, which is the reading
+ * `parseFabricUrl` already gives a page URL of this shape.
+ */
+function decomposeUrl(
   input: string,
-): { apiUrl: string; space: string; piece?: string; pieceScope?: CellScope } {
+): { apiUrl: string; space: string; reference?: string } {
   let url;
   try {
     url = new URL(input);
@@ -4835,20 +5470,37 @@ function parseUrl(
     );
   }
   const apiUrl = `${url.protocol}//${url.host}`;
-  const [space, piece] = url.pathname.split("/").filter(Boolean);
+  const segments = url.pathname.split("/").filter(Boolean);
+  const space = segments[0] === undefined
+    ? undefined
+    : decodeUrlSegment(segments[0]);
   if (!space) {
     throw new ValidationError(
       `"--url" does not contain a space.`,
       { exitCode: 1 },
     );
   }
-  if (!piece) return { apiUrl, space };
-  const parsedPiece = parseScopedId(piece);
+  if (segments.length === 1) return { apiUrl, space };
+  // The space and the piece are words, not paths, so only percent-encoding
+  // sits on them; everything after the piece is a cell path and carries the
+  // JSON Pointer escaping too.
+  const piece = decodeUrlSegment(segments[1]);
+  const path = segments.slice(2).map(decodeUrlPathSegment);
+  // `#` is what closes a reference, so a part holding one cannot be written
+  // into the reference this decomposes to. Refused rather than folded in:
+  // read as the suffix, it would silently address the arguments cell.
+  const holdsHash = [space, piece, ...path].find((part) => part.includes("#"));
+  if (holdsHash !== undefined) {
+    throw new ValidationError(
+      `The "--url" names "${holdsHash}", and "#" closes a reference, so it ` +
+        `cannot ride one. Write the path as an argument instead.`,
+      { exitCode: 1 },
+    );
+  }
   return {
     apiUrl,
     space,
-    piece: parsedPiece.id,
-    ...(parsedPiece.scope && { pieceScope: parsedPiece.scope }),
+    reference: encodeJsonPointer(["", `@${space}`, piece, ...path]),
   };
 }
 

@@ -32,10 +32,22 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
+import type { Signer, URI } from "@commonfabric/memory/interface";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  type ServerMessage,
+  type SessionSync,
+} from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { SessionFactory, SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
+import { collectExternalSchemaRefHashes } from "../src/schema-decompose.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -59,7 +71,8 @@ import {
   getPatternSource,
   resolveEntryIdentity,
 } from "../src/index.ts";
-import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space root ensure space");
 const space = spaceSigner.did() as MemorySpace;
@@ -82,19 +95,113 @@ function rootSource(marker: string): string {
   ].join("\n");
 }
 
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
+/**
+ * A loopback session factory whose frames reach the client with every `cid:`
+ * upsert dropped, the absorb defect placed at the wire: the replica applies
+ * exactly the frames a defective client would hand it. Counts what it
+ * dropped and records the ids of the documents it let through whose link
+ * schemas reference a `cid:` schema document — the delivery obligation the
+ * replica's arrival validation holds each one to, which the dropped
+ * schema leaves unmet.
+ */
+class CidDroppingSessionFactory implements SessionFactory {
+  droppedCids = 0;
+  readonly cidMentioningIds = new Set<string>();
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
   }
-};
+
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions: MemoryV2Client.MountOptions = {},
+  ) {
+    const client = await MemoryV2Client.connect({
+      transport: this.#transport(),
+    });
+    const session = await client.mount(
+      space,
+      mountOptions,
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {
+          principal: signer?.did(),
+        },
+      }),
+    );
+    return { client, session };
+  }
+
+  /**
+   * The real loopback, with each frame decoded, filtered, and re-encoded on
+   * its way to the client, so the client keeps loopback's one-frame-per-turn
+   * delivery and sees only what the filter lets through.
+   */
+  #transport(): MemoryV2Client.Transport {
+    const inner = MemoryV2Client.loopback(this.#getServer());
+    return {
+      ...inner,
+      setReceiver: (next) =>
+        inner.setReceiver((payload) =>
+          next(
+            encodeMemoryBoundary(
+              this.#filter(
+                decodeMemoryBoundary(payload) as unknown as ServerMessage,
+              ) as unknown as FabricValue,
+            ),
+          )
+        ),
+    };
+  }
+
+  #filter(message: ServerMessage): ServerMessage {
+    const frame = message as ServerMessage & {
+      effect?: SessionSync;
+      ok?: { sync?: SessionSync };
+    };
+    if (frame.type === "session/effect" && frame.effect?.type === "sync") {
+      return {
+        ...(frame as object),
+        effect: this.#filterSync(frame.effect),
+      } as unknown as ServerMessage;
+    }
+    if (frame.type === "response" && frame.ok?.sync?.type === "sync") {
+      return {
+        ...(frame as object),
+        ok: { ...(frame.ok as object), sync: this.#filterSync(frame.ok.sync) },
+      } as unknown as ServerMessage;
+    }
+    return message;
+  }
+
+  #filterSync(sync: SessionSync): SessionSync {
+    const kept = sync.upserts.filter((upsert) => {
+      if (upsert.id.startsWith("cid:")) {
+        this.droppedCids += 1;
+        return false;
+      }
+      if (upsert.doc !== undefined && upsert.doc !== null) {
+        // The validator's own predicate: a `cid:` reference in a link-schema
+        // position is an obligation; one in plain data is not.
+        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
+          if (collectExternalSchemaRefHashes(schema as JSONSchema).size > 0) {
+            this.cidMentioningIds.add(upsert.id);
+          }
+          return schema;
+        });
+      }
+      return true;
+    });
+    return kept.length === sync.upserts.length
+      ? sync
+      : { ...sync, upserts: kept };
+  }
+}
 
 describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   let server: MemoryV2Server.Server;
@@ -365,7 +472,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // THE CRASH CLASS'S ACTUAL SEAM: the subscription is registered
     // BEFORE the ensure activates, so the mention-carrying frames
     // arrive as server pushes through the BACKGROUND consume path
-    // (`consumeUpdates` → `applySessionSync`) — where the
+    // (`consumeUpdates` → `#applySessionSync()`) — where the
     // pre-containment validator throw was an unhandled rejection that
     // killed the consuming worker (the OW61 board's kill mode; the
     // round-3 review's R2: routed through the request-shaped pull
@@ -376,39 +483,26 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await seedAcl({ [space]: "OWNER" });
     const created = newSpaceServer();
 
-    const reader = clientRuntime(readerSigner);
-    // The simulated absorb defect: DROP every cid: upsert before the
-    // frame applies. Installed on the reader's replica before its
-    // space-cell subscription (the suite's established instance-patch
-    // seam).
-    const replica = (reader.storageManager.open(space) as unknown as {
-      replica: {
-        applySessionSync(sync: unknown, type: string): void;
-        getDocument(uri: string): unknown;
-      };
-    }).replica;
-    let droppedCids = 0;
-    const computedSeen = new Set<string>();
-    const originalApply = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = (sync: unknown, type: string) => {
-      const frame = sync as { upserts?: Array<{ id?: unknown }> };
-      const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
-      const kept = upserts.filter((upsert) => {
-        if (typeof upsert?.id !== "string") return true;
-        if (upsert.id.startsWith("computed:")) computedSeen.add(upsert.id);
-        if (upsert.id.startsWith("cid:")) {
-          droppedCids += 1;
-          return false;
-        }
-        return true;
-      });
-      return originalApply(
-        kept.length === upserts.length
-          ? sync
-          : { ...(sync as object), upserts: kept },
-        type,
-      );
-    };
+    // The simulated absorb defect: every cid: upsert is DROPPED at the
+    // wire, before the reader's replica sees the frame, so the replica
+    // applies exactly what a defective client would hand it.
+    const dropping = new CidDroppingSessionFactory(() => server);
+    const readerManager = TestStorageManager.create({
+      as: readerSigner,
+      memoryHost: new URL("memory://"),
+    }, dropping);
+    const reader = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: readerManager,
+      fetch: fetchStub,
+    });
+    cleanups.push(async () => {
+      await reader.dispose();
+      await readerManager.close();
+    });
+    const replica = readerManager.open(space).replica as SpaceReplica;
+    const droppedCids = () => dropping.droppedCids;
+    const cidMentioningIds = dropping.cidMentioningIds;
 
     // Subscribe FIRST (this starts the background consumer), activate
     // SECOND: everything the ensure materializes reaches this replica
@@ -425,15 +519,17 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await liveness.sync();
     expect(await created.activate()).toBe(true);
 
-    // Producer sanity: the ensure's computed cells DID ride the plain
-    // subscription as pushes, and the simulated defect DID drop cid
-    // deliveries — without both, this pin is vacuously green.
+    // Producer sanity: a document mentioning a cid DID ride the plain
+    // subscription as a push, and the simulated defect DID drop cid
+    // deliveries — without both, this pin is vacuously green. Which
+    // documents ride is the query walk's policy, not this pin's: it needs
+    // one that mentions a cid, whichever that is.
     await waitUntil(
-      () => computedSeen.size > 0,
-      "the ensured root's computed cell riding the plain subscription",
+      () => cidMentioningIds.size > 0,
+      "a cid-mentioning document riding the plain subscription",
     );
     await waitUntil(
-      () => droppedCids > 0,
+      () => droppedCids() > 0,
       "the simulated absorb defect dropping a cid delivery",
     );
     await waitUntil(
@@ -443,17 +539,17 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
 
     // THE PIN, half one — the consumer SURVIVED the violating push
     // frames (pre-containment: unhandled rejection in consumeUpdates,
-    // nothing after this point runs) and the mention-carrying computed
-    // doc is QUARANTINED, not applied: fail-closed for the doc.
+    // nothing after this point runs) and a mention-carrying doc is
+    // QUARANTINED, not applied: fail-closed for the doc.
     let quarantinedId: string | undefined;
     await waitUntil(
       () => {
-        quarantinedId = [...computedSeen].find((id) =>
-          replica.getDocument(id) === undefined
+        quarantinedId = [...cidMentioningIds].find((id) =>
+          replica.getDocument(id as URI) === undefined
         );
         return quarantinedId !== undefined;
       },
-      "a cid-mentioning computed doc held in quarantine (not applied)",
+      "a cid-mentioning doc held in quarantine (not applied)",
     );
 
     // Half two — the CONSUMER LOOP IS ALIVE, proven by delivery: a
@@ -520,7 +616,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // The request path exercised the exact quarantined doc, and the
     // quarantine held through it (its cid rode the response and was
     // dropped by the simulated defect again).
-    expect(replica.getDocument(quarantinedId!)).toBeUndefined();
+    expect(replica.getDocument(quarantinedId! as URI)).toBeUndefined();
     const witness = reader.getCell<{ n?: number }>(
       space,
       "ow61-containment-witness",
@@ -698,7 +794,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // report): production spaces always get a default pattern, but
     // tests may switch the tenure's ensure OFF — the CI ON lanes'
     // fixture clients hold space-cell subscriptions that receive the
-    // ensured root's computed cells with unverified cid: schema refs
+    // ensured root's documents, unverified cid: schema refs included
     // (the broken-schema-ref uncaught class that redded the board).
     // OFF must mean fully inert: nothing armed, nothing skipped,
     // nothing counted — and the ACL-arrival re-arm must not resurrect

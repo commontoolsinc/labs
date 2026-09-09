@@ -4,7 +4,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { type Pattern } from "../builder/types.ts";
 import { type AddCancel } from "../cancel.ts";
 import { type Cell } from "../cell.ts";
-import { resolveLink } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
@@ -19,25 +18,21 @@ import {
   listElementKeys,
   releaseRemovedElements,
 } from "./list-element-keys.ts";
-import { listElementLink } from "./list-element-link.ts";
+import {
+  listCoordinatorPlan,
+  listElementResultCell,
+} from "./list-coordinator-plan.ts";
 import {
   type ElementRun,
   type SetupRecord,
   trackListSetupRollback,
 } from "./list-element-rollback.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
-import { listResultSchema } from "./list-result-schema.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { resumeSettleRunKind } from "./resume-republish.ts";
-import {
-  exposedResultCell,
-  outputSpotFromBinding,
-  scopedCell,
-} from "./scope-policy.ts";
+import { exposedResultCell } from "./scope-policy.ts";
 
-const MAP_INPUT_SCHEMA = internSchema({
+export const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
     // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
@@ -202,79 +197,31 @@ export function map(
     // has been processed (below), so a transient empty first reconcile doesn't
     // burn it.
     const elementAwaitSync = resumeBatchAwaitSync;
-    const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
-    const op = mappedInputs.key("op").get();
-    const sourceListCell = inputsCell.key("list");
-    const listTarget = resolveLink(
+    // The identity-bearing prefix — op, list materialization, scope, the
+    // result container — is the plan the resume pre-sync shares, naming the
+    // children this reconcile runs before the parent instantiates; its
+    // reads and their rationale live in list-coordinator-plan.ts.
+    const plan = listCoordinatorPlan(
       runtime,
       tx,
-      sourceListCell.getAsNormalizedFullLink(),
-      "writeRedirect",
+      "map",
+      inputsCell,
+      MAP_INPUT_SCHEMA,
+      parentCell,
+      outputBinding,
     );
-    const listScope = listTarget.scope;
-    // `array` callback arguments should observe the actual list entity, not the
-    // alias/boxed reference used to pass that list into the builtin.
-    const listCell = sourceListCell.withTx(tx).resolveAsCell();
-    // Identity-only list materialization: read the raw slots (journals the
-    // list-doc read for reactivity and label flow — membership/order ARE
-    // the list's content) and build element cells from the slot links
-    // directly. The asCell traversal here used to dereference each slot's
-    // target ("arrays dereference one more link"), journaling a content
-    // read of every element doc the coordinator never consumes — under
-    // flow labels (S16) that joined every element's label into the
-    // coordinator's J and smeared it across sibling scaffolding.
-    // resolveLink's probes belong to the dereferences it records, so flow
-    // derivation treats them as resolution machinery, not followRef
-    // observations (observation classes C1); no element value is loaded at
-    // all.
-    const rawList = listCell.withTx(tx).getRaw() as unknown;
-    const listBase = listCell.getAsNormalizedFullLink();
-    const list: Cell<any>[] | undefined = rawList === undefined
-      ? undefined
-      : !Array.isArray(rawList)
-      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
-      : rawList.map((slot, i) => {
-        const slotLink = listElementLink(listBase, slot, i);
-        const resolved = resolveLink(runtime, tx, slotLink, "value");
-        return runtime.getCellFromLink(resolved, undefined, tx);
-      });
-    // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern. The raw value is either a compact
-    // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
-    // identity) or, on the legacy path, the embedded pattern graph itself.
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map", inputsCell);
-    const argumentUsage = inferListOpArgumentUsage(opPattern);
+    const { opPattern, argumentUsage, listCell, list } = plan;
+    const listScope = plan.scope;
 
     // Whether this reconcile issues the container's links: a container it
     // mints needs them, and one whose last issuance did not commit owes them.
     let issueLinks = containerSetup.needsSetup;
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const previousResult = result;
-      const resultSchema = listResultSchema(opPattern.resultSchema);
-      // CT-1623: identify the result container by the reserved output spot —
-      // the fully-resolved write-redirect target the runner supplies as the
-      // `outputBinding`. It is a stable, position-derived, program-independent
-      // identity, unlike the serialized `op` / inputs, both of which drag in the
-      // session-varying `program` and force the container id (and every per-row
-      // id derived from it) to churn across reloads. A `map` node always writes
-      // through a write redirect, so the absence of an output spot is a bug.
-      const outputSpot = outputSpotFromBinding(outputBinding);
-      if (!outputSpot) {
-        throw new Error(
-          "map: result container requires a write-redirect output binding",
-        );
-      }
-      const baseResult = runtime.getCell<any[]>(
-        parentCell.space,
-        { map: parentCell.entityId, outputSpot },
-        resultSchema,
-        tx,
-      );
-      const boundResult = scopedCell(runtime, tx, baseResult, listScope);
       // The container outlives this reconcile's transaction; a cell bound to
       // it would pin the settled transaction and its journal for the life of
       // the coordinator. Rebind per use instead.
-      result = boundResult.withTx();
+      result = plan.container.withTx();
       const installedResult = result;
       // Give back only what this reconcile installed. An overlapping reconcile
       // that has already replaced the container owns it, and its bookkeeping
@@ -446,11 +393,12 @@ export function map(
         if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
         newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
       } else {
-        const boundResultCell = runtime.getCell(
-          parentCell.space,
-          { map: result, elementKey },
-          undefined,
+        const boundResultCell = listElementResultCell(
+          runtime,
           tx,
+          "map",
+          result,
+          elementKey,
         );
         // The stored cell outlives this reconcile's transaction: it lives in
         // `elementRuns` and in the cancel closure below, both of which last as

@@ -29,6 +29,7 @@ const space = signer.did();
 
 describe("stale linked read across two clients", () => {
   // Two StorageManagers sharing ONE real server, each with its own replicas.
+
   let server: MemoryV2Server.Server;
   let storageA: EmulatedStorageManager;
   let storageB: EmulatedStorageManager;

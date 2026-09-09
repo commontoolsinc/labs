@@ -72,61 +72,6 @@ export const TEXTURE_WIDTH = 8;
 // blue wherever it appears.
 export const RUNNING_COLOR = "#6ea8fe";
 
-// The flat surface a status tints: the tile itself, and the rows of the
-// drill-down pages that wear a status the same way.
-export const TILE_BASE = "#16181d";
-export const LIGHT_TILE_BASE = "#ffffff";
-
-function channels(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function hex(channels: readonly number[]): string {
-  return `#${
-    channels.map((c) => Math.round(c).toString(16).padStart(2, "0")).join("")
-  }`;
-}
-
-// How much darker than its tile a sparkline's fade sits.
-const FADE_DEPTH = 0.6;
-
-/** The shade a sparkline fades up out of, on a tile of the given status. */
-function fadeUnder(status: Status, tileBase: string, depth: number): string {
-  const base = channels(tileBase);
-  const tint = channels(STATUS_COLOR[status]);
-  return hex(
-    base.map((b, i) => (b + (tint[i] - b) * STATUS_WASH[status]) * depth),
-  );
-}
-
-// The left edge of a sparkline's fade gradient, a shade below the tile's own
-// background so the line fades up out of it. Worked out from the status color
-// and the tile's wash rather than written down beside them, so a change to
-// either carries here on its own.
-export const SPARK_FADE: Record<Status, string> = {
-  good: fadeUnder("good", TILE_BASE, FADE_DEPTH),
-  warn: fadeUnder("warn", TILE_BASE, FADE_DEPTH),
-  bad: fadeUnder("bad", TILE_BASE, FADE_DEPTH),
-  unknown: fadeUnder("unknown", TILE_BASE, FADE_DEPTH),
-};
-
-// On a light tile the line can disappear into the tile's own tinted surface.
-// The CSS theme chooses between these shades and the dark ones above.
-export const LIGHT_SPARK_FADE: Record<Status, string> = {
-  good: fadeUnder("good", LIGHT_TILE_BASE, 1),
-  warn: fadeUnder("warn", LIGHT_TILE_BASE, 1),
-  bad: fadeUnder("bad", LIGHT_TILE_BASE, 1),
-  unknown: fadeUnder("unknown", LIGHT_TILE_BASE, 1),
-};
-
-export const SPARK_FADE_CSS: Record<Status, string> = {
-  good: "var(--spark-fade-good)",
-  warn: "var(--spark-fade-warn)",
-  bad: "var(--spark-fade-bad)",
-  unknown: "var(--spark-fade-unknown)",
-};
-
 /** A `#rrggbb` color as a CSS `rgba()` at the given alpha. */
 export function rgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);

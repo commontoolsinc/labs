@@ -154,9 +154,12 @@ export class FileSystemProgramResolver implements ProgramResolver {
     });
   }
 
-  // Async so that a refusal — an escaping name, bytes that are not text —
-  // arrives as a rejection. A method that returns a promise and also throws
-  // where it is called cannot be handled one way.
+  /**
+   * Reads the data file `name` from the file system. Async so that a refusal
+   * — an escaping name, bytes that are not text — arrives as a rejection. A
+   * method that returns a promise and also throws where it is called cannot be
+   * handled one way.
+   */
   async resolveDataFile(name: string): Promise<Source | undefined> {
     requireDeno("FileSystemProgramResolver");
     let realPath: string | undefined;

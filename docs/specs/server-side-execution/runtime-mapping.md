@@ -75,7 +75,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 30 | `setup` / `start` / `run` / `runSynced`: argument staging, setup state, node instantiation | `runner.ts:1077`, `1941`, `2950`, `3052`, `startCore` `runner.ts:2037-2530` | serving-loop §3 (hosted runtime) | COVERED |
+| 30 | `setup` / `start` / `run` / `runSynced`: argument staging, setup state, node instantiation | `runner.ts:1077`, `1941`, `2950`, `3052`, `Runner.#startCore()` | serving-loop §3 (hosted runtime) | COVERED |
 | 31 | Who starts pieces: shell navigation, `ensurePieceRunning` on event, CLI, roots at bootstrap | `ensure-piece-running.ts:97`, `runner.ts:2343-2530` | serving-loop §1 (no piece-start policy; demand-driven pull) | RULED |
 | 32 | `stop` / `stopAll`: cancel groups, start-generation tombstones, lifecycle epochs | `runner.ts:3807-3852`, `3926-3956`, `2056-2077` | serving-loop §1 (park = dispose) | COVERED |
 | 33 | Child pieces from list coordinators (map/filter/flatMap): per-element `runner.run`, identity reuse, release-on-removal, `resumeMode: "always-run"` | `builtins/map.ts:344-412`, release `builtins/list-element-keys.ts:38-59`, registration `scheduler/facade.ts:316-322` | builtins §1 (listed as pure) | CHANGED |
@@ -279,7 +279,13 @@ the verb contract reads a handling's result back by receipt address
 (`tx.handlingReceiptLink`, `runner.ts:4767-4780`,
 `plainResultReceipts`) — events.md is silent on result readback for
 CLI/agent ingress; carry receipts as a value surface or re-spec the
-verb contract. Flag as a Phase 3 decision.
+verb contract. ~~Flag as a Phase 3 decision.~~ **(b) RULED 2026-08-29
+(owner: serving-side receipt/result write): receipts are carried as a
+value surface — the SERVING side writes every handling's receipt (the
+`{}` witness included) in the handler run's own wave, at the same
+cause-derived address, write-once by CAS (lost CAS = loud no-op); the
+readback contract is unchanged. Normative text: events.md §4 "Result
+carriage".**
 
 **N27 (lineage).** Client-side under the flag, lineage's job — drop
 descendants of a failed speculative commit — is absorbed by the

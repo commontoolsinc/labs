@@ -7,7 +7,9 @@
  * extrapolated one (04-protocol.md §4.1.2; `SpaceReplica.holdings`;
  * 09-invariants.md INV-14).
  */
+
 import { assert } from "@std/assert";
+
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -73,7 +75,11 @@ class DroppableTransport implements MemoryV2Client.Transport {
   #sessionId: string | null = null;
   #serverSeq = 0;
 
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   /** Hands the client a crafted fan-out frame, as though the server had
    * pushed it: the way a test reaches frame shapes — a foreign branch, an
@@ -121,11 +127,11 @@ class DroppableTransport implements MemoryV2Client.Transport {
     if (message.type === "transact" && this.#verdictWaiting !== null) {
       this.#transactRequestId = message.requestId ?? null;
     }
-    await this.connection().receive(payload);
+    await this.#openConnection().receive(payload);
   }
 
   close(): Promise<void> {
-    this.drop();
+    this.#drop();
     return Promise.resolve();
   }
 
@@ -144,19 +150,19 @@ class DroppableTransport implements MemoryV2Client.Transport {
     const waiting = defer<SessionHolding[]>();
     this.#waiting = waiting;
     this.dropEffects = false;
-    this.drop();
+    this.#drop();
     return waiting.promise;
   }
 
-  private drop(): void {
+  #drop(): void {
     this.#connection?.close();
     this.#connection = null;
     queueMicrotask(() => this.#closeReceiver(new Error("disconnect")));
   }
 
-  private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
+  #openConnection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
-      this.#connection = this.server.connect((message) => {
+      this.#connection = this.#server.connect((message) => {
         const framed = message as {
           type?: string;
           requestId?: string;

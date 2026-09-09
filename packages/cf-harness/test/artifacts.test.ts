@@ -1,3 +1,5 @@
+import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
@@ -188,6 +190,8 @@ Deno.test({
           { stdout: "hello\n", stderr: "", exitCode: 0 },
         ]),
         runId: "run-artifacts",
+        // The persisted run state and the invocation context beside it are both
+        // asserted to record this rung.
         cfcEnforcementMode: "observe",
         now: (() => {
           const timestamps = [
@@ -234,11 +238,9 @@ Deno.test({
       );
       assertEquals(persistedState, {
         runId: "run-artifacts",
-        status: "completed",
+        status: "pending",
         createdAt: "2026-04-15T21:00:00.000Z",
         updatedAt: "2026-04-15T21:00:05.000Z",
-        endedAt: "2026-04-15T21:00:05.000Z",
-        terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
         modelProvider: "openai-compatible-gateway",
         modelAuthSource: "api-key",
@@ -247,7 +249,7 @@ Deno.test({
           version: 1,
           sequence: 1,
           runId: "run-artifacts",
-          createdAt: "2026-04-15T21:00:04.000Z",
+          createdAt: "2026-04-15T21:00:03.000Z",
           toolId: "bash",
           toolOutputId: createToolOutputId("run-artifacts", "bash", 1),
           operation: "shell",
@@ -264,6 +266,12 @@ Deno.test({
           },
         }],
         currentDir: "/workspace",
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record",
+          source: "checkout-default",
+          roots: checkoutDocsCorpusRoots(),
+        },
+        skillsRoot: resolveHarnessSkillsRoot(),
         artifactRoot: runRoot,
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
@@ -430,6 +438,10 @@ Deno.test({
           runId: "run-loop-persisted",
           model: "gpt-5.4",
           skillsRoot: fixture.skillsRoot,
+          // The policy-snapshot comparison below reads this rung and its
+          // source back, and the run reads a file, which a rung above this
+          // one refuses without direct-command authorization.
+          cfcEnforcementMode: "enforce-explicit",
           now: (() => {
             const timestamps = [
               "2026-04-15T21:10:00.000Z",
@@ -539,8 +551,8 @@ Deno.test({
       );
       assertEquals(persistedPolicySnapshot.cfc, {
         enforcementMode: "enforce-explicit",
-        enforcementModeSource: "default",
-        absenceBehavior: "permissive-if-absent",
+        enforcementModeSource: "explicit-config",
+        absenceBehavior: "fail-closed-if-absent",
         substrateStatus: "not-attested",
       });
       assertEquals(persistedPolicySnapshot.runManifest, { present: false });
@@ -559,6 +571,7 @@ Deno.test({
           "write_file",
           "delegate_task",
           "describe_handle",
+          "query_docs",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
@@ -588,6 +601,8 @@ Deno.test({
         allowed: 1,
         warned: 0,
         denied: 0,
+        invalid: 0,
+        withheld: 0,
       });
       assertEquals(persistedPolicyTrace.decisions[0], {
         type: "cf-harness.policy-decision",
@@ -639,6 +654,8 @@ Deno.test({
         allowed: 1,
         warned: 0,
         denied: 0,
+        invalid: 0,
+        withheld: 0,
       });
       assertEquals(persistedReport.policyDecisions, [
         persistedPolicyTrace.decisions[0],
@@ -704,7 +721,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 8,
+          toolCount: 9,
         },
       );
       assert(
@@ -1060,7 +1077,6 @@ Deno.test({
             source: "loom",
             credentialOwner,
           },
-          cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
@@ -1220,6 +1236,11 @@ Deno.test({
       });
       assertEquals(childState.runManifest?.source, "loom");
       assertEquals(childState.runManifest?.credentialOwner, credentialOwner);
+      // The child scans the tree its parent scanned, and records how that tree
+      // was arrived at rather than relabelling an inherited default as
+      // something an operator named.
+      assertEquals(childState.skillsRoot?.source, "checkout-default");
+      assertEquals(childState.skillsRoot, persistedState.skillsRoot);
       assertEquals(childState.status, "completed");
       assertEquals(childState.artifactRoot, childRunRoot);
       assertEquals(
@@ -1323,6 +1344,8 @@ Deno.test({
           ]),
           runId: "run-subagent-sanitized-failure",
           model: "gpt-5.4",
+          // The child's second failure is the `tool_not_allowed` policy event
+          // this rung produces, and the run asserts a failure count of two.
           cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {
@@ -1515,7 +1538,6 @@ Deno.test({
         artifactRoot,
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-prompt-slot",
-        cfcEnforcementMode: "observe",
       });
 
       engine.setPromptSlotBinding(promptSlotBinding);
@@ -1546,6 +1568,8 @@ Deno.test({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-denied-report",
           model: "gpt-5.4",
+          // The write the run asks for is denied at this rung, and the persisted
+          // tool activity is asserted to record the denial and the rung.
           cfcEnforcementMode: "enforce-explicit",
           now: (() => {
             const timestamps = [
@@ -1627,6 +1651,8 @@ Deno.test({
         allowed: 0,
         warned: 0,
         denied: 1,
+        invalid: 0,
+        withheld: 0,
       });
       assertEquals(policyTrace.decisions[0].decision, "denied");
       assertEquals(policyTrace.decisions[0].reasonCodes, [
@@ -1746,6 +1772,8 @@ Deno.test({
           ]),
           runId: "run-missing-cfc-report",
           model: "gpt-5.4",
+          // Output mediation denies the sandbox result at this rung, which is the
+          // denial the run report is asserted to carry.
           cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {

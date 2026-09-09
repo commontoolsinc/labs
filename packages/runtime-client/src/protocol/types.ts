@@ -1,13 +1,14 @@
-import type { MetaField } from "@commonfabric/api";
-import type {
-  FabricBytes,
-  FabricKeyPair,
-} from "@commonfabric/data-model/fabric-primitives";
+import type { CellScope } from "@commonfabric/api";
+import type { MetaField } from "@commonfabric/runner";
 import type {
   FabricArray,
   FabricPlainObject,
   FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import type {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import type {
@@ -26,6 +27,7 @@ import type {
   JSONValue,
   NormalizedFullLink,
   PatternCoverageData,
+  RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
   SettleStats,
@@ -34,7 +36,6 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONObject, JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };
@@ -60,7 +61,7 @@ export type CellRef = NormalizedFullLink & {
 };
 
 /** A piece as this connection names it, by the cell that holds it. */
-export type PageRef = {
+export type PieceRef = {
   /**
    * The cell holding the piece.
    */
@@ -84,7 +85,21 @@ export enum RequestType {
   Initialize = "initialize",
 
   /**
-   * Tears the worker's runtime down. Requests arriving after it are acked in
+   * Joins a client to the runtime a first client already stood up, over a
+   * duplex of its own. It carries the {@link RuntimeSecurityContext} the
+   * joining client believes it is joining, and is refused when that disagrees
+   * with the one the runtime runs under -- a runtime acts as one principal
+   * under one enforcement configuration, and an attach never merges a second.
+   * Refused too before any {@link RequestType.Initialize}: an attach joins a
+   * runtime rather than standing one up.
+   */
+  Attach = "attach",
+
+  /**
+   * Tears down what the requesting client owns. From the client that
+   * initialized the runtime that is the runtime itself; from an attached one
+   * it is that client's own subscriptions and mounts, the runtime and every
+   * other client's work left running. Requests arriving after it are acked in
    * silence rather than refused, teardown running concurrently with whatever
    * the client had in flight.
    */
@@ -106,8 +121,9 @@ export enum RequestType {
   CellPull = "cell:pull",
 
   /**
-   * Stores a value only when the cell is currently undefined, using the read
-   * as an optimistic-concurrency precondition. Returns the value that won.
+   * Stores a value only when the cell has no backing value, using the raw read
+   * as an optimistic-concurrency precondition. A schema fallback does not
+   * count as stored. Returns the value that won.
    */
   CellInitialize = "cell:initialize",
 
@@ -213,7 +229,7 @@ export enum RequestType {
   ResolveEventAttention = "runtime:resolveEventAttention",
 
   /**
-   * Waits for every opened space to finish syncing. {@link PageSynced} is the
+   * Waits for every opened space to finish syncing. {@link PieceSynced} is the
    * same wait narrowed to one space.
    */
   RuntimeSynced = "runtime:synced",
@@ -343,7 +359,7 @@ export enum RequestType {
    */
   UploadBlob = "runtime:uploadBlob",
 
-  // Page operations (main -> worker)
+  // Piece operations (main -> worker)
 
   /**
    * Answers with a space's root pattern, creating it if the space has none.
@@ -357,34 +373,40 @@ export enum RequestType {
    * Creates a piece in a space from a URL or a program, optionally running it
    * once created.
    */
-  PageCreate = "page:create",
+  PieceCreate = "piece:create",
 
   /** Reads a piece by id, optionally running it. */
-  PageGet = "page:get",
+  PieceGet = "piece:get",
 
   /** Reads a piece's slug, which a piece need not have. */
-  PageGetSlug = "page:getSlug",
+  PieceGetSlug = "piece:getSlug",
+
+  /**
+   * Answers with the piece a slug reference names, without starting it: the
+   * piece the slug reaches, or the member of the collection it names.
+   */
+  SlugResolve = "slug:resolve",
 
   /** Removes a piece from its space's list. */
-  PageRemove = "page:remove",
+  PieceRemove = "piece:remove",
 
   /** Starts a piece running. */
-  PageStart = "page:start",
+  PieceStart = "piece:start",
 
   /** Stops a running piece. */
-  PageStop = "page:stop",
+  PieceStop = "piece:stop",
 
   /**
    * Answers with a ref to the cell holding a space's piece registry. The
    * pieces themselves are read from that cell, not carried here.
    */
-  PageGetAll = "page:getAll",
+  PieceGetAll = "piece:getAll",
 
   /**
    * Waits for one space's pieces to finish syncing, {@link RuntimeSynced}
    * being the same wait across every opened space.
    */
-  PageSynced = "page:synced",
+  PieceSynced = "piece:synced",
 
   /** Reads a piece's current source. */
   PieceGetSource = "piece:getSource",
@@ -483,6 +505,7 @@ export enum NotificationType {
 
   /** Reports a new operation-backed snapshot for a subscription. */
   OperationUpdate = "operation:update",
+
   /** Reports one authoritative terminal event-delivery notice. */
   EventNeedsAttention = "callback:event-needs-attention",
 }
@@ -506,6 +529,34 @@ export enum TransportNotificationType {
    */
   WorkerConsole = "worker:console",
 }
+
+/**
+ * Main-thread-to-worker signals the worker entry acts on itself, rather than
+ * handing to the runtime. The mirror of {@link TransportNotificationType}, and
+ * its own enum for the same reason: this is the channel's traffic, and no
+ * `RuntimeProcessor` ever sees it.
+ */
+export enum ClientTransportNotificationType {
+  /**
+   * Hands the worker one end of a duplex a further client will speak over;
+   * see {@link AttachPortNotification}.
+   */
+  AttachPort = "client:attach-port",
+}
+
+/**
+ * Gives the worker a duplex for a new client. The port itself rides the
+ * `postMessage` transfer list rather than this message -- a port is not a
+ * `FabricValue` and has no encoding -- so what crosses here is the marker that
+ * says what the transferred port is for.
+ *
+ * Accepted only from the client that initialized the runtime, which is the one
+ * that owns the worker. A client that arrived over a port does not get to
+ * enlarge the family it joined.
+ */
+export type AttachPortNotification = {
+  type: ClientTransportNotificationType.AttachPort;
+};
 
 /**
  * A request together with the id its answer will carry. The only shape the
@@ -609,7 +660,10 @@ export type IPCRemotePost = IPCRemoteMessage | IPCTransportNotification;
 export type BaseRequest = {
   /**
    * Which request this is. Every arm narrows it to one member, so it is
-   * the discriminant dispatch turns on.
+   * the discriminant dispatch turns on. Each arm's narrowing is left
+   * undocumented on purpose: what a request does belongs on the request
+   * type, so a doc on `type: RequestType.Foo` would have nothing of its own
+   * to say.
    */
   type: RequestType;
 };
@@ -666,27 +720,51 @@ export type InitializationData = {
    * realms cannot diverge.
    */
   experimental?: {
+    /**
+     * Whether a link is a `FabricLink` and an entity reference a
+     * `FabricHash`, rather than the plain `{ "/": ... }` envelopes that
+     * represent both otherwise. Recognition is strict per regime, so the two
+     * spellings are a clean break rather than a pair a reader accepts.
+     */
     modernCellRep?: boolean;
-    // Server-execution v2 (docs/specs/server-side-execution/). The host
-    // DECLARES its posture here so the worker runs the same arm — the
-    // flag previously rode only as an untyped excess property, and any
-    // typed re-packaging silently reverted a worker to OFF while the
-    // host diverted (F10 alive and dead across realms; review
-    // 2026-08-11 m7). The worker refuses initialization when its
-    // resolved posture disagrees with this declaration.
+
+    /**
+     * Whether server-execution v2 is on
+     * (`docs/specs/server-side-execution/`). The host declares its posture
+     * here so the worker runs the same arm, and the worker refuses
+     * initialization when its own resolved posture disagrees. That refusal
+     * is why this is a declared field rather than an untyped excess
+     * property: as one, a typed re-packaging could revert a worker to off
+     * while the host stayed on, and each realm would believe a different
+     * answer.
+     */
     serverExecution?: boolean;
-    // Link writers emit cid: schema-document references, with each closure
-    // materialized in the carrying transaction (content-addressed schemas
-    // Phase 1). Default on; an explicit false is the rollback override.
+
+    /**
+     * Whether a link writer emits `cid:` schema-document references, each
+     * closure materialized in the carrying transaction. Default on; an
+     * explicit `false` is the rollback override.
+     */
     contentAddressedSchemas?: boolean;
-    // Link crossings resolve schemas by reader precedence
-    // (combineSchemaForLink). Server-authoritative: the host declares the
-    // deployment's posture so the worker resolves hops under the same
-    // combine rule as the server that ships its subscriptions. Default on;
-    // an explicit false is the rollback override.
+
+    /**
+     * Whether a link crossing resolves its schema by reader precedence,
+     * through `combineSchemaForLink`. Server-authoritative: the host
+     * declares the deployment's posture so the worker resolves a hop under
+     * the same combine rule as the server shipping its subscriptions.
+     * Default on; an explicit `false` is the rollback override.
+     */
     readerSchemaPrecedence?: boolean;
   };
-  // Commit-boundary CFC mode for the worker runtime.
+
+  /**
+   * The commit-boundary CFC mode the worker runtime runs under, in
+   * increasing strictness. `disabled` checks nothing. `observe` checks and
+   * reports without refusing anything. `enforce-explicit` refuses against a
+   * declared policy and stays permissive where none is declared, which is
+   * the rollout posture. `enforce-strict` refuses a commit whose writes
+   * carry confidentiality the target's declared policy does not admit.
+   */
   cfcEnforcementMode?:
     | "disabled"
     | "observe"
@@ -703,6 +781,28 @@ export type InitializationData = {
   cfcFlowLabels?: "off" | "observe" | "persist";
 
   /**
+   * The runtime-wide read ceiling every `db.query` the worker's runtime
+   * issues reads under (`RuntimeOptions.cfcReadMaxConfidentiality`). A
+   * worker is one device's runtime, so a ceiling set here is per device by
+   * construction: it never touches the space, and a query's own ceiling can
+   * only tighten it. It applies to session-scoped query results; a query
+   * whose result is space- or user-scoped is refused before it is staged,
+   * and a row the ceiling does not admit is handled as `cfcReadOnExceed`
+   * says (`fail` refuses the query, `skip` drops the row). Absent means no
+   * ceiling — the owner view. An empty list admits nothing and the runtime
+   * refuses to start on it.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /**
+   * What a read under that ceiling does with a row the ceiling does not
+   * admit when the query declares no `onExceed` of its own: `fail` refuses
+   * the query, `skip` drops the row. Absent leaves the runner's default,
+   * which is `fail`.
+   */
+  cfcReadOnExceed?: "fail" | "skip";
+
+  /**
    * Whether author-supplied render-boundary declassification is honored.
    * `allow` is the default. `deny` ignores an author's
    * `declassifyConfidentiality`, so that a pattern cannot release a secret
@@ -716,7 +816,16 @@ export type InitializationData = {
    * `caveatKinds` a display can discharge. Absent means no ceiling.
    */
   renderConfidentialityCeiling?: {
+    /**
+     * The exact confidentiality clauses a display surface admits, an acting
+     * user's own identity atoms among them.
+     */
     atoms?: readonly CfcConfClause[];
+
+    /**
+     * The kinds of Caveat a display surface can discharge, named rather
+     * than carried, so a label bearing only these is still displayable.
+     */
     caveatKinds?: readonly string[];
   };
 
@@ -726,8 +835,22 @@ export type InitializationData = {
    * its own.
    */
   trustSnapshot?: {
+    /** Identifies the snapshot. The CFC gates require it to be present. */
     id: string;
+
+    /**
+     * The principal whose trust the snapshot is taken from. Absent leaves
+     * the worker to run against the snapshot with no acting principal
+     * named.
+     */
     actingPrincipal?: string;
+
+    /**
+     * Which revision of the snapshot this is: the runtime id with the
+     * trust configuration's digest folded in. It compares as equal or not
+     * rather than as older or newer, and a change to it is what invalidates
+     * digests prepared against the previous one.
+     */
     revision?: string;
   };
 
@@ -768,6 +891,66 @@ export type InitializeRequest = BaseRequest & {
    * What the runtime is stood up from.
    */
   data: InitializationData;
+};
+
+/**
+ * The part of an {@link InitializationData} a runtime's security posture is
+ * made of: whom it acts as, and under which enforcement configuration. One
+ * runtime carries exactly one of these, fixed by the client that initialized
+ * it, and every client attached to that runtime shares it.
+ *
+ * `identity` is the acting principal's DID rather than the key pair
+ * {@link InitializationData} carries, because an attach states which principal
+ * it believes the runtime acts as and never supplies a signer of its own.
+ * Every other field is the initialization field of the same name, so what an
+ * attach asserts and what initialization declared compare directly.
+ *
+ * `apiUrl` and `spaceHostMap` are here as posture rather than as routing: a
+ * document believing it reads from a different backend than the runtime does
+ * is as wrong about what it is joined to as one believing a different
+ * enforcement mode, and the reads would silently go to the runtime's hosts.
+ * Both are normalized before they are stored or asserted, so two spellings of
+ * one origin are one posture.
+ *
+ * **Every field here holds plain JSON-shaped values only.** They are compared
+ * with `deepEqual`, which compares a class instance by its enumerable own
+ * properties -- so a `FabricValue`-carrying field would compare EQUAL between
+ * two different values whose state lives in private fields, and an attach
+ * asserting a different one would be accepted. A field that must carry such a
+ * value needs `valueEqual` from `data-model` and a deliberate decision about
+ * what equality means for it; adding one without that is a false accept, not
+ * a missing check.
+ */
+export type RuntimeSecurityContext =
+  & Pick<
+    InitializationData,
+    | "apiUrl"
+    | "spaceHostMap"
+    | "spaceDid"
+    | "experimental"
+    | "cfcEnforcementMode"
+    | "cfcFlowLabels"
+    | "cfcReadMaxConfidentiality"
+    | "cfcReadOnExceed"
+    | "renderDeclassificationPolicy"
+    | "renderConfidentialityCeiling"
+    | "trustSnapshot"
+  >
+  & {
+    /** The principal the runtime acts as. */
+    identity: DID;
+  };
+
+/**
+ * The {@link RequestType.Attach} request. Its `data` is the context the
+ * joining client asserts, which the worker compares field for field against
+ * the running runtime's and refuses on any disagreement.
+ */
+export type AttachRequest = BaseRequest & {
+  type: RequestType.Attach;
+
+  /** The security context this client believes it is joining. */
+  data: RuntimeSecurityContext;
 };
 
 /** The {@link RequestType.Dispose} request, which carries no payload. */
@@ -813,6 +996,7 @@ export type CellGetRequest = BaseRequest & {
 /** The {@link RequestType.CellPull} request. */
 export type CellPullRequest = BaseRequest & {
   type: RequestType.CellPull;
+
   /**
    * The cell whose producers to demand before reading its current value.
    */
@@ -823,7 +1007,7 @@ export type CellPullRequest = BaseRequest & {
 export type CellInitializeRequest = BaseRequest & {
   type: RequestType.CellInitialize;
 
-  /** The cell to initialize when it is currently undefined. */
+  /** The cell to initialize when it has no backing value. */
   cell: CellRef;
 
   /** The non-undefined default to store. */
@@ -846,6 +1030,7 @@ export type CellSetRequest = BaseRequest & {
    * The value to store, whole and already resolved.
    */
   value: FabricValue;
+
   /** Wait for commit confirmation and return a refusal to the caller. */
   awaitCommit?: boolean;
 };
@@ -886,6 +1071,7 @@ export type CellSendRequest = BaseRequest & {
    * The event to deliver.
    */
   event: FabricValue;
+
   /** Wait for commit confirmation and return a refusal to the caller. */
   awaitCommit?: boolean;
 };
@@ -945,98 +1131,249 @@ export type CellGetCfcLabelRequest = BaseRequest & {
 /** The {@link RequestType.OperationQuery} request. */
 export type OperationQueryRequest = BaseRequest & {
   type: RequestType.OperationQuery;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /**
+   * The cursor to report from, exclusive: only operations integrated after
+   * it come back. Absent asks for the field from its beginning, which a
+   * field whose history has been trimmed answers with no operations and
+   * `reset`, telling the caller to rebuild from `materialized` instead.
+   */
   after?: OpCursor;
 };
 
 /** The {@link RequestType.OperationCapabilities} request. */
 export type OperationCapabilitiesRequest = BaseRequest & {
   type: RequestType.OperationCapabilities;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
 };
 
 /** The {@link RequestType.OperationApply} request. */
 export type OperationApplyRequest = BaseRequest & {
   type: RequestType.OperationApply;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /**
+   * Names the operation codec the payload is written in, which is what
+   * decides how it integrates. {@link OperationCapabilitiesResponse} is
+   * where the choices come from.
+   */
   codec: string;
+
+  /**
+   * Identifies this submission, chosen by the submitter. It is what lets a
+   * re-sent apply be recognized as the same one rather than integrated
+   * twice; {@link ApplyOpResolution} reports that case as `duplicate`.
+   */
   submissionId: string;
+
+  /**
+   * The cursor the payload is expressed against. `null` submits against the
+   * field's beginning, which is what a first submission does.
+   */
   base: OpCursor | null;
+
+  /**
+   * The hash of the materialized value the payload was written against.
+   * Required exactly when `base` is `null`, and refused otherwise: an apply
+   * opening an epoch names the baseline it assumes, and one continuing from
+   * a cursor inherits it. A hash that does not match the field's own
+   * refuses the apply rather than integrating against a value the payload
+   * was not written for.
+   */
   baselineHash?: string;
+
+  /** The operations themselves, in whatever form `codec` gives them. */
   payload: FabricValue;
 };
 
 /** The {@link RequestType.OperationSubscribe} request. */
 export type OperationSubscribeRequest = BaseRequest & {
   type: RequestType.OperationSubscribe;
+
+  /**
+   * Identifies this subscription, chosen by the subscriber. Every
+   * {@link OperationUpdateNotification} carries it back, which is how a
+   * client with several subscriptions open routes an update to the one that
+   * asked for it.
+   */
   subscriptionId: string;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /**
+   * The cursor to report from, exclusive: only operations integrated after
+   * it come back. Absent asks for the field from its beginning, which a
+   * field whose history has been trimmed answers with no operations and
+   * `reset`, telling the caller to rebuild from `materialized` instead.
+   */
   after?: OpCursor;
 };
 
 /** The {@link RequestType.OperationRelease} request. */
 export type OperationReleaseRequest = BaseRequest & {
   type: RequestType.OperationRelease;
+
+  /** The cell whose operation field this addresses. */
   cell: CellRef;
+
+  /**
+   * Groups this request into a named operation session. The worker pins a
+   * session to one cell when it opens, and refuses a later request naming
+   * the same session against a different one. Absent works outside any
+   * session, which is what a one-off request does.
+   */
   operationSessionId?: string;
+
+  /** The field's codec, which must be the one it currently holds. */
   codec: string;
+
+  /**
+   * The field's head, exactly -- epoch and version both. A release naming
+   * anything else is refused, which is what keeps one racing an apply from
+   * discarding the other writer's work. Releasing deactivates the field for
+   * every client, and the next apply opens a fresh epoch.
+   */
   cursor: OpCursor;
 };
 
 /** The {@link RequestType.OperationUnsubscribe} request. */
 export type OperationUnsubscribeRequest = BaseRequest & {
   type: RequestType.OperationUnsubscribe;
+
+  /**
+   * The subscription to end, as {@link OperationSubscribeRequest} named it.
+   */
   subscriptionId: string;
 };
 
 /** The {@link RequestType.OperationSessionClose} request. */
 export type OperationSessionCloseRequest = BaseRequest & {
   type: RequestType.OperationSessionClose;
+
+  /**
+   * The session to close, releasing the worker's bookkeeping for it. Unlike
+   * the other requests in this family it is required, a close having
+   * nothing to name otherwise.
+   */
   operationSessionId: string;
 };
 
 /** A response carrying one operation-backed field snapshot. */
 export type OperationFieldResponse = {
+  /**
+   * The field as it stands: its codec and cursor, the materialized value,
+   * and the integrated operations the request asked to see.
+   */
   field: OperationFieldSnapshot;
 };
 
 /** A response naming the operation codecs available for a cell. */
 export type OperationCapabilitiesResponse = {
+  /**
+   * The operation codecs the space's server connection advertises, by name.
+   * It is what a submitter chooses an {@link OperationApplyRequest.codec}
+   * from, and it says nothing about any one cell: the answer is the same
+   * for every cell in the space, and a field pins its codec once its epoch
+   * is open, so the choice exists only at the apply that opens one.
+   */
   codecs: readonly string[];
 };
 
 /** A response carrying the authoritative resolution of an operation. */
 export type OperationApplyResponse = {
+  /**
+   * Where the submission landed: the cursor span it moved the field
+   * through, the operations as integrated, and whether the submission was
+   * a duplicate of one already there.
+   */
   resolution: ApplyOpResolution;
 };
 
 /** SQLite bind values as the main-thread connection carries them. */
 export type SqliteParams =
-  | { kind: "positional"; values: readonly FabricValue[] }
   | {
+    /** Marks the positional form, whose values bind in the order given. */
+    kind: "positional";
+
+    /** The bind values, one per placeholder, in statement order. */
+    values: readonly FabricValue[];
+  }
+  | {
+    /** Marks the named form, whose entries bind by parameter name. */
     kind: "named";
+
+    /** The bindings, as name/value pairs in no particular order. */
     entries: readonly (readonly [string, FabricValue])[];
   };
 
 /** The {@link RequestType.SqliteQuery} request. */
 export type SqliteQueryRequest = BaseRequest & {
   type: RequestType.SqliteQuery;
+
+  /** The cell whose database to read. */
   cell: CellRef;
+
+  /** The statement to run, with its bind parameters left as placeholders. */
   sql: string;
+
+  /** What to bind the statement's placeholders to. Absent binds nothing. */
   params?: SqliteParams;
 };
 
 /** The {@link RequestType.SqliteExec} request. */
 export type SqliteExecRequest = BaseRequest & {
   type: RequestType.SqliteExec;
+
+  /** The cell whose database to write. */
   cell: CellRef;
+
+  /** The statement to run, with its bind parameters left as placeholders. */
   sql: string;
+
+  /** What to bind the statement's placeholders to. Absent binds nothing. */
   params?: SqliteParams;
 };
+
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
  * cell: the same space and cause always name the same one.
@@ -1084,22 +1421,42 @@ export type IdleRequest = BaseRequest & {
 /** Reads unresolved attention notices for one open or reconnecting space. */
 export type ListEventAttentionRequest = BaseRequest & {
   type: RequestType.ListEventAttention;
+
+  /** The space whose unresolved notices to read. */
   space: DID;
 };
 
 /** Resolves one notice through the authenticated memory-v2 CAS endpoint. */
 export type ResolveEventAttentionRequest = BaseRequest & {
   type: RequestType.ResolveEventAttention;
+
+  /** The space the notice belongs to. */
   space: DID;
+
+  /** The event the notice was raised for. */
   eventId: string;
+
+  /**
+   * The stream seq the engine stamped on the commit that appended the
+   * event, which with `eventId` is what identifies the entry.
+   */
   seq: number;
+
+  /** The sidecar record holding the notice, which is what is compared and
+   * swapped. */
   sidecarId: string;
+
+  /**
+   * What to do with it: `retry` asks for the delivery again, `dismiss`
+   * accepts the failure and closes the notice. A notice whose
+   * {@link EventAttentionNotice.retryable} is false takes only `dismiss`.
+   */
   action: "retry" | "dismiss";
 };
 
 /**
  * Await storage/piece-manager convergence for EVERY space this worker
- * has opened. Genuinely spaceless — like Idle — unlike PageSynced,
+ * has opened. Genuinely spaceless — like Idle — unlike PieceSynced,
  * which awaits one named space's piece context.
  */
 export type RuntimeSyncedRequest = BaseRequest & {
@@ -1670,11 +2027,11 @@ export type LoggerFlagsData = Record<
 >;
 
 /**
- * The {@link RequestType.PageCreate} request. `source` names a URL or a
+ * The {@link RequestType.PieceCreate} request. `source` names a URL or a
  * program, never both.
  */
-export type PageCreateRequest = BaseRequest & {
-  type: RequestType.PageCreate;
+export type PieceCreateRequest = BaseRequest & {
+  type: RequestType.PieceCreate;
 
   /** The space the piece is created in — part of its address. */
   space: DID;
@@ -1684,10 +2041,13 @@ export type PageCreateRequest = BaseRequest & {
    * given directly. Never both.
    */
   source: {
+    /** Where to fetch the program from. */
     url: string;
   } | {
+    /** The program's entry point and its sources, given rather than fetched. */
     program: Program;
   };
+
   /**
    * The argument the piece is created with. The wire carries a `FabricValue`,
    * which is what the envelope's encoding makes true of it.
@@ -1719,18 +2079,31 @@ export type PageCreateRequest = BaseRequest & {
 };
 
 /**
- * Page operations resolve against one space's piece context, and every
+ * Piece operations resolve against one space's piece context, and every
  * request names its space explicitly — there is no implicit/default
  * space at this layer. The worker lazily builds a piece context per
  * space, sharing the one runtime/storage connection.
  */
-export type PageGetSpaceDefault = BaseRequest & {
+export type GetSpaceRootPatternRequest = BaseRequest & {
   type: RequestType.GetSpaceRootPattern;
 
   /**
    * The space whose root pattern to read.
    */
   space: DID;
+
+  /**
+   * Whether the root is wanted RUNNING. Defaults to true, which is what a
+   * view that renders the root needs — the space home, where running the
+   * root is the page.
+   *
+   * A caller that only reads what the root exported passes false. Starting
+   * a root materializes everything its result reaches, which on a space
+   * whose root reaches a large piece is the dominant cost of opening
+   * anything; a stored export costs a read. Either way an absent root is
+   * still created, since a space needs one before it can have exports.
+   */
+  start?: boolean;
 };
 
 /** The {@link RequestType.RecreateSpaceRootPattern} request. */
@@ -1744,16 +2117,34 @@ export type RecreateSpaceRootPatternRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.PageGet} request. `runIt` starts the piece as part of
- * the read.
+ * Which document a request means by a piece: an id, and the scope that id is
+ * resolved in within whichever space the request names. A piece reached
+ * through a link into a narrower scope is addressed by both, and the id alone
+ * reaches nothing — or reaches a different document that happens to share it.
+ *
+ * Every request naming a piece by id intersects this, so that the two halves
+ * of one address cannot be declared apart. The assertion under
+ * {@link IPCClientRequest} is what holds a new one to it, and says with what
+ * bound.
  */
-export type PageGetRequest = BaseRequest & {
-  type: RequestType.PageGet;
+export type PieceAddress = {
+  /**
+   * The piece's document id.
+   */
+  pieceId: string;
 
   /**
-   * The piece to read.
+   * The scope that id resolves in, defaulting to the space.
    */
-  pageId: string;
+  scope?: CellScope;
+};
+
+/**
+ * The {@link RequestType.PieceGet} request. `runIt` starts the piece as part of
+ * the read.
+ */
+export type PieceGetRequest = BaseRequest & PieceAddress & {
+  type: RequestType.PieceGet;
 
   /**
    * Start the piece as part of the read.
@@ -1766,14 +2157,9 @@ export type PageGetRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageGetSlug} request. */
-export type PageGetSlugRequest = BaseRequest & {
-  type: RequestType.PageGetSlug;
-
-  /**
-   * The piece whose slug to read.
-   */
-  pageId: string;
+/** The {@link RequestType.PieceGetSlug} request. */
+export type PieceGetSlugRequest = BaseRequest & PieceAddress & {
+  type: RequestType.PieceGetSlug;
 
   /**
    * The space the piece lives in.
@@ -1781,29 +2167,41 @@ export type PageGetSlugRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageRemove} request. */
-export type PageRemoveRequest = BaseRequest & {
-  type: RequestType.PageRemove;
+/** The {@link RequestType.SlugResolve} request. */
+export type SlugResolveRequest = BaseRequest & {
+  type: RequestType.SlugResolve;
 
   /**
-   * The piece to remove.
+   * The slug to resolve.
    */
-  pageId: string;
+  slug: string;
 
   /**
-   * The space to remove it from.
+   * The member to select out of the collection the slug names, absent where
+   * the reference stops at the slug. One member name, never a path: a
+   * member's own fields are addressed inside the piece it resolves to.
+   */
+  member?: string;
+
+  /**
+   * The space the slug is bound in.
    */
   space: DID;
 };
 
-/** The {@link RequestType.PageStart} request. */
-export type PageStartRequest = BaseRequest & {
-  type: RequestType.PageStart;
+/** The {@link RequestType.PieceRemove} request. */
+export type PieceRemoveRequest = BaseRequest & PieceAddress & {
+  type: RequestType.PieceRemove;
 
   /**
-   * The piece to start.
+   * The space to remove the piece from.
    */
-  pageId: string;
+  space: DID;
+};
+
+/** The {@link RequestType.PieceStart} request. */
+export type PieceStartRequest = BaseRequest & PieceAddress & {
+  type: RequestType.PieceStart;
 
   /**
    * The space the piece lives in.
@@ -1811,14 +2209,9 @@ export type PageStartRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageStop} request. */
-export type PageStopRequest = BaseRequest & {
-  type: RequestType.PageStop;
-
-  /**
-   * The piece to stop.
-   */
-  pageId: string;
+/** The {@link RequestType.PieceStop} request. */
+export type PieceStopRequest = BaseRequest & PieceAddress & {
+  type: RequestType.PieceStop;
 
   /**
    * The space the piece lives in.
@@ -1826,9 +2219,9 @@ export type PageStopRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageGetAll} request. */
-export type PageGetAllRequest = BaseRequest & {
-  type: RequestType.PageGetAll;
+/** The {@link RequestType.PieceGetAll} request. */
+export type PieceGetAllRequest = BaseRequest & {
+  type: RequestType.PieceGetAll;
 
   /**
    * The space whose pieces to list.
@@ -1836,9 +2229,9 @@ export type PageGetAllRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageSynced} request. */
-export type PageSyncedRequest = BaseRequest & {
-  type: RequestType.PageSynced;
+/** The {@link RequestType.PieceSynced} request. */
+export type PieceSyncedRequest = BaseRequest & {
+  type: RequestType.PieceSynced;
 
   /**
    * The space whose pieces to wait for.
@@ -1851,22 +2244,17 @@ export type PageSyncedRequest = BaseRequest & {
  * history metadata it carries, and its authored source files. See
  * `docs/specs/piece-source-lifecycle.md`.
  */
-export type PieceGetSourceRequest = BaseRequest & {
+export type PieceGetSourceRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceGetSource;
 
   /**
    * The space the piece lives in.
    */
   space: DID;
-
-  /**
-   * The piece whose source to read.
-   */
-  pieceId: string;
 };
 
 /** Read the authored files retained for one recorded source revision. */
-export type PieceGetSourceRevisionRequest = BaseRequest & {
+export type PieceGetSourceRevisionRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceGetSourceRevision;
 
   /**
@@ -1875,29 +2263,22 @@ export type PieceGetSourceRevisionRequest = BaseRequest & {
   space: DID;
 
   /**
-   * The piece whose history to read from.
-   */
-  pieceId: string;
-
-  /**
    * The revision to read.
    */
   revisionId: string;
 };
 
-/** Create a copy of a piece in another space. */
-export type PieceCloneRequest = BaseRequest & {
+/**
+ * Create a copy of a piece in another space. The address is read in
+ * `sourceSpace`, that being the space the request names a piece in.
+ */
+export type PieceCloneRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceClone;
 
   /**
    * The space to copy from.
    */
   sourceSpace: DID;
-
-  /**
-   * The piece to copy.
-   */
-  pieceId: string;
 
   /**
    * The space to copy into.
@@ -1909,7 +2290,7 @@ export type PieceCloneRequest = BaseRequest & {
 };
 
 /** How a piece's origin URL resolves. */
-export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+export type PieceOriginKind = "system" | "fabric-piece" | "fabric-pattern";
 
 /**
  * Where a piece's source came from. `recorded` is present only when
@@ -1944,17 +2325,11 @@ export type PiecePatternRefView = {
   symbol: string;
 };
 
-/**
- * What the last attempt to follow a piece's active origin did. `unsupported`
- * says the origin is well formed and this runtime does not follow origins of
- * that kind yet, so what it holds is unexamined — neither a fault nor a piece
- * nobody has checked.
- */
+/** What the last attempt to follow a piece's active origin did. */
 export type PieceReconciliationOutcome =
   | "followed"
   | "unreachable"
-  | "refused"
-  | "unsupported";
+  | "refused";
 
 /**
  * Why a reconciliation did not adopt what its origin offered. Only
@@ -2204,18 +2579,13 @@ export type PieceSourceAction =
  * token an incompatibility warning returned; sending it back is what confirms
  * the update.
  */
-export type PieceUpdateSourceRequest = BaseRequest & {
+export type PieceUpdateSourceRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceUpdateSource;
 
   /**
    * The space the piece lives in.
    */
   space: DID;
-
-  /**
-   * The piece to update.
-   */
-  pieceId: string;
 
   /**
    * What to change about which source the piece follows.
@@ -2374,6 +2744,7 @@ import type {
   SerializedEvent as SerializedDomEvent,
   SerializedEventTarget,
 } from "@commonfabric/html/events";
+
 export type { SerializedDomEvent, SerializedEventTarget };
 
 /**
@@ -2440,6 +2811,7 @@ export type VDomMountResponse = {
  */
 export type IPCClientRequest =
   | InitializeRequest
+  | AttachRequest
   | DisposeRequest
   | CellGetRequest
   | CellPullRequest
@@ -2485,16 +2857,17 @@ export type IPCClientRequest =
   | SetWriteStackTraceMatchersRequest
   | IdleRequest
   | FlushCompileCacheWritesRequest
-  | PageCreateRequest
-  | PageGetSpaceDefault
+  | PieceCreateRequest
+  | GetSpaceRootPatternRequest
   | RecreateSpaceRootPatternRequest
-  | PageGetRequest
-  | PageGetSlugRequest
-  | PageRemoveRequest
-  | PageStartRequest
-  | PageStopRequest
-  | PageGetAllRequest
-  | PageSyncedRequest
+  | PieceGetRequest
+  | PieceGetSlugRequest
+  | SlugResolveRequest
+  | PieceRemoveRequest
+  | PieceStartRequest
+  | PieceStopRequest
+  | PieceGetAllRequest
+  | PieceSyncedRequest
   | PieceGetSourceRequest
   | PieceGetSourceRevisionRequest
   | PieceCloneRequest
@@ -2511,6 +2884,56 @@ export type IPCClientRequest =
   | GetPatternSourcesRequest
   | SetBreakpointsRequest
   | UploadBlobRequest;
+
+/**
+ * The requests naming a piece by id, read off {@link IPCClientRequest} rather
+ * than listed, so that a request joins this by being declared rather than by
+ * anyone remembering to enroll it.
+ *
+ * Membership is having a `pieceId` member at all, whatever its type: an
+ * optional one, and one whose type admits `undefined`, each still name a
+ * piece on the requests that send one, so both are in. That is what the test
+ * on `keyof` buys. A property that may be absent, and one whose type includes
+ * `undefined`, are each unassignable to a required `string`, so a membership
+ * test written as an assignment would see neither.
+ */
+export type PieceAddressedRequest = IPCClientRequest extends infer Request
+  ? Request extends unknown ? "pieceId" extends keyof Request ? Request : never
+  : never
+  : never;
+
+/**
+ * Those {@link PieceAddressedRequest}s declaring no `scope`, which is `never`
+ * exactly while every one of them intersects {@link PieceAddress}.
+ *
+ * The bound is the member name, on both sides. What puts a request in front
+ * of this check is declaring `pieceId`, so a request naming a piece under
+ * some other field is outside it, as is one reaching a piece through a
+ * {@link CellRef}, which carries its own scope. And what satisfies the check
+ * is declaring `scope` in any form: the shape a scope has is
+ * {@link PieceAddress}'s to state, and is not read here.
+ */
+type PieceAddressedRequestMissingScope = PieceAddressedRequest extends
+  infer Request
+  ? Request extends unknown ? "scope" extends keyof Request ? never : Request
+  : never
+  : never;
+
+/**
+ * Refuses anything but `never`, so that instantiating it with a union of
+ * requests reports those requests as the error.
+ */
+type NoSuchRequest<T extends never> = T;
+
+/**
+ * A piece's address is its id and its scope together, and this is what says
+ * so at the protocol level: a new request naming a piece by id without a
+ * scope inhabits {@link PieceAddressedRequestMissingScope}, and this
+ * declaration then fails `deno task check` naming that request.
+ */
+type EveryPieceAddressCarriesItsScope = NoSuchRequest<
+  PieceAddressedRequestMissingScope
+>;
 
 /** A response whose whole content is `null`. */
 export type NullResponse = null;
@@ -2567,6 +2990,10 @@ export type CellGetResponse = CellValueResponse & {
 
 /** Rows returned by {@link RequestType.SqliteQuery}. */
 export type SqliteQueryResponse = {
+  /**
+   * The result set, one entry per row, each keyed by the column names the
+   * statement selected. Empty when the statement returned no rows.
+   */
   rows: readonly {
     readonly [key: string]: FabricValue;
   }[];
@@ -2592,12 +3019,72 @@ export type CfcLabelViewResponse = {
 };
 
 /** A reference to one piece. */
-export type PageResponse = {
+export type PieceResponse = {
   /**
    * The piece in question.
    */
-  page: PageRef;
+  piece: PieceRef;
 };
+
+/**
+ * Why a slug reference reached nothing. This is an outcome, not a failure:
+ * a name nobody has bound, or a member a collection does not hold, is what a
+ * reader is asking about, so it crosses as data and leaves the error channel
+ * to transport and decoding faults.
+ */
+export type SlugRefusal = {
+  /**
+   * Which refusal it is, as the runner's slug resolution names them.
+   */
+  code: string;
+
+  /**
+   * What to tell a reader, naming the collection and the member where the
+   * refusal knows them.
+   */
+  message: string;
+};
+
+/**
+ * Where a slug reference landed: the piece it reached and the segments the
+ * walk did not spend, or the refusal that says it reached nothing.
+ *
+ * The two are arms of a union rather than optional fields of one object, so
+ * that a response carrying both cannot be built. Written as optionals, the
+ * contradiction is a shape the type admits and only a reader can catch, and a
+ * reader that checks the refusal first reports a malformed answer as an
+ * ordinary "no such member".
+ */
+export type SlugReferenceResponse =
+  | {
+    /**
+     * The piece the reference reached.
+     */
+    piece: PieceRef;
+
+    /**
+     * What is left of the reference after the piece. Empty where the member
+     * named a member; the member itself where the slug named a piece at its
+     * root, which spends no segment and leaves the member a cell path the
+     * piece's own address does not include.
+     */
+    pathAfter: string[];
+
+    /** Absent, which is what makes this the landing arm. */
+    refusal?: undefined;
+  }
+  | {
+    /** Absent, which is what makes this the refusal arm. */
+    piece?: undefined;
+
+    /** Absent with the piece. */
+    pathAfter?: undefined;
+
+    /**
+     * Why the reference reached nothing.
+     */
+    refusal: SlugRefusal;
+  };
 
 /** A piece's slug, `undefined` where the piece has none. */
 export type SlugResponse = {
@@ -2674,6 +3161,7 @@ export type CellUpdateNotification = {
    * The cell that changed.
    */
   cell: CellRef;
+
   /** Its new value, as {@link CellValueResponse} carries the pulled form. */
   value: FabricValue;
 
@@ -2803,14 +3291,32 @@ export type PendingWritesNotification = {
 
 /** The authoritative safe recovery handle presented by the runtime client. */
 export type EventAttentionNotice = {
+  /** The space whose delivery ended this way. */
   space: DID;
+
+  /** The event that failed to deliver. */
   eventId: string;
+
+  /**
+   * The stream seq the engine stamped on the commit that appended the
+   * event. One notice covers every delivery attempt of that entry; the
+   * attempts themselves are counted inside `attention`.
+   */
   seq: number;
+
+  /** The sidecar record the notice is stored as, and the handle a
+   * resolution compares and swaps against. */
   sidecarId: string;
+
   /** False when the terminal event has no acting user and can only be
    * dismissed. Absence preserves Retry for older producers. */
   retryable?: boolean;
+
+  /** Why the delivery ended, in terms meant for the person reading it. */
   reason: string;
+
+  /** What the delivery is waiting on, which is what a surface renders the
+   * notice from. */
   attention: DeliveryAttention;
 };
 
@@ -2819,11 +3325,24 @@ export type EventNeedsAttentionNotification = EventAttentionNotice & {
   type: NotificationType.EventNeedsAttention;
 };
 
+/** The unresolved notices in one space that the requester may act on. */
 export type EventAttentionListResponse = {
+  /**
+   * The notices still awaiting a person, in no promised order, narrowed to
+   * those whose acting user is the requesting identity plus those with no
+   * acting user at all. Empty therefore says the requester has none to act
+   * on, not that the space is holding none.
+   */
   notices: EventAttentionNotice[];
 };
 
+/** What became of one notice a resolution was asked for. */
 export type EventAttentionResolveResponse = {
+  /**
+   * The outcome, which is the memory-v2 compare-and-swap's answer rather
+   * than the request's: a notice another client resolved first comes back
+   * as such rather than as a failure.
+   */
   resolution: EventAttentionResolution;
 };
 
@@ -2872,6 +3391,7 @@ export type WorkerConsoleNotification = {
  * different things.
  */
 import type { VDomOp } from "@commonfabric/html/vdom-ops";
+
 export type { VDomOp };
 
 /**
@@ -2900,7 +3420,14 @@ export type VDomBatchNotification = {
 /** A new operation-backed snapshot for one active subscription. */
 export type OperationUpdateNotification = {
   type: NotificationType.OperationUpdate;
+
+  /**
+   * The subscription this is for, as
+   * {@link OperationSubscribeRequest.subscriptionId} named it.
+   */
   subscriptionId: string;
+
+  /** The field as it now stands, in the shape a query returns it. */
   field: OperationFieldSnapshot;
 };
 
@@ -2925,7 +3452,8 @@ export type RemoteResponse =
   | ActionRunTraceResponse
   | TriggerTraceResponse
   | WriteStackTraceResponse
-  | PageResponse
+  | PieceResponse
+  | SlugReferenceResponse
   | PieceSourceResponse
   | PieceSourceRevisionResponse
   | PieceUpdateSourceResponse
@@ -2961,11 +3489,20 @@ export type IPCRemoteNotification =
  * The request-and-response pairing for every {@link RequestType}. This is what
  * types a call site's return, so adding a request means adding its entry here
  * as well as its arm to {@link IPCClientRequest}.
+ *
+ * The `request` and `response` members carry no doc comments of their own,
+ * deliberately: each names a type documented where it is declared, and the
+ * pairing is the whole of what an entry says. A comment on either would
+ * restate the name beside it.
  */
 export type Commands = {
   // Runtime requests
   [RequestType.Initialize]: {
     request: InitializeRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.Attach]: {
+    request: AttachRequest;
     response: EmptyResponse;
   };
   [RequestType.Dispose]: {
@@ -3149,13 +3686,13 @@ export type Commands = {
     request: SqliteExecRequest;
     response: EmptyResponse;
   };
-  // Page requests
-  [RequestType.PageCreate]: {
-    request: PageCreateRequest;
-    response: PageResponse;
+  // Piece requests
+  [RequestType.PieceCreate]: {
+    request: PieceCreateRequest;
+    response: PieceResponse;
   };
-  [RequestType.PageSynced]: {
-    request: PageSyncedRequest;
+  [RequestType.PieceSynced]: {
+    request: PieceSyncedRequest;
     response: EmptyResponse;
   };
   [RequestType.RuntimeSynced]: {
@@ -3170,28 +3707,32 @@ export type Commands = {
     request: RegisterSpaceHostRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageGet]: {
-    request: PageGetRequest;
-    response: PageResponse | NullResponse;
+  [RequestType.PieceGet]: {
+    request: PieceGetRequest;
+    response: PieceResponse | NullResponse;
   };
-  [RequestType.PageGetSlug]: {
-    request: PageGetSlugRequest;
+  [RequestType.PieceGetSlug]: {
+    request: PieceGetSlugRequest;
     response: SlugResponse;
   };
-  [RequestType.PageRemove]: {
-    request: PageRemoveRequest;
+  [RequestType.SlugResolve]: {
+    request: SlugResolveRequest;
+    response: SlugReferenceResponse;
+  };
+  [RequestType.PieceRemove]: {
+    request: PieceRemoveRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageStart]: {
-    request: PageStartRequest;
+  [RequestType.PieceStart]: {
+    request: PieceStartRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageStop]: {
-    request: PageStopRequest;
+  [RequestType.PieceStop]: {
+    request: PieceStopRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageGetAll]: {
-    request: PageGetAllRequest;
+  [RequestType.PieceGetAll]: {
+    request: PieceGetAllRequest;
     response: CellResponse;
   };
   [RequestType.PieceGetSource]: {
@@ -3204,7 +3745,7 @@ export type Commands = {
   };
   [RequestType.PieceClone]: {
     request: PieceCloneRequest;
-    response: PageResponse;
+    response: PieceResponse;
   };
   [RequestType.PieceUpdateSource]: {
     request: PieceUpdateSourceRequest;
@@ -3223,12 +3764,12 @@ export type Commands = {
     response: SpaceAclResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
-    request: PageGetSpaceDefault;
-    response: PageResponse;
+    request: GetSpaceRootPatternRequest;
+    response: PieceResponse;
   };
   [RequestType.RecreateSpaceRootPattern]: {
     request: RecreateSpaceRootPatternRequest;
-    response: PageResponse;
+    response: PieceResponse;
   };
   // Diagnosis requests
   [RequestType.DetectNonIdempotent]: {

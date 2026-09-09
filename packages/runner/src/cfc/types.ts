@@ -36,6 +36,69 @@ export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
 
+// A store the runtime owns: a document it materializes to hold a piece's
+// machinery rather than data an author named. Four kinds carry it — a piece's
+// argument, result and internal documents, minted by the runner from the
+// piece's result cause; the state documents a builtin mints from its own
+// node's cause; the per-event documents a builtin mints inside one
+// transaction; and the documents anchoring splits out of a value written into
+// any of those. `target` is that document; `sources` is the document the
+// runtime derived it from. The prepare gate reads it for the §8.12.5 route-2
+// declaration described in `docs/specs/cfc-enforcement-matrix.md` §4, and
+// takes it only where `target` names a whole document AND the input was
+// recorded under {@link runtimeWritePolicyAuthorization}.
+//
+// The marker names the store for one transaction. A store written outside the
+// transaction that minted it is enrolled beside it
+// (`IExtendedStorageTransaction.enrollRuntimeOwnedStore`), which lasts for the
+// runtime's life.
+export const CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE =
+  "runtime.owned-store";
+
+/**
+ * Marks a write-policy input as one the runtime itself recorded.
+ *
+ * `recordCfcWritePolicyInput` is on the public transaction interface, and
+ * pattern-authored code runs in the runtime's own realm holding runtime cells,
+ * so it reaches `cell.tx` and can record an input naming whatever it likes.
+ * An input a gate ACTS on — rather than one a gate measures — therefore has to
+ * say who recorded it. This is the mark, and it works the way
+ * `rawMetaWriteAuthorization` does: a symbol cannot be named by a module that
+ * did not import it, and the sandbox hands pattern code the builder namespace
+ * rather than the runner's modules.
+ */
+export const RUNTIME_WRITE_POLICY_INPUT: unique symbol = Symbol(
+  "runtime-write-policy-input",
+);
+
+/** The authorization a runtime-recorded write-policy input carries. */
+export interface RuntimeWritePolicyAuthorization {
+  readonly [RUNTIME_WRITE_POLICY_INPUT]: true;
+}
+
+/**
+ * The authorization the runtime passes beside an input a gate acts on.
+ *
+ * It travels as an argument of the one call that carries it, so it marks that
+ * input and no other — including no input recorded on the same transaction in
+ * the meantime.
+ *
+ * In-package callers only: `cfc/mod.ts` re-exports the type and not this
+ * value, so it stays out of the package's public entry points, and holding it
+ * is what naming a store the runtime owns takes.
+ */
+export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
+  Object.freeze(
+    { [RUNTIME_WRITE_POLICY_INPUT]: true } as RuntimeWritePolicyAuthorization,
+  );
+
+/** Whether an authorization argument carries the runtime's mark. */
+export const runtimeWritePolicyAuthorized = (value: unknown): boolean =>
+  typeof value === "object" && value !== null &&
+  (value as Partial<RuntimeWritePolicyAuthorization>)[
+      RUNTIME_WRITE_POLICY_INPUT
+    ] === true;
+
 export type CfcEnforcementMode =
   | "disabled"
   | "observe"
@@ -388,6 +451,7 @@ export type ImplementationIdentity =
 
     /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
     symbol?: string;
+
     sourceFile?: string;
     bindingPath?: string[];
     codeHash?: string;
@@ -507,6 +571,7 @@ export type PreparedDigestInput = {
    * shape; docs/specs/cfc-write-prefix-provenance.md §6).
    */
   readonly writeAttemptLog: readonly OrderedWriteAttempt[];
+
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
@@ -515,6 +580,7 @@ export type PreparedDigestInput = {
 
   /** Update-authority aliases consulted by writeAuthorizedBy verification. */
   readonly moduleDelegations?: readonly ModuleDelegationSnapshotEntry[];
+
   // Digest of the policy snapshot the boundary decisions evaluated under
   // (Epic B5): anything that can change a boundary decision must be in the
   // digest, so a decision made under one rule set cannot be committed under
@@ -545,7 +611,9 @@ export type PostCommitSideEffect = {
    * authoritative intent arrives with, and the effects channel converges
    * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
   nonce?: string;
+
   flush(tx: unknown): void | Promise<void>;
+
   /**
    * Called instead of {@link flush} when the work this effect stands for will
    * not happen: the transaction carrying it was rejected and whoever owns its

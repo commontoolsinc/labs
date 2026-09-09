@@ -106,6 +106,9 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        // The assertion below is that a matching binding identity is
+        // admitted. Only an enforcing rung decides that; a weaker one admits
+        // the claim with a diagnostic and the assertion holds either way.
         cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "trust-snapshot-1",

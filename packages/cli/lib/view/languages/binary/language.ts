@@ -64,6 +64,7 @@ export const binaryLanguage: Language = {
     filenamePatterns: [],
     aliases: ["bytes"],
     interpreters: [],
+    sharedExtensions: [],
   },
 
   parseDocument: binarySourceDocument,

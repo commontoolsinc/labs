@@ -103,6 +103,7 @@ export interface ControlDeps {
 
   /** The toolshed's own space — where registrations live. */
   serviceSpace: string;
+
   operatorDid: string;
   serviceDids: readonly string[];
   hostsSpace: (space: string) => boolean;
@@ -112,6 +113,7 @@ export interface ControlDeps {
 
   /** Overridable so a test can reach the cap without minting the whole limit. */
   maxChannelsPerOwner?: number;
+
   maxLifetimeChannelsPerOwner?: number;
   maxLifetimeChannelsPerSpace?: number;
   apiUrl: string;

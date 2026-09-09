@@ -17,7 +17,7 @@ import {
   type FabricValue,
   isFabricPlainObject,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,
@@ -1344,6 +1344,15 @@ const VALUE_VALIDATION: SchemaValidationOptions = {
 
 interface SchemaValidationContext {
   activeByRoot: WeakMap<object, SchemaRootValidationActivity>;
+
+  /** Completed object proofs, keyed by options, schema root, schema, and value. */
+  successful: WeakMap<
+    SchemaValidationOptions,
+    WeakMap<object, WeakMap<object, WeakSet<object>>>
+  >;
+
+  /** Active recursion cutoffs encountered during this validation. */
+  cycleVersion: number;
 }
 
 interface SchemaRootValidationActivity {
@@ -1376,6 +1385,8 @@ const atValidationPath = (
 
 const createSchemaValidationContext = (): SchemaValidationContext => ({
   activeByRoot: new WeakMap(),
+  successful: new WeakMap(),
+  cycleVersion: 0,
 });
 
 const primitiveValidationKey = (value: unknown): string =>
@@ -1500,7 +1511,7 @@ export function localRefTarget(
  * would reject payloads the verb would have accepted.
  *
  * This is honest only for a payload that is PRESENT (measured 2026-07-30,
- * recorded on #5147): `SchemaObjectTraverser.traverseObjectWithSchema` (runner
+ * recorded on #5147): `SchemaObjectTraverser.#traverseObjectWithSchema` (runner
  * `traverse.ts`) fills each missing defaulted property of a present object
  * before checking `required`, while a wholly absent event bypasses the object
  * branch entirely — the handler sees `undefined` and no default is ever
@@ -1689,7 +1700,53 @@ export const validateAgainstSchemaForSanitization = (
     createSchemaValidationContext(),
   )?.message;
 
+/** Reuses completed proofs without turning an active cycle into acceptance. */
 const validateAgainstSchemaInternal = (
+  schema: JSONSchema,
+  value: unknown,
+  fullSchema: JSONSchema,
+  options: SchemaValidationOptions,
+  context: SchemaValidationContext,
+): SchemaValidationFailure | undefined => {
+  let successful: WeakSet<object> | undefined;
+  if (isObjectNotArray(schema) && typeof value === "object" && value !== null) {
+    const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+    const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
+    let byRoot = context.successful.get(options);
+    if (byRoot === undefined) {
+      byRoot = new WeakMap();
+      context.successful.set(options, byRoot);
+    }
+    let bySchema = byRoot.get(rootKey);
+    if (bySchema === undefined) {
+      bySchema = new WeakMap();
+      byRoot.set(rootKey, bySchema);
+    }
+    successful = bySchema.get(schema);
+    if (successful?.has(value)) return undefined;
+    if (successful === undefined) {
+      successful = new WeakSet();
+      bySchema.set(schema, successful);
+    }
+  }
+  const cycleVersion = context.cycleVersion;
+  const failure = validateAgainstSchemaUncached(
+    schema,
+    value,
+    fullSchema,
+    options,
+    context,
+  );
+  // Even an accepted union branch can depend on a recursion cutoff elsewhere
+  // in the proof. Only cycle-independent successes can be reused on any path.
+  if (failure === undefined && cycleVersion === context.cycleVersion) {
+    successful?.add(value as object);
+  }
+  return failure;
+};
+
+/** Checks one schema/value pair with active-path recursion detection. */
+const validateAgainstSchemaUncached = (
   schema: JSONSchema,
   value: unknown,
   fullSchema: JSONSchema,
@@ -1704,6 +1761,7 @@ const validateAgainstSchemaInternal = (
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (!markSchemaValueActive(rootKey, schema, value, context)) {
+    context.cycleVersion++;
     return indeterminate("recursive schema validation made no progress");
   }
 

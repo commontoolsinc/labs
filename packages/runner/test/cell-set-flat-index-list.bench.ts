@@ -170,6 +170,7 @@ async function cleanup(
 // pass one. Instead it runs the same scenario once more, untimed and with the
 // callback, and reports what came back. The reports are per bench name, once.
 //
+
 type Account = (tx: IExtendedStorageTransaction) => void;
 
 const reported = new Set<string>();
@@ -214,6 +215,7 @@ function updateLine({ docs, bytes }: WriteAccount): string {
 //
 // 1. WRITE: one flat array in ONE doc, via a single Cell.set()
 //
+
 async function writeOneDoc(
   N: number,
   b?: Deno.BenchContext,
@@ -241,6 +243,7 @@ async function writeOneDoc(
 //
 // 2. WRITE: one doc PER ITEM (parent array holds cell links)
 //
+
 async function writePerItem(
   N: number,
   b?: Deno.BenchContext,
@@ -310,6 +313,7 @@ for (const N of SIZES) {
 //
 // 3. READ: one whole-array get() in a fresh tx, then repeated reads in one tx
 //
+
 for (const N of SIZES) {
   Deno.bench({
     name: `flat list read - fresh-tx schemaless get() (${N} items)`,
@@ -417,14 +421,19 @@ for (const N of SIZES) {
   });
 }
 
-// 4. UPDATE: three writer profiles for "one item changed", distinguished
-//    because they have wildly different write footprints:
-//      a. REGENERATE from scratch (what a derivation/lift recompute does):
-//         fresh objects carry no doc identity → every element re-minted.
-//      b. READ-MODIFY-WRITE (the idiomatic handler edit): objects returned
-//         by get() carry their doc identity → only the changed element and
-//         the parent write.
-//      c. TARGETED key(i).set: bypasses the array diff entirely.
+//
+// 4. UPDATE: three writer profiles for "one item changed"
+//
+// They are distinguished because they have wildly different write footprints:
+//
+//   a. REGENERATE from scratch (what a derivation/lift recompute does):
+//      fresh objects carry no doc identity → every element re-minted.
+//   b. READ-MODIFY-WRITE (the idiomatic handler edit): objects returned
+//      by get() carry their doc identity → only the changed element and
+//      the parent write.
+//   c. TARGETED key(i).set: bypasses the array diff entirely.
+//
+
 async function updateRegenerate(
   N: number,
   b?: Deno.BenchContext,

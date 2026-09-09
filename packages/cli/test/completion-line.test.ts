@@ -109,7 +109,7 @@ Deno.test("resolve: the word after a value-taking flag is that flag's value", ()
 
 Deno.test("resolve: a boolean flag does not swallow the following word", () => {
   // `--quiet` takes no value, so the next word is a positional.
-  const line = resolve("cf piece get --quiet ");
+  const line = resolve("cf cell get --quiet ");
   assertEquals(line.slot?.kind, "argument");
 });
 
@@ -127,13 +127,13 @@ Deno.test("resolve: options already typed are captured for provider context", ()
   assertEquals(line.options.get("identity"), "./k.key");
   assertEquals(line.options.get("api-url"), "http://localhost:8000");
   assertEquals(line.options.get("space"), "team");
-  assertEquals(line.options.get("piece"), "fid1:x");
+  assertEquals(line.options.get("cell"), "fid1:x");
 });
 
 Deno.test("resolve: bundled short flags do not shift the argument index", () => {
   // `-qs team` is `-q` plus `-s team`. Mis-parsing it would make the first
   // positional look like the second and select the wrong provider.
-  const line = resolve("cf piece get -qs team ");
+  const line = resolve("cf cell get -qs team ");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "addressOrPath");
   assertEquals(line.slot.index, 0);
@@ -148,9 +148,10 @@ Deno.test("resolve: a second positional advances to the next argument", () => {
   assertEquals(line.slot.index, 1);
 });
 
-Deno.test("resolve: words after -- are passthrough, not CLI options", () => {
-  // `cf piece call ... -- --flag` hands `--flag` to the callable's own parser.
-  const line = resolve("cf piece call --piece x handler -- --title ");
+Deno.test("resolve: words after -- reach the read step, not the option tree", () => {
+  // `--` closes the callable's section, so what follows is the read options
+  // rather than any flag the command tree declares in the ordinary positions.
+  const line = resolve("cf piece call --piece x handler -- --select ");
   assertEquals(line.slot?.kind, "passthrough");
 });
 
@@ -169,9 +170,9 @@ Deno.test("resolve: a pre-parse global does not disturb later resolution", () =>
 });
 
 Deno.test("resolve: a stopEarly command offers no option slot past its callable", () => {
-  // `piece call` ends option parsing at the callable name, so every later word
-  // belongs to the callable's own parser. Offering `--invocation` there names a
-  // flag the command refuses.
+  // `cf piece call` ends option parsing at the callable name, which is where the
+  // callable's own section opens, so every later word belongs to its parser.
+  // Offering `--invocation` there names a flag the command refuses.
   const line = resolve("cf piece call --piece x addItem --");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "tail");
@@ -183,18 +184,22 @@ Deno.test("resolve: a flag past that boundary does not shift the positional inde
   const line = resolve("cf piece call --piece x addItem --title x ");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.index, 3);
-  assertEquals(line.options.get("piece"), "x");
+  assertEquals(line.options.get("cell"), "x");
 });
 
 Deno.test("resolve: the boundary does not reach a command that parses to the end", () => {
-  // `piece get` is not stopEarly(), so its own flags stay reachable after the
+  // `cf cell get` is not stopEarly(), so its own flags stay reachable after the
   // path argument.
-  const line = resolve("cf piece get --piece x items --");
+  const line = resolve("cf cell get --piece x items --");
   assertEquals(line.slot?.kind, "option-name");
 });
 
-Deno.test("resolve: `--` after the callable name still opens the passthrough slot", () => {
-  const line = resolve("cf piece call --piece x addItem -- --title ");
+Deno.test("resolve: `--` after the callable name closes its section", () => {
+  // The verb's own flags stand before the marker; the words past it are the
+  // read step's, and the slot is what tells them apart.
+  const line = resolve(
+    "cf piece call --piece x addItem --title x -- --select ",
+  );
   assertEquals(line.slot?.kind, "passthrough");
 });
 
@@ -207,8 +212,8 @@ Deno.test("resolve: a positional canonical address names the target, not the arg
   assertEquals(line.slot.argument.name, "callable");
 });
 
-Deno.test("resolve: an address in `cf get` leaves the path argument next", () => {
-  const line = resolve("cf get -s team /of:fid1:abc ");
+Deno.test("resolve: an address in `cf cell get` leaves the path argument next", () => {
+  const line = resolve("cf cell get -s team /of:fid1:abc ");
   assertEquals(line.address, "/of:fid1:abc");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "addressOrPath");
@@ -218,7 +223,7 @@ Deno.test("resolve: an address in `cf get` leaves the path argument next", () =>
 Deno.test("resolve: a cell path in the same position is not read as an address", () => {
   // A relative cell path never begins with `/`, which is the whole of the
   // grammar that tells the two apart.
-  const line = resolve("cf get -s team items ");
+  const line = resolve("cf cell get -s team items ");
   assertEquals(line.address, undefined);
   assertEquals(line.positionals, ["items"]);
 });
@@ -226,7 +231,7 @@ Deno.test("resolve: a cell path in the same position is not read as an address",
 Deno.test("resolve: a command with no positional address reads the word as its argument", () => {
   // `piece get-label` takes a path and nothing else, so a `/`-leading word is
   // that path rather than a target.
-  const line = resolve("cf piece get-label --piece x /of:fid1:abc ");
+  const line = resolve("cf cell get-label --piece x /of:fid1:abc ");
   assertEquals(line.address, undefined);
   assertEquals(line.positionals, ["/of:fid1:abc"]);
 });
@@ -295,7 +300,7 @@ Deno.test("resolve: a deno task cf line resolves like a cf line", () => {
   assertEquals(line.path, ["piece", "call"]);
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "callable");
-  assertEquals(line.options.get("piece"), "x");
+  assertEquals(line.options.get("cell"), "x");
 });
 
 Deno.test("declaredSlots names a value-taking option by long name and command", () => {
@@ -324,10 +329,8 @@ Deno.test("declaredSlots skips the help Cliffy propagates to every command", () 
     slots.positionals.some((slot) => slot.key.endsWith("help:command")),
   );
   assertEquals(
-    slots.positionals.filter((slot) => slot.where === "piece call").map((s) =>
-      s.key
-    ),
-    ["piece call:callable", "piece call:tail"],
+    slots.positionals.filter((slot) => slot.where === "call").map((s) => s.key),
+    ["call:callable", "call:tail"],
   );
 });
 

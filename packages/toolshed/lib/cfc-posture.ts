@@ -4,9 +4,14 @@
  * rationale this mirrors): a deployment whose enforcement dials cannot be
  * read off it is indistinguishable from a default one, so an operator has no
  * way to confirm what a runtime is actually enforcing (CT-2075's posture
- * visibility finding). Reporting only — the values come from the constructed
- * Runtime's resolved fields, never from a second reading of configuration
- * that could disagree with the first.
+ * visibility finding).
+ *
+ * The record itself is the runner's (`@commonfabric/runner/cfc`
+ * `cfcPostureReport`), which every surface that publishes a posture
+ * publishes: what is here is the module state a route can read, and nothing
+ * about the record's shape. Reporting only — the values come from the
+ * constructed Runtime's resolved fields, never from a second reading of
+ * configuration that could disagree with the first.
  *
  * The base webhook Runtime is the one reported. The per-space serving
  * runtimes the executor host builds hand-roll their options deliberately and
@@ -14,39 +19,13 @@
  * channel would report nothing the base does not.
  */
 
-import type { Runtime } from "@commonfabric/runner";
+import {
+  type CfcPostureReport,
+  cfcPostureReport,
+  type CfcPostureSource,
+} from "@commonfabric/runner/cfc";
 
-/** What `/api/meta` reports about the deployment's CFC dials. */
-export interface CfcPostureReport {
-  readonly enforcementMode: string;
-  readonly flowLabels: string;
-  readonly writeFloor: string;
-  readonly triggerReadGating: boolean;
-  readonly decomposedEnvelopes: boolean;
-  readonly policyEvaluation: string;
-  readonly labelMetadataProtection: string;
-  readonly declaredMonotonicity: string;
-
-  /** Digest of the deployment policy snapshot; `null` when none configured. */
-  readonly policyDigest: string | null;
-
-  /** Sink names with a declared confidentiality ceiling, sorted. */
-  readonly sinkCeilings: string[];
-}
-
-type CfcPostureSource = Pick<
-  Runtime,
-  | "cfcEnforcementMode"
-  | "cfcFlowLabels"
-  | "cfcWriteFloor"
-  | "cfcTriggerReadGating"
-  | "cfcDecomposedEnvelopes"
-  | "cfcPolicyEvaluation"
-  | "cfcLabelMetadataProtection"
-  | "cfcDeclaredMonotonicity"
-  | "cfcPolicySnapshot"
-  | "cfcSinkMaxConfidentiality"
->;
+export type { CfcPostureReport };
 
 let posture: CfcPostureReport | null = null;
 
@@ -56,22 +35,7 @@ let posture: CfcPostureReport | null = null;
  * reads `cfc: null` as "this deployment said nothing".
  */
 export function publishCfcPosture(runtime: CfcPostureSource | null): void {
-  if (runtime === null) {
-    posture = null;
-    return;
-  }
-  posture = {
-    enforcementMode: runtime.cfcEnforcementMode,
-    flowLabels: runtime.cfcFlowLabels,
-    writeFloor: runtime.cfcWriteFloor,
-    triggerReadGating: runtime.cfcTriggerReadGating === true,
-    decomposedEnvelopes: runtime.cfcDecomposedEnvelopes === true,
-    policyEvaluation: runtime.cfcPolicyEvaluation,
-    labelMetadataProtection: runtime.cfcLabelMetadataProtection,
-    declaredMonotonicity: runtime.cfcDeclaredMonotonicity,
-    policyDigest: runtime.cfcPolicySnapshot?.digest ?? null,
-    sinkCeilings: Object.keys(runtime.cfcSinkMaxConfidentiality).sort(),
-  };
+  posture = runtime === null ? null : cfcPostureReport(runtime);
 }
 
 /** What `/api/meta` reports; `null` until a Runtime has been constructed. */

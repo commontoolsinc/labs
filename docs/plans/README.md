@@ -10,6 +10,20 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
+  repairs, migration of authored patterns and their tests, and enforcement
+  through lint and new-source admission.
+- [Acquiring skills from the open internet](external-skill-acquisition.md)
+  splits discovery from acquisition against a public skill registry: the
+  registry answers what exists, a digest-verified `.well-known` entry or a git
+  commit SHA answers for the bytes, the text loads by handle into a child the
+  chooser never reads, and a split-mint provenance mark records where it came
+  from without declassifying anything.
+- [Collection naming: the first customer](collection-naming-topics.md)
+  builds [Naming in collections](../specs/collection-naming.md) on a parallel
+  exemplar board — a naming library, a member namespace the CLI and the shell
+  resolve as `top/42`, and `#42` in the editor — proven against the Topics
+  shape by a test-only board, and grafted onto Topics once, at the end.
 - [`cf view` language and syntax coverage](cf-view-language-coverage.md)
   orders the remaining language, data, build, and configuration formats needed
   for honest coverage of the active organization repositories.
@@ -17,6 +31,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   tracks the remaining shipping gates after the core implementation.
 - [CFC exchange-rule authoring](cfc-exchange-rule-authoring.md) tracks the
   remaining owner decisions and blocked stages for exchange rules.
+- [CFC llm-sink admission](cfc-llm-sink-admission.md) tracks the
+  boundary-scoped admission mechanism the max-enforcement posture names as
+  pending for its llm sinks: public-only ceilings paired with class-scoped
+  exchange rules, the llm sink class those rules need, and the owner decisions
+  on which authority and which caveat tiers admit content to a model.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
 - [`cf-code-editor` co-presence](cf-code-editor-copresence.md) adds an
@@ -75,12 +94,36 @@ a record: archive it to `docs/history/plans/` following the procedure in
   intent listener, the ruled double-dispatch implementation, the
   acceptance and the owner ruling set); it archives beside the stage-C
   closeout when that build lands.
+- [Scheduled work in the server](scheduled-work-in-the-server.md) proposes the
+  simpler form D12 said bgUpdater would come back as: a pattern declares the
+  cadence it wants to wake on, and the space's own serving runtime honors it,
+  so background work stops needing a separate process anyone has to run and
+  keep online. Waking a piece on a timer with nobody watching is the one thing
+  the background piece service does that the executor does not, and the ruling
+  accepts that capability lapsing in the meantime — nothing depends on it, so
+  nothing is broken while it is gone. Three separable parts: the replacement,
+  the already-ruled deletion, which waits for nothing here and has a worked v1
+  inventory to read, and compute accounting, which neither of the others
+  depends on. The replacement rests on a further ruling, because a
+  scheduled wake would be the second issuer of warm demand where the spec pins
+  the count at one.
+- [Revision-keyed schema memo](revision-keyed-schema-memo.md) designs a
+  cross-evaluation, per-document memo of schema-walk computation on the
+  memory server, keyed by each document's revision so validity needs no
+  invalidation machinery, sitting under the query evaluation cache to make
+  post-commit and cross-shape evaluations cost what changed instead of the
+  whole corpus. Carries the measured baseline and the staged path to a
+  per-revision snapshot cache.
 - [Retention and CFC execution provenance](retention-and-provenance.md)
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
   confidentiality. Gated on a CFC review that has not happened.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
+- [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
+  compares the lifecycle spec against the repository and orders the remainder
+  as five pull requests in two tracks — what a revision records, and where a
+  space lives.
 - [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
@@ -89,10 +132,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   board and topic grow their verbs without breaking the pieces already holding
   data: the shape the board demands of a stored topic, the one rehearsed break
   that narrowing it needs, and the items waiting on platform work.
-- Topics migration rehearsal has been executed and is archived at
-  [`../history/plans/topics-migration-rehearsal.md`](../history/plans/topics-migration-rehearsal.md);
-  what the live run found, including where that script was wrong, is in
-  [`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
 - [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
   rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
   space`, `cf inspect churn`); the operating procedure lives in
@@ -138,12 +177,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
-- [The CLI surface — implementation plan](cli-surface-implementation.md) builds
-  the rest of the command surface: positional addresses, the honest top-level
-  names, deprecating the spellings they replace, and merging the commands that
-  do one job under two names. Separate from the read-layer plan because it
-  renames rather than adds, so its risk is what breaks for a caller who already
-  learned the current spelling.
+- [Shuttle — a place-aware fabric shell](shuttle/README.md) is the working design
+  state for an interactive terminal tool: a REPL whose prompt carries a
+  mutable current place — the context that fills in the omitted levels of the
+  fabric's right-anchored references — plus full-screen live views, for
+  inspecting and editing space and piece state. Decisions so far and open
+  questions; construction is under way, in the order its
+  [build sequence](shuttle/build-sequence.md) sets out.
 - [Shell completion coverage](cli-completion-coverage.md) sequences the work
   that makes `cf completion` answer correctly across the surface it claims and
   reach the verb surface it does not: the slots that offer a wrong candidate,

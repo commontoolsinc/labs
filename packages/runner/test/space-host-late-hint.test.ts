@@ -24,11 +24,17 @@ import {
 } from "@commonfabric/memory/v2";
 
 class LoopbackSessionFactory implements SessionFactory {
+  readonly #serverForSpace: (
+    space: MemorySpace,
+  ) => MemoryV2Server.Server;
+
   constructor(
-    private readonly serverForSpace: (
+    serverForSpace: (
       space: MemorySpace,
     ) => MemoryV2Server.Server,
-  ) {}
+  ) {
+    this.#serverForSpace = serverForSpace;
+  }
 
   async create(
     space: MemorySpace,
@@ -37,7 +43,7 @@ class LoopbackSessionFactory implements SessionFactory {
     _signal?: AbortSignal,
   ) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.serverForSpace(space)),
+      transport: MemoryV2Client.loopback(this.#serverForSpace(space)),
     });
     const session = await client.mount(
       space,

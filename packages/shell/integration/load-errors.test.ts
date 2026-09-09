@@ -1,3 +1,4 @@
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
@@ -5,6 +6,8 @@ import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 
 import "../src/globals.ts";
+
+import { clickPierce } from "./shadow-dom.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;
 const ASYNC_FAILURE_MESSAGE = "The selected piece failed while it was starting";
@@ -115,6 +118,105 @@ describe("shell load errors", () => {
         probe.collect(".load-error-details code").some((element) =>
           probe.deepText(element).trim().length > 0
         ),
+    );
+  });
+
+  it("opens the space's menu over the surface a piece failed to load into", async () => {
+    const page = shell.page();
+    const identity = await Identity.generate({ implementation: "noble" });
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId: "fid1:missing:piece",
+      },
+      identity,
+    });
+    await waitForCondition(
+      page,
+      (probe) =>
+        probe.collect(".load-error").some((element) =>
+          probe.deepText(element).includes("We could not load this piece")
+        ),
+    );
+
+    // The click lands at the foot of the viewport, four pixels above the
+    // bottom edge, which is also the margin the menu keeps from that edge. So
+    // a menu placed from its own measured height comes to rest with its bottom
+    // exactly on that margin, however tall the space heading makes it, and its
+    // left edge still at the click.
+    const space = await page.evaluate(() => {
+      const rootView = document.querySelector("x-root-view");
+      const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+        | (Element & { space?: string })
+        | null;
+      const surface = appView?.shadowRoot?.querySelector("x-body-view")
+        ?.shadowRoot?.querySelector(".load-error");
+      if (!appView?.space) throw new Error("the app view names no space");
+      if (!surface) throw new Error("no load-error surface to right-click");
+      surface.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+          clientX: 40,
+          clientY: globalThis.innerHeight - 4,
+        }),
+      );
+      return appView.space;
+    });
+
+    const menu = await waitForCondition(page, (probe, heading: string) => {
+      const root = document.querySelector("cf-piece-menu")?.shadowRoot;
+      const element = root?.querySelector(".menu");
+      if (!element || !probe.isRendered(element)) return false;
+      const text = probe.deepText(element).replace(/\s+/g, " ").trim();
+      if (!text.includes(heading)) return false;
+      const entries: Record<string, boolean> = {};
+      for (const button of root!.querySelectorAll("button[test-id]")) {
+        entries[button.getAttribute("test-id")!] =
+          (button as HTMLButtonElement).disabled;
+      }
+      const box = element.getBoundingClientRect();
+      return {
+        piece: text.startsWith("Piece unavailable"),
+        entries,
+        left: Math.round(box.left),
+        gap: Math.round(globalThis.innerHeight - box.bottom),
+      };
+    }, { args: [`Space ${space}`] });
+
+    expect(menu).toEqual({
+      piece: true,
+      entries: {
+        "piece-menu-source": true,
+        "piece-menu-origin": true,
+        "piece-menu-data": true,
+        "piece-menu-actions": true,
+        "piece-menu-clone-fresh": true,
+        "piece-menu-clone-copy-data": true,
+        "piece-menu-space-access": false,
+      },
+      left: 40,
+      gap: 4,
+    });
+
+    // The rights the panel shows were read through the space and the runtime
+    // the menu was handed, there being no piece to read them through. The
+    // panel names that space in its subject line, and lists the wildcard entry
+    // every space carries. Which capability this identity holds is not
+    // asserted: the tests share one space, and the first to reach it owns it.
+    await clickPierce(page, '[test-id="piece-menu-space-access"]');
+    await waitForCondition(
+      page,
+      (probe, subject: string) =>
+        probe.collect('[test-id="piece-panel-access"]').some((panel) => {
+          const text = probe.deepText(panel).replace(/\s+/g, " ");
+          return text.includes(`Space access rights ${subject}`) &&
+            text.includes("Anyone (*)");
+        }),
+      { args: [space] },
     );
   });
 

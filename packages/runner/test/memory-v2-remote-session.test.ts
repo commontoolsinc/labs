@@ -294,17 +294,19 @@ class RecordingWebSocket extends EventTarget {
       RecordingWebSocket.#waiters.push({ count, resolve })
     );
   }
+
   send(_payload: EncodedMemoryMessage): void {}
   close(): void {}
 }
 
 describe("StorageManager per-space host wiring", () => {
-  // The pending session promises hold no resources, but their microtask
-  // chains outlive the test body; opt out of the op sanitizer for that.
   it("dials a mapped space on its host and others on the default", {
     sanitizeOps: false,
     sanitizeResources: false,
   }, async () => {
+    // The pending session promises hold no resources, but their microtask
+    // chains outlive the test body; opt out of the op sanitizer for that.
+
     const realWebSocket = globalThis.WebSocket;
     (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
     try {
@@ -344,9 +346,10 @@ describe("StorageManager per-space host wiring", () => {
   });
 });
 
-// Site-table v0: runtime-learned host hints. A default-host connection remains
-// provisional until the first configured or accepted route is known.
 describe("StorageManager.registerSpaceHost", () => {
+  // Site-table v0: runtime-learned host hints. A default-host connection
+  // remains provisional until the first configured or accepted route is known.
+
   const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
   const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
   const spaceOpened = "did:key:z6Mk-register-opened" as MemorySpace;
@@ -526,14 +529,17 @@ describe("WebSocketTransport failure signaling", () => {
     readonly started = Promise.withResolvers<void>();
     readonly released = Promise.withResolvers<void>();
 
-    constructor(private readonly contents = new Uint8Array([0]).buffer) {
+    readonly #contents: ArrayBuffer;
+
+    constructor(contents = new Uint8Array([0]).buffer) {
       super();
+      this.#contents = contents;
     }
 
     override async arrayBuffer(): Promise<ArrayBuffer> {
       this.started.resolve();
       await this.released.promise;
-      return this.contents;
+      return this.#contents;
     }
   }
 

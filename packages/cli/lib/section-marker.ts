@@ -24,7 +24,7 @@ import { ValidationError } from "@cliffy/command";
  * Refuse a `--` written on a command that has no callable section.
  *
  * `rawArgs` is the command's own argument list, marker included. The marker is
- * read from there rather than from what followed it: a trailing `cf get addr
+ * read from there rather than from what followed it: a trailing `cf cell get addr
  * --` sets no words aside, so the literal arguments are empty and identical to
  * a line that wrote no marker at all. Judging by what followed would accept the
  * one spelling that most looks like the caller expected the marker to mean
@@ -55,7 +55,7 @@ export function refuseSectionMarker(
       `${consequence}\n\n` +
       `  written:  cf ${spelling} ${written}\n` +
       `  write:    cf ${spelling} ${corrected}\n\n` +
-      `\`--\` is written on \`cf call\` and \`cf exec\`, where a callable's ` +
+      `\`--\` is written on \`cf piece call\` and \`cf exec\`, where a callable's ` +
       `own flags come first and the marker ends them.`,
   );
 }

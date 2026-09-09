@@ -105,18 +105,6 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
   return meta?.[ignoreReadForCommitMarker] === true;
 }
 
-// Transaction-level UI-input "blind leaf overwrite" mode. handleCellSet marks
-// the transaction around a scalar `$value` set (and unmarks before
-// prepareTxForCommit, so CFC boundary-commit read-then-writes keep their
-// preconditions); while marked, read() tags every read with `ignoreReadForCommit`
-// and skips `validated`, so the write carries no value-equality precondition on
-// its leaf (last-write-wins, which is correct for raw scalar UI input) — buildReads
-// downgrades the tagged reads to a single nonRecursive entity-root existence read,
-// which still catches a concurrent whole-doc delete/replace. Read-modify-write
-// and structured (array/object) writes are NOT marked and retain compare-and-set.
-// Both the wrapper and the inner storage transaction(s) are marked, since
-// read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
-// layers.
 // Rejection listeners, registered per inner transaction (CT-1950). A
 // rejected commit's promise resolves only after finalizeRejection's
 // read-repair gate — the caller's retry needs the repaired base — but the
@@ -191,6 +179,20 @@ function* blindWriteTxChain(tx: object): Generator<object> {
   }
 }
 
+/**
+ * Transaction-level UI-input "blind leaf overwrite" mode. handleCellSet marks
+ * the transaction around a scalar `$value` set (and unmarks before
+ * prepareTxForCommit, so CFC boundary-commit read-then-writes keep their
+ * preconditions); while marked, read() tags every read with `ignoreReadForCommit`
+ * and skips `validated`, so the write carries no value-equality precondition on
+ * its leaf (last-write-wins, which is correct for raw scalar UI input) — buildReads
+ * downgrades the tagged reads to a single nonRecursive entity-root existence read,
+ * which still catches a concurrent whole-doc delete/replace. Read-modify-write
+ * and structured (array/object) writes are NOT marked and retain compare-and-set.
+ * Both the wrapper and the inner storage transaction(s) are marked, since
+ * read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
+ * layers.
+ */
 export function markUiInputBlindWriteTx(tx: object): void {
   for (const layer of blindWriteTxChain(tx)) uiInputBlindWriteTxs.add(layer);
 }
@@ -217,25 +219,27 @@ export function isDurableReadTx(tx: object): boolean {
   return false;
 }
 
-// Lazy materialization: a marked transaction hands a reader views that resolve
-// each path as it is touched, rather than a value built in one pass before the
-// reader looks at any of it.
-//
-// The mark also decides how a view treats the transaction it was made against.
-// Unmarked, a query-result proxy is a standing handle: it resolves the
-// transaction on every access, so a holder keeps reading current state after
-// that transaction has finished — which long-lived consumers depend on, an LLM
-// tool call dispatched later and a SQLite result flushed post-commit among
-// them. Marked, a view keeps the transaction it was created with, so the value
-// it describes stays the value that was there when it was taken, and reading
-// after that transaction finishes throws rather than quietly reading from
-// committed state.
-//
-// Nothing outside the mark changes, so an unmarked transaction reads exactly as
-// it did before lazy materialization existed. Marked on the same wrapper chain
-// as the marks above, so a wrapper and the transaction it wraps read alike.
 const lazyMaterializationTxs = new WeakSet<object>();
 
+/**
+ * Lazy materialization: a marked transaction hands a reader views that resolve
+ * each path as it is touched, rather than a value built in one pass before the
+ * reader looks at any of it.
+ *
+ * The mark also decides how a view treats the transaction it was made against.
+ * Unmarked, a query-result proxy is a standing handle: it resolves the
+ * transaction on every access, so a holder keeps reading current state after
+ * that transaction has finished — which long-lived consumers depend on, an LLM
+ * tool call dispatched later and a SQLite result flushed post-commit among
+ * them. Marked, a view keeps the transaction it was created with, so the value
+ * it describes stays the value that was there when it was taken, and reading
+ * after that transaction finishes throws rather than quietly reading from
+ * committed state.
+ *
+ * Nothing outside the mark changes, so an unmarked transaction reads exactly as
+ * it did before lazy materialization existed. Marked on the same wrapper chain
+ * as the marks above, so a wrapper and the transaction it wraps read alike.
+ */
 export function markLazyMaterializationTx(tx: object): void {
   for (const layer of blindWriteTxChain(tx)) lazyMaterializationTxs.add(layer);
 }
@@ -244,6 +248,16 @@ export function unmarkLazyMaterializationTx(tx: object): void {
     lazyMaterializationTxs.delete(layer);
   }
 }
+export function isLazyMaterializationTx(tx: object): boolean {
+  // Walk the chain rather than testing the object: a wrapper built over a
+  // transaction that was marked earlier has never been marked itself, and must
+  // still report the mark of what it wraps.
+  for (const layer of blindWriteTxChain(tx)) {
+    if (lazyMaterializationTxs.has(layer)) return true;
+  }
+  return false;
+}
+
 // A refusal recorded on the transaction, so it survives being caught. A reader
 // can swallow a `SchemaMismatchError` — its own `try`/`catch`, or an `await`
 // that discards the rejection — and still hand back a plausible-looking result.
@@ -272,16 +286,6 @@ export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
   for (const layer of blindWriteTxChain(tx)) {
     if (schemaRefusals.get(layer) === refusal) schemaRefusals.delete(layer);
   }
-}
-
-export function isLazyMaterializationTx(tx: object): boolean {
-  // Walk the chain rather than testing the object: a wrapper built over a
-  // transaction that was marked earlier has never been marked itself, and must
-  // still report the mark of what it wraps.
-  for (const layer of blindWriteTxChain(tx)) {
-    if (lazyMaterializationTxs.has(layer)) return true;
-  }
-  return false;
 }
 
 // Renderer-input (user-keystroke `$value`) provenance for timing-mitigation

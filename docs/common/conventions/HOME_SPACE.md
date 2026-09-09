@@ -56,22 +56,28 @@ Favorites are stored on the home default pattern at
 Favorites are reached through the runtime's favorites manager
 (`FavoritesManager`, exported by `@commonfabric/runtime-client`), which reads
 and writes the home space's default pattern directly. A piece is addressed by
-the space it lives in plus its entity id:
+the space it lives in, its entity id there, and the scope that id resolves in,
+carried as the one `FavoritePieceAddress` value since one id in two scopes is
+two documents:
 
 ```typescript
 // Shown for illustration only.
 const favorites = rt.favorites();
+const piece = { space, pieceId, scope: "space" };
 
-await favorites.addFavorite(space, pieceId);
-await favorites.removeFavorite(space, pieceId);
+await favorites.addFavorite(piece);
+await favorites.removeFavorite(piece);
 
 const entries = await favorites.getFavorites();
 const unsubscribe = favorites.subscribeFavorites((list) => render(list));
 ```
 
-An entry is keyed by the piece's identity, so favoriting the same piece twice
-replaces its entry rather than adding a second one, and removing it reaches
-that entry whatever else the list holds.
+An entry is keyed by that whole address, so favoriting the same piece twice
+replaces its entry rather than adding a second one, removing it reaches that
+entry whatever else the list holds, and one id favorited in two scopes holds
+two entries rather than one. A space-scoped address names no scope in its key,
+that being the scope an address defaults to; only a narrower scope is written,
+and that elision is what keys every favorite in durable storage.
 
 ## Profile
 
@@ -133,11 +139,11 @@ the CF CLI:
 cf test ./my-home.test.tsx
 
 # Deploy a custom home pattern with the test attached
-cf piece set-home -i ./my.key -a http://localhost:8000 \
+cf space set-home -i ./my.key -a http://localhost:8000 \
   --test ./my-home.test.tsx ./my-home.tsx
 
 # Reset to the system default
-cf piece set-home -i ./my.key -a http://localhost:8000 --reset
+cf space set-home -i ./my.key -a http://localhost:8000 --reset
 ```
 
 Write automated tests for new or changed home-pattern behavior. Repeat
@@ -181,7 +187,7 @@ To share identity between browser and CLI:
 deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > ./browser.key
 
 # 3. Use that key with cf, retaining the tested source package
-cf piece set-home -i ./browser.key -a http://localhost:8000 \
+cf space set-home -i ./browser.key -a http://localhost:8000 \
   --test ./my-home.test.tsx ./my-home.tsx
 ```
 
@@ -218,7 +224,7 @@ Both the home pattern and the default app pattern follow the same mechanism:
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` can replace it — either with a URL-based pattern,
    which also stamps `patternSource`, or a custom `RuntimeProgram` (used by
-   `cf piece set-home`), which remains untracked by the URL updater and may carry
+   `cf space set-home`), which remains untracked by the URL updater and may carry
    a separate repository locator
 5. Before an existing eligible root starts, it is reconciled in place. A root
    with stored `patternSource` tracks that source. A pre-provenance root is

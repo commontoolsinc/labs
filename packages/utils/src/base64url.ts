@@ -107,6 +107,7 @@ const B64_PADDING_CHAR = "=";
 
 /** Reverse lookup: base64 char -> 6-bit value. */
 const B64_DECODE = new Uint8Array(128).fill(B64_INVALID);
+
 for (let i = 0; i < B64_CHARS.length; i++) {
   B64_DECODE[B64_CHARS.charCodeAt(i)] = i;
 }

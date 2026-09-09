@@ -13,6 +13,7 @@ import {
   preparePieceSourceTransitionBaseline,
   setPatternSource,
 } from "../src/runner.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -93,7 +94,11 @@ describe("patternSource meta accessors", () => {
     const origin = "https://example.test/pattern.tsx";
     const seed = runtime.edit();
     const seededCell = runtime.getCell(signer.did(), id, undefined, seed);
-    seededCell.setMetaRaw("patternIdentity", pattern);
+    seededCell.setMetaRaw(
+      "patternIdentity",
+      pattern,
+      rawMetaWriteAuthorization,
+    );
     setPatternSource(seededCell, seed, origin);
     await seed.commit();
 
@@ -156,7 +161,11 @@ describe("patternSource meta accessors", () => {
     const pattern = { identity: "current-pattern", symbol: "default" };
     const seed = runtime.edit();
     const seededCell = runtime.getCell(signer.did(), id, undefined, seed);
-    seededCell.setMetaRaw("patternIdentity", pattern);
+    seededCell.setMetaRaw(
+      "patternIdentity",
+      pattern,
+      rawMetaWriteAuthorization,
+    );
     setPatternSource(seededCell, seed, "https://example.test/first.tsx");
     await seed.commit();
 
@@ -202,11 +211,15 @@ describe("patternSource meta accessors", () => {
     const pattern = { identity: "current-pattern", symbol: "default" };
     const seed = runtime.edit();
     const seededCell = runtime.getCell(signer.did(), id, undefined, seed);
-    seededCell.setMetaRaw("patternIdentity", pattern);
+    seededCell.setMetaRaw(
+      "patternIdentity",
+      pattern,
+      rawMetaWriteAuthorization,
+    );
     seededCell.setMetaRaw("pieceSourceHistory", [{
       revisionId: "broken",
       timestamp: 42,
-    }]);
+    }], rawMetaWriteAuthorization);
     await seed.commit();
 
     const cell = runtime.getCell(signer.did(), id);
@@ -259,7 +272,11 @@ describe("patternSource meta accessors", () => {
         `malformed-source-history-${index}`,
       );
       const seed = runtime.edit();
-      cell.withTx(seed).setMetaRaw("pieceSourceHistory", history as never);
+      cell.withTx(seed).setMetaRaw(
+        "pieceSourceHistory",
+        history as never,
+        rawMetaWriteAuthorization,
+      );
       await seed.commit();
 
       expect(() => getPieceSourceRevisions(cell)).toThrow(
@@ -273,7 +290,11 @@ describe("patternSource meta accessors", () => {
     const pattern = { identity: "expected-pattern", symbol: "default" };
     const seed = runtime.edit();
     const seededCell = runtime.getCell(signer.did(), id, undefined, seed);
-    seededCell.setMetaRaw("patternIdentity", pattern);
+    seededCell.setMetaRaw(
+      "patternIdentity",
+      pattern,
+      rawMetaWriteAuthorization,
+    );
     seededCell.setMetaRaw("pieceSourceHistory", [{
       revisionId: "wrong-source",
       timestamp: 42,
@@ -285,7 +306,7 @@ describe("patternSource meta accessors", () => {
         seed,
       ).getAsLink(),
       operation: "create",
-    }]);
+    }], rawMetaWriteAuthorization);
     await seed.commit();
 
     expect(() => getPieceSourceRevisions(runtime.getCell(signer.did(), id)))
@@ -304,7 +325,11 @@ describe("patternSource meta accessors", () => {
     const pattern = runtime.patternManager.getArtifactEntryRef(compiled)!;
     const piece = runtime.getCell(signer.did(), "source-verification-race");
     const seed = runtime.edit();
-    piece.withTx(seed).setMetaRaw("patternIdentity", pattern);
+    piece.withTx(seed).setMetaRaw(
+      "patternIdentity",
+      pattern,
+      rawMetaWriteAuthorization,
+    );
     await seed.commit();
     const expected = getPieceSourceSnapshot(piece)!;
     const baseline = await preparePieceSourceTransitionBaseline(
@@ -348,7 +373,11 @@ describe("patternSource meta accessors", () => {
     const missing = { identity: "missing-source", symbol: "default" };
     const seed = runtime.edit();
     const seededCell = runtime.getCell(signer.did(), id, undefined, seed);
-    seededCell.setMetaRaw("patternIdentity", missing);
+    seededCell.setMetaRaw(
+      "patternIdentity",
+      missing,
+      rawMetaWriteAuthorization,
+    );
     await seed.commit();
 
     const cell = runtime.getCell(signer.did(), id);
@@ -388,7 +417,11 @@ describe("patternSource meta accessors", () => {
         expected,
       },
     );
-    cell.withTx(transition).setMetaRaw("patternIdentity", replacement);
+    cell.withTx(transition).setMetaRaw(
+      "patternIdentity",
+      replacement,
+      rawMetaWriteAuthorization,
+    );
     await transition.commit();
 
     expect(
@@ -406,7 +439,11 @@ describe("patternSource meta accessors", () => {
     const pattern = { identity: "current-pattern", symbol: "default" };
     const cell = runtime.getCell(signer.did(), "stale-source-baseline");
     const seed = runtime.edit();
-    cell.withTx(seed).setMetaRaw("patternIdentity", pattern);
+    cell.withTx(seed).setMetaRaw(
+      "patternIdentity",
+      pattern,
+      rawMetaWriteAuthorization,
+    );
     setPatternSource(cell, seed, "https://example.test/first.tsx");
     await seed.commit();
     const stale = getPieceSourceSnapshot(cell)!;

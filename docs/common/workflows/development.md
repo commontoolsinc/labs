@@ -14,13 +14,13 @@ deno task cf test pattern.test.tsx
 deno task cf piece new ... --test pattern.test.tsx pattern.tsx
 
 # Update existing and retain the complete source package
-deno task cf piece setsrc ... --test pattern.test.tsx --piece PIECE_ID pattern.tsx
+deno task cf piece setsrc ... --test pattern.test.tsx --cell PIECE_ID pattern.tsx
 
 # Ship a file that is not code alongside the source
-deno task cf piece setsrc ... --test pattern.test.tsx --datafile data/cities.json --piece PIECE_ID pattern.tsx
+deno task cf piece setsrc ... --test pattern.test.tsx --datafile data/cities.json --cell PIECE_ID pattern.tsx
 
 # Inspect data
-deno task cf piece inspect ... --piece PIECE_ID
+deno task cf piece inspect ... --cell PIECE_ID
 
 # Link data between deployed pieces (shares cells across patterns)
 deno task cf piece link ... editor-id/items viewer-id/items

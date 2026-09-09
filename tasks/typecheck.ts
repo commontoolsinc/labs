@@ -6,12 +6,14 @@
  * the whole task. tasks/check.sh owns the Deno version gate and delegates
  * here.
  *
- * This list is the single type-checking point for the paths it names: the
- * CI test jobs and the package test tasks that cover these paths run
- * `deno test --no-check` and rely on this task (via the Check job's
- * "Type check codebase" step) for type safety. Before adding --no-check to
- * a test invocation, make sure every file it loads is under a path listed
- * here. Removing a path from this list removes its type checking entirely.
+ * This list is the only type check a path gets whose tests run under
+ * `--no-check`: those runs lean on this task, via the Check job's "Type
+ * check codebase" step, for type safety. A package whose test task checks
+ * its own files instead — `packages/patterns` among them — is reached both
+ * ways. Before adding `--no-check` to a test invocation, make sure every
+ * file it loads is under a path listed here, because that flag is what
+ * moves the file's type checking here. Removing a path removes the checking
+ * this task gives it.
  */
 
 import { expandGlob } from "@std/fs";
@@ -22,10 +24,7 @@ const DIRS = [
   "packages/api",
   "packages/background-piece-service",
   "packages/cf-harness",
-  "packages/cli/commands",
-  "packages/cli/lib",
-  "packages/cli/support",
-  "packages/cli/test",
+  "packages/cli",
   "packages/connectors/agents/connector",
   "packages/connectors/agents/debug-view",
   "packages/connectors/agents/host",
@@ -61,7 +60,6 @@ const DIRS = [
   "packages/patterns/google/core/util",
   "packages/patterns/integration",
   "packages/patterns/notes",
-  "packages/patterns/record",
   "packages/patterns/scrabble",
   "packages/patterns/system",
   "packages/patterns/test",
@@ -79,31 +77,49 @@ const DIRS = [
   "packages/static/test",
   "packages/test-support",
   "packages/toolshed",
+  "packages/ts-transformers/lint-plugins",
   "packages/ts-transformers/src",
+  "packages/ts-transformers/test/diagnostics",
+  "packages/ts-transformers/test/reactive",
+  "packages/ui",
   "packages/utils",
+  "tasks",
 ];
 
-// Glob patterns, expanded the way the shell used to expand them.
+// Paths reached by pattern rather than named outright.
 const GLOBS = [
-  "tasks/*.ts",
   "scripts/*.ts",
-  "packages/cli/*.ts",
   "packages/static/*.ts",
   "packages/patterns/*.ts",
   "packages/patterns/*.tsx",
-  // Iframe guests compile as ordinary browser modules. Their generated
+  // Iframe guests and the contracts they are written against compile as
+  // ordinary browser modules, and `isPatternSource()` excludes them for
+  // exactly that reason, so this task is what checks them. Their generated
   // pattern wrappers remain under the classic JSX environment owned by
-  // `deno task cfcheck`.
-  "packages/patterns/*/guest.ts",
-  "packages/patterns/*/guest.tsx",
+  // `deno task cfcheck`. The depth is open because a guest sits wherever the
+  // pattern that hosts it puts it; the `iframe-` prefix is not, because that
+  // is the condition under which the exclusion applies. A file of the same
+  // name elsewhere is a pattern source cfcheck compiles, and checking it here
+  // as well would put one file through two incompatible JSX environments.
+  "packages/patterns/iframe-*/**/guest.ts",
+  "packages/patterns/iframe-*/**/guest.tsx",
+  "packages/patterns/iframe-*/**/contract.ts",
+  // A `.browser.test.ts` reaches the browser through `deno bundle`, which
+  // transpiles rather than type-checks, and `packages/patterns` keeps it out
+  // of the `deno test` pass that would have. This task is the only thing that
+  // opens it.
+  "packages/patterns/**/*.browser.test.ts",
+  // `deno check` takes no exclusion, so a tree holding a `test/fixtures`
+  // subtree it must not open is reached by glob rather than as one directory
+  // entry: per tree, a pattern for the test files at any depth and another
+  // for the helper modules beside them at the top level. A subtree holding no
+  // fixtures needs none of that and is named in `DIRS` above, which is where
+  // the transformer's `test/diagnostics` and `test/reactive` sit;
+  // `UNCHECKED_TREES` records the fixtures these patterns leave behind.
+  "packages/ts-transformers/test/*.ts",
   "packages/ts-transformers/test/**/*.test.ts",
-  // schema-generator tests, excluding test/fixtures: the `*.input.ts`
-  // fixtures name ambient wrappers (Cell, Stream, Writable) without
-  // importing them, since the transformer supplies those, so they do not
-  // type-check on their own. The test-file suffix keeps them out.
+  "packages/schema-generator/test/*.ts",
   "packages/schema-generator/test/**/*.test.ts",
-  // Google patterns (previously checked individually to avoid OOM, now
-  // included with the increased heap limit).
   "packages/patterns/google/core/*.ts",
   "packages/patterns/google/core/*.tsx",
   "packages/patterns/google/core/experimental/*.ts",
@@ -114,43 +130,118 @@ const GLOBS = [
   "packages/patterns/google/WIP/*.tsx",
 ];
 
-// The ui components entry replicates the shell pattern
-// `packages/ui/src/v2/components/*[!outliner]/*.ts*`: a component directory
-// is included unless its name ends with one of the characters of
-// "outliner". The character class reads as a name filter for the outliner
-// component but excludes every directory with one of those trailing
-// letters, and this port preserves that behavior exactly rather than
-// silently widening the checked set.
-const UI_COMPONENTS_DIR = "packages/ui/src/v2/components";
-const UI_EXCLUDED_TRAILING = new Set("outliner");
-
-async function uiComponentFiles(root: string): Promise<string[]> {
-  const files: string[] = [];
-  const directories: Deno.DirEntry[] = [];
-  try {
-    for await (const entry of Deno.readDir(`${root}/${UI_COMPONENTS_DIR}`)) {
-      directories.push(entry);
-    }
-  } catch (error) {
-    // This task is the single type-checking point for these paths, so a
-    // component tree that cannot be enumerated fails the task rather than
-    // silently dropping the whole ui group from coverage.
-    throw new Error(`cannot enumerate ${UI_COMPONENTS_DIR}: ${error}`);
-  }
-  for (const entry of directories) {
-    if (!entry.isDirectory) continue;
-    const last = entry.name.at(-1);
-    if (last !== undefined && UI_EXCLUDED_TRAILING.has(last)) continue;
-    for await (
-      const file of Deno.readDir(`${root}/${UI_COMPONENTS_DIR}/${entry.name}`)
-    ) {
-      if (file.isFile && /\.tsx?$/.test(file.name)) {
-        files.push(`${UI_COMPONENTS_DIR}/${entry.name}/${file.name}`);
-      }
-    }
-  }
-  return files.sort();
+/** Whether a repository-relative path is a test rather than a source file. */
+export function isTestModule(file: string): boolean {
+  return /\.test\.[cm]?[jt]sx?$/.test(file);
 }
+
+/**
+ * Whether a path is a pattern test that one of the two lanes type-checks.
+ *
+ * `packages/patterns` runs a `.test.ts` under `deno test` without
+ * `--no-check`, and `cf test` compiles a `.test.tsx` through the runtime
+ * harness. The exclusions are the places where a file's shape and those lanes
+ * part company, and each leaves a file for a checked path to name instead: an
+ * extension outside the two has no lane at all; a `.browser.test.ts` is kept
+ * out of the `deno test` pass and bundled to its browser by a step that
+ * transpiles without checking; and a nested `integration` tree is excluded
+ * from that pass by the package's own test config, while the `integration`
+ * task names top-level paths explicitly rather than globbing for them.
+ */
+function isPatternTest(file: string): boolean {
+  if (file.includes("/integration/")) return false;
+  if (file.endsWith(".browser.test.ts")) return false;
+  return file.endsWith(".test.ts") || file.endsWith(".test.tsx");
+}
+
+/** A tree of modules the checked paths leave out, and why. */
+export interface UncheckedTree {
+  /** Repository-relative directory no checked path names. */
+  readonly tree: string;
+
+  /** Why this task does not type-check it. */
+  readonly because: string;
+
+  /**
+   * Which of the tree's modules this entry accounts for; all of them when
+   * omitted. Two entries dividing one tree each carry one, so that no file
+   * is excused by an entry whose reason is untrue of it — the reasons differ
+   * where what happens to the files differs.
+   */
+  readonly matches?: (file: string) => boolean;
+}
+
+/**
+ * Every tree the checked paths deliberately leave out.
+ *
+ * A list of what is checked cannot on its own distinguish a tree somebody
+ * decided to leave out from one the list forgot: both are simply absent, and
+ * the task reports a clean run over either. Recording the decision is what
+ * tells them apart, and `typecheck.test.ts` holds the pair to being
+ * exhaustive — a workspace file that is neither checked nor named by an entry
+ * here fails that test, naming the file.
+ */
+export const UNCHECKED_TREES: readonly UncheckedTree[] = [
+  {
+    tree: "packages/patterns",
+    matches: (file) => !isTestModule(file),
+    because:
+      "authored patterns compile under the classic-`h` JSX runtime rather " +
+      "than the automatic-JSX environment this task uses, and the two " +
+      "disagree on some pattern types, so `deno task cfcheck` type-checks " +
+      "them instead. `typecheck.test.ts` holds this entry to excusing only " +
+      "files the collector in `tasks/pattern-files.ts` hands that gate, so " +
+      "a claim that coverage lives elsewhere cannot drift from where it is.",
+  },
+  {
+    tree: "packages/patterns",
+    matches: isPatternTest,
+    because: "a file under `packages/patterns` shaped like what the test " +
+      "lanes take, whatever it holds — many are patterns driven through " +
+      "`action(...)`, and others are plain `Deno.test` unit tests of a " +
+      "pattern's helpers. What decides is the suffix rather than the " +
+      "contents: `isPatternSource()` in `tasks/pattern-files.ts` turns a " +
+      "file away on the test suffix alone, so `deno task cfcheck` walks " +
+      "none of them. The lane that runs one type-checks it instead: " +
+      "`packages/patterns` runs a `.test.ts` under `deno test` without " +
+      "`--no-check`, and `cf test` compiles a `.test.tsx` through the " +
+      "runtime harness, which reports a type error as a failed test. This " +
+      "reaches only what those lanes take, which is why the predicate turns " +
+      "three cases away: another extension has no lane at all; a " +
+      "`.browser.test.ts` is excluded from the `deno test` pass and bundled " +
+      "to its browser by a step that transpiles without checking; and a " +
+      "nested `integration` tree is excluded from that pass by the package's " +
+      "test config while the `integration` tasks name their top-level paths " +
+      "outright. The last two are checked because paths above name them, and " +
+      "anything else in those shapes is reported rather than excused here.",
+  },
+  {
+    tree: "packages/schema-generator/test/fixtures",
+    because:
+      "the generator's fixture corpus: inputs the tests feed it, and the " +
+      "outputs they compare against. These are data for the tests beside " +
+      "them rather than modules the repository builds, and the corpus does " +
+      "not compile as a unit, because inputs among them name the ambient " +
+      "wrappers (Cell, Stream, Writable) the generator supplies rather than " +
+      "importing them. Individual files here may well compile alone; what " +
+      "earns the exemption is being corpus, not being uncompilable.",
+  },
+  {
+    tree: "packages/ts-transformers/test/fixtures",
+    because: "the transformer's fixture corpus, exempt for the reason the " +
+      "generator's is: inputs and expected outputs that are data for the " +
+      "tests beside them, not modules the repository builds.",
+  },
+  {
+    tree: "packages/static/assets/types",
+    because:
+      "the declaration bundles handed to the in-memory pattern compiler. " +
+      "The set is the ambient environment a pattern compiles against rather " +
+      "than modules this repository builds, and it does not compile beside " +
+      "the tree it describes, since it redeclares what `packages/html` " +
+      "declares.",
+  },
+];
 
 /** The owning scope of a checked path: the workspace member's name. */
 export function scopeOfPath(checkPath: string): string {
@@ -180,7 +271,6 @@ export async function collectPathsByScope(
       );
     }
   }
-  paths.push(...await uiComponentFiles(root));
   const byScope = new Map<string, string[]>();
   for (const checkPath of paths.sort()) {
     const scope = scopeOfPath(checkPath);
@@ -207,14 +297,19 @@ export async function checkGroup(
   paths: string[],
   reload: boolean,
   execPath: string = Deno.execPath(),
+  cwd: string = Deno.cwd(),
 ): Promise<GroupResult> {
   const startedAt = performance.now();
   const args = ["check", ...(reload ? ["--reload"] : []), ...paths];
   let success = false;
   let output = "";
   try {
+    // The paths are collected relative to the tree they were found in,
+    // so the check runs there. Without this a caller pointing at another
+    // tree would collect that tree's paths and check this one's.
     const result = await new Deno.Command(execPath, {
       args,
+      cwd,
       env: { DENO_V8_FLAGS: "--max-old-space-size=8192" },
       stdout: "piped",
       stderr: "piped",
@@ -237,6 +332,9 @@ export interface TypecheckOptions {
   list?: boolean;
   reload?: boolean;
   check?: typeof checkGroup;
+
+  /** The tree the paths were collected from, and so the tree to check. */
+  root?: string;
 
   /**
    * Spool one typecheck record per scope.
@@ -300,7 +398,13 @@ export async function runTypecheck(
   const workers = Array.from({ length: workerCount }, async () => {
     while (next < scopes.length) {
       const scope = scopes[next++]!;
-      const result = await check(scope, byScope.get(scope)!, reload);
+      const result = await check(
+        scope,
+        byScope.get(scope)!,
+        reload,
+        Deno.execPath(),
+        options.root ?? Deno.cwd(),
+      );
       results.push(result);
       recordsFragment?.append({
         line: "record",
@@ -332,15 +436,54 @@ export async function runTypecheck(
   return true;
 }
 
-export async function main(): Promise<void> {
-  const passed = await runTypecheck(await collectPathsByScope(), {
-    list: Deno.args.includes("--list"),
-    reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
-    recordResults: true,
-  });
-  if (!passed) Deno.exit(1);
+/**
+ * The scopes named on the command line, or every scope when none are.
+ * A continuous-integration lane is given part of the repository to check
+ * and names the groups it was given; a person running the task names
+ * none and checks the whole tree.
+ */
+export function selectScopes(
+  byScope: ReadonlyMap<string, string[]>,
+  args: readonly string[],
+): Map<string, string[]> {
+  const named = args
+    .filter((arg) => arg.startsWith("--scope="))
+    .map((arg) => arg.slice("--scope=".length));
+  if (named.length === 0) return new Map(byScope);
+  const selected = new Map<string, string[]>();
+  for (const scope of named) {
+    const paths = byScope.get(scope);
+    if (paths === undefined) {
+      throw new Error(`no such type-check scope: ${scope}`);
+    }
+    selected.set(scope, paths);
+  }
+  return selected;
 }
 
-if (import.meta.main) {
-  await main();
+/**
+ * Runs the check the way the command line runs it, and answers with the
+ * status it would exit with rather than exiting from inside itself.
+ */
+export async function main(
+  args: readonly string[] = Deno.args,
+  root: string = Deno.cwd(),
+  options: TypecheckOptions = {},
+): Promise<number> {
+  const passed = await runTypecheck(
+    selectScopes(await collectPathsByScope(root), args),
+    {
+      list: args.includes("--list"),
+      reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
+      recordResults: true,
+      root,
+      ...options,
+    },
+  );
+  return passed ? 0 : 1;
 }
+
+// `Deno.exitCode` rather than `Deno.exit`, which would end the process
+// before the unload handlers run — and one of those is what writes a
+// test run's name map into its spool.
+if (import.meta.main) Deno.exitCode = await main();

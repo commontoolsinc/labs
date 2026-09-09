@@ -1,7 +1,4 @@
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,

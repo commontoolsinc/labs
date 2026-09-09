@@ -5,7 +5,7 @@ import {
 } from "./schema-ifc.ts";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   linkPayloadAtProbe,
   linkProbeSubPath,
@@ -39,6 +39,7 @@ export type LastNode = "value" | "writeRedirect" | "top";
  * has any links between the top and the value at `link.path`.
  */
 declare const resolvedFullLinkBrand: unique symbol;
+
 export type ResolvedFullLink = NormalizedFullLink & {
   // type-script only marker, doesn't appear in actual data
   [resolvedFullLinkBrand]: true;
@@ -56,7 +57,7 @@ export type ResolvedFullLink = NormalizedFullLink & {
 const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
   schema === undefined || ContextualFlowControl.isTrueSchema(schema);
 
-const MAX_PATH_RESOLUTION_LENGTH = 100;
+export const MAX_PATH_RESOLUTION_LENGTH = 100;
 
 type LinkHop = {
   /**
@@ -66,6 +67,7 @@ type LinkHop = {
    * subject is the link as stored.
    */
   storedSchema?: JSONSchema;
+
   link: NormalizedFullLink;
   source: NormalizedFullLink;
   kind: "value" | "write-redirect";
@@ -412,6 +414,7 @@ export function resolveLink(
   options: {
     preserveOverwrite?: boolean;
     onScopeBlocked?: () => void;
+
     /**
      * Mark the transaction cfc-relevant for every crossed link whose
      * stored schema carries `ifc` (the crossing seam,
@@ -451,6 +454,7 @@ export function resolveLinkTracingDereferences(
   options: {
     preserveOverwrite?: boolean;
     onScopeBlocked?: () => void;
+
     /**
      * Mark the transaction cfc-relevant for every crossed link whose
      * stored schema carries `ifc` (the crossing seam,

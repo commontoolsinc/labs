@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
@@ -10,13 +10,20 @@ import {
   isMemoryMessageFrame,
   parseMemoryCompressionControlMessage,
 } from "@commonfabric/memory/v2/message-compression";
+import { getLogger } from "@commonfabric/utils/logger";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
+
+const logger = getLogger("storage.v2.remote", {
+  enabled: true,
+  level: "error",
+});
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
    *  by lower-level replica tests omit this because they intentionally model
    *  only the messages under test. */
   readonly supportsAclBootstrap?: boolean;
+
   create(
     space: MemorySpace,
     signer?: Signer,
@@ -198,7 +205,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
    * overtake earlier asynchronous compression.
    */
   async send(payload: string): Promise<void> {
-    const opening = this.open();
+    const opening = this.#open();
     const compressionEnabled = this.#sendCompressionEnabled;
     const send = this.#sending.then(async () => {
       const socket = await opening;
@@ -239,7 +246,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     await closed;
   }
 
-  private async open(): Promise<WebSocket> {
+  async #open(): Promise<WebSocket> {
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
@@ -268,6 +275,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
               throw new Error("Unsupported memory websocket frame type");
             }
             let payload: string;
+            const decodeStart = performance.now();
             if (this.#receiveCompressionEnabled) {
               payload = await decodeCompressedMemoryMessage(frame);
             } else {
@@ -278,6 +286,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
               }
               payload = frame;
             }
+            logger.time(decodeStart, "receive", "decodeFrame");
             if (this.#socket !== socket) return;
             const control = parseMemoryCompressionControlMessage(payload);
             if (control) {
@@ -290,11 +299,13 @@ export class WebSocketTransport implements MemoryClient.Transport {
               }
               return;
             }
+            const receiverStart = performance.now();
             try {
               this.#receiver(payload);
             } catch (cause) {
               reportError(cause);
             }
+            logger.time(receiverStart, "receive", "dispatchPayload");
           } catch (cause) {
             if (this.#socket !== socket) return;
             const error = new Error(
@@ -369,7 +380,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const response = Promise.withResolvers<boolean>();
     void response.promise.catch(() => {});
     this.#compressionRequests.set(requestId, response);
-    const opening = this.open();
+    const opening = this.#open();
     const send = this.#sending.then(async () => {
       const socket = await opening;
       if (this.#socket !== socket) {
@@ -448,10 +459,16 @@ export class RemoteSessionFactory implements SessionFactory {
   #compressionEnabled = true;
   #transports = new Set<WebSocketTransport>();
 
+  readonly #resolveAddress: (space: MemorySpace) => URL;
+  readonly #defaultSigner: Signer;
+
   constructor(
-    private readonly resolveAddress: (space: MemorySpace) => URL,
-    private readonly defaultSigner: Signer,
-  ) {}
+    resolveAddress: (space: MemorySpace) => URL,
+    defaultSigner: Signer,
+  ) {
+    this.#resolveAddress = resolveAddress;
+    this.#defaultSigner = defaultSigner;
+  }
 
   /** Changes compression on live sessions and the default for later ones. */
   async setMessageCompressionEnabled(enabled: boolean): Promise<void> {
@@ -474,12 +491,12 @@ export class RemoteSessionFactory implements SessionFactory {
 
   async create(
     space: MemorySpace,
-    signer = this.defaultSigner,
+    signer = this.#defaultSigner,
     mountOptions: MemoryClient.MountOptions = {},
     signal?: AbortSignal,
   ) {
     const transport = new WebSocketTransport(
-      toSpaceWebSocketAddress(this.resolveAddress(space), space),
+      toSpaceWebSocketAddress(this.#resolveAddress(space), space),
       this.#compressionEnabled,
       () => this.#transports.delete(transport),
     );

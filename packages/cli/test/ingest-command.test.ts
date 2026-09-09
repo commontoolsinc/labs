@@ -235,9 +235,10 @@ describe("cf ingest mint", () => {
     expect(output).toContain("tok-secret");
   });
 
-  // Every self-serve credential is finite-lived, so the expiry line is always
-  // present: the server applies a default when no --ttl-days is given.
   it("forwards a did:key space verbatim and always shows an expiry", async () => {
+    // Every self-serve credential is finite-lived, so the expiry line is always
+    // present: the server applies a default when no --ttl-days is given.
+
     const { output, calls } = await run([
       "mint",
       "--identity",
@@ -260,11 +261,12 @@ describe("cf ingest mint", () => {
     expect(output).toContain("expires:     2026-11-02T00:00:00.000Z");
   });
 
-  // The server always sets an expiry, so a response without one means the two
-  // sides disagree about the contract. Printing a bare blank there would hide
-  // that behind something that reads like "never expires" — the opposite of
-  // the truth.
   it("says so loudly when a mint response carries no expiry", async () => {
+    // The server always sets an expiry, so a response without one means the two
+    // sides disagree about the contract. Printing a bare blank there would hide
+    // that behind something that reads like "never expires" — the opposite of
+    // the truth.
+
     const { expiresAt: _dropped, ...noExpiry } = minted;
     const { output } = await run([
       "mint",
@@ -402,11 +404,12 @@ describe("cf ingest revoke", () => {
     expect(output).toContain("retained as an audit record");
   });
 
-  // The whole point of revocation-by-current-owner is a channel minted by
-  // someone whose access has since been removed. That channel has a different
-  // owner, so it is NOT in the caller's own list — looking the revision up
-  // there would make the one case this exists for unreachable.
   it("looks a foreign channel up in the space when --space is given", async () => {
+    // The whole point of revocation-by-current-owner is a channel minted by
+    // someone whose access has since been removed. That channel has a different
+    // owner, so it is NOT in the caller's own list — looking the revision up
+    // there would make the one case this exists for unreachable.
+
     const { calls } = await run([
       "revoke",
       "chan-1",
@@ -426,10 +429,11 @@ describe("cf ingest revoke", () => {
     expect(calls[1].body.expectedRevision).toBe(3);
   });
 
-  // Revoking an already-revoked channel is a legitimate confirm, not an error —
-  // and the CLI has to say which it is, or "it worked" and "it was already
-  // dead" are indistinguishable.
   it("says a channel was already revoked before re-issuing", async () => {
+    // Revoking an already-revoked channel is a legitimate confirm, not an error
+    // — and the CLI has to say which it is, or "it worked" and "it was already
+    // dead" are indistinguishable.
+
     const { output, calls } = await run([
       "revoke",
       "chan-1",

@@ -12,10 +12,12 @@
  * Orange means at least one of those processors trends up. Green means every
  * eligible established processor stays flat or falls. Red means the most recent
  * run failed, or finished successfully without readable benchmark data.
- * A tile in the failed state drops its benchmark count and window span and
- * names the failure in their place: how long ago the benchmarks last worked,
- * and how many runs have failed since. A run under way puts a "running" badge
- * in the header.
+ * A tile in the failed state reads `failed (was <trend>)` in its headline when
+ * cached measurements are available, including measurements older than twelve
+ * hours. Without measurements it reads `failed`. It drops its benchmark count
+ * and window span and names the failure in their place: how long ago the
+ * benchmarks last worked, and how many runs have failed since.
+ * A run under way puts a "running" badge in the header.
  *
  * A benchmark added or removed is absent from one side of an adjacent
  * comparison, so it does not move the index. A processor change starts another
@@ -88,10 +90,10 @@ import {
   github,
   githubDownload,
   humanSpan,
+  jsonFromZip,
   multiSparkline,
   performanceGithub,
   performanceGithubDownload,
-  SPARK_FADE,
 } from "../lib.ts";
 import {
   BENCH_HEADLINE_MAX_AGE_HOURS,
@@ -430,60 +432,6 @@ function parseBenchmarkReport(
     });
   }
   return { cpu, metrics: m };
-}
-
-// Inflate raw-deflate bytes (the compression zip uses) to their decompressed form.
-async function inflateRaw(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
-  const ds = new DecompressionStream("deflate-raw");
-  const collected = new Response(ds.readable).arrayBuffer(); // read as we write
-  const writer = ds.writable.getWriter();
-  await writer.write(data);
-  await writer.close();
-  return new Uint8Array(await collected);
-}
-
-// Extract the first *.json file from a zip via its central directory (which holds
-// the true sizes even when a streamed zip leaves them out of the local headers).
-export async function jsonFromZip(
-  buf: Uint8Array<ArrayBuffer>,
-): Promise<string | null> {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  const u16 = (o: number) => dv.getUint16(o, true);
-  const u32 = (o: number) => dv.getUint32(o, true);
-  let eocd = -1;
-  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 0x10000; i--) {
-    if (u32(i) === 0x06054b50) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) return null;
-  let p = u32(eocd + 16); // central directory offset
-  const count = u16(eocd + 10);
-  for (let n = 0; n < count; n++) {
-    if (u32(p) !== 0x02014b50) break; // central-directory file header signature
-    const method = u16(p + 10);
-    const compSize = u32(p + 20);
-    const nameLen = u16(p + 28),
-      extraLen = u16(p + 30),
-      commentLen = u16(p + 32);
-    const lho = u32(p + 42); // local header offset
-    const name = new TextDecoder().decode(
-      buf.subarray(p + 46, p + 46 + nameLen),
-    );
-    p += 46 + nameLen + extraLen + commentLen;
-    if (!name.endsWith(".json")) continue;
-    if (u32(lho) !== 0x04034b50) return null; // local file header signature
-    const dataStart = lho + 30 + u16(lho + 26) + u16(lho + 28);
-    const comp = buf.subarray(dataStart, dataStart + compSize);
-    const bytes = method === 0
-      ? comp
-      : method === 8
-      ? await inflateRaw(comp)
-      : null;
-    return bytes ? new TextDecoder().decode(bytes) : null;
-  }
-  return null;
 }
 
 async function fetchZip(
@@ -1070,7 +1018,7 @@ export function benchmarkRerunHandoff(
     ? {
       href: `https://github.com/${REPO}/actions/runs/${latest.id}`,
       label: "rerun the failed benchmark run ↗",
-      hint: "Re-run all jobs on GitHub repeats it.",
+      hint: "Select \"Re-run all jobs\" on GitHub to repeat the run.",
     }
     : {
       href: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
@@ -1094,10 +1042,11 @@ const RUNNING_BADGE =
 // never become benchmark changes. The headline shows the largest established
 // trend among processors measured in the last twelve hours. Orange means any
 // eligible processor trends up. Red means the most recent run failed or
-// produced no readable data. The line under the headline then dates the outage
-// instead of counting the benchmarks measured. `offline` names a fetch failure.
-// The tile then keeps its last-known trends gray, or shows a gray dash when no
-// history is cached.
+// produced no readable data. Its headline reads `failed (was <trend>)` when a
+// cached trend is available, and `failed` otherwise. The line below dates the
+// outage instead of counting the benchmarks measured. `offline` names a fetch
+// failure. The tile then keeps its last-known trends gray, or shows a gray dash
+// when no history is cached.
 function benchmarkIndexView(
   runs: Run[],
   now: number,
@@ -1130,7 +1079,10 @@ function benchmarkIndexView(
       run.at >= cutoff && run.cpu !== undefined && productMetricCount(run) > 0
     )
     .sort((a, b) => a.at - b.at);
-  const indices = benchmarkCpuIndices(cached, now);
+  // A failed headline uses the latest measurements to date its trend window
+  // and determine which processors are eligible.
+  const trendAt = failed && !offline ? cached.at(-1)?.at ?? now : now;
+  const indices = benchmarkCpuIndices(cached, trendAt);
   if (!indices.length) {
     // A fetch failure with nothing cached to stand on: a gray dash and the reason.
     if (offline) return benchmarkUnavailable(offline, aside);
@@ -1139,7 +1091,7 @@ function benchmarkIndexView(
         ...benchmarkDrill,
         label: "benchmarks",
         status: "bad",
-        value: "—",
+        value: "failed",
         sub: failSub,
         aside,
       };
@@ -1151,18 +1103,8 @@ function benchmarkIndexView(
       aside,
     );
   }
-  const headlineCandidates = benchmarkHeadlineCandidates(indices, now);
-  if (!headlineCandidates.length && !offline) {
-    if (failed) {
-      return {
-        ...benchmarkDrill,
-        label: "benchmarks",
-        status: "bad",
-        value: "—",
-        sub: failSub,
-        aside,
-      };
-    }
+  const headlineCandidates = benchmarkHeadlineCandidates(indices, trendAt);
+  if (!headlineCandidates.length && !offline && !failed) {
     return benchmarkUnavailable("no recent benchmark data", aside);
   }
   const displayCandidates = headlineCandidates.length
@@ -1188,8 +1130,10 @@ function benchmarkIndexView(
     : rising
     ? "warn"
     : "good";
-  // Headline: the window's trend.
-  const value = escapeHtml(headline.trend.label);
+  const trendLabel = escapeHtml(headline.trend.label);
+  const value = status === "bad"
+    ? `failed <span style="font-size:14px">(was ${trendLabel})</span>`
+    : trendLabel;
   const latest = cached[cached.length - 1];
   const count = productMetricCount(latest);
   // Name the highlighted window's span beside the count, like CI duration names its
@@ -1220,13 +1164,16 @@ function benchmarkIndexView(
       maxXGap: CPU_LINE_MAX_X_GAP,
       showSinglePoint: true,
     })),
-    { fadeFrom: SPARK_FADE[status] },
+    { fade: true },
   );
   return {
     ...benchmarkDrill,
     label: "benchmarks",
     status,
     value,
+    valueLabel: status === "bad"
+      ? `failed (was ${headline.trend.label})`
+      : undefined,
     sub: offline ?? (failed ? failSub : undefined),
     extra: `${countLine}${chart}`,
     duration: chartSpan,
@@ -1928,7 +1875,7 @@ export function benchPage(
           showSinglePoint: true,
         })),
         {
-          fadeFrom: SPARK_FADE[status],
+          fade: true,
           scale: {
             trim: PERFORMANCE_HISTORY_SCALE_TRIM,
             minValues: PERFORMANCE_HISTORY_SCALE_MIN_VALUES,

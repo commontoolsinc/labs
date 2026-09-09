@@ -1,3 +1,4 @@
+import { readLoomAuthoringConfig } from "./loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import {
   basename,
@@ -9,16 +10,16 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
-import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
-  type HarnessFabricSessionConfig,
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
   type HarnessPatternIndexConfig,
+  type HarnessSkillsShConfig,
   isHarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
+  readCeilingsEqual,
 } from "./config.ts";
 import {
   createHarnessImageAttachment,
@@ -58,24 +59,33 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import { type BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { renderCfcPostureReport } from "./cfc-posture.ts";
+import {
+  describeHarnessDocsCorpus,
+  type HarnessDocsCorpusRecord,
+  harnessDocsCorpusRecordsEqual,
+} from "./contracts/docs-corpus.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
+import { resolveHarnessFabricSessionConfig } from "./fabric-session-options.ts";
 import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
-import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
+import {
+  establishHarnessSessionContext,
+  type HarnessSessionConfig,
+  harnessSessionEngineOptions,
+} from "./session-assembly.ts";
 import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DEFAULT_FABRIC_MOUNT_PATH,
 } from "./sandbox/docker-runsc.ts";
-import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import {
   type CfHarnessHostMountConfig,
   type CfHarnessHostMountMode,
-  hostMountsToAdditionalMounts,
   parseHostMountSpecs,
 } from "./host-mounts.ts";
 
@@ -85,15 +95,19 @@ import {
   type CreateHarnessPromptLoopOptions,
   type HarnessPromptLoopResult,
 } from "./prompt-loop.ts";
-import { loadHarnessSkillContext } from "./skills/registry.ts";
-import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import { createHarnessSkillsShAcquisitionClientFactory } from "./skills-sh/acquisition.ts";
+import {
+  createHarnessSkillsShSearchClientFactory,
+} from "./skills-sh/search-client.ts";
 import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
-import type {
-  HarnessAllowedSkillScript,
-  HarnessSkillScriptExecutionTarget,
+import { resolveHarnessSkillsRoot } from "./skills/root.ts";
+import {
+  describeHarnessSkillsRoot,
+  type HarnessAllowedSkillScript,
+  type HarnessSkillScriptExecutionTarget,
 } from "./contracts/skill.ts";
 import {
   digestJsonValue,
@@ -135,16 +149,14 @@ import {
   setProvenanceCommand,
 } from "./provenance.ts";
 import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
-import {
-  inputCellsContextMessage,
-  parseInputCellArgument,
-} from "./input-cells.ts";
+import { parseInputCellArgument } from "./input-cells.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
+  harnessResumeRefusal,
 } from "./control-errors.ts";
 
-const DEFAULT_MODEL = "gpt-5.6-terra";
+const DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
@@ -170,6 +182,8 @@ const CLI_STRING_FLAGS = [
   "compact-threshold",
   "prompt-cache-mode",
   "skills-root",
+  "docs-corpus-root",
+  "skills-registry-url",
   "skill",
   "skill-script-execution-target",
   "gateway-base-url",
@@ -187,12 +201,15 @@ const CLI_STRING_FLAGS = [
   "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
+  "loom-authoring-config",
   "fabric-api-url",
   "fabric-identity",
   "fabric-space",
   "fabric-cfc-enforcement-mode",
   "fabric-cfc-flow-labels",
   "fabric-cfc-posture",
+  "max-confidentiality",
+  "space-db",
   "pattern-index-url",
   "host-mount",
   "browser-access-lease-id",
@@ -208,10 +225,12 @@ const CLI_BOOLEAN_FLAGS = [
   "print-transcript",
   "stream-events",
   "no-skill-catalog",
+  "no-docs-corpus",
   "no-pattern-index-publish",
 ] as const;
 const CLI_COLLECT_FLAGS = [
   "allow-tool",
+  "docs-corpus-root",
   "allow-skill-script",
   "allow-subagent-profile",
   "skill",
@@ -223,12 +242,13 @@ const CLI_COLLECT_FLAGS = [
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
 
-export interface CfHarnessCliConfig {
-  workspace: string;
-  cwd?: string;
+/**
+ * What one batch CLI invocation resolves to: the session it describes, plus
+ * what belongs to this surface alone — where the prompt came from, how the
+ * result is printed, which run is being resumed.
+ */
+export interface CfHarnessCliConfig extends HarnessSessionConfig {
   focusRoot?: string;
-  allowedToolIds?: readonly BuiltinToolId[];
-  allowedSubagentProfiles: readonly HarnessSubagentProfile[];
   outputMode: CfHarnessCliOutputMode;
   streamEvents: boolean;
   promptSlotRole: PromptSlotRole;
@@ -236,41 +256,18 @@ export interface CfHarnessCliConfig {
   imageAttachments: readonly HarnessImageAttachment[];
   resumeRun?: string;
   systemPrompt?: string;
-  skillsRoot?: string;
-  skillsRootSandboxPath?: string;
-  skillNames: readonly string[];
-  allowedSkillScripts: readonly HarnessAllowedSkillScript[];
-  skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   skillCatalogEnabled: boolean;
-  model?: string;
   modelProvider?: HarnessModelProviderId;
-  reasoningEffort?: string;
-  compactThreshold?: number;
-  promptCacheMode?: "implicit" | "explicit";
   gatewayConfigurationExplicit: boolean;
   harnessHome: string;
   gatewayBaseUrl: string;
   gatewayAuthMode: HarnessGatewayAuthMode;
-  artifactRoot: string;
   resultJsonPath?: string;
   structuredResult?: CfHarnessStructuredResultConfig;
   runManifestPath?: string;
-  cfcEnforcementModeOverride?: CfcEnforcementMode;
-  cfcResultDir?: string;
-  cfcInvocationContextDir?: string;
-  browserAccess?: HarnessBrowserAccessLease;
-  handleValueOrigins: readonly string[];
-  inputCells: readonly HarnessInputCellSpec[];
-  maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
-  sandboxImage?: string;
-  sandboxDockerRuntime?: string;
-  fabricMount?: string;
-  fabricSession?: HarnessFabricSessionConfig;
-  patternIndex?: HarnessPatternIndexConfig;
-  hostMounts: readonly CfHarnessHostMountConfig[];
 }
 
 export interface CfHarnessStructuredResultConfig {
@@ -357,6 +354,7 @@ export interface RunCfHarnessCliDependencies {
 
   /** Trusted, fixed binding supplied only by the dedicated local Loom host. */
   loomLocalHostBinding?: LoomLocalHostBinding;
+
   fetchFn?: HarnessFetch;
   structuredHostFailures?: boolean;
 
@@ -365,6 +363,7 @@ export interface RunCfHarnessCliDependencies {
    * Resolved from the process when absent.
    */
   provenance?: HarnessProvenance;
+
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: (path: string, text: string) => Promise<void>;
@@ -488,9 +487,12 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback);
-                                run_pattern and assign_slug additionally require the three --fabric-* session flags,
-                                and search_patterns and record_feedback require --pattern-index-url
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs | loom_compose | loom_inspect | loom_authoring_context);
+                                run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
+                                search_patterns and record_feedback require --pattern-index-url,
+                                search_skills and acquire_skill require --skills-registry-url,
+                                query_docs requires a resolved documentation corpus,
+                                and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -502,10 +504,13 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
+  --docs-corpus-root <path>     Reference tree query_docs answers out of (repeatable)
+  --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
+  --no-docs-corpus              Resolve no documentation corpus, so query_docs is absent
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
                                 (no default; select one here, through
@@ -536,6 +541,7 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --loom-authoring-config <path> Absolute host-owned JSON file backing Loom tools
   --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug)
   --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
   --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
@@ -549,6 +555,14 @@ Options:
                                 into the named CFC posture bundle (every staged
                                 enforcement dial on); the two dials above still
                                 apply over the bundle
+  --max-confidentiality <json>  Read ceiling for the fabric session's runtime: a
+                                JSON array of confidentiality clauses every
+                                db.query the run issues is bounded by, met with
+                                any the run manifest declares (never widened)
+  --space-db <path>             The space database the run's per-cell label
+                                snapshot reads. Give it when this run's working
+                                directory shares no ancestor with the server's,
+                                which is what the discovery walk looks under
   --pattern-index-url <url>     Base URL of the pattern index for search_patterns,
                                 record_feedback, and run_pattern's patternId argument;
                                 signs with the fabric session identity, so it needs the
@@ -572,17 +586,24 @@ Environment:
   CF_HARNESS_COMPACT_THRESHOLD  Default value for --compact-threshold
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
+  CF_HARNESS_SKILLS_REGISTRY_URL Default value for --skills-registry-url
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_LOOM_AUTHORING_CONFIG Default host authoring configuration file
   CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
   CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
   CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
   CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
+  CF_HARNESS_SPACE_DB           Default value for --space-db
   CF_HARNESS_PATTERN_INDEX_URL  Default value for --pattern-index-url
   CF_HARNESS_PATTERN_INDEX_PUBLISH 0 applies --no-pattern-index-publish
+  CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE 1 offers successful authored
+                                patterns to search immediately (default: recorded only)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
+  CF_HARNESS_CFC_ENFORCEMENT_MODE Default value for --cfc-enforcement-mode (ignored on --resume-run)
+  CF_CFC_MODE                   Fallback for CF_HARNESS_CFC_ENFORCEMENT_MODE
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
   ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
 `;
@@ -635,10 +656,16 @@ const CLI_PARENT_TOOL_IDS = [
   "write_file",
   "delegate_task",
   "describe_handle",
+  "loom_compose",
+  "loom_inspect",
+  "loom_authoring_context",
   "run_pattern",
   "assign_slug",
   "search_patterns",
   "record_feedback",
+  "search_skills",
+  "acquire_skill",
+  "query_docs",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -864,9 +891,9 @@ const parseHandleValueOrigins = (
  * The input cells `--input-cell` names. Grammar defects are refused at
  * parse: an input cell is explicit operator configuration, and a run must
  * not start without what it asked for. No shape is stated here — a cell's
- * schema and labels live on its declaration in the fabric. The references
- * themselves are validated against the session space later, at mint time,
- * where the space is known.
+ * schema and labels live on its declaration in the fabric. A reference is
+ * held to the handle-table grammar here; whether it names the session's own
+ * space is checked at mint time, where the space is known.
  */
 const parseInputCells = (
   raw: string | readonly string[] | undefined,
@@ -951,7 +978,8 @@ const parseBrowserAccessLease = (
   };
 };
 
-const parseSkillNames = (
+/** The distinct non-empty values of a repeatable option. */
+const parseRepeatedValues = (
   input: string | readonly string[] | undefined,
 ): readonly string[] => {
   if (input === undefined) {
@@ -1248,7 +1276,7 @@ export const parseCfHarnessCliArgs = async (
   const focusRoot = typeof args["focus-root"] === "string"
     ? resolve(workspace, args["focus-root"])
     : undefined;
-  const skillsRoot = typeof args["skills-root"] === "string"
+  const configuredSkillsRoot = typeof args["skills-root"] === "string"
     ? resolvePathWithinAllowedHostRoots(
       allowedHostRoots,
       workspace,
@@ -1256,15 +1284,50 @@ export const parseCfHarnessCliArgs = async (
       "--skills-root",
     ).hostPath
     : undefined;
-  const skillsRootSandboxPath = skillsRoot !== undefined
+  // The named tree is addressed inside the sandbox because it was resolved
+  // against the roots the sandbox mounts. The checkout's own tree was not: it
+  // is read on the host, where the registry scan runs, and a tool that needs
+  // the sandbox path — a skill script — still needs the flag.
+  const skillsRootSandboxPath = configuredSkillsRoot !== undefined
     ? resolvePathWithinAllowedHostRoots(
       allowedHostRoots,
       workspace,
-      skillsRoot,
+      configuredSkillsRoot,
       "--skills-root",
     ).sandboxPath
     : undefined;
-  const skillNames = parseSkillNames(
+  // Naming no skills tree is not the same as wanting none: a run with no
+  // registry gives a `pattern-author` child no authoring skill at all, which
+  // is not what an operator who passed no flag asked for. The default is the
+  // checkout the harness runs out of, as the documentation corpus resolves its
+  // own.
+  const skillsRootRecord = resolveHarnessSkillsRoot(configuredSkillsRoot);
+  const skillsRoot = skillsRootRecord?.hostPath;
+  // Naming no root is not the same as wanting none: the default comes from the
+  // checkout the harness runs out of, applied where every surface resolves its
+  // configuration, so a console started with no documentation flag is not
+  // documentation-blind.
+  const configuredDocsCorpusRoots = parseRepeatedValues(
+    args["docs-corpus-root"] as string | readonly string[] | undefined,
+  ).map((root) => resolve(workspace, root));
+  // `--no-docs-corpus` wins over a named root: an operator who asked for no
+  // corpus and also named one has said two things, and the safe reading of the
+  // pair is the one that reaches for less documentation rather than more.
+  const docsCorpus: HarnessDocsCorpusRecord | undefined =
+    args["no-docs-corpus"] === true
+      ? {
+        type: "cf-harness.docs-corpus-record",
+        source: "configured",
+        roots: [],
+      }
+      : configuredDocsCorpusRoots.length === 0
+      ? undefined
+      : {
+        type: "cf-harness.docs-corpus-record",
+        source: "configured",
+        roots: configuredDocsCorpusRoots,
+      };
+  const skillNames = parseRepeatedValues(
     args.skill as string | readonly string[] | undefined,
   );
   if (skillNames.length > 0 && skillsRoot === undefined) {
@@ -1273,7 +1336,10 @@ export const parseCfHarnessCliArgs = async (
   const allowedSkillScripts = parseAllowedSkillScripts(
     args["allow-skill-script"] as string | readonly string[] | undefined,
   );
-  if (allowedSkillScripts.length > 0 && skillsRoot === undefined) {
+  if (allowedSkillScripts.length > 0 && configuredSkillsRoot === undefined) {
+    // A skill script runs in the sandbox and is addressed by the sandbox path
+    // only a named tree has, so this one asks for the flag rather than for a
+    // tree.
     throw new Error("--allow-skill-script requires --skills-root");
   }
   const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
@@ -1331,10 +1397,10 @@ export const parseCfHarnessCliArgs = async (
   if (resumeRun !== undefined && imagePaths.length > 0) {
     throw new Error("--image is not supported with --resume-run");
   }
-  if (skillsRoot !== undefined) {
+  if (configuredSkillsRoot !== undefined) {
     await assertSkillsRootRealPathWithinAllowedHostRoots(
       allowedHostRoots,
-      skillsRoot,
+      configuredSkillsRoot,
     );
   }
   const artifactRoot = resolve(
@@ -1370,6 +1436,9 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_COMPACT_THRESHOLD",
       ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+      CF_HARNESS_SKILLS_REGISTRY_URL: Deno.env.get(
+        "CF_HARNESS_SKILLS_REGISTRY_URL",
+      ),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
@@ -1378,6 +1447,7 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_FABRIC_API_URL: Deno.env.get("CF_HARNESS_FABRIC_API_URL"),
       CF_HARNESS_FABRIC_IDENTITY: Deno.env.get("CF_HARNESS_FABRIC_IDENTITY"),
       CF_HARNESS_FABRIC_SPACE: Deno.env.get("CF_HARNESS_FABRIC_SPACE"),
+      CF_HARNESS_SPACE_DB: Deno.env.get("CF_HARNESS_SPACE_DB"),
       CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
       ),
@@ -1392,6 +1462,9 @@ export const parseCfHarnessCliArgs = async (
       ),
       CF_HARNESS_PATTERN_INDEX_PUBLISH: Deno.env.get(
         "CF_HARNESS_PATTERN_INDEX_PUBLISH",
+      ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE",
       ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
@@ -1491,6 +1564,12 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const loomAuthoring = await readLoomAuthoringConfig(
+    typeof args["loom-authoring-config"] === "string"
+      ? args["loom-authoring-config"]
+      : env.CF_HARNESS_LOOM_AUTHORING_CONFIG,
+    readTextFile,
+  );
   const inputCells = parseInputCells(
     args["input-cell"] as string | readonly string[] | undefined,
   );
@@ -1544,8 +1623,15 @@ export const parseCfHarnessCliArgs = async (
   const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
     ? args["cfc-enforcement-mode"]
     : undefined;
-  const envCfcMode = nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
-    nonEmptyEnvValue(env.CF_CFC_MODE);
+  // The environment forms name a fleet's posture for the runs it starts, and
+  // a resume is not one of those: its mode is already recorded, and the run
+  // enforces at the recorded mode whatever the environment says. Reading them
+  // on a resume would state a dial nobody typed, which a run recorded at
+  // another mode then refuses. `CF_HARNESS_MODEL` is read the same way.
+  const envCfcMode = resumeRun === undefined
+    ? nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
+      nonEmptyEnvValue(env.CF_CFC_MODE)
+    : undefined;
   const cfcEnforcementModeOverride = parseCfcEnforcementMode(
     explicitCfcMode ?? envCfcMode,
   );
@@ -1578,118 +1664,24 @@ export const parseCfHarnessCliArgs = async (
   const fabricMount = rawFabricMount !== undefined
     ? resolve(cwd, rawFabricMount)
     : undefined;
-  const fabricSessionFlagValue = (
-    flag:
-      | "fabric-api-url"
-      | "fabric-identity"
-      | "fabric-space"
-      | "fabric-cfc-enforcement-mode"
-      | "fabric-cfc-flow-labels"
-      | "fabric-cfc-posture",
-    envValue: string | undefined,
-  ): string | undefined => {
-    const raw = typeof args[flag] === "string"
-      ? args[flag].trim()
-      : nonEmptyEnvValue(envValue);
-    if (raw === "") {
-      throw new Error(`--${flag} requires a non-empty value`);
-    }
-    return raw;
-  };
-  const fabricApiUrl = fabricSessionFlagValue(
-    "fabric-api-url",
-    env.CF_HARNESS_FABRIC_API_URL,
-  );
-  const fabricIdentity = fabricSessionFlagValue(
-    "fabric-identity",
-    env.CF_HARNESS_FABRIC_IDENTITY,
-  );
-  const fabricSpace = fabricSessionFlagValue(
-    "fabric-space",
-    env.CF_HARNESS_FABRIC_SPACE,
-  );
-  const fabricCfcEnforcementMode = fabricSessionFlagValue(
-    "fabric-cfc-enforcement-mode",
-    env.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE,
-  );
-  if (
-    fabricCfcEnforcementMode !== undefined &&
-    fabricCfcEnforcementMode !== "enforce-explicit" &&
-    fabricCfcEnforcementMode !== "enforce-strict"
-  ) {
-    // Raise-only: the fabric session's preset already pins enforce-explicit,
-    // so the dial admits that pin or a raise to strict, never a relaxation.
+  const fabricSession = resolveHarnessFabricSessionConfig(args, env, cwd);
+  const rawSpaceDb = typeof args["space-db"] === "string"
+    ? args["space-db"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SPACE_DB);
+  if (rawSpaceDb === "") {
+    throw new Error("--space-db requires a non-empty value");
+  }
+  if (rawSpaceDb !== undefined && fabricSession === undefined) {
+    // The snapshot it points at is taken over the cells of a fabric session,
+    // so without one there is nothing for the database to be read for, and a
+    // path accepted here would silently do nothing all run.
     throw new Error(
-      `--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict: ${fabricCfcEnforcementMode}`,
+      "--space-db names the database the fabric session's labels are read from and needs --fabric-api-url, --fabric-identity, and --fabric-space",
     );
   }
-  const fabricCfcFlowLabels = fabricSessionFlagValue(
-    "fabric-cfc-flow-labels",
-    env.CF_HARNESS_FABRIC_CFC_FLOW_LABELS,
-  );
-  if (
-    fabricCfcFlowLabels !== undefined && fabricCfcFlowLabels !== "off" &&
-    fabricCfcFlowLabels !== "observe" && fabricCfcFlowLabels !== "persist"
-  ) {
-    throw new Error(
-      `--fabric-cfc-flow-labels must be off, observe, or persist: ${fabricCfcFlowLabels}`,
-    );
-  }
-  const fabricCfcPosture = fabricSessionFlagValue(
-    "fabric-cfc-posture",
-    env.CF_HARNESS_FABRIC_CFC_POSTURE,
-  );
-  if (
-    fabricCfcPosture !== undefined && fabricCfcPosture !== "max-enforcement"
-  ) {
-    throw new Error(
-      `--fabric-cfc-posture must be max-enforcement: ${fabricCfcPosture}`,
-    );
-  }
-  let fabricSession: HarnessFabricSessionConfig | undefined;
-  if (
-    fabricApiUrl !== undefined || fabricIdentity !== undefined ||
-    fabricSpace !== undefined
-  ) {
-    const missing = [
-      ...(fabricApiUrl === undefined ? ["--fabric-api-url"] : []),
-      ...(fabricIdentity === undefined ? ["--fabric-identity"] : []),
-      ...(fabricSpace === undefined ? ["--fabric-space"] : []),
-    ];
-    if (missing.length > 0) {
-      throw new Error(
-        `--fabric-api-url, --fabric-identity, and --fabric-space configure one fabric session and go together; missing ${
-          missing.join(", ")
-        }`,
-      );
-    }
-    try {
-      new URL(fabricApiUrl!);
-    } catch {
-      throw new Error(`--fabric-api-url must be a valid URL: ${fabricApiUrl}`);
-    }
-    fabricSession = {
-      apiUrl: fabricApiUrl!,
-      identityKeyPath: resolve(cwd, fabricIdentity!),
-      space: fabricSpace!,
-      ...(fabricCfcEnforcementMode !== undefined
-        ? { cfcEnforcementMode: fabricCfcEnforcementMode }
-        : {}),
-      ...(fabricCfcFlowLabels !== undefined
-        ? { cfcFlowLabels: fabricCfcFlowLabels }
-        : {}),
-      ...(fabricCfcPosture !== undefined
-        ? { cfcPosture: fabricCfcPosture }
-        : {}),
-    };
-  } else if (
-    fabricCfcEnforcementMode !== undefined ||
-    fabricCfcFlowLabels !== undefined || fabricCfcPosture !== undefined
-  ) {
-    throw new Error(
-      "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
-    );
-  }
+  const spaceDbPath = rawSpaceDb === undefined
+    ? undefined
+    : resolve(cwd, rawSpaceDb);
   const rawPatternIndexUrl = typeof args["pattern-index-url"] === "string"
     ? args["pattern-index-url"].trim()
     : nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_URL);
@@ -1717,17 +1709,39 @@ export const parseCfHarnessCliArgs = async (
     // an unset or unrecognized value leaves a run publishing.
     const publish = args["no-pattern-index-publish"] !== true &&
       nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+    const publishDiscoverable = nonEmptyEnvValue(
+      env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE,
+    ) === "1";
     patternIndex = {
       baseUrl: rawPatternIndexUrl,
       ...(publish ? {} : { publish: false }),
+      ...(publishDiscoverable ? { publishDiscoverable: true } : {}),
     };
+  }
+  const rawSkillsRegistryUrl = typeof args["skills-registry-url"] === "string"
+    ? args["skills-registry-url"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SKILLS_REGISTRY_URL);
+  if (rawSkillsRegistryUrl === "") {
+    throw new Error("--skills-registry-url requires a non-empty value");
+  }
+  let skillsSh: HarnessSkillsShConfig | undefined;
+  if (rawSkillsRegistryUrl !== undefined) {
+    try {
+      new URL(rawSkillsRegistryUrl);
+    } catch {
+      throw new Error(
+        `--skills-registry-url must be a valid URL: ${rawSkillsRegistryUrl}`,
+      );
+    }
+    skillsSh = { baseUrl: rawSkillsRegistryUrl };
   }
   // An allowlisted fabric-session tool with no session to run it against is
   // a configuration contradiction, surfaced here rather than as a tool that
   // is silently absent from the run.
-  const sessionTool = (["run_pattern", "assign_slug"] as const).find(
-    (toolId) => allowedToolIds?.includes(toolId) === true,
-  );
+  const sessionTool = (["run_pattern", "assign_slug", "acquire_skill"] as const)
+    .find(
+      (toolId) => allowedToolIds?.includes(toolId) === true,
+    );
   if (sessionTool !== undefined && fabricSession === undefined) {
     throw new Error(
       `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
@@ -1739,6 +1753,22 @@ export const parseCfHarnessCliArgs = async (
   if (indexTool !== undefined && patternIndex === undefined) {
     throw new Error(
       `--allow-tool ${indexTool} requires a pattern index; missing --pattern-index-url`,
+    );
+  }
+  if (
+    allowedToolIds?.includes("search_skills") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool search_skills requires a skills registry; missing --skills-registry-url",
+    );
+  }
+  if (
+    allowedToolIds?.includes("acquire_skill") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool acquire_skill requires a skills registry; missing --skills-registry-url",
     );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
@@ -1763,6 +1793,8 @@ export const parseCfHarnessCliArgs = async (
       ? { systemPrompt: args["system-prompt"] }
       : {}),
     ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+    ...(skillsRootRecord !== undefined ? { skillsRootRecord } : {}),
+    ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
     allowedSkillScripts,
@@ -1795,6 +1827,10 @@ export const parseCfHarnessCliArgs = async (
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
     inputCells,
+    // A pattern reference is attached per task, and this surface takes one
+    // prompt: a batch run names an indexed pattern in its prompt or finds it
+    // with search_patterns.
+    patternRefs: [],
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -1808,7 +1844,10 @@ export const parseCfHarnessCliArgs = async (
     ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
+    ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(patternIndex !== undefined ? { patternIndex } : {}),
+    ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,
   };
 };
@@ -1971,18 +2010,6 @@ const runCfHarnessWhoamiCommand = (
   io.stdout(`${lines.join("\n")}\n`);
   return 0;
 };
-
-const createAdditionalMountConfigs = (
-  config: Pick<CfHarnessCliConfig, "fabricMount" | "hostMounts">,
-): readonly DockerRunscAdditionalMountConfig[] => [
-  ...(config.fabricMount !== undefined
-    ? [{
-      kind: "fabric-fuse" as const,
-      hostPath: config.fabricMount,
-    }]
-    : []),
-  ...hostMountsToAdditionalMounts(config.hostMounts),
-];
 
 export const formatCfHarnessCliUsage = (): string => usage;
 
@@ -2403,6 +2430,29 @@ const summarizeToolCallArguments = (
         ).join(" ");
         return joined === "" ? undefined : joined;
       }
+      case "search_skills": {
+        const query = typeof parsed.query === "string"
+          ? `query=${JSON.stringify(parsed.query)}`
+          : undefined;
+        const owner = typeof parsed.owner === "string"
+          ? `owner=${JSON.stringify(parsed.owner)}`
+          : undefined;
+        const limit = typeof parsed.limit === "number"
+          ? `limit=${parsed.limit}`
+          : undefined;
+        const joined = [query, owner, limit].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "acquire_skill":
+        return typeof parsed.id === "string"
+          ? `id=${JSON.stringify(parsed.id)}`
+          : undefined;
+      case "query_docs":
+        return typeof parsed.question === "string"
+          ? `question=${JSON.stringify(parsed.question)}`
+          : undefined;
       case "record_feedback": {
         // The note is the model's prose about a run and can quote what the
         // pattern produced, so the line names the verdict and the pattern
@@ -2496,7 +2546,34 @@ export const formatCfHarnessCliResult = (
     lines.push(
       `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})${
         posture.posture !== undefined ? `, posture ${posture.posture}` : ""
+      }${
+        posture.readMaxConfidentiality !== undefined
+          ? `, read-ceiling ${posture.readMaxConfidentiality.length} clause(s) onExceed ${
+            posture.readOnExceed ?? "fail"
+          } (${posture.readMaxConfidentialitySource ?? "unknown"})`
+          : ""
       }`,
+    );
+    if (posture.record !== undefined) {
+      lines.push(...renderCfcPostureReport(posture.record));
+    }
+  }
+  const docsCorpus = result.runState.docsCorpus;
+  lines.push(
+    docsCorpus === undefined || docsCorpus.roots.length === 0
+      ? "docsCorpus: none — query_docs is absent and children cannot look documentation up"
+      : `docsCorpus: ${docsCorpus.source} ${docsCorpus.roots.join(", ")}`,
+  );
+  const skillsRoot = result.runState.skillsRoot;
+  lines.push(
+    skillsRoot === undefined
+      ? "skillsRoot: none — this run scanned no skills tree, so no profile preloads any skill"
+      : `skillsRoot: ${describeHarnessSkillsRoot(skillsRoot)}`,
+  );
+  const docsQueryFailures = result.runState.docsQueryFailures ?? 0;
+  if (docsQueryFailures > 0) {
+    lines.push(
+      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children that ended with no answer`,
     );
   }
   if (
@@ -3014,6 +3091,7 @@ export const runCfHarnessCli = async (
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
     const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
     let runManifest = await readRunManifest(
@@ -3056,32 +3134,18 @@ export const runCfHarnessCli = async (
         }
       }
       : undefined;
-    const additionalMounts = createAdditionalMountConfigs(parsed);
-    const prepareSkillContextMessages = async (
-      engine: CfHarnessEngine,
-    ): Promise<string[]> => {
-      if (parsed.skillsRoot === undefined) {
-        return [];
-      }
-      const registry = await persistHarnessRunSkillRegistry(engine, {
-        skillsRoot: parsed.skillsRoot,
-        ...(parsed.skillsRootSandboxPath !== undefined
-          ? { sandboxSkillsRoot: parsed.skillsRootSandboxPath }
-          : {}),
-      });
-      if (parsed.skillNames.length === 0) {
-        return [];
-      }
-      const context = await loadHarnessSkillContext({
-        registry,
-        skillNames: parsed.skillNames,
-        source: "cli-preload",
-        runId: engine.getRunState().runId,
-        activatedAt: engine.getRunState().updatedAt,
-      });
-      await engine.persistSkillActivations(context.activations);
-      return [context.contextText];
-    };
+    const sessionOptions = harnessSessionEngineOptions(parsed);
+    const skillsShSearchClientFactory = parsed.skillsSh !== undefined &&
+        deps.fetchFn !== undefined
+      ? createHarnessSkillsShSearchClientFactory(
+        parsed.skillsSh.baseUrl,
+        deps.fetchFn,
+      )
+      : undefined;
+    const skillsShAcquisitionClientFactory =
+      parsed.skillsSh !== undefined && deps.fetchFn !== undefined
+        ? createHarnessSkillsShAcquisitionClientFactory(deps.fetchFn)
+        : undefined;
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
       const artifacts = await readRunArtifacts(parsed.resumeRun).catch(
@@ -3093,7 +3157,7 @@ export const runCfHarnessCli = async (
         },
       );
       if (artifacts.runState.lineage?.role === "subagent") {
-        throw new Error(
+        throw harnessResumeRefusal(
           `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
         );
       }
@@ -3105,8 +3169,7 @@ export const runCfHarnessCli = async (
         requestedProvider !== undefined &&
         requestedProvider !== recordedProvider
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
         );
       }
@@ -3114,8 +3177,8 @@ export const runCfHarnessCli = async (
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
-        throw new Error(
-          "gateway URL/auth options cannot be used with openai-codex",
+        throw harnessResumeRefusal(
+          "gateway URL/auth options cannot be used with openai-codex, which is the provider this run recorded",
         );
       }
       if (
@@ -3126,14 +3189,28 @@ export const runCfHarnessCli = async (
           "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
         );
       }
+      // The documentation a run answered out of is part of what it is. An
+      // operator repeating the flags with different roots is asking for a
+      // different run, so the resume is refused rather than quietly answering
+      // later questions from another tree; omitting them keeps the record.
+      const recordedDocsCorpus = artifacts.runState.docsCorpus;
+      if (
+        parsed.docsCorpus !== undefined && recordedDocsCorpus !== undefined &&
+        !harnessDocsCorpusRecordsEqual(parsed.docsCorpus, recordedDocsCorpus)
+      ) {
+        throw harnessResumeRefusal(
+          `resume docs corpus mismatch: run uses ${
+            describeHarnessDocsCorpus(recordedDocsCorpus)
+          }, requested ${describeHarnessDocsCorpus(parsed.docsCorpus)}`,
+        );
+      }
       const recordedRunManifest = artifacts.runState.runManifest;
       if (
         runManifest?.model !== undefined &&
         artifacts.runState.model !== undefined &&
         runManifest.model !== artifacts.runState.model
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume model mismatch: run uses ${artifacts.runState.model}, requested manifest uses ${runManifest.model}`,
         );
       }
@@ -3146,9 +3223,28 @@ export const runCfHarnessCli = async (
           credentialOwner,
         )
       ) {
+        throw harnessResumeRefusal(
+          "resume credential owner mismatch: requested owner does not match the recorded run",
+        );
+      }
+      // A manifest handed to a resume must agree with the recorded one on
+      // the read ceiling, as it must on the model and the credential owner:
+      // the recorded manifest is what the run resumes under, and a different
+      // ceiling silently set aside would leave the operator believing the
+      // run reads under the one they passed.
+      if (
+        runManifest !== undefined && recordedRunManifest !== undefined &&
+        (!readCeilingsEqual(
+          runManifest.cfc?.maxConfidentiality,
+          recordedRunManifest.cfc?.maxConfidentiality,
+        ) ||
+          runManifest.cfc?.onExceed !== recordedRunManifest.cfc?.onExceed)
+      ) {
         throw new HarnessControlError(
           "provider-mismatch",
-          "resume credential owner mismatch: requested owner does not match the recorded run",
+          "resume read ceiling mismatch: the requested manifest's " +
+            "cfc.maxConfidentiality or cfc.onExceed does not match the " +
+            "recorded run's",
         );
       }
       const credentialOwnerKey = credentialOwner.ownerKey;
@@ -3166,21 +3262,8 @@ export const runCfHarnessCli = async (
       }
       requestAccepted = true;
       const engine = new CfHarnessEngine({
+        ...sessionOptions,
         runState: artifacts.runState,
-        artifactRoot: parsed.artifactRoot,
-        workspaceHostPath: parsed.workspace,
-        ...(parsed.sandboxImage !== undefined
-          ? { sandboxImage: parsed.sandboxImage }
-          : {}),
-        ...(parsed.sandboxDockerRuntime !== undefined
-          ? { sandboxDockerRuntime: parsed.sandboxDockerRuntime }
-          : {}),
-        ...(parsed.cfcResultDir !== undefined
-          ? { cfcResultDir: parsed.cfcResultDir }
-          : {}),
-        ...(parsed.cfcInvocationContextDir !== undefined
-          ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
-          : {}),
         model: parsed.model ?? artifacts.runState.model,
         modelProvider,
         credentialOwnerKey,
@@ -3190,26 +3273,11 @@ export const runCfHarnessCli = async (
             gatewayAuthMode: parsed.gatewayAuthMode,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
           : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
-          : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
-          : {}),
-        ...(parsed.handleValueOrigins.length > 0
-          ? { handleValueOrigins: parsed.handleValueOrigins }
-          : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(parsed.fabricSession !== undefined
-          ? { fabricSession: parsed.fabricSession }
-          : {}),
-        ...(parsed.patternIndex !== undefined
-          ? { patternIndex: parsed.patternIndex }
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
           : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.
@@ -3223,7 +3291,6 @@ export const runCfHarnessCli = async (
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
       });
       const modelClient = await createSelectedModelClient({
         provider: modelProvider,
@@ -3234,9 +3301,8 @@ export const runCfHarnessCli = async (
       });
       activateEngine(engine);
       const loop = createPromptLoop({
+        ...sessionOptions,
         engine,
-        workspaceHostPath: parsed.workspace,
-        artifactRoot: parsed.artifactRoot,
         model: parsed.model ?? artifacts.runState.model,
         modelProvider,
         credentialOwnerKey,
@@ -3244,48 +3310,18 @@ export const runCfHarnessCli = async (
           ? {
             gatewayBaseUrl: parsed.gatewayBaseUrl,
             gatewayAuthMode: parsed.gatewayAuthMode,
+            apiKey: parsed.apiKey,
+            apiKeySource: parsed.apiKeySource,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
-          : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
-          : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
-          : {}),
-        ...(parsed.handleValueOrigins.length > 0
-          ? { handleValueOrigins: parsed.handleValueOrigins }
-          : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(modelProvider === "openai-compatible-gateway"
-          ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
-          : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
         ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
-        ...(parsed.reasoningEffort !== undefined
-          ? { reasoningEffort: parsed.reasoningEffort }
-          : {}),
-        ...(parsed.compactThreshold !== undefined
-          ? { compactThreshold: parsed.compactThreshold }
-          : {}),
-        ...(parsed.promptCacheMode !== undefined
-          ? { promptCacheMode: parsed.promptCacheMode }
-          : {}),
-        maxModelTurns: parsed.maxModelTurns,
-        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
-        ...(parsed.allowedToolIds !== undefined
-          ? { allowedToolIds: parsed.allowedToolIds }
-          : {}),
       });
       if (artifacts.transcript === undefined) {
         throw new Error(
@@ -3346,21 +3382,7 @@ export const runCfHarnessCli = async (
         deps,
       });
       const engine = new CfHarnessEngine({
-        workspaceHostPath: parsed.workspace,
-        artifactRoot: parsed.artifactRoot,
-        ...(parsed.sandboxImage !== undefined
-          ? { sandboxImage: parsed.sandboxImage }
-          : {}),
-        ...(parsed.sandboxDockerRuntime !== undefined
-          ? { sandboxDockerRuntime: parsed.sandboxDockerRuntime }
-          : {}),
-        ...(parsed.cfcResultDir !== undefined
-          ? { cfcResultDir: parsed.cfcResultDir }
-          : {}),
-        ...(parsed.cfcInvocationContextDir !== undefined
-          ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
-          : {}),
-        model: parsed.model,
+        ...sessionOptions,
         modelProvider,
         credentialOwnerKey,
         ...(modelProvider === "openai-compatible-gateway"
@@ -3369,26 +3391,11 @@ export const runCfHarnessCli = async (
             gatewayAuthMode: parsed.gatewayAuthMode,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
           : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
-          : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
-          : {}),
-        ...(parsed.handleValueOrigins.length > 0
-          ? { handleValueOrigins: parsed.handleValueOrigins }
-          : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(parsed.fabricSession !== undefined
-          ? { fabricSession: parsed.fabricSession }
-          : {}),
-        ...(parsed.patternIndex !== undefined
-          ? { patternIndex: parsed.patternIndex }
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
           : {}),
         // What the run was asked to do, in the operator's words. A pattern
         // the run publishes carries it as the request it answers.
@@ -3400,93 +3407,38 @@ export const runCfHarnessCli = async (
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
-        ...(parsed.inputCells.length > 0
-          ? { inputCells: parsed.inputCells }
-          : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
+        ...sessionOptions,
         engine,
-        workspaceHostPath: parsed.workspace,
-        artifactRoot: parsed.artifactRoot,
-        model: parsed.model,
         modelProvider,
         credentialOwnerKey,
         ...(modelProvider === "openai-compatible-gateway"
           ? {
             gatewayBaseUrl: parsed.gatewayBaseUrl,
             gatewayAuthMode: parsed.gatewayAuthMode,
+            apiKey: parsed.apiKey,
+            apiKeySource: parsed.apiKeySource,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
-          : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
-          : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(modelProvider === "openai-compatible-gateway"
-          ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
-          : {}),
-        ...(modelClient !== undefined ? { modelClient } : {}),
-        ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
-        ...(parsed.reasoningEffort !== undefined
-          ? { reasoningEffort: parsed.reasoningEffort }
-          : {}),
-        ...(parsed.compactThreshold !== undefined
-          ? { compactThreshold: parsed.compactThreshold }
-          : {}),
-        ...(parsed.promptCacheMode !== undefined
-          ? { promptCacheMode: parsed.promptCacheMode }
-          : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        maxModelTurns: parsed.maxModelTurns,
-        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
-          : {}),
-        ...(parsed.handleValueOrigins.length > 0
-          ? { handleValueOrigins: parsed.handleValueOrigins }
-          : {}),
-        ...(parsed.allowedToolIds !== undefined
-          ? { allowedToolIds: parsed.allowedToolIds }
-          : {}),
+        ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
       });
-      const contextMessages = await prepareSkillContextMessages(engine);
-      // The well-known grants connect the Fabric session up front; a run
-      // configured for one is assumed to use it. A run whose session cannot
-      // be established still runs — its tools will surface the same failure
-      // when called — but the missing grants are said out loud rather than
-      // silently absent.
-      if (engine.fabricSessionAvailable) {
-        try {
-          const grants = await engine.establishWellKnownGrants();
-          const grantMessage = wellKnownGrantsContextMessage(grants);
-          if (grantMessage !== undefined) {
-            contextMessages.push(grantMessage);
-          }
-        } catch (error) {
+      const contextMessages = await establishHarnessSessionContext({
+        engine,
+        config: parsed,
+        onGrantsUnavailable: (error) =>
           io.stderr(
             `fabric grants: unavailable (${
               error instanceof Error ? error.message : String(error)
             })\n`,
-          );
-        }
-      }
-      // Operator input cells are explicit configuration, so unlike the
-      // grants a failure here fails the run rather than proceeding without
-      // what the operator asked for.
-      const inputCells = await engine.establishInputCells();
-      const inputCellsMessage = inputCellsContextMessage(inputCells);
-      if (inputCellsMessage !== undefined) {
-        contextMessages.push(inputCellsMessage);
-      }
+          ),
+      });
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
         imageAttachments: parsed.imageAttachments,
@@ -3502,20 +3454,6 @@ export const runCfHarnessCli = async (
         promptSlotBinding,
         onTranscriptEvent,
       });
-    }
-    // A run's own artifacts say which cells it made and read; the space says
-    // what each of them is labelled, and nothing else joins the two. The
-    // cells are settled once the loop is, so the space is read here — and a
-    // snapshot that cannot be written leaves a finished run finished, since
-    // the record of what the run did is already on disk.
-    try {
-      await activeEngine?.snapshotCellLabels();
-    } catch (error) {
-      io.stderr(
-        `cell label snapshot failed: ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      );
     }
     const durationMs = Date.now() - startedAt;
     const structuredResultValidation = parsed.structuredResult === undefined

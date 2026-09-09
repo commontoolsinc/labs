@@ -9,7 +9,7 @@
 // succession (DR1), and the same-process residue is closed by the in-process
 // abort-before-reacquire discipline. A lease renewal is NEVER a commit.
 
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertGreater, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
@@ -53,11 +53,17 @@ const setCommit = (localSeq: number, id: string): ClientCommit => ({
   operations: [{ op: "set", id, value: { value: { n: localSeq } } }],
 });
 
+/** Reads every lease row, with the expiry read through SQLite's REAL accessor. */
 const leaseRows = (
   engine: Engine,
 ): { space: string; holder: string; expires_at: number }[] =>
   engine.database.prepare(
-    `SELECT space, holder, expires_at FROM execution_lease ORDER BY space`,
+    // The engine's INTEGER accessor truncates to 32 bits; millisecond
+    // timestamps are exactly representable as REAL values. The synthetic-
+    // clock assertions (t0 = 1_000_000) fit in 32 bits either way; only a
+    // live-clock expiry needs the CAST to read back exactly.
+    `SELECT space, holder, CAST(expires_at AS REAL) AS expires_at
+     FROM execution_lease ORDER BY space`,
   ).all() as { space: string; holder: string; expires_at: number }[];
 
 const commitRows = (
@@ -561,6 +567,11 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
       holder,
       now: LIVE_NOW(),
     }));
+    // The live-clock expiry reads back as the real millisecond timestamp:
+    // leaseRows reads the column as a REAL, so this is not the low 32 bits
+    // of the epoch (which went negative on 2026-09-08 and flip sign every
+    // ~24.9 days).
+    assertGreater(leaseRows(engine)[0].expires_at, Date.now());
     const first = applyCommit(engine, {
       sessionId: holder,
       space: SPACE,

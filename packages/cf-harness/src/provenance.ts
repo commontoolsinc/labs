@@ -174,6 +174,7 @@ function detectPrincipal(env: EnvReader, store?: PrincipalStore): string {
 export interface DetectProvenanceOptions {
   /** The parsed subcommand. Pass the resolved name, never raw arguments. */
   command?: string;
+
   env?: EnvReader;
   session?: string;
   principalStore?: PrincipalStore;

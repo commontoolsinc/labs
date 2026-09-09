@@ -3,7 +3,10 @@ import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   assignSlug,
   pieceId,
+  readSlugBinding,
   resolvePieceAddress,
+  SlugAssignedError,
+  SlugReleasedError,
   SlugResolutionError,
 } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
@@ -60,7 +63,7 @@ export const assignSlugToolDescriptor: HarnessToolDescriptor = {
   toolId: "assign_slug",
   title: "Assign Slug",
   description:
-    "Register the piece behind a handle token in the space's piece list and give it a named address a person can open. Use it after run_pattern when a piece deserves a name; a piece never named stays out of the list, which is what pure computation wants. A slug that already names another piece is refused rather than repointed.",
+    "Register the piece behind a handle token in the space's piece list and give it a named address a person can open. Use it after run_pattern when a piece deserves a name; a piece never named stays out of the list, which is what pure computation wants. A slug already naming another piece, or a collection, is refused rather than repointed.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -98,56 +101,100 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * The `SlugResolutionError` codes that positively say the slug names no
- * piece: its document is absent, holds no usable redirect, or redirects to
- * something that is not a piece. Each is a statement about what the space
- * holds, arrived at by reading it, so each means the slug is free — a
- * name only ever competes with a piece.
+ * What each `SlugResolutionError` code says about the name.
  *
- * Every other outcome is a failure to establish anything: a storage error, a
- * sync that never landed, a lost connection. `invalid` sits on that side too
- * — the slug was validated before this is asked, so a resolver calling it
- * unusable means the two disagree about the rule rather than that the space
- * is empty.
+ * `free` is a positive statement about what the space holds, arrived at by
+ * reading it: the slug's document is absent, holds no usable redirect, or
+ * redirects to something that is not a piece, and a name only ever competes
+ * with a piece. `in-use` is equally positive the other way — the name
+ * resolves to a collection, which is a thing a person opens, so assigning
+ * over it would take the address away from whoever holds it.
+ *
+ * `unknown` is a failure to establish anything: a storage error, a sync that
+ * never landed, a lost connection. `invalid` sits there too — the slug was
+ * validated before this is asked, so a resolver calling it unusable means the
+ * two disagree about the rule rather than that the space is empty.
+ *
+ * The map is total over the code union, so a code added to the resolver does
+ * not compile until it is classified here. Totality is the point: only
+ * `inside-piece` can reach this from an address with no path, and
+ * `missing-member` is classified because it belongs to the same answer, not
+ * because it arrives.
  */
-const VACANT_SLUG_CODES: ReadonlySet<
-  NonNullable<SlugResolutionError["code"]>
-> = new Set(["missing", "malformed", "not-piece", "missing-piece-id"]);
+const SLUG_CODE_STATES: Readonly<
+  Record<
+    NonNullable<SlugResolutionError["code"]>,
+    "free" | "in-use" | "unknown"
+  >
+> = {
+  invalid: "unknown",
+  missing: "free",
+  malformed: "free",
+  "not-piece": "free",
+  "missing-piece-id": "free",
+  "inside-piece": "in-use",
+  "missing-member": "in-use",
+};
 
 /**
  * Whether `slug` already names a piece in the session's space — and which —
- * or whether that could not be established at all.
+ * whether it names something else a person opens, or whether that could not
+ * be established at all.
  *
- * Assignment is a blind write: the slug document is pointed at the piece
- * whatever it held before, and last writer wins. So without asking first, a
- * request naming a slug a person already opens would repoint that name at
- * whatever the caller passed. That makes an unanswered question a refusal
- * rather than a "free": a resolution that failed operationally says nothing
- * about what the slug holds, and treating it as vacancy would reopen exactly
- * the overwrite this asks to prevent.
+ * Assignment refuses a name that is already bound, so this asks first for a
+ * different reason than the write does. The write's rule is "bound at all";
+ * this one is "names a piece or a collection a person opens", and a name
+ * whose document holds no usable redirect competes with nothing. Asking here
+ * is what lets the refusal name which of the two it is.
  *
- * The two are told apart by the typed `code` `resolvePieceAddress` carries
- * on its `SlugResolutionError`, never by the message text.
+ * The answer is carried into the write as `takeFrom` rather than forced over
+ * whatever is there. Forcing would spend the claim the assignment makes: two
+ * calls that both read this name as free would both take it, and one would
+ * overwrite the other silently — the very race the claim closes. Handing the
+ * binding this rule was judged against to the transaction keeps the rule and
+ * the claim at once, so a name bound under this call is refused by the write
+ * even though this read called it free.
+ *
+ * That also makes an unanswered question a refusal rather than a "free": a
+ * resolution that failed operationally says nothing about what the slug
+ * holds, and treating it as vacancy would repoint a name this side never
+ * established was free.
+ *
+ * The outcomes are told apart by the typed `code` `resolvePieceAddress`
+ * carries on its `SlugResolutionError`, never by the message text.
  */
 const slugAvailability = async (
   pieces: PiecesController,
   slug: string,
 ): Promise<
-  | { state: "free" }
+  | { state: "free"; binding: string | null }
   | { state: "taken"; pieceId: string }
+  | { state: "in-use" }
   | { state: "unknown"; reason: string }
 > => {
+  // The binding this rule is about to be applied to, read before the rule
+  // runs so that an answer of "free" and the state it was reached from are
+  // the same observation. A binding that cannot be read is an unestablished
+  // answer for the same reason a failed resolution is.
+  let binding: string | null;
+  try {
+    binding = await readSlugBinding(pieces, slug);
+  } catch (error) {
+    return { state: "unknown", reason: errorMessage(error) };
+  }
   try {
     const holder = await resolvePieceAddress(pieces, slug);
     return { state: "taken", pieceId: holder };
   } catch (error) {
-    if (
-      error instanceof SlugResolutionError && error.code !== undefined &&
-      VACANT_SLUG_CODES.has(error.code)
-    ) {
-      return { state: "free" };
-    }
-    return { state: "unknown", reason: errorMessage(error) };
+    const state = error instanceof SlugResolutionError &&
+        error.code !== undefined
+      ? SLUG_CODE_STATES[error.code]
+      : "unknown";
+    // Only `unknown` carries the resolver's text. The other two are answers
+    // about what the space holds, and their refusals name the caller's own
+    // slug and nothing the caller did not already have.
+    if (state === "unknown") return { state, reason: errorMessage(error) };
+    return state === "free" ? { state, binding } : { state };
   }
 };
 
@@ -179,15 +226,17 @@ export const namedPieceUrl = (
 
 /**
  * Puts `cell` in the space's piece list unless the list already holds it.
- * The registry's addPiece handler appends unconditionally, so membership is
- * asked first — by piece id over the registered list — rather than by
- * re-adding and hoping.
+ * Establishes the space root first because the registry belongs to it. The
+ * registry's addPiece handler appends unconditionally, so membership is asked
+ * first — by piece id over the registered list — rather than by re-adding and
+ * hoping.
  */
 const ensureRegistered = async (
   pieces: PiecesController,
   cell: Parameters<PiecesController["add"]>[0][number],
   targetId: string,
 ): Promise<void> => {
+  await pieces.ensureDefaultPattern();
   const registered = await pieces.getRegisteredPieces();
   if (registered.some((piece) => piece.id === targetId)) {
     return;
@@ -311,22 +360,65 @@ export const assignSlugTool: HarnessToolDefinition<
         `assign_slug slug "${slug}" already names another piece in this space, and assigning would repoint that address. Choose another slug.`,
       );
     }
+    if (availability.state === "in-use") {
+      return errorOutput(
+        `assign_slug slug "${slug}" already names a collection in this space, and assigning would repoint that address. Choose another slug.`,
+      );
+    }
     if (availability.state === "unknown") {
       return errorOutput(
         `assign_slug could not establish whether slug "${slug}" is available: ${availability.reason}. Nothing was assigned. Try the same call again.`,
       );
     }
+    // The registry join goes first, so a failure between the two leaves a
+    // listed-but-unnamed piece — visible and reachable by its handle —
+    // rather than an orphan name pointing outside the list. Membership is
+    // ensured rather than appended: a retry after exactly that failure must
+    // not list the piece twice.
+    //
+    // Its own try, because what the two failures leave behind differs: this
+    // one leaves nothing, and the refusals below leave a listed piece. A
+    // sentence attached to the catch rather than to the state it describes
+    // would say the piece is listed when the listing is what failed.
     try {
-      // The registry join goes first, so a failure between the two leaves a
-      // listed-but-unnamed piece — visible and reachable by its handle —
-      // rather than an orphan name pointing outside the list. Membership is
-      // ensured rather than appended: a retry after exactly that failure
-      // must not list the piece twice.
       await ensureRegistered(pieces, cell, targetId);
-      await assignSlug(pieces, cell, slug);
     } catch (error) {
       return errorOutput(
-        `assign_slug failed while naming the piece: ${errorMessage(error)}`,
+        `assign_slug failed while listing the piece: ${errorMessage(error)}`,
+      );
+    }
+    try {
+      await assignSlug(pieces, cell, slug, { takeFrom: availability.binding });
+    } catch (error) {
+      // The name was bound between this call's reading of it and its write,
+      // so the answer is the same one a name found taken gets, and for the
+      // same reason: assigning now would repoint an address someone holds.
+      // The registry join above has already committed, so every refusal from
+      // here reports what it left: the name was not assigned, and the piece
+      // is listed. A caller told "nothing was assigned" would read that as
+      // all-or-nothing and never look for the piece it did not mean to list.
+      if (error instanceof SlugAssignedError) {
+        return errorOutput(
+          `assign_slug slug "${slug}" was taken while this call was ` +
+            `deciding, and assigning would repoint that address. The slug ` +
+            `was not assigned and the piece is listed in this space. Choose ` +
+            `another slug.`,
+        );
+      }
+      // The name moved the other way and now points nowhere, so nobody is
+      // holding it and the answer is the one an unestablished availability
+      // gets: read it again rather than choose another name.
+      if (error instanceof SlugReleasedError) {
+        return errorOutput(
+          `assign_slug slug "${slug}" changed while this call was deciding ` +
+            `and now names nothing. The slug was not assigned and the piece ` +
+            `is listed in this space. Try the same call again.`,
+        );
+      }
+      return errorOutput(
+        `assign_slug failed while naming the piece: ${
+          errorMessage(error)
+        }. The piece is listed in this space.`,
       );
     }
     const url = namedPieceUrl(pieces, slug);

@@ -23,6 +23,7 @@ import type {
 export interface EventPreflightDependencyState {
   /** Identity entity keys resolve scoped addresses against (keys.ts). */
   readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly getTrace: () => EventPreflightTraceContext | undefined;
   readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;

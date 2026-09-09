@@ -9,6 +9,7 @@ import {
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
+import type { HarnessPolicyDecisionRecord } from "../../src/contracts/policy-trace.ts";
 import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import {
   HARNESS_CELL_LABELS_TYPE,
@@ -95,6 +96,18 @@ describe("console/steps", () => {
       expect(steps[1].output).toEqual({ status: "ok" });
     });
 
+    it("marks a run-pattern source replaced by a later attempt", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText:
+            "[cf-harness: superseded run_pattern source collapsed for model context; attempt 1, 999 characters. The newest run_pattern call carries the source to edit; this attempt's source is preserved in tool output run:run_pattern:1.]",
+        }),
+        result("c1", "run_pattern", { status: "compile-error" }),
+      ]);
+
+      expect(steps[0].sourceReplacedByLaterAttempt).toBe(true);
+    });
+
     it("keeps an assistant message that carries text alongside its calls", () => {
       const steps = consoleRunSteps([
         { role: "assistant", content: "thinking out loud", toolCalls: [] },
@@ -112,6 +125,311 @@ describe("console/steps", () => {
       expect(steps[0].inputText).toBe("{not json");
       expect(steps[0].output).toBeUndefined();
       expect(steps[0].outputText).toBe("plain output");
+    });
+
+    it("joins recorded omissions to full tool-output positions", () => {
+      const outputId = createToolOutputId("run", "run_pattern", 1);
+      const artifactPath = "/moved/run/tool-outputs/result.json";
+      const transcript: HarnessTranscriptMessage[] = [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        {
+          role: "tool",
+          toolCallId: "c1",
+          toolName: "run_pattern",
+          content: JSON.stringify({ status: "compile-error" }),
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId,
+            toolId: "run_pattern",
+            runId: "run",
+            artifactPath: "/original/run/tool-outputs/result.json",
+          },
+        },
+      ];
+      const rawDiagnostic =
+        "Failure in fid1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const steps = consoleRunSteps(
+        transcript,
+        [],
+        [],
+        [],
+        {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 1,
+            toolCallId: "c1",
+            toolId: "run_pattern",
+            outputId,
+            rules: [{
+              rule: "artifact-only",
+              locations: [{
+                artifactPath: "/original/run/tool-outputs/result.json",
+                jsonPointer: "/rawValue",
+              }],
+            }, {
+              rule: "bare-fabric-identifier-scrub",
+              locations: [{
+                artifactPath: "/original/run/tool-outputs/result.json",
+                jsonPointer: "/message",
+              }],
+            }, {
+              rule: "superseded-run-pattern-diagnostic-collapse",
+              locations: [{
+                artifactPath: "/original/run/tool-outputs/result.json",
+                jsonPointer: "/diagnostic",
+              }],
+            }, {
+              rule: "bare-fabric-identifier-scrub",
+              locations: [{
+                artifactPath: "/original/run/tool-outputs/result.json",
+                jsonPointer: "/schema/properties",
+              }],
+            }],
+          }],
+        },
+        [{
+          artifactPath,
+          value: {
+            status: "compile-error",
+            rawValue: { retained: true },
+            message: rawDiagnostic,
+            diagnostic: rawDiagnostic,
+            schema: {
+              properties: {
+                "did:key:z6MkSecret": { type: "string" },
+              },
+            },
+          },
+        }],
+      );
+
+      expect(steps[0].withheld.status).toBe("recorded");
+      expect(steps[0].withheld.locations[0].value).toEqual({ retained: true });
+      expect(steps[0].withheld.locations[1].redaction).toBe(
+        "Failure in [fabric-id]",
+      );
+      expect(steps[0].withheld.locations[2].value).toBe(rawDiagnostic);
+      expect(steps[0].withheld.locations[3].value).toEqual({
+        "[fabric-id]": { type: "string" },
+      });
+    });
+
+    it("reports a legacy tool result as unrecorded", () => {
+      const steps = consoleRunSteps([
+        call("c1", "bash", { command: "pwd" }),
+        result("c1", "bash", { status: "ok" }),
+      ]);
+      expect(steps[0].withheld).toEqual({
+        status: "unrecorded",
+        locations: [],
+      });
+    });
+
+    it("distinguishes unreadable and incomplete omission records", () => {
+      const transcript = [
+        call("c1", "bash", { command: "pwd" }),
+        result("c1", "bash", { status: "ok" }),
+      ];
+      const unreadable = consoleRunSteps(
+        transcript,
+        [],
+        [],
+        [],
+        { status: "unreadable" },
+      );
+      const incomplete = consoleRunSteps(
+        transcript,
+        [],
+        [],
+        [],
+        {
+          status: "present",
+          value: {
+            type: "cf-harness.transcript-omissions",
+            version: 1,
+            results: [],
+          },
+        },
+      );
+
+      expect(unreadable[0].withheld.status).toBe("record-unreadable");
+      expect(incomplete[0].withheld.status).toBe("record-entry-missing");
+    });
+
+    it("reports root, array, and unavailable artifact positions honestly", () => {
+      const outputId = createToolOutputId("run", "bash", 1);
+      const artifactPath = "/run/tool-outputs/bash.json";
+      const transcript: HarnessTranscriptMessage[] = [
+        call("c1", "bash", { command: "echo" }),
+        {
+          role: "tool",
+          toolCallId: "c1",
+          toolName: "bash",
+          content: "model-facing",
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId,
+            toolId: "bash",
+            runId: "run",
+            artifactPath,
+          },
+        },
+      ];
+      const locations = ["", "/items/0", "/items/no", "not-a-pointer"];
+      const steps = consoleRunSteps(
+        transcript,
+        [],
+        [],
+        [],
+        {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 1,
+            toolCallId: "c1",
+            toolId: "bash",
+            outputId,
+            rules: [{
+              rule: "artifact-only",
+              locations: locations.map((jsonPointer) => ({
+                artifactPath,
+                jsonPointer,
+              })),
+            }, {
+              rule: "observation-denied",
+              locations: [{
+                artifactPath: "/run/tool-outputs/missing.json",
+                jsonPointer: "/stderr",
+              }],
+            }, {
+              rule: "bare-fabric-identifier-scrub",
+              locations: [{
+                artifactPath: "/run/tool-outputs/missing.json",
+                jsonPointer: "/message",
+              }],
+            }],
+          }],
+        },
+        [{ artifactPath, value: { items: ["first"] } }],
+      );
+
+      expect(steps[0].withheld.locations.map((location) => ({
+        available: location.available,
+        value: location.value,
+        redaction: location.redaction,
+      }))).toEqual([
+        { available: true, value: { items: ["first"] }, redaction: undefined },
+        { available: true, value: "first", redaction: undefined },
+        { available: false, value: undefined, redaction: undefined },
+        { available: false, value: undefined, redaction: undefined },
+        {
+          available: false,
+          value: undefined,
+          redaction: "[redacted by CFC]",
+        },
+        { available: false, value: undefined, redaction: "[fabric-id]" },
+      ]);
+    });
+
+    it("redacts an available denied value for every overlapping rule", () => {
+      const outputId = createToolOutputId("run", "bash", 1);
+      const artifactPath = "/run/tool-outputs/bash.json";
+      const transcript: HarnessTranscriptMessage[] = [
+        call("c1", "bash", { command: "echo" }),
+        {
+          role: "tool",
+          toolCallId: "c1",
+          toolName: "bash",
+          content: "model-facing",
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId,
+            toolId: "bash",
+            runId: "run",
+            artifactPath,
+          },
+        },
+      ];
+      const locations = [{ artifactPath, jsonPointer: "/stdout" }];
+      const steps = consoleRunSteps(
+        transcript,
+        [],
+        [],
+        [],
+        {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 1,
+            toolCallId: "c1",
+            toolId: "bash",
+            outputId,
+            rules: [{ rule: "artifact-only", locations }, {
+              rule: "observation-denied",
+              locations,
+            }],
+          }],
+        },
+        [{ artifactPath, value: { stdout: "PLANTED-SECRET" } }],
+      );
+
+      expect(steps[0].withheld.locations).toHaveLength(2);
+      expect(
+        steps[0].withheld.locations.every((location) =>
+          location.redaction === "[redacted by CFC]" &&
+          location.value === undefined
+        ),
+      ).toBe(true);
+      expect(JSON.stringify(steps[0].withheld)).not.toContain("PLANTED-SECRET");
+    });
+
+    it("does not join an omission record whose transcript identity differs", () => {
+      const outputId = createToolOutputId("run", "bash", 1);
+      const artifactPath = "/run/tool-outputs/bash.json";
+      const transcript: HarnessTranscriptMessage[] = [
+        call("c1", "bash", { command: "echo" }),
+        {
+          role: "tool",
+          toolCallId: "c1",
+          toolName: "bash",
+          content: "model-facing",
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId,
+            toolId: "bash",
+            runId: "run",
+            artifactPath,
+          },
+        },
+      ];
+      const steps = consoleRunSteps(
+        transcript,
+        [],
+        [],
+        [],
+        {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 0,
+            toolCallId: "another-call",
+            toolId: "bash",
+            outputId,
+            rules: [{
+              rule: "artifact-only",
+              locations: [{ artifactPath, jsonPointer: "/stdout" }],
+            }],
+          }],
+        },
+        [{ artifactPath, value: { stdout: "PLANTED-SECRET" } }],
+      );
+
+      expect(steps[0].withheld).toEqual({
+        status: "record-entry-missing",
+        locations: [],
+      });
+      expect(JSON.stringify(steps[0].withheld)).not.toContain("PLANTED-SECRET");
     });
 
     it("names the child a delegate_task step started", () => {
@@ -344,6 +662,235 @@ describe("console/steps CFC and disclosure", () => {
     );
     expect(steps[0].status).toBe("denied");
     expect(steps[0].policyEvents).toHaveLength(1);
+  });
+
+  it("reads a step the loop rejected for its arguments as an error, not a denial", () => {
+    const steps = consoleRunSteps(
+      [
+        call("c1", "delegate_task", { goal: "" }),
+        result("c1", "delegate_task", {
+          type: "cf-harness.invalid-tool-call",
+          reason: "invalid_arguments",
+          expected: "a non-empty goal",
+          detail: "delegate_task goal must be a non-empty string",
+        }),
+      ],
+      [{
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-invalid",
+        at: "2026-01-01T00:00:00.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "c1",
+        toolId: "delegate_task",
+        cfcEnforcementMode: "enforce-explicit",
+        decision: "invalid",
+        reasonCodes: ["invalid_tool_call"],
+      }],
+    );
+
+    // The answer carries no `status` of its own, so without reading the
+    // decision the step would read as an ordinary success.
+    expect(steps[0].status).toBe("error");
+    expect(steps[0].policyEvents).toHaveLength(0);
+  });
+
+  it("reads a step whose release was withheld as the ok its own answer states", () => {
+    const steps = consoleRunSteps(
+      [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", {
+          status: "ok",
+          resultRef: { outputId: "out-1" },
+          valueError: "the values are withheld; resultRef still names them",
+        }),
+      ],
+      [
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 1,
+          runId: "run-withheld",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "allowed",
+          reasonCodes: ["cfc_enforce_explicit_direct_command"],
+        },
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 2,
+          runId: "run-withheld",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "withheld",
+          reasonCodes: ["cfc_release_withheld"],
+          release: {
+            reasonCode: "cfc_release_withheld",
+            boundary: "release",
+            sink: "run_pattern",
+            ceiling: [],
+          },
+        },
+      ],
+    );
+
+    // The call ran and answered with the reference to its result, so the step
+    // is the success its answer states; the boundary shows as the decision the
+    // CFC line carries, and not as a denial of the call.
+    expect(steps[0].status).toBe("ok");
+    expect(steps[0].policy?.decision).toBe("withheld");
+    expect(steps[0].policy?.reasonCodes).toEqual(["cfc_release_withheld"]);
+  });
+
+  it("reads a legacy trace's withheld release off its reason code, not its outcome word", () => {
+    // A run recorded before the `withheld` outcome existed persisted `denied`
+    // beside a release that held values back. The reason code is the fact and
+    // does not move, so the console reads the step off that — the same field
+    // AUD-16 counts — and an old family reads alike whichever build opens it.
+    const steps = consoleRunSteps(
+      [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", {
+          status: "ok",
+          resultRef: { outputId: "out-1" },
+          valueError: "the values are withheld; resultRef still names them",
+        }),
+      ],
+      [
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 1,
+          runId: "run-legacy",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "allowed",
+          reasonCodes: ["cfc_enforce_explicit_direct_command"],
+        },
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 2,
+          runId: "run-legacy",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "denied",
+          reasonCodes: ["cfc_release_withheld"],
+          release: {
+            reasonCode: "cfc_release_withheld",
+            boundary: "release",
+            sink: "run_pattern",
+            ceiling: [],
+          },
+        },
+      ],
+    );
+
+    expect(steps[0].status).toBe("ok");
+    expect(steps[0].policy?.decision).toBe("withheld");
+  });
+
+  it("keeps `denied` for a decision no boundary decided", () => {
+    // The other half of the rule: a call authority refused carries no release
+    // record, so nothing rewrites its word and the step stays denied.
+    const steps = consoleRunSteps(
+      [
+        call("c1", "write_file", { path: "x" }),
+        result("c1", "write_file", { status: "error" }),
+      ],
+      [{
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-denied",
+        at: "2026-01-01T00:00:00.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "c1",
+        toolId: "write_file",
+        cfcEnforcementMode: "enforce-explicit",
+        decision: "denied",
+        reasonCodes: ["write_file_enforce_explicit_direct_command"],
+      }],
+    );
+
+    expect(steps[0].status).toBe("denied");
+    expect(steps[0].policy?.decision).toBe("denied");
+  });
+
+  it("keeps the persisted word when the release record answers neither closed set", () => {
+    // A trace is read back through JSON. A release record whose boundary or
+    // reason code is outside the contract's sets is a record the console
+    // cannot read, and an unreadable record is not evidence to rewrite a
+    // persisted outcome with — so the word the run recorded stands. `null` is
+    // the same reading, and would throw if it were dereferenced instead.
+    const legacy = {
+      type: "cf-harness.policy-decision",
+      sequence: 1,
+      runId: "run-malformed",
+      at: "2026-01-01T00:00:00.000Z",
+      toolActivitySequence: 1,
+      toolCallId: "c1",
+      toolId: "run_pattern",
+      cfcEnforcementMode: "enforce-explicit",
+      decision: "denied",
+      reasonCodes: ["cfc_release_withheld"],
+    } as const;
+    const transcript = [
+      call("c1", "run_pattern", { sourceText: "x" }),
+      result("c1", "run_pattern", { status: "ok" }),
+    ];
+    const malformed = [
+      // A boundary outside the set, beside a reason code inside it.
+      { reasonCode: "cfc_release_withheld", boundary: "egress" },
+      // A reason code outside the set, beside a boundary inside it.
+      { reasonCode: "cfc_release_maybe", boundary: "release" },
+      // No discriminant at all, and an empty record.
+      { sink: "run_pattern" },
+      null,
+    ];
+
+    for (const release of malformed) {
+      const steps = consoleRunSteps(transcript, [
+        { ...legacy, release } as unknown as HarnessPolicyDecisionRecord,
+      ]);
+      expect(steps[0].status).toBe("denied");
+      expect(steps[0].policy?.decision).toBe("denied");
+    }
+  });
+
+  it("reads a refused commit as denied, since it landed no result", () => {
+    // A release record does not by itself mean the call answered: the runner
+    // refused this write, so `cfc_commit_refused` keeps the denial.
+    const steps = consoleRunSteps(
+      [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ],
+      [{
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-commit",
+        at: "2026-01-01T00:00:00.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "c1",
+        toolId: "run_pattern",
+        cfcEnforcementMode: "enforce-strict",
+        decision: "denied",
+        reasonCodes: ["cfc_commit_refused"],
+        release: { reasonCode: "cfc_commit_refused", boundary: "commit" },
+      }],
+    );
+
+    expect(steps[0].status).toBe("denied");
+    expect(steps[0].policy?.decision).toBe("denied");
   });
 
   it("measures the longest numeric run a result let across as value", () => {

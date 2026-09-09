@@ -23,45 +23,15 @@ type Task = {
 export class SpaceManager {
   #did: string;
   #pollingIntervalMs: number;
-
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private enabledPieces = new Map<string, Cell<BGPieceEntry>>();
-
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private activePiece: Cell<BGPieceEntry> | null = null;
+  #enabledPieces = new Map<string, Cell<BGPieceEntry>>();
+  #activePiece: Cell<BGPieceEntry> | null = null;
   #deactivationTimeoutMs: number;
-
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private workerController!: WorkerController;
+  #workerController!: WorkerController;
   #rerunIntervalMs: number;
-
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private pendingTasks: Task[] = [];
-
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private failureTracking = new Map<string, number>();
+  #pendingTasks: Task[] = [];
+  #failureTracking = new Map<string, number>();
   #workerOptions: WorkerOptions;
-
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private isRunning = false;
+  #isRunning = false;
 
   constructor(options: PieceSchedulerOptions) {
     this.#did = options.did;
@@ -69,57 +39,72 @@ export class SpaceManager {
     this.#deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
     this.#rerunIntervalMs = options.rerunIntervalMs ?? 60000;
     this.#workerOptions = options;
-    this.setupWorkerController();
+    this.#setupWorkerController();
 
     console.log(
       `${this.#did} Piece scheduler initialized | pollingIntervalMs: ${this.#pollingIntervalMs} | deactivationTimeoutMs: ${this.#deactivationTimeoutMs} | rerunIntervalMs: ${this.#rerunIntervalMs}`,
     );
   }
 
-  #pushTask(
-    pieceId: string,
-    entry: Cell<BGPieceEntry>,
-    whenInMs?: number,
-  ) {
-    const when = whenInMs ?? this.#rerunIntervalMs;
-    const timestamp = Date.now() + when;
-    this.pendingTasks.push({
-      pieceId,
-      timestamp,
-      entry,
-    });
-
-    this.pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
+  /**
+   * The state and the steps of this instance that a test drives directly:
+   * the scheduling tables, the piece in flight, the running flag, the worker
+   * controller, and the loop and the two steps it takes.
+   */
+  get accessForTestingOnly(): {
+    activePiece: Cell<BGPieceEntry> | null;
+    readonly enabledPieces: Map<string, Cell<BGPieceEntry>>;
+    readonly failureTracking: Map<string, number>;
+    isRunning: boolean;
+    pendingTasks: Task[];
+    workerController: WorkerController;
+    execLoop(): Promise<void>;
+    processPiece(pieceId: string, entry: Cell<BGPieceEntry>): Promise<void>;
+    setupWorkerController(): Promise<void>;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get activePiece() {
+        return outerThis.#activePiece;
+      },
+      set activePiece(value) {
+        outerThis.#activePiece = value;
+      },
+      enabledPieces: this.#enabledPieces,
+      failureTracking: this.#failureTracking,
+      get isRunning() {
+        return outerThis.#isRunning;
+      },
+      set isRunning(value) {
+        outerThis.#isRunning = value;
+      },
+      get pendingTasks() {
+        return outerThis.#pendingTasks;
+      },
+      set pendingTasks(value) {
+        outerThis.#pendingTasks = value;
+      },
+      get workerController() {
+        return outerThis.#workerController;
+      },
+      set workerController(value) {
+        outerThis.#workerController = value;
+      },
+      execLoop: () => this.#execLoop(),
+      processPiece: (pieceId, entry) => this.#processPiece(pieceId, entry),
+      setupWorkerController: () => this.#setupWorkerController(),
+    };
   }
 
-  #updatePieceStatus(b: BGPieceEntry, c: Cell<BGPieceEntry>) {
-    const pieceId = b.pieceId;
-    const enabled = !b.disabledAt;
-    const currentlyScheduled = this.enabledPieces.has(pieceId) ||
-      this.activePiece?.get().pieceId === pieceId;
-
-    if (enabled) {
-      // if we aren't already scheduling this piece, add it to the list
-      if (!currentlyScheduled) {
-        this.enabledPieces.set(pieceId, c);
-        this.#pushTask(pieceId, c, 0);
-      }
-    } else {
-      // if we are disabling a piece, remove it from the list
-      if (currentlyScheduled) {
-        this.enabledPieces.delete(pieceId);
-        this.pendingTasks = this.pendingTasks.filter((r) =>
-          r.pieceId !== pieceId
-        );
-      }
-    }
-  }
-
-  // Update the list of pieces to watch (removing any pieces that are no longer in the list)
+  /**
+   * Updates the list of pieces to watch, removing any pieces that are no
+   * longer in the list.
+   */
   watch(entries: Cell<BGPieceEntry>[]): Cancel {
     const [cancel, addCancel] = useCancelGroup();
 
-    const scheduled = Array.from(this.enabledPieces.keys());
+    const scheduled = Array.from(this.#enabledPieces.keys());
     const desired = new Set();
 
     for (const entry of entries) {
@@ -134,38 +119,38 @@ export class SpaceManager {
     const toRemove = scheduled.filter((pieceId) => !desired.has(pieceId));
 
     for (const pieceId of toRemove) {
-      this.enabledPieces.delete(pieceId);
-      this.pendingTasks = this.pendingTasks.filter((task) =>
+      this.#enabledPieces.delete(pieceId);
+      this.#pendingTasks = this.#pendingTasks.filter((task) =>
         task.pieceId !== pieceId
       );
     }
 
     console.log(
-      `${this.#did} Piece scheduling ${this.enabledPieces.size} piece updaters`,
+      `${this.#did} Piece scheduling ${this.#enabledPieces.size} piece updaters`,
     );
     return cancel;
   }
 
   start(): void {
-    if (this.isRunning) {
+    if (this.#isRunning) {
       return;
     }
-    this.isRunning = true;
+    this.#isRunning = true;
     console.log(`${this.#did} Piece scheduler starting...`);
-    this.execLoop();
+    this.#execLoop();
   }
 
   async stop(): Promise<void> {
     console.log(`${this.#did} Stopping piece scheduler...`);
-    this.isRunning = false;
+    this.#isRunning = false;
 
     // Wait for active jobs to finish with a timeout
-    if (this.activePiece) {
+    if (this.#activePiece) {
       await Promise.race([
         sleep(this.#deactivationTimeoutMs),
         new Promise((resolve) => {
           const checkInterval = setInterval(() => {
-            if (!this.activePiece) {
+            if (!this.#activePiece) {
               clearInterval(checkInterval);
               resolve(true);
             }
@@ -174,44 +159,36 @@ export class SpaceManager {
       ]);
     }
 
-    await this.workerController.shutdown();
+    await this.#workerController.shutdown();
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private async execLoop(): Promise<void> {
-    while (this.isRunning) {
-      if (!this.workerController.isReady()) {
+  async #execLoop(): Promise<void> {
+    while (this.#isRunning) {
+      if (!this.#workerController.isReady()) {
         await sleep(this.#pollingIntervalMs);
         continue;
       }
 
-      if (this.activePiece) {
+      if (this.#activePiece) {
         await sleep(this.#pollingIntervalMs);
         continue;
       }
 
       if (
-        this.pendingTasks.length === 0 ||
-        this.pendingTasks[0].timestamp > Date.now()
+        this.#pendingTasks.length === 0 ||
+        this.#pendingTasks[0].timestamp > Date.now()
       ) {
         await sleep(this.#pollingIntervalMs);
         continue;
       }
 
-      const { pieceId, entry, timestamp: _ } = this.pendingTasks.shift()!;
+      const { pieceId, entry, timestamp: _ } = this.#pendingTasks.shift()!;
 
-      this.processPiece(pieceId, entry);
+      this.#processPiece(pieceId, entry);
     }
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private async processPiece(pieceId: string, entry: Cell<BGPieceEntry>) {
+  async #processPiece(pieceId: string, entry: Cell<BGPieceEntry>) {
     const raw = entry.get();
 
     if (raw.disabledAt) {
@@ -221,10 +198,10 @@ export class SpaceManager {
 
     console.log(`${this.#did} Starting ${raw.integration} ${raw.pieceId}`);
 
-    this.activePiece = entry;
+    this.#activePiece = entry;
 
     try {
-      await this.workerController.runPiece(entry);
+      await this.#workerController.runPiece(entry);
       this.#onProcessSuccess(pieceId, entry);
     } catch (error) {
       const errorString = error instanceof Error
@@ -233,13 +210,52 @@ export class SpaceManager {
       console.error(`${this.#did} ${errorString}`);
       this.#onProcessFail(pieceId, entry, errorString);
     }
-    this.activePiece = null;
+    this.#activePiece = null;
+  }
+
+  #pushTask(
+    pieceId: string,
+    entry: Cell<BGPieceEntry>,
+    whenInMs?: number,
+  ) {
+    const when = whenInMs ?? this.#rerunIntervalMs;
+    const timestamp = Date.now() + when;
+    this.#pendingTasks.push({
+      pieceId,
+      timestamp,
+      entry,
+    });
+
+    this.#pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  #updatePieceStatus(b: BGPieceEntry, c: Cell<BGPieceEntry>) {
+    const pieceId = b.pieceId;
+    const enabled = !b.disabledAt;
+    const currentlyScheduled = this.#enabledPieces.has(pieceId) ||
+      this.#activePiece?.get().pieceId === pieceId;
+
+    if (enabled) {
+      // if we aren't already scheduling this piece, add it to the list
+      if (!currentlyScheduled) {
+        this.#enabledPieces.set(pieceId, c);
+        this.#pushTask(pieceId, c, 0);
+      }
+    } else {
+      // if we are disabling a piece, remove it from the list
+      if (currentlyScheduled) {
+        this.#enabledPieces.delete(pieceId);
+        this.#pendingTasks = this.#pendingTasks.filter((r) =>
+          r.pieceId !== pieceId
+        );
+      }
+    }
   }
 
   #onProcessSuccess(pieceId: string, entry: Cell<BGPieceEntry>) {
     // If previous runs have failed, clear out the counter
-    if (this.failureTracking.has(pieceId)) {
-      this.failureTracking.delete(pieceId);
+    if (this.#failureTracking.has(pieceId)) {
+      this.#failureTracking.delete(pieceId);
     }
 
     entry.runtime.editWithRetry((tx) => {
@@ -249,7 +265,7 @@ export class SpaceManager {
       });
     });
 
-    if (this.enabledPieces.has(pieceId)) {
+    if (this.#enabledPieces.has(pieceId)) {
       this.#pushTask(pieceId, entry);
     }
   }
@@ -259,15 +275,15 @@ export class SpaceManager {
     entry: Cell<BGPieceEntry>,
     error: string,
   ) {
-    const failureCount = (this.failureTracking.get(pieceId) ?? 0) + 1;
+    const failureCount = (this.#failureTracking.get(pieceId) ?? 0) + 1;
 
     // If we've received graph errors 3 times in a row,
     // disable the piece.
     if (failureCount >= 3) {
-      this.failureTracking.delete(pieceId);
+      this.#failureTracking.delete(pieceId);
       this.#disablePiece(pieceId, entry, error);
     } else {
-      this.failureTracking.set(pieceId, failureCount);
+      this.#failureTracking.set(pieceId, failureCount);
       entry.runtime.editWithRetry((tx) => {
         entry.withTx(tx).update({
           lastRun: Date.now(),
@@ -275,7 +291,7 @@ export class SpaceManager {
         });
       });
 
-      if (this.enabledPieces.has(pieceId)) {
+      if (this.#enabledPieces.has(pieceId)) {
         // Apply a linear backoff for the next attempts
         this.#pushTask(
           pieceId,
@@ -299,28 +315,41 @@ export class SpaceManager {
       });
     });
 
-    this.enabledPieces.delete(pieceId);
-    this.pendingTasks = this.pendingTasks.filter((r) => r.pieceId !== pieceId);
+    this.#enabledPieces.delete(pieceId);
+    this.#pendingTasks = this.#pendingTasks.filter((r) =>
+      r.pieceId !== pieceId
+    );
   }
 
   #disableSpace(reason: string) {
     console.log(`${this.#did} Disabling space: ${reason}`);
-    for (const [pieceId, entry] of this.enabledPieces.entries()) {
+    for (const [pieceId, entry] of this.#enabledPieces.entries()) {
       this.#disablePiece(pieceId, entry, reason);
     }
   }
 
-  // This is fired from `WorkerController` when an terminal error
-  // occurs (e.g. outside of the graph), and may happen at any point
-  // during execution.
-  // Because this can occur from a piece calling `setTimeout(() => throw new Error(""), timeout)`
-  // we cannot determine the offending piece. Because this should not occur frequently,
-  // and happening currently due to older, misbehaving pieces, this should flush out
-  // those misbehaving pieces.
-  //
-  // Attempt to recreate the worker environment, which should only occur once per
-  // space-wide disabling.
-  #onTerminalError = (event: WorkerControllerErrorEvent) => {
+  /**
+   * Handler for the event `WorkerController` fires when a terminal error
+   * occurs (e.g. outside of the graph), which may happen at any point during
+   * execution. Because this can occur from a piece calling
+   * `setTimeout(() => throw new Error(""), timeout)`, we cannot determine the
+   * offending piece. Because this should not occur frequently, this should
+   * flush out misbehaving pieces.
+   *
+   * It attempts to recreate the worker environment, which should only occur
+   * once per space-wide disabling.
+   */
+  #onTerminalError = (event: Event) => {
+    // `addEventListener` types its listener over `Event`; the narrowing
+    // recovers the controller's own event type, and anything else here is a
+    // bug worth hearing about rather than a space left running on a dead
+    // worker.
+    if (!(event instanceof WorkerControllerErrorEvent)) {
+      console.error(
+        `${this.#did} Terminal error listener got a \`${event.type}\` event that is not a \`WorkerControllerErrorEvent\``,
+      );
+      return;
+    }
     console.error(
       `${this.#did} Terminal error received: ${event.error?.message}`,
     );
@@ -328,21 +357,17 @@ export class SpaceManager {
     const reason =
       `TerminalError: All pieces in this space have been disabled: ${event.error?.message}`;
     this.#disableSpace(reason);
-    this.setupWorkerController();
+    this.#setupWorkerController();
   };
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private async setupWorkerController() {
-    const previousWorker = this.workerController;
+  async #setupWorkerController() {
+    const previousWorker = this.#workerController;
     const newWorker = new WorkerController(this.#workerOptions);
     newWorker.addEventListener(
       "error",
       this.#onTerminalError,
     );
-    this.workerController = newWorker;
+    this.#workerController = newWorker;
 
     if (previousWorker) {
       console.log(`${this.#did} Restarting Worker Controller`);
@@ -363,7 +388,7 @@ export class SpaceManager {
       // Disable all pieces in this space and attempt to recreate the worker.
       console.error(`${this.#did} failed to initialize: ${e}`);
       this.#disableSpace(`Failed to initialize worker.`);
-      this.setupWorkerController();
+      this.#setupWorkerController();
     }
   }
 }

@@ -192,10 +192,12 @@ describe("web-worker-console-bridge", () => {
     });
   });
 
-  // NOTE: this describe must stay AFTER the console-bridge one. Initializing the
-  // worker sets the entry module's `worker`/`workerInitialization` for the rest
-  // of the file, and the bridge test asserts pre-initialization behavior.
   describe("web worker request ledger and timing", () => {
+    // NOTE: this describe must stay AFTER the console-bridge one. Initializing
+    // the worker sets the entry module's `worker`/`workerInitialization` for
+    // the rest of the file, and the bridge test asserts pre-initialization
+    // behavior.
+
     const ledgerCount = (key: string) =>
       getLogger("runtime-worker.ipc").countsByKey[key]?.total ?? 0;
     const timingCount = (...keys: string[]) =>
@@ -233,12 +235,12 @@ describe("web-worker-console-bridge", () => {
               return Promise.resolve({ ok: true });
             case RequestType.CellGet:
               return Promise.resolve(undefined);
-            case RequestType.PageGet:
+            case RequestType.PieceGet:
               return Promise.reject(new Error("handler exploded"));
-            case RequestType.PageGetSlug:
+            case RequestType.PieceGetSlug:
               // Intentionally a non-Error rejection: the entry must stringify it.
               return Promise.reject("string-boom");
-            case RequestType.PageStart:
+            case RequestType.PieceStart:
               return Promise.reject(
                 new CompilerStackLoadError(new TypeError("chunk fetch failed")),
               );
@@ -265,7 +267,7 @@ describe("web-worker-console-bridge", () => {
           deliveryInit: timingCount("delivery", RequestType.Initialize),
           deliveryIdle: timingCount("delivery", RequestType.Idle),
           handleIdle: timingCount("handle", RequestType.Idle),
-          handlePageGet: timingCount("handle", RequestType.PageGet),
+          handlePieceGet: timingCount("handle", RequestType.PieceGet),
           respondedInit: ledgerCount(`responded/${RequestType.Initialize}`),
           respondedErrorInit: ledgerCount(
             `responded-error/${RequestType.Initialize}`,
@@ -274,9 +276,9 @@ describe("web-worker-console-bridge", () => {
           respondedErrorIdle: ledgerCount(
             `responded-error/${RequestType.Idle}`,
           ),
-          respondedPageGet: ledgerCount(`responded/${RequestType.PageGet}`),
-          respondedErrorPageGet: ledgerCount(
-            `responded-error/${RequestType.PageGet}`,
+          respondedPieceGet: ledgerCount(`responded/${RequestType.PieceGet}`),
+          respondedErrorPieceGet: ledgerCount(
+            `responded-error/${RequestType.PieceGet}`,
           ),
           respondedSynced: ledgerCount(
             `responded/${RequestType.RuntimeSynced}`,
@@ -340,16 +342,16 @@ describe("web-worker-console-bridge", () => {
         // A throwing handler still records handle/<type> (finally), and the
         // reply is counted as responded-error, never as responded.
         posted.length = 0;
-        await dispatch({ msgId: 104, data: { type: RequestType.PageGet } });
+        await dispatch({ msgId: 104, data: { type: RequestType.PieceGet } });
         expect(posted).toEqual([{ msgId: 104, error: "handler exploded" }]);
-        expect(timingCount("handle", RequestType.PageGet)).toBe(
-          before.handlePageGet + 1,
+        expect(timingCount("handle", RequestType.PieceGet)).toBe(
+          before.handlePieceGet + 1,
         );
-        expect(ledgerCount(`responded/${RequestType.PageGet}`)).toBe(
-          before.respondedPageGet,
+        expect(ledgerCount(`responded/${RequestType.PieceGet}`)).toBe(
+          before.respondedPieceGet,
         );
-        expect(ledgerCount(`responded-error/${RequestType.PageGet}`)).toBe(
-          before.respondedErrorPageGet + 1,
+        expect(ledgerCount(`responded-error/${RequestType.PieceGet}`)).toBe(
+          before.respondedErrorPieceGet + 1,
         );
         expect(
           consoleErrors.some((args) =>
@@ -361,13 +363,16 @@ describe("web-worker-console-bridge", () => {
 
         // A non-Error throw is stringified into the error reply.
         posted.length = 0;
-        await dispatch({ msgId: 105, data: { type: RequestType.PageGetSlug } });
+        await dispatch({
+          msgId: 105,
+          data: { type: RequestType.PieceGetSlug },
+        });
         expect(posted).toEqual([{ msgId: 105, error: "string-boom" }]);
 
         // Compiler chunk load failures carry a lifecycle code so the shell can
         // replace the worker and its poisoned module map.
         posted.length = 0;
-        await dispatch({ msgId: 107, data: { type: RequestType.PageStart } });
+        await dispatch({ msgId: 107, data: { type: RequestType.PieceStart } });
         expect(posted).toEqual([{
           msgId: 107,
           error: "Failed to load the compiler stack",

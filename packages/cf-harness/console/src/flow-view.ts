@@ -51,8 +51,10 @@ export class ConsoleFlowView extends LitElement {
   };
 
   declare flow: ConsoleFlow | undefined;
+
   /** The step the timeline is on, marked here so the two stay in step. */
   declare focusStep: number | undefined;
+
   /** The run that step belongs to, since a child's steps number from zero. */
   declare focusRunId: string | undefined;
 
