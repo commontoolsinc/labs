@@ -2,6 +2,7 @@ import { Identity } from "@commonfabric/identity";
 import { decode } from "@commonfabric/utils/encoding";
 import { dirname } from "@std/path";
 import { cliText } from "./cli-name.ts";
+import { shellQuote } from "./shell-quote.ts";
 
 export async function pkcs8FromPassphrase(
   passphrase: string,
@@ -63,9 +64,9 @@ async function identityFromKeyfile(
         path,
         "does not exist",
         `${POINT_AT} an existing keyfile, or create one there with ` +
-          `\`mkdir -p '${dirname(path)}' && ${
+          `\`mkdir -p ${shellQuote(dirname(path))} && ${
             cliText("cf id new")
-          } > '${path}'\`.`,
+          } > ${shellQuote(path)}\`.`,
       );
     }
     const reason = error instanceof Error ? error.message : String(error);

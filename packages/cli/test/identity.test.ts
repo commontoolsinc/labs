@@ -66,6 +66,21 @@ describe("identity", () => {
       expect(error.message).toContain(`id new > '${path}'\`.`);
     });
 
+    it("quotes the remedy's paths as shell words, an apostrophe included", async () => {
+      // The remedy is a line a person pastes. A path holding a quote character
+      // must still reach `mkdir` and the redirect as one argument each.
+
+      const below = `${dir}/o'brien`;
+      const path = `${below}/identity.key`;
+      const error = await failureOf(loadIdentity(path));
+      expect(error.message).toContain(
+        `\`mkdir -p '${dir}/o'\\''brien' && `,
+      );
+      expect(error.message).toContain(
+        `id new > '${dir}/o'\\''brien/identity.key'\`.`,
+      );
+    });
+
     it("names a path that cannot be read, with the system's reason", async () => {
       // A directory is the deterministic case: it exists, and reading it as
       // a file fails everywhere, unlike a permission bit that root ignores.

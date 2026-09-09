@@ -1516,7 +1516,7 @@ does not strand it.
 
 Several checkouts coexisting is normal — worktrees, and a vendored labs inside
 another repo (a supported, tested layout: see `test/launcher.test.ts`). So the
-symlink above does **not** pin `cf` to the checkout you installed it from. It
+copy above does **not** pin `cf` to the checkout you installed it from. It
 selects, in order:
 
 1. **`$CF_LABS_ROOT`**, when set — the explicit override for when your cwd
