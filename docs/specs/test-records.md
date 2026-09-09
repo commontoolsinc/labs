@@ -159,11 +159,19 @@ empty value is recording off, the same as an unset one.
 A check that no lane can be asked to run is not recorded. A record is one
 execution of one test, and every history built from records — flake rate,
 duration, and what a pull request selects — answers whether to run that
-test again. A check reading the artifacts of every job in its own run
-exists only as part of a whole run, so there is nothing to select and no
-suite in the test topology to claim its identity. The pull request
-coverage gate is the one such check; a gate resolving a merge base
+test again. A check reading what the run around it produced exists only
+as part of that run, so there is nothing to select and no suite in the
+test topology to claim its identity. Two checks are of this shape: the
+pull request coverage gate, which reads the coverage artifacts of every
+job in its own run, and the nightly audit over the CFC property corpus,
+which reads what the step before it wrote. A gate resolving a merge base
 against a base ref is not, and records normally.
+
+A test another workflow already records against the same commit is not
+recorded a second time. One execution of one test is one record, so a
+second workflow running those tests on that commit would give each of
+them two entries in its history. The exemption covers tests rather than
+jobs: a test that runs only in such a job is recorded there.
 
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the
@@ -362,10 +370,9 @@ the default branch. Otherwise the old relay drops the field before writing a
 create-only object that cannot be repaired in place.
 
 The relay workflow follows the completion of every workflow that records
-tests — success, failure, cancellation, and timeout alike. A workflow whose
-tests another workflow already records against the same commit records
-nothing of its own, and the relay does not follow it. It ships a
-same-repository run unconditionally, since only write access creates
+tests — success, failure, cancellation, and timeout alike — and follows
+no workflow that "Recording" above leaves recording nothing. The relay
+ships a same-repository run unconditionally, since only write access creates
 one, and a fork run only when the run's actor — read from the trusted
 payload — is on the team member list (`TEST_RECORDS_MEMBER_ACTOR_IDS`,
 an infra-managed variable of numeric actor ids): team members work from

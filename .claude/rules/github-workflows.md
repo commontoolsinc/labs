@@ -60,21 +60,26 @@ steps wrap their command in `deno task run-recorded <kind> <scope> <name>
 without the ship step runs fine and records nothing — which is how a new
 job silently falls out of the flake and duration history.
 
-A job whose every test another workflow already records against the same
-commit is the exception, and it records nothing: no spool directory, no
-`run-recorded` wrapper, no ship step. Recording there would file each of
+A job or step whose every test another workflow already records against
+the same commit is the exception, and it records nothing: no spool
+directory, no `run-recorded` wrapper, no ship step. Recording there would file each of
 those tests twice against one commit. The Dashboard workflow's tests job
-is the one such job, and the relay does not follow that workflow. The
-exemption covers tests, not jobs, so a test that runs only in such a job
-is recorded there.
+and the CFC Property Suite's test step are the two, and the relay follows
+neither workflow. The exemption covers tests, not jobs, so a test that
+runs only in such a job is recorded there.
 
 A check that no lane can be asked to run is the other exception, and it
 records nothing either: no spool directory, no `run-recorded` wrapper, no
 ship step. `docs/specs/test-records.md` under "Recording" holds the
-criterion. The `Coverage Check` job in `deno.yml` is the one such job,
-because it reads the coverage artifacts of every test job in its own run.
-A gate comparing against a base ref is not this: `check-baselines-append-only`
-and `check-test-aliases` each resolve a merge base, and both record.
+criterion. The `Coverage Check` job in `deno.yml` is one, because it reads
+the coverage artifacts of every test job in its own run; the CFC Property
+Suite's audit step is the other, because it reads the corpus the suite in
+the step before it has just written. A gate comparing against a base ref
+is not this: `check-baselines-append-only` and `check-test-aliases` each
+resolve a merge base, and both record.
+
+Both exceptions land on the CFC Property Suite, one on each of its two
+steps, so that workflow takes no part in test records at all.
 
 ## Before splitting or rebalancing jobs
 
