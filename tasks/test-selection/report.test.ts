@@ -96,7 +96,7 @@ function ranThere(
     ...unknownPullRequest(),
     manifest: true,
     ran: run(entries),
-    flakeRates: new Map(entries.map(([name]) => [key(name), 0])),
+    flakes: new Map(entries.map(([name]) => [key(name), undefined])),
     ...extra,
   };
 }
@@ -115,7 +115,7 @@ function knows(
     ...unknownPullRequest(),
     manifest: true,
     ran: new Map(),
-    flakeRates: new Map(names.map((name) => [key(name), 0])),
+    flakes: new Map(names.map((name) => [key(name), undefined])),
     ...extra,
   };
 }
@@ -185,9 +185,9 @@ describe("report", () => {
     it("separates each reason a run did not reach a test", () => {
       const view = knows(["bakes"], {
         withheld: new Map([[key("kneads"), "flaky" as const]]),
-        flakeRates: new Map([
-          [key("kneads"), 0],
-          [key("bakes"), 0],
+        flakes: new Map([
+          [key("kneads"), undefined],
+          [key("bakes"), undefined],
         ]),
       });
       expect(selectionOf(view, key("kneads"))).toBe("withheld-flaky");
@@ -208,7 +208,7 @@ describe("report", () => {
     // manifest explains is the test skipping itself.
     it("separates a skip the selector chose from one the test chose", () => {
       const chosen = ranThere([["kneads", "skip"]], {
-        flakeRates: new Map([[key("kneads"), 0]]),
+        flakes: new Map([[key("kneads"), undefined]]),
       });
       expect(selectionOf(chosen, key("kneads"))).toBe("not-selected");
       const itself: PullRequestView = {
@@ -216,7 +216,7 @@ describe("report", () => {
         manifest: true,
         ran: run([["kneads", "skip"]]),
         selected: new Set([key("kneads")]),
-        flakeRates: new Map([[key("kneads"), 0]]),
+        flakes: new Map([[key("kneads"), undefined]]),
       };
       expect(selectionOf(itself, key("kneads"))).toBe("skipped-there");
     });
@@ -315,11 +315,11 @@ describe("report", () => {
         previous: run([["kneads", "pass"]]),
         current: run([["kneads", "fail"]]),
         pullRequest: ranThere([["kneads", "pass"]], {
-          flakeRates: new Map([[key("kneads"), 0.04]]),
+          flakes: new Map([[key("kneads"), { flakes: 4, runs: 100 }]]),
         }),
       }));
       expect(failures[0]?.selection).toBe("passed-there");
-      expect(failures[0]?.flakeRate).toBe(0.04);
+      expect(failures[0]?.flakes).toEqual({ flakes: 4, runs: 100 });
     });
   });
 
@@ -656,7 +656,7 @@ describe("report", () => {
         current: run([["kneads the dougk", "pass"], ["proves", "pass"]]),
         pullRequest: {
           ...withCatches("kneads the dough", 4, "proves"),
-          flakeRates: new Map([[key("kneads the dougk"), 0]]),
+          flakes: new Map([[key("kneads the dougk"), undefined]]),
         },
       }))).toEqual([]);
     });
@@ -838,9 +838,9 @@ describe("report", () => {
         ]),
         pullRequest: knows(["proves", "bakes"], {
           catches: new Map([[key("kneads the dough"), 6]]),
-          flakeRates: new Map([
-            [key("proves"), 0.05],
-            [key("bakes"), 0],
+          flakes: new Map([
+            [key("proves"), { flakes: 5, runs: 80 }],
+            [key("bakes"), undefined],
           ]),
           units: inOneUnit("kneads the dough", "proves", "bakes"),
         }),
@@ -926,13 +926,45 @@ describe("report", () => {
           previous: run([["proves", "pass"]]),
           current: run([["proves", "fail"]]),
           pullRequest: ranThere([["proves", "pass"]], {
-            flakeRates: new Map([[key("proves"), 0.07]]),
+            flakes: new Map([[key("proves"), { flakes: 7, runs: 900 }]]),
           }),
         })),
         context,
       )!;
-      expect(body).toContain("7.0% of the time");
+      // The counts rather than the share, so a reader can weigh them:
+      // seven in nine hundred is not the claim seven in nine is.
+      expect(body).toContain("disagree with itself 7 times in 900 runs");
       expect(body).toContain("may be its own and not the change's");
+    });
+
+    it("counts one disagreement in words rather than as a figure", () => {
+      const body = renderReport(
+        buildReport(input({
+          previous: run([["proves", "pass"]]),
+          current: run([["proves", "fail"]]),
+          pullRequest: ranThere([["proves", "pass"]], {
+            flakes: new Map([[key("proves"), { flakes: 1, runs: 40 }]]),
+          }),
+        })),
+        context,
+      )!;
+      expect(body).toContain("disagree with itself once in 40 runs");
+    });
+
+    it("says nothing of a test the store has never seen disagree", () => {
+      // A hedge on no evidence tells somebody a real failure may be
+      // noise, which is the thing the label exists to avoid saying.
+      const body = renderReport(
+        buildReport(input({
+          previous: run([["proves", "pass"]]),
+          current: run([["proves", "fail"]]),
+          pullRequest: ranThere([["proves", "pass"]], {
+            flakes: new Map([[key("proves"), { flakes: 0, runs: 900 }]]),
+          }),
+        })),
+        context,
+      )!;
+      expect(body).not.toContain("may be its own and not the change's");
     });
 
     it("says a withheld test could not have run rather than was not run", () => {

@@ -9,6 +9,7 @@ import {
   daysBetween,
   emptyContext,
   emptyState,
+  flakeCounts,
   flakeRate,
   foldObservations,
   type Observation,
@@ -26,6 +27,7 @@ import {
 import {
   CATCH_BREADTH_WINDOW_DAYS,
   FLAKE_COMMIT_REACH,
+  FLAKE_EXCLUSION_RATE,
   SAME_COMMIT_REACH_DAYS,
   VALUE_FLOOR,
 } from "./policy.ts";
@@ -290,7 +292,15 @@ describe("score", () => {
         saw("fail", { commit: "c1", place: "pr", source: "branch" }),
       ]);
       expect(state.prCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-20")).toBe(1);
+      expect(state.flakesByDay["2026-08-20"]).toBe(1);
+      // Two runs, one of them a disagreement. Nothing is charged
+      // against that, so it reads as the half it is and the test is too
+      // noisy to judge a change by until it has run enough to say
+      // otherwise.
+      expect(flakeRate(state, "2026-08-20")).toBe(0.5);
+      expect(flakeRate(state, "2026-08-20")).toBeGreaterThan(
+        FLAKE_EXCLUSION_RATE,
+      );
     });
 
     it("reads a failure across many branches as the environment", () => {
@@ -370,7 +380,10 @@ describe("score", () => {
         }),
       ]);
       expect(state.mainCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-21")).toBe(1);
+      expect(state.flakesByDay["2026-08-20"]).toBe(1);
+      expect(flakeRate(state, "2026-08-21")).toBeGreaterThan(
+        FLAKE_EXCLUSION_RATE,
+      );
     });
   });
 
@@ -626,18 +639,126 @@ describe("sealDay()", () => {
   });
 });
 
-describe("flakeRate()", () => {
-  it("counts only failures inside the window", () => {
+describe("flakeCounts()", () => {
+  it("reports both halves of the share, so a reader can weigh it", () => {
     const state = emptyState();
-    state.failuresByDay["2026-08-20"] = 2;
-    state.flakesByDay["2026-08-20"] = 1;
-    // Far enough back that the window cannot reach it, so neither its
-    // failures nor its flakes are in the share.
-    state.failuresByDay["2020-01-01"] = 50;
-    expect(flakeRate(state, "2026-08-20")).toBe(0.5);
+    state.runsByDay["2026-08-20"] = 200;
+    state.flakesByDay["2026-08-20"] = 10;
+    expect(flakeCounts(state, "2026-08-20")).toEqual({ flakes: 10, runs: 200 });
+  });
+});
+
+describe("flakeRate()", () => {
+  it("counts flakes against the runs they happened among", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 200;
+    state.flakesByDay["2026-08-20"] = 10;
+    expect(flakeRate(state, "2026-08-20")).toBe(10 / 200);
   });
 
-  it("is zero for a test that has never failed", () => {
+  it("keeps a flake whose pass has aged out of the window", () => {
+    // A disagreement is a pass and a failure at one commit, and the two
+    // can be days apart. Where the pass falls outside the window and the
+    // failure inside it, the window holds a disagreement with no pass
+    // beside it, and the share reads at its ceiling until the test runs
+    // again.
+    const state = stateFrom([
+      saw("pass", { day: "2026-06-20", commit: "c1", place: "pr" }),
+      saw("fail", { day: "2026-06-22", commit: "c1", place: "pr" }),
+    ]);
+    expect(flakeCounts(state, "2026-06-22")).toEqual({ flakes: 1, runs: 2 });
+    trimWindows(state, "2026-08-20");
+    expect(flakeCounts(state, "2026-08-20")).toEqual({ flakes: 1, runs: 1 });
+    expect(flakeRate(state, "2026-08-20")).toBe(1);
+  });
+
+  it("counts a disagreement for less as the test settles after it", () => {
+    // The same counts on both, and not the same test. One disagreed and
+    // has passed since; the other passed and has just disagreed. A share
+    // that summed the window flat would call them equally flaky.
+    const today = "2026-08-20";
+    const settled = emptyState();
+    settled.runsByDay["2026-07-23"] = 2;
+    settled.flakesByDay["2026-07-23"] = 2;
+    settled.runsByDay[today] = 200;
+
+    const started = emptyState();
+    started.runsByDay["2026-07-23"] = 200;
+    started.runsByDay[today] = 2;
+    started.flakesByDay[today] = 2;
+
+    expect(flakeCounts(settled, today)).toEqual(flakeCounts(started, today));
+    expect(flakeRate(settled, today)).toBeLessThan(flakeRate(started, today));
+  });
+
+  it("holds a test out until it has settled for long enough", () => {
+    // Forty disagreements among a hundred runs in one day. It goes on
+    // running on the default branch and never disagrees again, and what
+    // brings it back is those runs together with the age of what it did.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 100;
+    state.flakesByDay["2026-08-20"] = 40;
+    expect(flakeRate(state, "2026-08-20")).toBeGreaterThan(
+      FLAKE_EXCLUSION_RATE,
+    );
+    for (let day = 21; day <= 23; day++) {
+      state.runsByDay[`2026-08-${day}`] = 100;
+    }
+    expect(flakeRate(state, "2026-08-23")).toBeGreaterThan(
+      FLAKE_EXCLUSION_RATE,
+    );
+    for (let day = 24; day <= 30; day++) {
+      state.runsByDay[`2026-08-${day}`] = 100;
+    }
+    expect(flakeRate(state, "2026-08-30")).toBeLessThan(FLAKE_EXCLUSION_RATE);
+  });
+
+  it("tells two tests apart that fail only ever as flakes", () => {
+    // Every failure either of these has is a flake, so a share of their
+    // failures reads them both as wholly unreliable. What separates them
+    // is how much of the time they pass.
+    const noisy = emptyState();
+    noisy.runsByDay["2026-08-20"] = 20;
+    noisy.failuresByDay["2026-08-20"] = 10;
+    noisy.flakesByDay["2026-08-20"] = 10;
+    const reliable = emptyState();
+    reliable.runsByDay["2026-08-20"] = 10000;
+    reliable.failuresByDay["2026-08-20"] = 1;
+    reliable.flakesByDay["2026-08-20"] = 1;
+    expect(flakeRate(noisy, "2026-08-20")).toBeGreaterThan(
+      FLAKE_EXCLUSION_RATE,
+    );
+    expect(flakeRate(reliable, "2026-08-20")).toBeLessThan(
+      FLAKE_EXCLUSION_RATE,
+    );
+  });
+
+  it("falls as the test goes on passing", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 4;
+    state.flakesByDay["2026-08-20"] = 2;
+    const held = flakeRate(state, "2026-08-20");
+    expect(held).toBeGreaterThan(FLAKE_EXCLUSION_RATE);
+    state.runsByDay["2026-08-21"] = 400;
+    expect(flakeRate(state, "2026-08-21")).toBeLessThan(FLAKE_EXCLUSION_RATE);
+  });
+
+  it("counts only the days inside the window", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 20;
+    state.flakesByDay["2026-08-20"] = 1;
+    // Far enough back that the window cannot reach it, so neither its
+    // runs nor its flakes are in the share.
+    state.runsByDay["2020-01-01"] = 10000;
+    state.flakesByDay["2020-01-01"] = 500;
+    expect(flakeRate(state, "2026-08-20")).toBe(1 / 20);
+  });
+
+  it("is zero for a test that has never flaked", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 50;
+    state.failuresByDay["2026-08-20"] = 5;
+    expect(flakeRate(state, "2026-08-20")).toBe(0);
     expect(flakeRate(emptyState(), "2026-08-20")).toBe(0);
   });
 });

@@ -19,13 +19,15 @@
  * named. Nothing is counted per author, per team, or per anything, and
  * no history is kept anywhere. A test the selector declined to run is
  * described as coverage this design traded away, because the author did
- * not miss it. A test the store knows disagrees with itself is labelled
- * as one. And every note says what to do, in a comment that is edited in
- * place rather than repeated.
+ * not miss it. A test the store has seen disagreeing with itself is
+ * labelled as one, with the evidence behind the label. And every note
+ * says what to do, in a comment that is edited in place rather than
+ * repeated.
  */
 
 import {
   ALIAS_FILE,
+  type FlakeEvidence,
   type TestIdentity,
   testIdentityKey,
   testIdentityOfKey,
@@ -39,6 +41,7 @@ import type { WithheldReason } from "./manifest.ts";
 import {
   COVERAGE_COMMENT_LINES,
   EXCLUDED_FROM_COVERAGE_GATE,
+  FLAKE_WINDOW_DAYS,
   LOCAL_COVERAGE_MAX_PACKAGES,
   RENAME_MARGIN,
   RENAME_SIMILARITY,
@@ -116,11 +119,13 @@ export interface PullRequestView {
   withheld: ReadonlyMap<string, WithheldReason>;
 
   /**
-   * How often the store says each identity disagrees with itself. Every
-   * identity the manifest holds is in here, so membership is also the
-   * answer to whether the store has ever seen a test.
+   * How often the store saw each identity disagree with itself, and over
+   * how many runs. Every identity the manifest holds is a key here, so
+   * membership is also the answer to whether the store has ever seen a
+   * test; the value is absent for a manifest written before the counts
+   * were published.
    */
-  flakeRates: ReadonlyMap<string, number>;
+  flakes: ReadonlyMap<string, FlakeEvidence | undefined>;
 
   /** The weighted catches behind each identity the store knows. */
   catches: ReadonlyMap<string, number>;
@@ -141,7 +146,7 @@ export function unknownPullRequest(): PullRequestView {
     manifest: false,
     selected: new Set(),
     withheld: new Map(),
-    flakeRates: new Map(),
+    flakes: new Map(),
     catches: new Map(),
     units: new Map(),
   };
@@ -171,8 +176,12 @@ export interface FirstFailure {
   test: TestIdentity;
   selection: ReportedSelection;
 
-  /** Present when the store knows how often the test disagrees with itself. */
-  flakeRate?: number;
+  /**
+   * Present when the store has seen the test disagree with itself, with
+   * the runs it saw that among. A reader weighs the two: one in five is
+   * not the claim one in five thousand is.
+   */
+  flakes?: FlakeEvidence;
 }
 
 /** A rise in the repository's whole uncovered-line count. */
@@ -304,7 +313,7 @@ export function selectionOf(
   // With a manifest, the packing says whether the test was to have run:
   // an identity the packing reached, and one the store has never seen,
   // are both identities that run.
-  if (view.manifest && view.flakeRates.has(key) && !view.selected.has(key)) {
+  if (view.manifest && view.flakes.has(key) && !view.selected.has(key)) {
     return "not-selected";
   }
   if (there === "skip") return "skipped-there";
@@ -337,11 +346,11 @@ export function firstFailures(input: ReportInput): FirstFailure[] {
     if (input.previous.get(key) !== "pass") continue;
     const selection = selectionOf(input.pullRequest, key);
     if (selection === "failed-there") continue;
-    const flakeRate = input.pullRequest.flakeRates.get(key);
+    const flakes = input.pullRequest.flakes.get(key);
     failures.push({
       test: identityOf(key),
       selection,
-      ...(flakeRate === undefined ? {} : { flakeRate }),
+      ...(flakes === undefined || flakes.flakes === 0 ? {} : { flakes }),
     });
   }
   return failures.sort(byIdentity);
@@ -498,7 +507,7 @@ export function flakyNewTests(input: ReportInput): FlakyNewTest[] {
   for (const [key, verdict] of input.current) {
     if (verdict !== "mixed") continue;
     if (input.previous.has(key)) continue;
-    if (input.pullRequest.flakeRates.has(key)) continue;
+    if (input.pullRequest.flakes.has(key)) continue;
     flaky.push({ test: identityOf(key) });
   }
   return flaky.sort(byIdentity);
@@ -583,7 +592,7 @@ export function renames(input: ReportInput): RenameSuggestion[] {
     ranHere.has(input.pullRequest.units.get(key) ?? "")
   );
   const arrived = [...input.current.keys()].filter((key) =>
-    !input.previous.has(key) && !input.pullRequest.flakeRates.has(key)
+    !input.previous.has(key) && !input.pullRequest.flakes.has(key)
   );
   const suggestions: RenameSuggestion[] = [];
   for (const key of gone) {
@@ -769,12 +778,13 @@ export function renderReport(
       out.push("");
       out.push(`- ${shownIdentity(failure.test)}`);
       out.push(`  ${SELECTION_PROSE[failure.selection]}`);
-      if (failure.flakeRate !== undefined && failure.flakeRate > 0) {
+      if (failure.flakes !== undefined) {
+        const { flakes, runs } = failure.flakes;
         out.push(
-          `  The store has it disagreeing with itself ${
-            (failure.flakeRate * 100).toFixed(1)
-          }% of the time, so this failure may be its own and not the ` +
-            "change's.",
+          `  The store has seen this test disagree with itself ${
+            flakes === 1 ? "once" : `${flakes} times`
+          } in ${runs} runs over the last ${FLAKE_WINDOW_DAYS} days, so ` +
+            "this failure may be its own and not the change's.",
         );
       }
     }

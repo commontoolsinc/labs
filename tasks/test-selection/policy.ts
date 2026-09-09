@@ -112,7 +112,14 @@ export const CHURN_HALF_LIFE_DAYS = 14;
 /** Days of decayed failure counts the churn term reads. */
 export const CHURN_WINDOW_DAYS = 60;
 
-/** Days of history the flake rate is measured over. */
+/**
+ * Runs after a disagreement over which its weight halves. Runs rather
+ * than days, because what shows a test has settled is running without
+ * disagreeing; a test that has not run has shown nothing.
+ */
+export const FLAKE_HALF_LIFE_RUNS = 200;
+
+/** Days of flake counts the flake rate reads at all. */
 export const FLAKE_WINDOW_DAYS = 60;
 
 /** Days of durations an item's cost estimate reads. */
@@ -128,18 +135,28 @@ export const FILL_DENSITY_SHARE = 0.25;
 export const FILL_EXPLORATION_SHARE = 0.15;
 
 /** The flake rate above which an item leaves the selectable set. */
-export const FLAKE_EXCLUSION_RATE = 0.05;
+export const FLAKE_EXCLUSION_RATE = 0.005;
 
 /**
- * The flake rates at which an item is run twice and three times. Below
- * the first it runs once. Every band has to stay under
- * `FLAKE_EXCLUSION_RATE`, or an item reaches the exclusion before it
- * reaches the band and the band never fires.
+ * What an item that has ever disagreed with itself runs, however rarely
+ * it does. One execution cannot tell a pass from a lucky pass, so an
+ * item with any flake rate at all is run at least twice.
  */
-export const FLAKE_REPEAT_RATES: readonly number[] = [0.01, 0.03];
+export const FLAKE_MIN_EXECUTIONS = 2;
+
+/**
+ * The flake rate the execution count is anchored at, with
+ * `FLAKE_ANCHOR_EXECUTIONS`. Between that point and
+ * `FLAKE_MIN_EXECUTIONS` at a rate of nothing, and beyond it, the count
+ * is the line through the two.
+ */
+export const FLAKE_ANCHOR_RATE = 0.01;
+
+/** What an item at `FLAKE_ANCHOR_RATE` runs. */
+export const FLAKE_ANCHOR_EXECUTIONS = 5;
 
 /** The most times one item is run inside a lane. */
-export const MAX_REPEATS = 3;
+export const MAX_EXECUTIONS = 10;
 
 /** The suite flake rate above which a suite's new items are repeated. */
 export const SUITE_FLAKE_PRIOR_RATE = 0.02;
@@ -529,13 +546,25 @@ export const DIALS: readonly Dial[] = [
       "rather than a policy one.",
   },
   {
+    name: "FLAKE_HALF_LIFE_RUNS",
+    value: FLAKE_HALF_LIFE_RUNS,
+    unit: "runs",
+    setBy: "chosen",
+    why: "How many runs without disagreeing halve what a disagreement counts " +
+      "for. It is also how much evidence the share is measured over, so far " +
+      "below one over `FLAKE_EXCLUSION_RATE` the share swings about on too " +
+      "little: up when it does; down when a test that has plainly settled " +
+      "is still judged by what it did.",
+  },
+  {
     name: "FLAKE_WINDOW_DAYS",
     value: FLAKE_WINDOW_DAYS,
     unit: "days",
     setBy: "chosen",
-    why:
-      "Up when a flake rate swings about on too little evidence; down when a " +
-      "test that has since been fixed stays excluded.",
+    why: "How far back the counts are read at all. The weight decays by " +
+      "runs rather than by days, so this bounds what is remembered rather " +
+      "than marking where the weight has faded: a test that runs rarely can " +
+      "still be carrying weight when its days fall off the end.",
   },
   {
     name: "COST_WINDOW_DAYS",
@@ -582,24 +611,40 @@ export const DIALS: readonly Dial[] = [
       "flakes are still blocking people.",
   },
   {
-    name: "FLAKE_REPEAT_RATES",
-    value: FLAKE_REPEAT_RATES,
-    unit: "share of runs",
+    name: "FLAKE_MIN_EXECUTIONS",
+    value: FLAKE_MIN_EXECUTIONS,
+    unit: "runs of one item",
     setBy: "chosen",
-    why: "Up when repeats cost more lane time than the intermittent failures " +
-      "they catch are worth; down when intermittent failures are still " +
-      "slipping through. Every band stays under `FLAKE_EXCLUSION_RATE`, or " +
-      "an item is excluded before it reaches the band and the band never " +
-      "fires.",
+    why: "What an item that has ever disagreed runs. Down to one when the " +
+      "cheapest evidence of intermittency is not worth a second execution; " +
+      "nowhere useful above two, since the line through the anchor covers " +
+      "everything flakier.",
   },
   {
-    name: "MAX_REPEATS",
-    value: MAX_REPEATS,
+    name: "FLAKE_ANCHOR_RATE",
+    value: FLAKE_ANCHOR_RATE,
+    unit: "share of runs",
+    setBy: "chosen",
+    why: "With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes " +
+      "through. Down to make the count climb faster with the rate; up to " +
+      "make it climb slower.",
+  },
+  {
+    name: "FLAKE_ANCHOR_EXECUTIONS",
+    value: FLAKE_ANCHOR_EXECUTIONS,
+    unit: "runs of one item",
+    setBy: "chosen",
+    why: "What an item at `FLAKE_ANCHOR_RATE` runs. Up when intermittent " +
+      "regressions still get through; down when executions crowd a lane.",
+  },
+  {
+    name: "MAX_EXECUTIONS",
+    value: MAX_EXECUTIONS,
     unit: "runs of one item",
     setBy: "chosen",
     why:
-      "Up when intermittent regressions still get through; down when repeats " +
-      "are crowding a lane.",
+      "Where the line stops. Up when the flakiest items a change forces in " +
+      "still are not proven by what runs; down when they crowd a lane.",
   },
   {
     name: "SUITE_FLAKE_PRIOR_RATE",

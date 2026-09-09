@@ -588,7 +588,9 @@ export function describePlan(
         : `, ${unmeasured} of ${entries} costs unmeasured`),
   );
   lines.push("");
-  lines.push("| Suite | Units | Tests | Their own time | Repeats | Chosen |");
+  lines.push(
+    "| Suite | Units | Tests | Their own time | Executions | Chosen |",
+  );
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const batch of batches) {
     const share = chosenFor(batch.suite.id, chosen.selections);

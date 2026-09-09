@@ -11,6 +11,7 @@
  */
 
 import type {
+  FlakeEvidence,
   ScoreInputs,
   TestIdentity,
 } from "@commonfabric/test-support/records";
@@ -26,6 +27,7 @@ import {
   COST_WINDOW_DAYS,
   ENVIRONMENTAL_MIN_SOURCES,
   FLAKE_COMMIT_REACH,
+  FLAKE_HALF_LIFE_RUNS,
   FLAKE_WINDOW_DAYS,
   FRESHNESS_FLOOR,
   FRESHNESS_HALF_LIFE_DAYS,
@@ -89,10 +91,10 @@ export interface IdentityState {
   /** Failures per day, the numerator of the churn term. */
   failuresByDay: Record<string, number>;
 
-  /** Runs per day, its denominator. */
+  /** Runs per day, the denominator of that term and of the flake rate. */
   runsByDay: Record<string, number>;
 
-  /** Flake observations per day, against the failures of the same day. */
+  /** Flake observations per day, the numerator of the flake rate. */
   flakesByDay: Record<string, number>;
 
   /**
@@ -718,43 +720,140 @@ export function trimWindows(state: IdentityState, today: string): void {
       if (daysBetween(day, today) > windowDays) delete counts[day];
     }
   };
-  drop(state.runsByDay, CHURN_WINDOW_DAYS);
+  // The run counts answer three questions with two windows: the churn
+  // term's denominator, the flake rate's, and how recently `lastRun` saw
+  // the test. They are kept for the longer of the two windows, and each
+  // reader reads back only as far as its own.
+  drop(state.runsByDay, Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS));
   drop(state.failuresByDay, CHURN_WINDOW_DAYS);
   drop(state.flakesByDay, FLAKE_WINDOW_DAYS);
   drop(state.costByDay, COST_WINDOW_DAYS);
 }
 
 /**
- * The churn term: recent failures over recent runs, with each day's
- * counts halved every `CHURN_HALF_LIFE_DAYS` as they age. Decayed rather
- * than cut off at a window's edge, because a ratio over a long window
- * measures total historical brokenness rather than the current rate. A
- * week of failures eight months ago would otherwise outrank a test that
- * is failing right now.
+ * A share of a test's runs over the days inside `windowDays`, each day's
+ * counts weighed by `weigh` against how old the day is and how many runs
+ * have followed it.
+ *
+ * Decayed rather than summed flat, because a sum cannot tell two
+ * histories apart that a reader would never confuse. A test that
+ * disagreed twice and then passed two hundred times has settled; one
+ * that passed two hundred times and then disagreed twice has just
+ * started. The same counts, and not the same test.
+ *
+ * Read over a window as well, so what is measured stays bounded. Past
+ * four half-lives a day is worth under one part in sixteen, which makes
+ * the window a performance choice rather than a policy one.
  */
-export function churn(state: IdentityState, today: string): number {
-  let failures = 0;
+function decayedShare(
+  counted: Record<string, number>,
+  state: IdentityState,
+  today: string,
+  windowDays: number,
+  weigh: (ageDays: number, runsSince: number) => number,
+): number {
+  // Newest day first, so the runs a day has been followed by are known
+  // by the time that day is weighed. A day's own runs are weighed
+  // together, as though all of them happened at the end of it, which is
+  // as fine a grain as counters kept per day can answer at.
+  const days = Object.keys(state.runsByDay).sort().reverse();
+  let runsSince = 0;
+  let top = 0;
   let runs = 0;
-  for (const [day, count] of Object.entries(state.runsByDay)) {
+  for (const day of days) {
     const age = daysBetween(day, today);
-    if (age > CHURN_WINDOW_DAYS) continue;
-    const weight = 0.5 ** (age / CHURN_HALF_LIFE_DAYS);
+    if (age > windowDays) continue;
+    const count = state.runsByDay[day] ?? 0;
+    const weight = weigh(age, runsSince);
     runs += count * weight;
-    failures += (state.failuresByDay[day] ?? 0) * weight;
+    top += (counted[day] ?? 0) * weight;
+    runsSince += count;
   }
-  return runs === 0 ? 0 : failures / runs;
+  return runs === 0 ? 0 : top / runs;
 }
 
-/** The share of a test's failures that were flake observations. */
+/**
+ * The churn term: recent failures over recent runs. A ratio over a long
+ * undecayed window measures total historical brokenness rather than the
+ * current rate, and a week of failures eight months ago would otherwise
+ * outrank a test that is failing right now.
+ */
+export function churn(state: IdentityState, today: string): number {
+  return decayedShare(
+    state.failuresByDay,
+    state,
+    today,
+    CHURN_WINDOW_DAYS,
+    (age) => 0.5 ** (age / CHURN_HALF_LIFE_DAYS),
+  );
+}
+
+/**
+ * The share of a test's runs it was seen disagreeing with itself over.
+ *
+ * Runs rather than failures in the denominator, because what the rate
+ * decides is whether running this test once fails somebody's change for
+ * something its author cannot act on, and that is a chance per run. The
+ * two differ by everything a test's passes say: a test that failed once
+ * in ten thousand runs, and passed on the rerun, has every one of its
+ * failures a flake, and a share of failures would read it as wholly
+ * unreliable. Counting runs is also what lets an exclusion reverse, since
+ * a run that does not disagree lowers the share.
+ *
+ * A disagreement's weight halves every `FLAKE_HALF_LIFE_RUNS` runs that
+ * follow it, so a test that has settled since is not judged as though it
+ * had just started. Runs rather than days, because what shows a test has
+ * settled is running without disagreeing. A test that has not run has
+ * shown nothing, and time alone should not clear it.
+ *
+ * A lower bound on how often the test fails on its own, because the only
+ * spurious failure this can count is one with a pass beside it at the
+ * same commit. What raises the bound is repeats, which put several
+ * executions at one commit, and which a rising share is what buys.
+ *
+ * Nothing is charged against the count, and no belief about how tests
+ * usually behave survives into it. A disagreement is not a sample from
+ * an unknown rate the way a failure is; it is a proof, since a test that
+ * is deterministic cannot pass and fail at one commit. Shrinking the
+ * share toward zero would be shrinking it toward what the observation
+ * has already ruled out. So a test seen twice that disagreed once reads
+ * a half, and one that disagreed once in ten thousand runs reads a
+ * ten-thousandth: what separates them is how much each has been run, not
+ * how much either is believed.
+ */
 export function flakeRate(state: IdentityState, today: string): number {
-  let failures = 0;
+  return decayedShare(
+    state.flakesByDay,
+    state,
+    today,
+    FLAKE_WINDOW_DAYS,
+    (_age, runsSince) => 0.5 ** (runsSince / FLAKE_HALF_LIFE_RUNS),
+  );
+}
+
+/**
+ * What a person is shown beside the share: the disagreements inside the
+ * flake window and the runs they were seen among, counted flat. A share
+ * cannot be weighed without them, and they are not what the share
+ * divides — the share weights recent days more heavily, so a test with
+ * these counts reads higher when the disagreements are the recent part
+ * of them.
+ */
+export function flakeCounts(
+  state: IdentityState,
+  today: string,
+): FlakeEvidence {
   let flakes = 0;
-  for (const [day, count] of Object.entries(state.failuresByDay)) {
+  for (const [day, count] of Object.entries(state.flakesByDay)) {
     if (daysBetween(day, today) > FLAKE_WINDOW_DAYS) continue;
-    failures += count;
-    flakes += state.flakesByDay[day] ?? 0;
+    flakes += count;
   }
-  return failures === 0 ? 0 : flakes / failures;
+  let runs = 0;
+  for (const [day, count] of Object.entries(state.runsByDay)) {
+    if (daysBetween(day, today) > FLAKE_WINDOW_DAYS) continue;
+    runs += count;
+  }
+  return { flakes, runs };
 }
 
 /**
@@ -773,7 +872,7 @@ export function costSeconds(state: IdentityState, today: string): number {
   return worst / 1000;
 }
 
-export type { ScoreInputs };
+export type { FlakeEvidence, ScoreInputs };
 
 /** The score's inputs for one identity, as of a given day. */
 export function scoreInputs(

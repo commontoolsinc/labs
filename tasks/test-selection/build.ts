@@ -25,6 +25,7 @@ import {
   emptyContext,
   emptySamples,
   emptyState,
+  flakeCounts,
   flakeRate,
   type FoldContext,
   foldObservations,
@@ -55,10 +56,12 @@ import {
 import { ObservationSpool } from "./observation-spool.ts";
 import {
   COST_WINDOW_DAYS,
+  FLAKE_ANCHOR_EXECUTIONS,
+  FLAKE_ANCHOR_RATE,
   FLAKE_EXCLUSION_RATE,
-  FLAKE_REPEAT_RATES,
+  FLAKE_MIN_EXECUTIONS,
   LANE_PROLOGUE_SECONDS,
-  MAX_REPEATS,
+  MAX_EXECUTIONS,
 } from "./policy.ts";
 
 /** The publisher's rolling aggregate, as one stored object. */
@@ -446,14 +449,28 @@ export function locateSurfaces(
   return { placed, unplaced };
 }
 
-/** How many times a lane runs an identity, given how flaky it is. */
-export function repeatsFor(rate: number): number {
-  if (rate > FLAKE_EXCLUSION_RATE) return 1;
-  let repeats = 1;
-  for (const band of FLAKE_REPEAT_RATES) {
-    if (rate > band) repeats++;
-  }
-  return Math.min(repeats, MAX_REPEATS);
+/**
+ * How many times a lane runs an identity, given how flaky it is.
+ *
+ * A test that has never disagreed with itself runs once. Any rate at all
+ * puts it on the line through `FLAKE_MIN_EXECUTIONS` at a rate of
+ * nothing and `FLAKE_ANCHOR_EXECUTIONS` at `FLAKE_ANCHOR_RATE`, which
+ * carries on past that anchor until `MAX_EXECUTIONS` stops it.
+ *
+ * The line runs past `FLAKE_EXCLUSION_RATE` on purpose. A test that
+ * flaky is not selected, so the only way it reaches a lane is a change
+ * that edits it or that its suite maps onto its unit — which is very
+ * likely a fix, and the count is what makes it prove itself.
+ */
+export function executionsFor(rate: number): number {
+  if (rate <= 0) return 1;
+  const line = FLAKE_MIN_EXECUTIONS +
+    (FLAKE_ANCHOR_EXECUTIONS - FLAKE_MIN_EXECUTIONS) *
+      (rate / FLAKE_ANCHOR_RATE);
+  return Math.min(
+    MAX_EXECUTIONS,
+    Math.max(FLAKE_MIN_EXECUTIONS, Math.round(line)),
+  );
 }
 
 /** What a manifest is built from beyond the folded state. */
@@ -503,7 +520,11 @@ export function buildManifest(input: BuildInput): Manifest {
     if (test === undefined) continue;
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
-    const rate = flakeRate(state, input.today);
+    const evidence = flakeCounts(state, input.today);
+    // Rounded before anything reads it, so the figure the manifest
+    // carries is the figure every decision here was taken on, and a
+    // consumer applying the same threshold reaches the same answer.
+    const rate = round(flakeRate(state, input.today), 4);
     // Rounded because the digits past these are noise, and because a
     // manifest carries one entry per identity: at twenty thousand of them
     // the difference between a rounded float and a full one is megabytes.
@@ -517,8 +538,9 @@ export function buildManifest(input: BuildInput): Manifest {
       cost: round(costSeconds(state, input.today), 3),
       score: round(value(inputs, input.today), 4),
       inputs,
-      flakeRate: round(rate, 4),
-      repeats: repeatsFor(rate),
+      flakeRate: rate,
+      flakeEvidence: evidence,
+      repeats: executionsFor(rate),
       ...(ran === undefined ? {} : { lastRun: ran }),
     });
     if (rate > FLAKE_EXCLUSION_RATE) {
