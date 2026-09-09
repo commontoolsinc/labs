@@ -51,7 +51,7 @@ here is what it does to a verb's author:
 | Mark a verb `@deprecated` | allowed, and it disappears from listings |
 | Turn a verb into data, or data into a verb | refused |
 | Add an optional field to a verb's input | allowed |
-| Add a required field to a verb's input | refused, unless the field carries a default |
+| Add a required field to a verb's input | refused, unless the field carries a valid default |
 | Make a field of a verb's input optional | allowed |
 | Remove or retype a field of a verb's input | refused |
 | Change anything about a verb's **output** | allowed, and nothing checks it |
@@ -72,8 +72,9 @@ the change does.
 **Required-ness of a verb's input is settled** ([#5663]). It reads as the
 argument side's rule, stated in the result comparison's direction, because a
 verb's event is an argument in every respect but where it is declared. Adding
-a newly required field is refused unless the field carries a default, which
-materializes for every call that omits it. The default may be one the field
+a newly required field is refused unless the field carries a valid default,
+which fills a missing field in a present event object. An entirely absent
+event payload stays absent. The default may be one the field
 already carried or one the candidate introduces, and a default that changes
 value is accepted as it is of an argument: a stream marker is cell metadata,
 and cell metadata is default-stable ([#7166]) — it does not constrain the

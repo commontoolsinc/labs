@@ -3387,12 +3387,9 @@ describe("verb event required-field transitions", () => {
   });
 
   it("accepts an event field that becomes required with a newly added default", () => {
-    // The rescue is any default the candidate carries, not only one the
-    // field carried before. A stream marker is cell metadata, and cell
-    // metadata is default-stable (#7166): it says how the value arrives, not
-    // what shape it has, so it withdraws no permission to introduce a
-    // default beneath it. The default materializes for every call that
-    // omits the field, which is what makes the new requirement safe.
+    // A stream marker permits default insertion. Dispatch fills a present
+    // event object's missing fields from valid defaults, so a new requirement
+    // with a default remains compatible with callers that omit the field.
     const before: JSONSchema = {
       type: "object",
       properties: { label: { type: "string" }, color: { type: "string" } },

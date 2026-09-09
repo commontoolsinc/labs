@@ -34,7 +34,7 @@ describe("default-empty-record-schema", () => {
           alias: state.alias,
         }));
         `,
-        { types: COMMONFABRIC_TYPES },
+        { types: COMMONFABRIC_TYPES, typeCheck: true },
       );
       const { input } = patternSchemas(parseModule(output));
       const schemas = input.properties as Record<
@@ -57,15 +57,14 @@ describe("default-empty-record-schema", () => {
   }
 
   it("omits the default for never-valued types that are not empty records", async () => {
-    // A named property or a missing index signature disqualifies the type:
-    // `{}` is not its only inhabitant. The two-argument form once returned
-    // `{}` for any type reference whose last type argument was `never`.
+    // Named properties disqualify arrays and finite-key records from
+    // representing empty-object defaults, even when their value type is `never`.
     const output = await transformSource(
       `/// <cts-enable />
       import { Default, pattern, Writable } from "commonfabric";
       interface Input {
         namedNever: Writable<Default<Record<string, unknown>, Record<"required", never>>>;
-        neverArray: Writable<Default<Record<string, unknown>, Array<never>>>;
+        neverArray: Writable<Default<object, Array<never>>>;
         unionNamedNever: Writable<Record<string, unknown> | Default<Record<"required", never>>>;
       }
       export default pattern<Input>((state) => ({
@@ -74,7 +73,7 @@ describe("default-empty-record-schema", () => {
         unionNamedNever: state.unionNamedNever,
       }));
       `,
-      { types: COMMONFABRIC_TYPES },
+      { types: COMMONFABRIC_TYPES, typeCheck: true },
     );
     const { input } = patternSchemas(parseModule(output));
     const schemas = input.properties as Record<string, Record<string, unknown>>;

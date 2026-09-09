@@ -475,11 +475,12 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    every index value type is `never`. This includes `Record<string, never>`,
    `Record<PropertyKey, never>`, their intersections, and aliases of these types,
    in both `T | Default<V>` and `Default<T, V>`. The record check does not require
-   a symbol value declaration. A propertyless record with `string` or `unknown`
-   values does not qualify for this check.
+   a symbol value declaration. Every intersection constituent must be an object
+   type; a primitive intersected with an empty record does not qualify. A
+   propertyless record with `string` or `unknown` values does not qualify either.
    Nor does a type that merely carries a `never` type argument:
-   `Record<"required", never>` has a named property and `Array<never>` has no
-   index signature, so both yield no default. An inline `Record<K, never>` in
+   `Record<"required", never>` and `Array<never>` both have named properties, so
+   neither yields a default. An inline `Record<K, never>` in
    `Default<T, V>` reaches this rule through the node route's type fallback;
    there is no name-based shortcut.
 3. **Brand-payload fallback**: `Default<T,V>` carries V in a

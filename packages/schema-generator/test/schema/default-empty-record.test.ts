@@ -2,6 +2,7 @@
 
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import ts from "typescript";
 
 import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
@@ -71,6 +72,57 @@ describe("default-empty-record", () => {
           expect(schema).not.toHaveProperty("default");
         });
       }
+
+      it("omits primitive-intersection defaults without boxed primitive members", () => {
+        // A custom type library need not declare `Boolean.valueOf`. Primitive
+        // intersections must be rejected independently of those named members.
+        const fileName = "default.ts";
+        const wrapped = form === "union member"
+          ? "{ [key: string]: unknown } | Default<Value>"
+          : "Default<{ [key: string]: unknown }, Value>";
+        const sourceFile = ts.createSourceFile(
+          fileName,
+          `
+          interface Array<T> { [index: number]: T; }
+          interface Boolean {}
+          interface CallableFunction {}
+          interface Function {}
+          interface IArguments {}
+          interface NewableFunction {}
+          interface Number {}
+          interface Object {}
+          interface RegExp {}
+          interface String {}
+          interface Default<T, V extends T = T> {}
+          type Value = true & { [key: string]: never };
+          type SchemaRoot = ${wrapped};
+          `,
+          ts.ScriptTarget.ES2023,
+          true,
+        );
+        const options: ts.CompilerOptions = { noLib: true, strict: true };
+        const host = ts.createCompilerHost(options);
+        host.getSourceFile = (name) =>
+          name === fileName ? sourceFile : undefined;
+        const program = ts.createProgram([fileName], options, host);
+        expect(ts.getPreEmitDiagnostics(program)).toEqual([]);
+        const checker = program.getTypeChecker();
+        const root = sourceFile.statements.find((node) =>
+          ts.isTypeAliasDeclaration(node) && node.name.text === "SchemaRoot"
+        );
+        if (!root || !ts.isTypeAliasDeclaration(root)) {
+          throw new Error("SchemaRoot type alias is missing");
+        }
+        const schema = asObjectSchema(
+          new SchemaGenerator().generateSchema(
+            checker.getTypeFromTypeNode(root.type),
+            checker,
+            root.type,
+          ),
+        );
+
+        expect(schema).not.toHaveProperty("default");
+      });
     });
   }
 
