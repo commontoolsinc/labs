@@ -576,6 +576,55 @@ describe("listPieceCallables", () => {
     ]);
   });
 
+  it("serves what degenerate declarations allow, and no more", async () => {
+    // The schemas a compiled pattern carries are the generator's, and the
+    // generator emits booleans and dangling references in the corners: an
+    // argument property declared `true`, a definition that is `true`, a
+    // reference nothing defines. Each is answered from what is there — a
+    // boolean definition still travels with the event that reaches it, an
+    // unresolvable event serves `true` rather than a shape the surface
+    // invented — and a root that declares no object declares no verb.
+    const listing = await listPattern(compiledPattern({
+      argumentSchema: {
+        type: "object",
+        properties: { flag: true, seed: { type: "number" } },
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          ghost: { asCell: ["stream"], $ref: "#/$defs/Missing" },
+          open: { asCell: ["stream"], $ref: "#/$defs/OpenEvent" },
+        },
+        $defs: {
+          OpenEvent: {
+            type: "object",
+            properties: { anything: { $ref: "#/$defs/Any" } },
+          },
+          Any: true,
+        },
+      },
+    }));
+    expect(listing.verbs).toEqual([
+      { name: "ghost", kind: "handler", on: "result", inputSchema: true },
+      {
+        name: "open",
+        kind: "handler",
+        on: "result",
+        inputSchema: {
+          type: "object",
+          properties: { anything: { $ref: "#/$defs/Any" } },
+          $defs: { Any: true },
+        },
+      },
+    ]);
+
+    const scalar = await listPattern(compiledPattern({
+      resultSchema: { type: "number" },
+      argumentSchema: { $ref: "#/$defs/Gone", $defs: {} },
+    }));
+    expect(scalar.verbs).toEqual([]);
+  });
+
   it("returns an empty list for a pattern that exposes no callables", async () => {
     const listing = await listPattern(
       compiledPattern({

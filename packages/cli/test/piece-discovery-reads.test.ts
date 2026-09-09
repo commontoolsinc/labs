@@ -76,35 +76,47 @@ async function readsOfColdDiscovery<T>(
     space: string,
   ) => Promise<T>,
 ): Promise<{ result: T; syncs: RecordedSync[] }> {
-  const signer = await Identity.fromPassphrase("cli piece discovery reads");
-  const server = newLoopbackServer();
-  const spaceName = "discovery-reads-" + crypto.randomUUID();
-
-  const writerStorage = EmulatedStorageManager.connectTo(server, {
-    as: signer,
-  });
-  const writerRuntime = new Runtime({
-    apiUrl: new URL("http://localhost:9999"),
-    storageManager: writerStorage,
-  });
-  const writerPieces = new PiecesController(
-    await createSession({ identity: signer, spaceName }),
-    writerRuntime,
-  );
-
-  const readerStorage = EmulatedStorageManager.connectTo(server, {
-    as: signer,
-  });
-  const readerRuntime = new Runtime({
-    apiUrl: new URL("http://localhost:9999"),
-    storageManager: readerStorage,
-  });
-  const readerPieces = new PiecesController(
-    await createSession({ identity: signer, spaceName }),
-    readerRuntime,
-  );
-
+  // Every resource is registered for release the moment it exists, so a
+  // failure while the next one is being built still closes what came before:
+  // a loopback server or a runtime left open outlives the test that made it.
+  const closers: (() => Promise<void>)[] = [];
+  const release = async () => {
+    for (const close of closers.reverse()) await close();
+  };
   try {
+    const signer = await Identity.fromPassphrase("cli piece discovery reads");
+    const server = newLoopbackServer();
+    closers.push(() => server.close());
+    const spaceName = "discovery-reads-" + crypto.randomUUID();
+
+    const writerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    closers.push(() => writerStorage.close());
+    const writerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: writerStorage,
+    });
+    closers.push(() => writerRuntime.dispose());
+    const writerPieces = new PiecesController(
+      await createSession({ identity: signer, spaceName }),
+      writerRuntime,
+    );
+
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    closers.push(() => readerStorage.close());
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    closers.push(() => readerRuntime.dispose());
+    const readerPieces = new PiecesController(
+      await createSession({ identity: signer, spaceName }),
+      readerRuntime,
+    );
+
     await writerPieces.synced();
     const space = writerPieces.getSpace();
     const compiled = await writerRuntime.patternManager.compilePattern(
@@ -135,11 +147,7 @@ async function readsOfColdDiscovery<T>(
     );
     return { result, syncs };
   } finally {
-    await readerRuntime.dispose();
-    await readerStorage.close();
-    await writerRuntime.dispose();
-    await writerStorage.close();
-    await server.close();
+    await release();
   }
 }
 
