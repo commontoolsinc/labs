@@ -37,6 +37,15 @@ describe("console/src/mount", () => {
       expect(consoleMount("/a/b/live/session-1")).toBe("/a/b");
       expect(consoleMount("/a/b/")).toBe("/a/b");
     });
+
+    it("returns a canonical mount with no trailing slash from a doubled path", () => {
+      // `consolePath` hangs every route off the mount, so a mount ending in
+      // a slash would build `/a//api`. The mount is canonicalized instead.
+      expect(consoleMount("/a//live/session-1")).toBe("/a");
+      expect(consolePath(consoleMount("/a//live/session-1"), "/api/x")).toBe(
+        "/a/api/x",
+      );
+    });
   });
 
   describe("consolePath()", () => {
@@ -55,6 +64,30 @@ describe("console/src/mount", () => {
       // Deno runs these tests without a location; every path stays as it was
       // before mounts existed.
       expect(pageMount()).toBe("");
+    });
+
+    it("reads the mount off the page's own address when there is one", () => {
+      // The real path the browser is on — a page served under a host prefix
+      // sees its prefix here, which is what prepends to every fetch/stream.
+      const original = Reflect.getOwnPropertyDescriptor(globalThis, "location");
+      try {
+        for (
+          const [path, mount] of [
+            ["/", ""],
+            ["/harness-console/", "/harness-console"],
+            ["/harness-console/live/session-1", "/harness-console"],
+          ] as const
+        ) {
+          Object.defineProperty(globalThis, "location", {
+            value: { pathname: path },
+            configurable: true,
+          });
+          expect(pageMount()).toBe(mount);
+        }
+      } finally {
+        if (original) Object.defineProperty(globalThis, "location", original);
+        else Reflect.deleteProperty(globalThis, "location");
+      }
     });
   });
 

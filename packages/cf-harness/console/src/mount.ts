@@ -19,7 +19,12 @@
 export const consoleMount = (pathname: string): string => {
   const trimmed = pathname.replace(/\/+$/, "");
   const live = /^(.*)\/live\/[^/]+$/.exec(trimmed);
-  return live === null ? trimmed : live[1];
+  // Strip any trailing slash off the mount itself: for a doubled path like
+  // `/a//live/x` the capture keeps the extra slash, and `consolePath` would
+  // then build `/a//api` — a redundant slash that some hosts route
+  // differently. The real `/harness-console` mount never hits this, but the
+  // mount is the base every path hangs off, so it should be canonical.
+  return (live === null ? trimmed : live[1]).replace(/\/+$/, "");
 };
 
 /**
