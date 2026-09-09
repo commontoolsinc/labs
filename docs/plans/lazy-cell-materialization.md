@@ -58,8 +58,8 @@ the data has stopped matching.
 ([`cfc.ts`](../../packages/runner/src/cfc.ts)) narrows a schema by a path,
 resolves `$ref`, unions `anyOf` / `oneOf` branches, and caches per interned
 schema. `canBranchMatch`, in `traverse.ts`, is a shallow branch prefilter — type
-check plus required-key presence, no descent. Together these are the narrowing
-primitive a lazy proxy needs.
+check, required-key presence and an array's tuple closure, no descent. Together
+these are the narrowing primitive a lazy proxy needs.
 
 **The "argument did not resolve" path.** `readJavaScriptArgument`
 ([`runner.ts`](../../packages/runner/src/runner.ts)) computes `isValidArgument`

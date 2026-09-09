@@ -13,6 +13,23 @@
 
 import type { JSONSchema, JSONSchemaObj } from "./builder/types.ts";
 
+/**
+ * The greatest number of elements a schema's tuple closure admits, or
+ * `undefined` where it admits any number. `items: false` closes the tuple:
+ * nothing is allowed past the `prefixItems` slots, so a schema with no slots
+ * admits only the empty array.
+ *
+ * Separate from the positional match because a shallow prefilter — the anyOf
+ * pre-check in traverse.ts, and the per-branch precomputation beside it —
+ * decides on length alone and never descends to the elements.
+ */
+export const closedArrayLength = (
+  schema: JSONSchemaObj,
+): number | undefined => {
+  if (schema.items !== false) return undefined;
+  return Array.isArray(schema.prefixItems) ? schema.prefixItems.length : 0;
+};
+
 export const arrayMatchesPositionally = (
   schema: JSONSchemaObj,
   value: readonly unknown[],
@@ -27,9 +44,9 @@ export const arrayMatchesPositionally = (
       if (!matches(prefixItems[index], value[index])) return false;
     }
   }
-  if (schema.items === false) {
-    // A closed tuple: `items: false` forbids any element past the slots.
-    if (value.length > (prefixItems?.length ?? 0)) return false;
+  const closed = closedArrayLength(schema);
+  if (closed !== undefined) {
+    if (value.length > closed) return false;
   } else if (typeof schema.items === "object" && schema.items !== null) {
     for (
       let index = prefixItems?.length ?? 0;
