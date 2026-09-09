@@ -206,6 +206,12 @@ The current package provides:
   identifiers;
 - content-addressed snapshots for in-run `view_image` observations, while
   run-start images remain source-integrity-locked;
+- opt-in skills.sh tools — `search_skills` returns registry metadata only, and
+  `acquire_skill` (which needs a fabric session as well) resolves a skill to a
+  commit SHA, fetches it pinned to that SHA, writes the exact text into a cell
+  stamped with `ExternalIngest` fetch provenance, and hands back a
+  capability-typed handle; each is gated on its own configuration, so a run with
+  discovery but no acquisition offers only the first;
 - opt-in fabric-session tools — `run_pattern` and `assign_slug`
   (`--fabric-api-url`, `--fabric-identity`, and `--fabric-space` configured
   together, or their `CF_HARNESS_FABRIC_*` environment fallbacks).
@@ -378,6 +384,22 @@ host.
 Loom also has an opt-in adapter for the interactive NDJSON protocol. It is not
 the default interactive harness, and browser automation is not yet wired into
 that interactive product path.
+
+A run accumulates what its sandbox work is known to have been exposed to, and
+whether that knowledge is complete. The taint is collected at the sandbox
+invocation boundary rather than from tool outputs, so a tool cannot lose it by
+dropping a field or returning early, and only a COMPLETE result runsc itself
+reported counts: a result the runtime synthesized because it could not read the
+sidecar is rendered as a denial carrying an empty label, shaped exactly like a
+public container, and only its recorded origin tells the two apart. An
+invocation that left no readable evidence poisons the run to `unknown` for the
+rest of it, with no recovery, because nothing later can establish what it did.
+Both sidecar transport directories are refused if their real path lies inside
+the workspace, any other writable mount, or the artifact root, and are held to
+being absolute before anything compares them — a container able to write its own
+result sidecar could name its own taint. What the harness cannot check from this
+side is whether the runtime is registered to read the directory named here; that
+residual belongs to the `runsc-cfc` registration.
 
 Loom currently forces autonomous `cf-harness` runs to `observe` mode while
 trusted `runsc-cfc` observation metadata is not wired through every local tool
