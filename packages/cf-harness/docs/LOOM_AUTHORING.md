@@ -152,9 +152,11 @@ preceding current-turn calls; receipt component count must match the request,
 and receipt IDs retain request order. Missing, historical, malformed or
 ambiguous pairs prove no membership. Different tokens for one Pattern can
 therefore leave a conservative duplicate; the console does not resolve token
-aliases here. The native client must check both IDs against a freshly read
-opened manifest before suppressing its ordinary Pattern placement. No token or
-cell address is exposed by this metadata.
+aliases here. When using this metadata, the native client must check both IDs
+against a freshly read opened manifest before suppressing ordinary Pattern
+placement. Weaver's legacy exact-reference comparison can independently prove
+membership; missing token correlation does not always require placement. No
+token or cell address is exposed by this metadata.
 
 Existing durable sessions retain their recorded tool policy. An adapter enabling
 new tools must create a session with the updated policy or explicitly refresh

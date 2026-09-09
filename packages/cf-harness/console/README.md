@@ -235,12 +235,13 @@ entry copies `slug` and `url` from the successful `assign_slug` observation.
 When that same held token also appeared in a verified successful composition,
 optional `loomComponents: [{loomId, componentId}]` identifies its saved
 membership. The correlation uses unique matching current-turn tool calls and
-request-order receipt IDs, never the human slug or assistant prose. Clients
-suppress duplicate placement only after verifying that pair in a freshly opened
-manifest. Missing or ambiguous correlation keeps the ordinary placement path;
-different tokens for the same Pattern are not inferred equivalent. No cell
-address or token is added to the result. `spaceName` identifies this console's
-configured space.
+request-order receipt IDs, never the human slug or assistant prose. When using
+this metadata, clients suppress duplicate placement only after verifying the
+pair in a freshly opened manifest. Weaver also retains a legacy exact-reference
+membership check; absent either proof it keeps ordinary placement. Different
+tokens for the same Pattern are not inferred equivalent. No cell address or
+token is added to the result. `spaceName` identifies this console's configured
+space.
 
 The route never holds a request open; it answers with where the turn stands, and
 the status code says whether asking again can change the answer:
