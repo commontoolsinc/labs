@@ -13,6 +13,7 @@ import {
   ingestJUnit,
   preloadArgument,
   readNameMaps,
+  RECORDS_DIR_VARIABLE,
   recordsDir,
   spoolWriteArgument,
 } from "@commonfabric/test-support/records";
@@ -556,7 +557,14 @@ export async function runTests(
   // plumbing: it forwards the flag and moves the results; the reported
   // names come from the leaves. A temporary directory that cannot be
   // created turns recording off with a warning; it never fails the suite.
-  const spoolDir = recordsDir();
+  // Resolved once here and used everywhere after: the parent reads this
+  // spool with the workspace as its working directory, each leaf runs with
+  // its own package as one, and the write granted to a leaf names a path.
+  // A relative `CF_TEST_RECORDS_DIR` would be three directories.
+  const rawSpoolDir = recordsDir();
+  const spoolDir = rawSpoolDir === undefined
+    ? undefined
+    : path.resolve(workspaceCwd, rawSpoolDir);
   let junitRoot: string | undefined;
   if (spoolDir !== undefined) {
     try {
@@ -575,14 +583,8 @@ export async function runTests(
   const capable = junitRoot !== undefined
     ? await junitCapableMembers(memberPaths, workspaceUrl)
     : new Set<string>();
-  // Resolved, because each leaf runs with its own package as the working
-  // directory and a relative spool would name a different place there.
   const recording = junitRoot !== undefined && spoolDir !== undefined
-    ? await memberRecordingArguments(
-      memberPaths,
-      path.resolve(workspaceCwd, spoolDir),
-      workspaceUrl,
-    )
+    ? await memberRecordingArguments(memberPaths, spoolDir, workspaceUrl)
     : new Map<string, string[]>();
 
   const results: PackageResult[] = [];
@@ -602,7 +604,9 @@ export async function runTests(
         unit.packageName,
         packagePath,
         coverageRoot,
-        unit.env,
+        spoolDir === undefined
+          ? unit.env
+          : { ...unit.env, [RECORDS_DIR_VARIABLE]: spoolDir },
         junitPath,
         recording.get(unit.memberPath),
       );

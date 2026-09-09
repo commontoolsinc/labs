@@ -75,6 +75,14 @@ export function spoolWriteArgument(
       `test records: the spool to grant must be an absolute path: "${spool}"`,
     );
   }
+  // A comma is what separates one path from the next inside
+  // `--allow-write=`, and Deno offers no way to write one that is part of a
+  // path, so a spool holding one is granted as two paths that are not it.
+  if (spool.includes(",")) {
+    throw new Error(
+      `test records: the spool to grant cannot hold a comma: "${spool}"`,
+    );
+  }
   if (grantsEverything(flags, "--allow-write", "W")) return undefined;
   if (!grantsEverything(flags, "--allow-read", "R")) return undefined;
   return `--allow-write=${spool}`;

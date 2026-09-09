@@ -346,13 +346,16 @@ granted one without the other records no file for any of its tests.
 `tasks/test-topology/package-integration.ts` holds a part in that shape,
 with `--allow-env` and no `--allow-read`.
 
-Three callers append the preload. `tasks/workspace-tests.ts` appends it
-to each member's `deno task test`, and `tasks/test-topology/suite.ts`
-appends it to each invocation a batch runs; both take the write argument
-from `spoolWriteArgument()`. `tasks/integration.ts` appends it without
-one, because every invocation it builds runs under `-A`, so the helper
-would build nothing for any of them. A task there that ever narrows its
-permissions needs the argument too.
+Four callers append the preload, and three of them append the write
+beside it. `tasks/workspace-tests.ts` appends both to each member's
+`deno task test`, taking the write from `spoolWriteArgument()` directly.
+The two topology suites append both to each invocation a batch runs —
+`fileSuite` in `tasks/test-topology/suite.ts` and `unitSuite` in
+`tasks/test-topology/unit.ts` — through `recordingArguments()`, which is
+where the helper is called for them. The fourth, `tasks/integration.ts`,
+appends the preload alone, because every invocation it builds runs under
+`-A` and the helper would build nothing for any of them. A task there
+that ever narrows its permissions needs the argument too.
 
 A test task naming its own `--import-map` does not take the preload. That
 map governs every module of the invocation, the preload included, so a

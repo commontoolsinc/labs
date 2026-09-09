@@ -63,4 +63,11 @@ describe("preload-path", () => {
     expect(() => spoolWriteArgument(["--allow-read"], "")).toThrow();
     expect(() => spoolWriteArgument(["--allow-read"], "spool")).toThrow();
   });
+
+  it("refuses a spool holding a comma", () => {
+    // A comma separates one path from the next inside `--allow-write=`,
+    // so such a spool is granted as two paths that are not it.
+    expect(() => spoolWriteArgument(["--allow-read"], "/a,b/spool"))
+      .toThrow();
+  });
 });
