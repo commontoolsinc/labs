@@ -24,8 +24,8 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
-import { FabricBytes } from "./FabricBytes.ts";
 import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
+import { FabricBytes } from "./FabricBytes.ts";
 
 /**
  * The encoded state of a {@link FabricKeyPair} that holds material: the

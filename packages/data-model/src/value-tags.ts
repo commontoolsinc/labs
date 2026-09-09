@@ -1,7 +1,7 @@
 /**
- * The tag vocabulary -- the names a dispatch answers with when asked what a
- * value already is -- and the dispatches that answer with it, one per kind of
- * value a caller can be holding.
+ * The tag vocabulary -- the names a dispatch returns when asked what a value
+ * already is -- and the dispatches that return them, one per kind of value a
+ * caller can be holding.
  *
  * Which classes a given dispatch recognizes varies with where it is layered:
  * recognizing a `FabricBytes` means holding the `FabricBytes` class, which not
@@ -164,8 +164,9 @@ export function tagFromFabricValueElseNull(
  * would come back `null` -- unrecognized rather than misidentified, which is
  * the direction an unhandled case should fail in.
  *
- * **Note:** This function is intentionally _not_ `export`ed from the
- * `data-model` barrel.
+ * This is asked of a class already read from a prototype, which is a
+ * question that arises inside this package: a caller elsewhere holds values,
+ * and asks `tagFromNativeValueElseNull()`.
  */
 export function tagFromNativeBuiltinClassElseNull(
   constructorFn: { prototype: unknown },
@@ -265,8 +266,9 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
 
   const proto = Object.getPrototypeOf(value);
 
-  // We treat a `null` prototype as type `Object`, because due to the checks
-  // above, it can't be a cross-realm type of any sort we attempt to recognize.
+  // The two kinds recognized without a prototype at all, a severed array and
+  // a severed error, were decided above, so what remains here is a bare
+  // record. It is tagged `Object` so that the object rule decides it by name.
   if (proto === null) {
     return VALUE_TAGS.Object;
   }
