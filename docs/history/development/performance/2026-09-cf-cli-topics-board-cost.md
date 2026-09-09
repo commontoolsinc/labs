@@ -141,8 +141,14 @@ cheaper — and they sit at different layers.
 1. **Discovery syncs the board through its full result schema.** `piece
    verbs` and `piece describe` open the piece with `getResultCellWithSourceSchema`,
    and on a board that means every topic: 16 MB and 4,286 documents to list
-   eleven verbs, whose names are top-level keys of one document. Bounding
-   that read to the piece's own document is a CLI change.
+   eleven verbs. The verbs are declared in the pattern's result schema, which
+   the listing already loads with `getPattern({ projectResult: false })`, so
+   the listing needs no read of the piece's data at all; the sync under the
+   result schema is the part to remove. Where a read of the document's own
+   property names is wanted, the bounded schema is
+   `{ type: "object", additionalProperties: { type: "unknown", asCell: ["opaque"] } }`
+   — a bare `{ type: "object" }` admits every property and walks everything
+   it reaches. A CLI change.
 2. **The resume pre-sync asks for whole documents it reads four fields of,
    and for metadata rails it never reads.** The argument pre-sync's width is
    the stored document's shape (66 % metadata); the list-child pre-sync's
