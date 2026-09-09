@@ -1,5 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import {
@@ -32,6 +32,18 @@ export interface WriteFileToolSuccessOutput {
   outputId: string;
   path: string;
   mode: WriteFileMode;
+
+  /**
+   * The sandbox's own CFC result for the write. Kept on the output — and
+   * stripped before the model sees it — as the run's record of what the write
+   * was exposed to.
+   *
+   * NOT what the family's taint is read from: that is collected at the
+   * sandbox invocation boundary, precisely so a tool cannot lose it by
+   * dropping a field. This is evidence for a reader of the run, and a write
+   * whose result is absent here costs the record rather than the label.
+   */
+  cfcResult?: CfcSandboxResult;
 }
 
 export type WriteFileToolOutput =
@@ -152,18 +164,28 @@ export const writeFileTool: HarnessToolDefinition<
       }),
     });
     if (result.exitCode !== 0) {
-      return createStructuredFileToolErrorOutput(context, "write_file", {
-        outputId,
-        path: resolvedPath,
-        code: classifyFileToolShellFailure(result),
-        detail: detailFromShellFailure(result),
-        exitCode: result.exitCode,
-      });
+      // The evidence travels with the failure too: a command that exited
+      // non-zero may still have truncated or partly written its target.
+      return {
+        ...createStructuredFileToolErrorOutput(context, "write_file", {
+          outputId,
+          path: resolvedPath,
+          code: classifyFileToolShellFailure(result),
+          detail: detailFromShellFailure(result),
+          exitCode: result.exitCode,
+        }),
+        ...(result.cfcResult !== undefined
+          ? { cfcResult: result.cfcResult }
+          : {}),
+      };
     }
     return {
       outputId,
       path: resolvedPath,
       mode,
+      ...(result.cfcResult !== undefined
+        ? { cfcResult: result.cfcResult }
+        : {}),
     };
   },
 };

@@ -609,13 +609,21 @@ Environment:
   ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
 `;
 
-// CFC sidecar transport dirs may be supplied by flag (resolved against cwd so
-// relative paths work) or env-var fallback (already an absolute host path by
-// convention). The docker-runsc layer re-validates that the result is absolute.
+// CFC sidecar transport dirs may be supplied by flag or by env-var fallback
+// (already an absolute host path by convention). The docker-runsc layer
+// re-validates that the result is absolute and refuses one the sandbox can
+// write.
+//
+// A relative flag value is REFUSED rather than resolved against the working
+// directory. The working directory is the workspace's own default, so
+// resolving there is how a transport directory ends up inside the mount the
+// sandbox writes to — and these two directories carry the evidence that
+// mount's contents are labelled from. Naming them absolutely is the one
+// spelling that cannot land somewhere the caller did not mean.
 const resolveOptionalCfcDir = (
   flagValue: unknown,
   envValue: string | undefined,
-  cwd: string,
+  _cwd: string,
   flagName: string,
 ): string | undefined => {
   if (typeof flagValue === "string") {
@@ -623,7 +631,15 @@ const resolveOptionalCfcDir = (
     if (trimmed === "") {
       throw new Error(`${flagName} requires a non-empty path`);
     }
-    return resolve(cwd, trimmed);
+    if (!isAbsolute(trimmed)) {
+      throw new Error(
+        `${flagName} requires an absolute path: a relative one resolves ` +
+          `against the working directory, which is the workspace the sandbox ` +
+          `writes to, and this directory carries the evidence that ` +
+          `workspace's contents are labelled from`,
+      );
+    }
+    return trimmed;
   }
   return envValue;
 };

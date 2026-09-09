@@ -796,14 +796,16 @@ describe("prompt-loop address handles", () => {
       createHarnessHandleTable(runId),
       URI_A,
     );
+    // Held rather than read back off the engine: what the engine exposes is
+    // the family-instrumented view of this runtime, not the runtime itself.
+    const sandbox = new FakeSandboxRuntime();
     const engine = new CfHarnessEngine({
-      sandboxRuntime: new FakeSandboxRuntime(),
+      sandboxRuntime: sandbox,
       runId,
       model: "gpt-5.4",
       cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(minted.table);
-    const sandbox = engine.sandbox as FakeSandboxRuntime;
     const command = `note ${minted.token}abc end`;
     const loop = new CfHarnessPromptLoop({
       apiKey: "test-key",

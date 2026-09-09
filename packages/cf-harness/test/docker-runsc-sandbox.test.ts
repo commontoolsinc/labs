@@ -1654,3 +1654,92 @@ Deno.test("DockerRunscSandboxRuntime reports the registered and configured paths
   );
   assertEquals(cfc?.invocationContextConfiguredPath, "/host/invocations");
 });
+
+Deno.test("DockerRunscSandboxRuntime treats an unreadable taint as synthetic, not public", async () => {
+  // `runscTaintLabel` keeps a clause only when it is an array, so a taint
+  // whose `confidentiality` is a string would be reduced to the empty label
+  // while `isPublicRunscTaint` still called it non-public: a container
+  // carrying a requirement, reported as one carrying none. A shape this build
+  // cannot read is not evidence about the container.
+
+  for (
+    const taint of [
+      { xattrJSON: { confidentiality: "finance" } },
+      { xattrJSON: { confidentiality: { name: "finance" } } },
+      { xattrJSON: { integrity: 7 } },
+      { xattrJSON: { provenance: ["somewhere"] } },
+      { xattrJSON: "finance" },
+      // Only a rendered string, which `runscTaintLabel` reads nothing out of.
+      // A non-empty one names atoms this cannot parse, so calling it public
+      // would report a container carrying a requirement as one carrying none.
+      { string: "finance" },
+      { string: '{conf: "finance", integ: \u2205}' },
+      // Neither representation: a sidecar that reported nothing, which is not
+      // a container that carried nothing.
+      {},
+      { string: 7 },
+    ]
+  ) {
+    const cfcResultDir = await Deno.makeTempDir();
+    try {
+      await Deno.writeTextFile(
+        `${cfcResultDir}/container-123.json`,
+        JSON.stringify({
+          version: 1,
+          containerId: "container-123",
+          sandboxId: "sandbox-123",
+          waitStatus: 0,
+          cfcTaint: taint,
+        }),
+      );
+      const runner = new FakeProcessRunner(dockerLifecycleResults());
+      const runtime = new DockerRunscSandboxRuntime(
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: "/host/project",
+          cfcResultDir,
+        }),
+        runner,
+      );
+
+      const result = await runtime.run({ argv: ["true"] });
+
+      assertEquals(result.cfcResultOrigin, "synthetic");
+      assertEquals(result.cfcResult?.stdout.policy, "denied");
+    } finally {
+      await Deno.remove(cfcResultDir, { recursive: true });
+    }
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime reports a readable taint as runsc's own", async () => {
+  const cfcResultDir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(
+      `${cfcResultDir}/container-123.json`,
+      JSON.stringify({
+        version: 1,
+        containerId: "container-123",
+        sandboxId: "sandbox-123",
+        waitStatus: 0,
+        cfcTaint: { xattrJSON: { confidentiality: ["finance"] } },
+      }),
+    );
+    const runner = new FakeProcessRunner(dockerLifecycleResults());
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcResultDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({ argv: ["true"] });
+
+    assertEquals(result.cfcResultOrigin, "runsc-taint");
+    assertEquals(result.cfcResult?.stdout.label, {
+      confidentiality: ["finance"],
+    });
+  } finally {
+    await Deno.remove(cfcResultDir, { recursive: true });
+  }
+});

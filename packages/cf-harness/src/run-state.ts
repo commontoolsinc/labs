@@ -10,6 +10,7 @@ import {
   type HarnessCfcModelContext,
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
+import type { HarnessSandboxTaint } from "./sandbox-taint.ts";
 import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
@@ -183,11 +184,20 @@ export interface HarnessRunState {
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
 
   /**
-   * The per-cell CFC labels the run's space holds for the cells it touched.
-   * Every other artifact a run writes is the run's own record of itself; this
-   * one is read out of the space, and it is the only place a reader working
-   * from the tree can learn what a cell is labelled.
+   * What this run is known to have been exposed to by its sandbox work, and
+   * whether that knowledge is complete. The join of the container
+   * taints runsc reported, or `unknown` once an invocation ran whose taint
+   * could not be established. Each taint arrives out of band, in the result
+   * sidecar runsc writes where the sandboxed workload cannot reach it; every
+   * channel out of the container itself is one that workload can write, so
+   * nothing read from inside contributes here.
+   *
+   * A record for a reader of the run: it is how a reader of the artifacts
+   * learns what the run's sandbox work was exposed to, and what a resumed run
+   * seeds its own state from.
    */
+  cfcSandboxTaint?: HarnessSandboxTaint;
+
   cellLabels?: HarnessCellLabels;
 
   cellLabelsPath?: string;
@@ -252,6 +262,7 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  cfcSandboxTaint?: HarnessSandboxTaint;
   cellLabels?: HarnessCellLabels;
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
@@ -366,6 +377,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
+      : {}),
+    ...(options.cfcSandboxTaint !== undefined
+      ? { cfcSandboxTaint: structuredClone(options.cfcSandboxTaint) }
       : {}),
     ...(options.cellLabels !== undefined
       ? { cellLabels: structuredClone(options.cellLabels) }
@@ -497,6 +511,24 @@ export const appendHarnessCfcModelContextObservations = (
   }
   return patchHarnessRunState(state, { cfcModelContext }, now);
 };
+
+/**
+ * Mirrors the run's accumulated sandbox taint onto its record.
+ *
+ * A copy for a reader of the artifacts rather than the value anything decides
+ * from: the deciding state lives in `sandbox-taint.ts` for the run's
+ * lifetime, and this is what survives it.
+ */
+export const setHarnessSandboxTaint = (
+  state: HarnessRunState,
+  taint: HarnessSandboxTaint,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  patchHarnessRunState(
+    state,
+    { cfcSandboxTaint: structuredClone(taint) },
+    now,
+  );
 
 export const setHarnessSubagentRun = (
   state: HarnessRunState,

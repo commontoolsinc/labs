@@ -11,10 +11,23 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
+import { inertLabelSnapshot } from "./ifc-label-shape.ts";
+import { observedSandboxRuntime } from "./sandbox/observed-sandbox.ts";
+import {
+  type HarnessSandboxTaint,
+  joinSandboxTaint,
+  poisonSandboxTaint,
+  sandboxTaint,
+  seedSandboxTaint,
+} from "./sandbox-taint.ts";
+
 import {
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
+  type IFCLabel,
   inheritedCfcPostureReport,
 } from "@commonfabric/runner/cfc";
 
@@ -148,6 +161,7 @@ import {
   isTerminalHarnessRunStatus,
   patchHarnessRunState,
   setHarnessRunStatus,
+  setHarnessSandboxTaint,
   setHarnessSubagentRun,
 } from "./run-state.ts";
 import {
@@ -162,6 +176,7 @@ import {
 import type {
   DockerRunscAdditionalMountConfig,
   DockerRunscSandboxConfig,
+  SandboxCommandResult,
   SandboxRuntime,
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
@@ -278,6 +293,121 @@ export interface BuiltinToolOutputMap {
   loom_inspect: LoomAuthoringToolOutput;
   loom_authoring_context: LoomAuthoringToolOutput;
 }
+
+const CFC_OBSERVATION_POLICIES = new Set(["observed", "opaque", "denied"]);
+
+/** Whether one stream observation is complete for the policy it declares. */
+const streamObservationLabel = (
+  value: unknown,
+  channel: "stdout" | "stderr",
+): Record<string, unknown> | undefined => {
+  if (!isObjectNotArray(value) || value.channel !== channel) {
+    return undefined;
+  }
+  const complete = value.policy === "observed"
+    ? Array.isArray(value.segments)
+    : value.policy === "opaque" || value.policy === "denied";
+  return complete ? inertLabelSnapshot(value.label) : undefined;
+};
+
+/** Whether the exit-code observation is complete for the policy it declares. */
+const exitCodeObservationLabel = (
+  value: unknown,
+): Record<string, unknown> | undefined => {
+  if (!isObjectNotArray(value)) {
+    return undefined;
+  }
+  const complete = value.policy === "observed"
+    ? typeof value.value === "number" || value.value === null
+    : value.policy === "opaque" || value.policy === "denied";
+  return complete ? inertLabelSnapshot(value.label) : undefined;
+};
+
+/**
+ * Whether two labels state the same requirement.
+ *
+ * Both are known representable before this runs, so serializing them cannot
+ * meet a cycle, a getter, or a depth this cannot walk. That order is the
+ * whole point: a label reaching `JSON.stringify` unchecked can throw out of
+ * the taint reader, and an exception there leaves the run recorded as it was
+ * — which is to say clean.
+ */
+const sameLabel = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
+
+/**
+ * The container taint a sandbox invocation reported, or `undefined` when it
+ * established none.
+ *
+ * Only a COMPLETE result runsc itself reported counts, and completeness is
+ * checked over the whole union rather than over the one field the label is
+ * read from. A result the runtime synthesized because it could not read the
+ * sidecar is rendered as a `denied` observation with an EMPTY label, shaped
+ * exactly like a public container; the origin is what tells them apart, and
+ * its absence is read as synthetic. Beyond that: a missing observation, a
+ * policy or channel outside the ones defined, a policy whose own fields are
+ * absent, a label this cannot represent, three observations that disagree
+ * about the container's label, or three policies that disagree — each
+ * describes no container, and reading one anyway is how an empty label gets
+ * minted from a tainted run.
+ */
+const cfcSandboxTaintOfResult = (
+  result: SandboxCommandResult | undefined,
+): IFCLabel | undefined => {
+  try {
+    return readRunscTaint(result);
+  } catch {
+    // The shape checks are meant to make this unreachable. It is here because
+    // the cost of being wrong about that is silent: an exception on this path
+    // leaves the run recorded as it was, which is to say clean, and no test
+    // would show it. Answering `undefined` poisons instead.
+    return undefined;
+  }
+};
+
+const readRunscTaint = (
+  result: SandboxCommandResult | undefined,
+): IFCLabel | undefined => {
+  if (result?.cfcResultOrigin !== "runsc-taint") {
+    return undefined;
+  }
+  const cfcResult = result.cfcResult;
+  if (!isObjectNotArray(cfcResult) || cfcResult.version !== 1) {
+    return undefined;
+  }
+  const { stdout, stderr, exitCode } = cfcResult;
+  // Each observation hands back its label as inert data. Everything below
+  // compares and returns the SNAPSHOTS, so the label that leaves here is the
+  // one the checks passed — not whatever the original answers next time.
+  const stdoutLabel = streamObservationLabel(stdout, "stdout");
+  const stderrLabel = streamObservationLabel(stderr, "stderr");
+  const exitCodeLabel = exitCodeObservationLabel(exitCode);
+  if (
+    stdoutLabel === undefined || stderrLabel === undefined ||
+    exitCodeLabel === undefined
+  ) {
+    return undefined;
+  }
+  // One decision covers the whole invocation: every branch of
+  // `cfcResultFromRunscSidecar` gives all three observations the same policy,
+  // because whether the container's output may be read is a fact about the
+  // container. Three that disagree were assembled by something else.
+  const policy = (stdout as { policy: unknown }).policy;
+  if (
+    (stderr as { policy: unknown }).policy !== policy ||
+    (exitCode as { policy: unknown }).policy !== policy ||
+    !CFC_OBSERVATION_POLICIES.has(policy as string)
+  ) {
+    return undefined;
+  }
+  if (
+    !sameLabel(stdoutLabel, stderrLabel) ||
+    !sameLabel(stdoutLabel, exitCodeLabel)
+  ) {
+    return undefined;
+  }
+  return stdoutLabel as IFCLabel;
+};
 
 interface ToolOutputWithId {
   outputId: string;
@@ -406,22 +536,66 @@ interface ResolveSandboxConfigOptions {
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
+  artifactRootHostPath?: string;
 }
 
+/**
+ * The sandbox configuration this run gets, with every check run over it.
+ *
+ * A pre-resolved `config.sandbox` is RE-RESOLVED rather than passed through.
+ * Passing it through was the hole: the sidecar-isolation and mount-overlap
+ * checks never saw it, so a caller supplying a whole configuration got the
+ * transports without the guarantees. Re-resolving states every field it
+ * already carried, so nothing is defaulted back out from under it.
+ */
 const resolveSandboxConfig = (
   config: HarnessConfig,
   options: ResolveSandboxConfigOptions,
 ): DockerRunscSandboxConfig => {
-  if (config.sandbox !== undefined) {
-    return config.sandbox;
-  }
-  if (options.workspaceHostPath === undefined) {
+  const preResolved = config.sandbox;
+  const workspaceHostPath = preResolved?.workspaceHostPath ??
+    options.workspaceHostPath;
+  if (workspaceHostPath === undefined) {
     throw new Error(
       "sandbox config is required when no workspaceHostPath default is provided",
     );
   }
   return resolveDockerRunscSandboxConfig({
-    workspaceHostPath: options.workspaceHostPath,
+    workspaceHostPath,
+    ...(preResolved?.dockerBinary !== undefined
+      ? { dockerBinary: preResolved.dockerBinary }
+      : {}),
+    ...(preResolved?.containerUser !== undefined
+      ? { containerUser: preResolved.containerUser }
+      : {}),
+    ...(preResolved?.workspaceMountPath !== undefined
+      ? { workspaceMountPath: preResolved.workspaceMountPath }
+      : {}),
+    ...(preResolved?.shellPath !== undefined
+      ? { shellPath: preResolved.shellPath }
+      : {}),
+    ...(preResolved?.dockerNetworkMode !== undefined
+      ? { dockerNetworkMode: preResolved.dockerNetworkMode }
+      : {}),
+    ...(preResolved?.extraDockerArgs !== undefined
+      ? { extraDockerArgs: preResolved.extraDockerArgs }
+      : {}),
+    ...(preResolved?.image !== undefined ? { image: preResolved.image } : {}),
+    ...(preResolved?.runtimeName !== undefined
+      ? { runtimeName: preResolved.runtimeName }
+      : {}),
+    ...(preResolved?.additionalMounts !== undefined
+      ? { additionalMounts: preResolved.additionalMounts }
+      : {}),
+    ...(preResolved?.cfcResultDir !== undefined
+      ? { cfcResultDir: preResolved.cfcResultDir }
+      : {}),
+    ...(preResolved?.cfcInvocationContextDir !== undefined
+      ? { cfcInvocationContextDir: preResolved.cfcInvocationContextDir }
+      : {}),
+    ...(options.artifactRootHostPath !== undefined
+      ? { artifactRootHostPath: options.artifactRootHostPath }
+      : {}),
     ...(options.sandboxImage !== undefined
       ? { image: options.sandboxImage }
       : {}),
@@ -517,6 +691,14 @@ export class CfHarnessEngine {
   readonly #spaceDbPath?: string;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
+  /**
+   * The sandbox as it was supplied, before this run's instrumentation.
+   *
+   * A delegated child builds its own instrumented view, so handing it the
+   * wrapped runtime would report every one of the child's invocations twice.
+   */
+  readonly #sandboxForDelegation: SandboxRuntime;
+
   readonly #resumedRun: boolean;
   #runModelBound: boolean;
   #cfcTransportChecked = false;
@@ -729,6 +911,15 @@ export class CfHarnessEngine {
         additionalMounts: options.additionalMounts,
         cfcResultDir: options.cfcResultDir,
         cfcInvocationContextDir: options.cfcInvocationContextDir,
+        ...((this.config.artifactRoot ??
+            (options.runState?.artifactRoot !== undefined
+              ? dirname(options.runState.artifactRoot)
+              : undefined)) !== undefined
+          ? {
+            artifactRootHostPath: this.config.artifactRoot ??
+              dirname(options.runState!.artifactRoot!),
+          }
+          : {}),
       })
       : this.config.sandbox;
     // Capture the engine-owned docker-runsc config so we can refuse to *run*
@@ -743,8 +934,21 @@ export class CfHarnessEngine {
       ? sandboxConfig
       : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
-    this.sandbox = options.sandboxRuntime ??
+    const sandbox = options.sandboxRuntime ??
       new DockerRunscSandboxRuntime(sandboxConfig!, options.processRunner);
+    this.#sandboxForDelegation = sandbox;
+    // Every invocation reports what it left, so no tool can lose the run's
+    // evidence by dropping a field or returning early.
+    this.sandbox = observedSandboxRuntime(
+      sandbox,
+      (result) => this.#recordSandboxEvidence(result),
+    );
+    if (options.runState !== undefined) {
+      // Resumed: this process has seen none of the earlier invocations, and
+      // an entry it has never seen reads as clean unless the record says
+      // otherwise.
+      seedSandboxTaint(runId, options.runState.cfcSandboxTaint);
+    }
     this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
       options.workspaceHostPath;
     this.workspaceMountPath = normalizeSandboxRoot(
@@ -981,7 +1185,93 @@ export class CfHarnessEngine {
   }
 
   getRunState(): HarnessRunState {
-    return structuredClone(this.#runState);
+    return structuredClone(this.#syncSandboxTaint());
+  }
+
+  /** What is known about this run's sandbox work, and how completely. */
+  get sandboxTaint(): HarnessSandboxTaint {
+    return sandboxTaint(this.#runState.runId);
+  }
+
+  /**
+   * The sandbox to hand a delegated child: the supplied runtime, without this
+   * engine's instrumentation, which the child adds for itself.
+   */
+  get sandboxForDelegation(): SandboxRuntime {
+    return this.#sandboxForDelegation;
+  }
+
+  /**
+   * Brings this run's record up to date with what its sandbox work is known
+   * to have been exposed to, on the way out to a reader or to disk.
+   *
+   * A run that has seen nothing says nothing: the default state is "known,
+   * and nothing accumulated", which is what an absent field already means.
+   * Recording it would put a line in every run's record that carries no
+   * information, and make the field's presence stop meaning anything.
+   */
+  #syncSandboxTaint(): HarnessRunState {
+    const taint = sandboxTaint(this.#runState.runId);
+    if (taint.kind === "known" && taint.label === undefined) {
+      return this.#runState;
+    }
+    if (
+      JSON.stringify(taint) === JSON.stringify(this.#runState.cfcSandboxTaint)
+    ) {
+      return this.#runState;
+    }
+    this.#runState = setHarnessSandboxTaint(
+      this.#runState,
+      taint,
+      this.#runState.updatedAt,
+    );
+    return this.#runState;
+  }
+
+  /**
+   * Records what one sandbox invocation left behind, at the boundary that ran
+   * it rather than from the tool output that reports it.
+   *
+   * The container's taint joins the run's; an invocation that returned no
+   * readable CFC result poisons it to `unknown`, and it stays there, because
+   * nothing later can establish what an invocation whose evidence was lost
+   * did. Whichever policy the result took is irrelevant — an opaque stream is
+   * precisely the case where a taint exists.
+   *
+   * A run configured without the runsc CFC result transport produces no
+   * evidence at all, so its first sandbox invocation poisons it. That is the
+   * intended reading: a run with no trusted taint source can say nothing
+   * about what its sandbox work was exposed to.
+   */
+  #recordSandboxEvidence(
+    result: SandboxCommandResult | undefined,
+  ): Promise<void> {
+    try {
+      const taint = cfcSandboxTaintOfResult(result);
+      if (taint === undefined) {
+        poisonSandboxTaint(
+          this.#runState.runId,
+          "a sandbox invocation returned no readable CFC result, so what it " +
+            "may have written cannot be established",
+        );
+      } else {
+        joinSandboxTaint(this.#runState.runId, taint);
+      }
+    } catch {
+      // The boundary covers the JOIN as well as the read. Ending it at the
+      // read would leave the one step that merges the label outside it, and
+      // a raise there propagates out of the sandbox call while the run stays
+      // recorded as it was — which is to say clean.
+      poisonSandboxTaint(
+        this.#runState.runId,
+        "a sandbox invocation's taint could not be recorded, so what it may " +
+          "have written cannot be established",
+      );
+    }
+    // Nothing is written here: every record picks the state up on its way out
+    // (`#syncSandboxTaint`). Reading the clock here would also make the run's
+    // timestamps depend on how many containers a tool happened to start.
+    return Promise.resolve();
   }
 
   /**
@@ -1378,7 +1668,7 @@ export class CfHarnessEngine {
   }
 
   async persistRunState(): Promise<string | undefined> {
-    return await this.artifactStore?.persistRunState(this.#runState);
+    return await this.artifactStore?.persistRunState(this.#syncSandboxTaint());
   }
 
   /**

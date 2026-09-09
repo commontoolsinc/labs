@@ -242,6 +242,14 @@ Deno.test({
         createdAt: "2026-04-15T21:00:00.000Z",
         updatedAt: "2026-04-15T21:00:05.000Z",
         cfcEnforcementMode: "observe",
+        // This run's sandbox is a stub that reports no CFC result, so the run
+        // cannot say what its invocation was exposed to. Recorded as a hole
+        // rather than as clean.
+        cfcSandboxTaint: {
+          kind: "unknown",
+          reason:
+            "a sandbox invocation returned no readable CFC result, so what it may have written cannot be established",
+        },
         modelProvider: "openai-compatible-gateway",
         modelAuthSource: "api-key",
         cfcInvocationContexts: [{

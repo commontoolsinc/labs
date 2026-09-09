@@ -88,6 +88,15 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   extraDockerArgs?: readonly string[];
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
+
+  /**
+   * The run's artifact root, when it has one. Not a mount, and named here
+   * only so a CFC sidecar transport directory inside it is refused: the
+   * artifact root holds the record a run writes about itself, and a transport
+   * directory there would put the evidence that record is labelled from
+   * within reach of whatever can reach the artifacts.
+   */
+  artifactRootHostPath?: string;
 }
 
 /**
@@ -146,6 +155,20 @@ export type CfcTransportReadiness = {
   readonly [K in CfcSidecarTransportKind]?: CfcSidecarTransportReading;
 };
 
+/**
+ * Where a `cfcResult` came from.
+ *
+ * `runsc-taint` is the container's own final taint, read from the sidecar
+ * runsc wrote. `synthetic` is a result the runtime composed because it could
+ * not read one — an unsupported sidecar version, a container-id mismatch, a
+ * missing taint, a read or parse failure. A synthetic result is rendered as a
+ * `denied` observation carrying an EMPTY label, which is indistinguishable
+ * from a public container unless the origin says so, and reading it as public
+ * would let unreadable evidence mint an unlabeled cell. Absent means the same
+ * as `synthetic`: nothing established where it came from.
+ */
+export type CfcSandboxResultOrigin = "runsc-taint" | "synthetic";
+
 export interface SandboxCommandRequest {
   argv: string[];
   cwd?: string;
@@ -170,6 +193,13 @@ export interface SandboxCommandResult {
   stderr: string;
   exitCode: number;
   cfcResult?: CfcSandboxResult;
+
+  /**
+   * Whether `cfcResult` is runsc's own report or one this runtime composed.
+   * Only a `runsc-taint` result is evidence about what the container was
+   * exposed to.
+   */
+  cfcResultOrigin?: CfcSandboxResultOrigin;
 }
 
 export interface SandboxRuntimeDescription {
