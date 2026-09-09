@@ -367,9 +367,9 @@ Answering "what does this item cover" belongs to the suite, because a
 unit that is not a path is one only its suite can map a diff onto. A
 suite whose units are files needs to say nothing: the diff naming the
 file is the whole of the question. A suite whose units are type-check
-groups or binaries maps the diff itself, and a suite that maps it wrongly
-runs too much or too little rather than reporting anything, so the answer
-errs toward running.
+groups, gate names, or binaries maps the diff itself, and a suite that
+maps it wrongly runs too much or too little rather than reporting
+anything, so the answer errs toward running.
 
 ### Today's jobs as suites
 
@@ -1431,12 +1431,32 @@ one of them that it does not say about a unit test. A gate above the
 flake threshold leaves the selectable set, and appears on the wall as the
 defect in the gate that it is.
 
-The exception the rule carries cannot fire for a gate. A gate's unit is
-the name of a gate rather than a path, and its suite maps no change onto
-its units, so nothing a pull request touches reaches one. A flaky gate
-therefore stays out of pull requests until it stops disagreeing with
-itself, and `main`, which runs the whole corpus, is where it goes on
-running until somebody fixes it.
+The exception the rule carries reaches a gate through the paths the gate
+declares a change reaches it by. A gate's unit is the name of a gate
+rather than a path, so the suite maps a change onto its units from a list
+each gate carries: `check-test-aliases` names
+`tasks/test-identity-aliases.jsonl`, `check-action-pins` names
+`.github/`, and a change touching one of those makes that gate mandatory.
+The pull request that fixes a gate too flaky to judge by therefore runs
+it, which is what the exception is for.
+
+What a gate declares is bounded rather than exhaustive, and two bounds
+are what keep this a fraction of what a lane runs rather than the bulk of
+it. No one gate may be reached by a significant share of the tree, and no
+one file may reach more than a few gates. So a gate whose input is a
+large part of the repository names the small and specific part of it —
+`check-docs` names the documents holding the code blocks, and not the
+modules those blocks compile against — or names nothing at all, which is
+what formatting, linting, the drift guard and the cycle check get. A gate
+naming nothing reaches a lane on what it is worth or because nothing has
+a record of it, so a flaky one stays out of pull requests until it stops
+disagreeing with itself.
+
+The asymmetry is what makes those bounds affordable. A gate named by too
+little is decided by the score, which is the same decision every test
+gets. A gate named by too much takes its share of every lane's budget
+forever, on the strength of a declaration rather than of anything
+measured, which is what the removed exemption did.
 
 What the lane owes people in exchange is clarity about whose problem it
 is. The job summary names what was withheld and why, and says of each
@@ -2637,6 +2657,27 @@ the exclusion list — all three being decisions about the repository rather
 than about one pull request, which is why they belong to a person and not
 to a threshold.
 
+#### Which packages a change reaches
+
+The gate makes two decisions — which tests to run, and which packages to
+measure — and both are the same question: which covered packages did this
+change reach. It answers that question the way everything else in this
+design answers it, from the declarations described under [what the change
+touches must run](#two-rules-that-force-a-test-in), rather than from a
+rule of its own. A covered package declares the paths a change reaches
+its own measured test set by, which is its own tree; the packages a
+change reaches are the packages whose sets become mandatory and the
+packages the gate scores. Two mechanisms answering one question is two
+things to be wrong about, and the failure they produce is silent: the
+gate would run a package's tests and decline to score it, or score a
+package whose tests it did not force.
+
+That also settles what a package may declare. The bounds the declarations
+are under are the ones stated there — nothing reached by a significant
+share of the tree, and no file reaching a significant share of the things
+declaring — and a package's own tree satisfies the first by construction.
+`LOCAL_COVERAGE_MAX_PACKAGES` is the second, said in packages.
+
 #### A change that touches more than two covered packages is not gated
 
 The mandatory set a covered package adds is its whole measured test set,
@@ -2646,7 +2687,7 @@ the gate's value falls as the change gets broader anyway: over three or
 four packages at once, "did this leave more untested" stops being a
 question about one thing somebody can look at.
 
-So when the diff touches more than `LOCAL_COVERAGE_MAX_PACKAGES` covered
+So when the diff reaches more than `LOCAL_COVERAGE_MAX_PACKAGES` covered
 packages, the gate is off for that pull request entirely. No package's set
 is forced whole, nothing is gated, and `Status` says the gate did not run
 and why. The tests are still selected normally, and the items the diff
@@ -2668,10 +2709,10 @@ gate would have caught.
 
 #### What a pull request does
 
-When the diff touches a covered package's tracked source or its tests, and
-the pull request is under the cap above, every item in that package's
-measured test set becomes mandatory, and runs once with coverage turned
-on. They are packed like any other mandatory items, so a large package
+When the diff reaches a covered package, by the declaration that package
+carries, and the pull request is under the cap above, every item in that
+package's measured test set becomes mandatory, and runs once with
+coverage turned on. They are packed like any other mandatory items, so a large package
 spreads across lanes rather than filling one.
 
 Run once is enforced rather than hoped for. A mandatory item leaves the
@@ -2683,7 +2724,7 @@ ordinary ones, fitted the same way every other cost in this design is.
 
 Each lane converts the coverage it produced into one report per workspace
 member and uploads it. `Status` adds the five together, scores each
-covered package the diff touched, and fails when the uncovered count has
+covered package the diff reached, and fails when the uncovered count has
 risen. A rise is accepted with the marker the repository already has, in
 the same form and with the same rebase-proof meaning:
 
@@ -2751,8 +2792,8 @@ pull request's own run could not have:
   green — and never for one line.
 - **A rise in a covered package's own-tests number**, named as one the
   per-package gate exists to catch. There are three ways one reaches
-  `main`: the change touched more covered packages than the cap allows, so
-  the gate did not run; a package the change touched is on the exclusion
+  `main`: the change reached more covered packages than the cap allows, so
+  the gate did not run; a package the change reached is on the exclusion
   list; or a change somewhere else moved which lines of that package its
   own tests reach. The comment says which, because the three call for
   different things — nothing, a look at the exclusion list, and a look at
@@ -2816,8 +2857,8 @@ notes that the option exists and that nothing here forecloses it.
 
 **Outside a covered package, a change to a source file does not pull in
 the tests that execute it.** Selection knows which test files a change
-edited, and which units each suite says the change touched. Where the diff
-touches a covered package and stays under the cap, [the per-package
+edited, and which units the declarations reach. Where those reach a
+covered package and the diff stays under the cap, [the per-package
 gate](#the-one-coverage-gate-that-survives) makes that package's whole
 measured set mandatory, which reaches the tests executing the changed
 lines by running every test the package has. Everywhere else, selection
