@@ -322,8 +322,7 @@ Mike's call, after S4.
    `../history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`:
    `backfillNames` writes the name into the board's map, the topic goes on
    reading none, and one `cf piece link` per topic closes it. The operator
-   procedure is the "Naming the Topics that predate the namespace" section of
-   `skills/topics/SKILL.md`.
+   procedure is `skills/topics/references/namespace-backfill.md`.
 
    **Held 2026-09-06, and not for a technical reason.** The step is rehearsed
    twice; the second run, after the positional-link fix, is recorded at
@@ -376,7 +375,8 @@ Mike's call, after S4.
    is a narrowing of `true`, which is what
    `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
    per-member demand property generally. The flag is
-   held behind explicit team authorization by `skills/topics/SKILL.md`, so this
+   held behind explicit team authorization by
+   `skills/topics/references/pattern-updates.md`, so this
    step carries a decision it did not carry before. What the forced deploy
    leaves behind is measured, in the 2026-09-06 rerun below.
 
@@ -397,7 +397,7 @@ Mike's call, after S4.
    `--root` at or above `packages/patterns`, because the board imports the
    naming library from a sibling directory and the default program root is the
    entry's own.
-5. `skills/topics/SKILL.md` describes `top/42` addressing.
+5. `skills/topics/references/naming.md` describes `top/42` addressing.
 
 ### S5 — Deferred, not scheduled
 

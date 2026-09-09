@@ -8,20 +8,21 @@ description: Interact with the Common Fabric team's Topics board on Estuary thro
 
 # Topics on Estuary
 
-Topics is the team's minimal issue tracker. This skill names the Estuary
-deployment, the deployed verb contract, and the team's authorship and editorial
-conventions. Use `skills/cf/SKILL.md` for the general CLI surface. The pattern's
-canonical semantics live in `packages/patterns/topics/README.md`; its verb
-contracts live in `packages/patterns/topics/main.tsx` and
-`packages/patterns/topics/topic.tsx`.
+Topics is the team's minimal issue tracker: a board piece holding Topic pieces
+on Estuary, driven through `cf`. This file is the map. Each file under
+`references/` carries the detail for one part of the work and is the thing to
+read once you are doing that part. `skills/cf/SKILL.md` is the general CLI
+surface; the pattern's canonical semantics are
+`packages/patterns/topics/README.md`, and its verb contracts
+`packages/patterns/topics/main.tsx` and `packages/patterns/topics/topic.tsx`.
 
-## Deployment and identity
+## Where, and as whom
 
-Run from inside the Labs checkout. The commands here are spelled `deno task cf`,
-which runs that checkout's CLI from any directory in it and needs nothing on
-PATH; `skills/cf/SKILL.md` covers the other routes. Shell state rarely survives
-between an agent's tool calls, so set these in the same invocation as the
-command that needs them:
+Run from inside the Labs checkout. Every command in this skill and its
+references is spelled `deno task cf`, which runs that checkout's CLI from any
+directory in it and needs nothing on PATH; `skills/cf/SKILL.md` covers the other
+routes. Shell state rarely survives between an agent's tool calls, so set these
+in the same invocation as the command that needs them:
 
 ```bash
 export CF_API_URL='https://estuary.saga-castor.ts.net'
@@ -30,482 +31,47 @@ export TOPICS_BOARD='/of:fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34'
 export CF_IDENTITY="${CF_IDENTITY:-$HOME/.config/commonfabric/identity.key}"
 ```
 
-An already-set `CF_IDENTITY` is the explicit override. Otherwise use the team's
-stable per-user default at `~/.config/commonfabric/identity.key`; the path is
-common while its contents belong to that teammate. Use the same Estuary identity
-key as your human user. When `cf` reports that keyfile missing or unreadable,
-stop and ask the human to provision that default or export the correct path; the
-check belongs to `cf`, so the shell never touches the key. Do not search for
-keys, mint an agent key, use another human's key, or use the publicly derivable
-`implicit trust` identity. Never print or inspect key material; use
-`deno task cf id did "$CF_IDENTITY"` when the public DID is needed for
-verification.
-
-Every authored-content mutation carries `agentName` in the same event. Use one
-stable agent name, without decorating titles, labels, bodies, or comments with a
-second signature. Fabric retains the human principal authenticated by the key;
-Topics stores the agent name as structured content attribution.
-
-`mention` and `unmention` are the intentional exception: they record only a
-reference edge, take no `agentName`, and return no value.
-
-## Start from the deployed verbs
-
-The running piece is authoritative. Orient before mutating it:
-
-```bash
-deno task cf piece verbs --cell "$TOPICS_BOARD" --json
-```
-
-That listing includes the deployed pattern reference, callable prose, and input
-and output schemas. `deno task cf piece describe --cell "$TOPICS_BOARD" --json`
-returns a superset of it (the same verb rows plus name, purpose, state, and
-inputs) for the same bounded discovery load. Neither command starts the piece;
-the reason to default to `verbs` is payload, not time: the listing is the
-smaller document to hold in context, and it is complete for calling. Use
-`describe` when you need the piece-wide purpose, state, or input documentation.
-Use `deno task cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only
-after choosing a verb and when its generated flags or standalone help are
-useful; help is served through the dispatch path, which starts the addressed
-piece, so it is the most expensive of the three. Each command is an independent
-cold CLI process, so do not run all three by default.
-
-The deployment can be well behind the checkout the CLI runs from, and that gap
-explains board behavior that would otherwise read as a defect. Ask it which
-commit it serves before recording one:
-
-```bash
-curl -fsS "$CF_API_URL/api/meta" | jq -r .gitSha
-```
-
-Resolve that in the repository — `git log --oneline -1 <sha>`, and
-`git rev-list --count <sha>..upstream/main` for the distance — before concluding
-anything from a verb that behaves unlike the source in front of you. A gap of
-dozens of commits is ordinary, so which source is running is the first question,
-not the last.
-
-Run `piece verbs --json` again after selecting a Topic, and use `describe` or
-per-verb help on demand. `piece verbs` lists contract verbs by default; `--all`
-additionally shows UI wrappers and deprecated verbs. The board's published Topic
-rows deliberately contain no verbs: take a row's address and call that Topic
-directly.
-
-The current declared contract is:
-
-| Piece | Verb            | Input                                           | Declared result         |
-| ----- | --------------- | ----------------------------------------------- | ----------------------- |
-| Board | `addTopic`      | `title`, optional `body`, `agentName`           | created `topic`, `name` |
-| Board | `backfillNames` | `agentName`                                     | the names it wrote      |
-| Topic | `addComment`    | `body`, `agentName`                             | appended `comment`      |
-| Topic | `addLink`       | `url`, optional `kind` and `label`, `agentName` | appended `link`         |
-| Topic | `setBody`       | complete `body`, `agentName`                    | body and attribution    |
-| Topic | `setTitle`      | `title`, `agentName`                            | title and attribution   |
-| Topic | `mention`       | Topic reference                                 | none                    |
-| Topic | `unmention`     | Topic reference                                 | none                    |
-| Topic | `editComment`   | comment reference, `body`, `agentName`          | body and `editedAt`     |
-| Topic | `removeComment` | comment reference, `agentName`                  | the retraction stamp    |
-| Topic | `removeLink`    | link reference **or** `url`, `agentName`        | url and stamp           |
-
-A retraction stamps the record rather than deleting it: the comment or link
-stays, carrying what it always said, while readers stop showing it and
-`commentCount` stops counting it. A retracted link also stops resolving into
-`mentions`. Retracting is not a way to make something unsaid — the evidence is
-retained deliberately.
-
-`editComment` and `removeComment` name their target by REFERENCE, and a comment
-is not a piece: it has no fid to write into an inline JSON event, so these are
-reachable from a reader that holds the row, not from a bare
-`deno task cf piece call`. `removeLink` is the exception and takes `url` for
-exactly that reason, retracting the most recently added link still present with
-that URL — so retracting twice retracts two rather than re-stamping one.
-
-## Discover and read
-
-Survey through the compact `index`. Its rows are Topics, and `@` asks for each
-row's canonical address without expanding its body, thread, or verbs:
-
-```bash
-deno task cf cell get "$TOPICS_BOARD" index --step \
-  --select @,title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
-```
-
-Keep discovery bounded. An unprojected board or durable `topics` read can follow
-every Topic into its body, thread, and verbs, transfer the whole graph, and
-append a read-set commit proportional to what it observed. Survey the projected
-`index`, then expand one Topic at a time.
-
-Take the selected row's `$link` value unchanged as `TOPIC`; canonical references
-compose directly into later commands. The space prefix appears only when the
-reference's space differs from the command's target space, so never reconstruct
-or edit the emitted address.
-
-That rule is about writing an address. Reading one has a counterpart: a Topic
-answers to more than one address, so two that differ as strings can name the
-same Topic. The `$link` a `mention` edge carries is not the string the board
-index hands out for the Topic it points at. Resolve each address and compare
-what comes back rather than comparing the addresses, and compare on something a
-separate document would not share — `createdAt`, or the comment thread — since a
-title alone can be duplicated. An address you do not recognise on an edge is not
-evidence the edge is wrong.
-
-Read one Topic's durable input before changing it:
-
-```bash
-deno task cf cell get --cell "$TOPIC" title --input
-deno task cf cell get --cell "$TOPIC" body --input
-deno task cf cell get --cell "$TOPIC" comments --input \
-  --select sentAt,author.kind,author.name,body
-deno task cf cell get --cell "$TOPIC" links --input \
-  --select kind,url,label,addedAt,addedBy.kind,addedBy.name
-```
-
-Use exact-field or range `--filter` predicates to narrow arrays, then project
-with `--select`. Do not combine an address marker with `--filter`: filtering
-changes positions, so a surviving row cannot carry its original address.
-
-Input reads are the durable source of truth. Use `--step` for computed results
-such as the board's `index` and a Topic's `commentCount`, `lastActivityAt`,
-`mentions`, or `referencedBy`.
-
-## `top/42` — a Topic addressed by the board's name for it
-
-The board gives each Topic a name of its own: a decimal number, dense from `1`,
-allocated when the Topic is filed and never reused. It is not a display name — a
-Topic's display name stays its title, and the number renders as a badge beside
-it. `addTopic` returns the name it allocated as `name` beside the created
-`topic`, and each Topic publishes its own as `shortName`, which the board's
-`index` rows and mention universe carry a copy of. So a survey reads every name
-in one bounded read:
-
-```bash
-deno task cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName
-```
-
-The number is what a short reference is written with. Once the board's `names`
-map is bound as a slug, `<collection>/<member>` names a Topic wherever an
-address is taken — `deno task cf cell get /@<space>/top/42 title`,
-`deno task cf piece describe --cell /@<space>/top/42`,
-`deno task cf piece call --cell /@<space>/top/42 setTitle '{...}'` — and exactly
-one segment reaches a member, so `/@<space>/top/42/title` is that Topic's
-`title` field. A name with no member after it is refused, naming the piece
-holding the collection; and `no member 999 in top` is the refusal for a member
-the board does not hold. `packages/cli/README.md` is the whole grammar, and
-`docs/specs/collection-naming.md` the design.
-
-A member name is the board's, not the fabric's: it means something only through
-the collection that issued it, so a citation carries the collection —
-`/@<space>/top/42`, never a bare `42`. A canonical `/of:` address remains the
-thing to pass in a reference position; the member name is for a person to read
-and type.
-
-**What the Estuary deployment carries.** The verbs and the naming above are what
-the pattern in this checkout declares. The deployed board runs whatever commit
-`/api/meta` reports, and until a pattern update lands there it has no `names`
-map, no `top` slug, and no named Topic — a Topic publishes no `shortName` and
-`/top/42` resolves to nothing. Ask the deployment before citing a number, and
-treat `top/42` as unavailable there until the plan's remaining step is done
-(`docs/plans/collection-naming-topics.md`). Deploying it and naming the Topics
-already on the board are the team's steps, not an agent's.
-
-## Create and recover the address
-
-Mint one invocation session for the agent run. Replace every angle-bracketed
-invocation placeholder below with an id unique to that logical mutation, and
-reuse that id only to retry the same mutation. Create through the board and
-project the returned Topic to its address:
-
-```bash
-export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"
-CREATE="$(deno task cf piece call --cell "$TOPICS_BOARD" \
-  --invocation '<unique-topic-create-id>' \
-  addTopic \
-  '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}' \
-  -- --schema '{"properties":{"topic":{"$link":true},"name":{"type":"string"}}}')"
-TOPIC="$(printf '%s\n' "$CREATE" | jq -r '.result.topic["$link"] // empty')"
-NAME="$(printf '%s\n' "$CREATE" | jq -r '.result.name // empty')"
-```
-
-The projection names BOTH results, and that is load-bearing: a schema listing
-only `topic` drops `name` from the envelope, so `NAME` comes back empty and the
-allocated number is lost. Dropping the projection entirely returns the name and
-the whole created topic with it — a rendered view included, two orders of
-magnitude more payload — which is what the projection exists to avoid.
-
-When the result is present, carry `TOPIC` into the next command. `NAME` is the
-member name the board allocated — read it here rather than from the Topic's own
-`shortName`, which is a derivation that may not have produced a value when the
-call returns. Use JSON encoding or schema-derived flags for multiline Markdown;
-do not interpolate unescaped content into JSON.
-
-Current Estuary calls have a known observation asymmetry. `addTopic` has
-reported an error after committing and has reported success without committing.
-A call can also answer nothing at all: `addTopic` and `addLink` have each hung
-past a ten-minute client timeout and committed, and an `addTopic` has hung the
-same way and not committed. A timeout therefore settles nothing in either
-direction, and none of this is particular to `addTopic` — take it as the
-behavior of every authored-content verb.
-
-So treat every call envelope, and every absence of one, as an observation rather
-than proof of durable state, and read back after every mutation. For `addTopic`,
-use a distinctive title and compare the narrow board index before and after the
-call; if the result is uncertain, recover its `$link` there rather than blindly
-creating another Topic. Retrying on the strength of a timeout is how one Topic
-becomes two.
-
-```bash
-deno task cf cell get "$TOPICS_BOARD" index --step --select @,title
-deno task cf cell get --cell "$TOPIC" title --input
-```
-
-Use one invocation session per agent run and an explicit invocation id per
-logical mutation. Retry an uncertain mutation only with that same session/id
-pair. The full retry and receipt model is in `skills/cf/SKILL.md` and
-`docs/common/verbs/over-the-cli.md`.
-
-## Update through Topic verbs
-
-```bash
-deno task cf piece call --cell "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
-  '{"title":"<complete new title>","agentName":"Sol"}'
-deno task cf piece call --cell "$TOPIC" --invocation '<unique-set-body-id>' setBody \
-  '{"body":"<complete revised body>","agentName":"Sol"}'
-deno task cf piece call --cell "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
-  '{"body":"<point-in-time update>","agentName":"Sol"}'
-deno task cf piece call --cell "$TOPIC" --invocation '<unique-add-link-id>' addLink \
-  '{"url":"<PR URL>","kind":"pr","label":"<label>","agentName":"Sol"}'
-```
-
-`kind` defaults to `web`; a blank or omitted `label` defaults to the URL.
-Current authored-content verbs reject blank required content or attribution
-instead of reporting apparent success.
-
-Verify the relevant durable input after each call (`title`, `body`, `comments`,
-or `links`). Use `--step` as a second check when the expected change is
-computed, such as a count or board-index row.
-
-A cross-Topic connection is a reference, not an address pasted into prose. Pass
-the canonical reference in the declared reference position; the CLI turns it
-into the live piece link the verb expects. Set `OTHER_TOPIC` to the `$link` from
-the index row for the Topic being referenced; the row's `{"$link": …}` object
-passes in that position as it was printed, too:
-
-```bash
-export OTHER_TOPIC='<canonical /of:... address from another index row>'
-deno task cf piece call --cell "$TOPIC" --invocation '<unique-mention-id>' mention \
-  "{\"topic\":\"$OTHER_TOPIC\"}"
-deno task cf piece call --cell "$TOPIC" --invocation '<unique-unmention-id>' unmention \
-  "{\"topic\":\"$OTHER_TOPIC\"}"
-```
-
-Use inline JSON for these reference events. The schema-derived `--topic` flag
-parses its declared object before reference resolution and therefore rejects a
-bare canonical address.
-
-`unmention` removes every `mention`-made edge to that Topic. References created
-inside the body are removed by editing the body. An `addLink` URL that resolves
-to a piece also contributes to the reference graph.
-
-## Editorial conventions
-
-- Treat the body as the living big-picture document. Replace it whole with the
-  current state while preserving meaningful context and decisions. Fabric owns
-  revision history; do not duplicate it as an activity log.
-- Treat comments as append-only, point-in-time progress records. Record what
-  changed, what was learned or decided, and what comes next.
-- Add every relevant pull request explicitly with `addLink` and `kind: "pr"`;
-  mentioning a PR only in prose is not enough.
-- Use references for relationships between Topics. Do not rely on pasted fids or
-  prose scanning.
-
-## Production pattern updates
-
-Changing content through verbs is normal. Changing the board or Topic pattern
-source is a production migration over team-critical data. Before any `setsrc`,
-read `docs/development/space-clone-rehearsal.md` and the latest Topics migration
-record in `docs/history/topics-board-migration-2026-08-28.md`. Do not use
-`--dangerously-allow-incompatible-schema` without explicit team authorization.
-
-Pass `--root` at or above `packages/patterns` on every `piece new` and `setsrc`
-of the board or a Topic. Both import the member-naming library from a sibling
-directory, and the default program root is the entry's own directory, so without
-the flag every such import is refused as escaping the program root and the
-deploy fails before it reaches the server.
-
-Do not substitute `piece ls` for the board index: handler-created Topics need
-not appear in the registry. If a deployed field or verb differs from this map,
-trust `piece describe`, `piece verbs`, and verb help, then update this skill in
-the same change that updates the deployment contract.
-
-## Naming the Topics that predate the namespace
-
-A Topic reads its own name by looking itself up in the board's names table,
-which reaches it as its `boardNames` ARGUMENT — `addTopic` wires it at create,
-and `ownName` in `packages/patterns/collection-naming/naming.ts` is the lookup.
-A parent writes its member's result and never its member's argument, so
-`backfillNames` names a Topic filed before the namespace in the board's map
-while that Topic goes on reading no name. No pattern can close that gap. One
-`deno task cf piece link` per Topic can, and this is that procedure.
-
-It was established by a clone rehearsal, and the evidence — every command, its
-output, and the counts and timings behind the claims here — is
-`docs/history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`. Read
-that before deciding anything this procedure says needs deciding.
-
-### The order
-
-1. **The board's source first**, and it needs
-   `--dangerously-allow-incompatible-schema`. `setsrc --check` refuses it over a
-   board holding Topics filed before the namespace:
-
-   ```
-   input link at topics.0.shortName: an unconstrained schema is no longer accepted
-   ```
-
-   That is not about `shortName` and not about the property's spelling. The
-   schema recorded on a member's retained link is unconstrained at every path
-   that recorded schema does not name, so a property only the CANDIDATE demand
-   names is a narrowing of `true` — which is what
-   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
-   per-member demand property generally; the record has the probes.
-
-   `deno task pattern-compat` and `deno task pattern-vintage` do not see this.
-   `tasks/pattern-vintage.ts` says what each proves: a pattern's declared
-   contract against the contracts it declared before, and its own stored
-   documents under today's source. Neither reaches the schema recorded on a link
-   into a sibling piece, so both can be green while the deploy is refused. Run
-   `setsrc --check` against the deployment itself before scheduling a window,
-   and treat the flag as needing team authorization under this skill's rule
-   above.
-
-2. **Then each Topic's source**, and it needs
-   `--dangerously-allow-incompatible-schema` once per Topic. Moving the board
-   first clears the Topic leg's own `mentionable[].shortName` refusal, and what
-   `setsrc --check` reports underneath is the Topic's mention universe narrowing
-   from a writable handle to a readable one:
-
-   ```
-   Pattern schemas are not backward compatible:
-   - argument.mentionable: asCell changed
-   ```
-
-   `asCell` is compared for exact equality by
-   `packages/piece/src/schema-compatibility.ts`, so a narrowed cell reads as a
-   break however narrow the narrowing is; the decision and what it costs are
-   `docs/history/topics-mentionable-readonly-break.md`. The cost is one forced
-   update per Topic and no more: a readable handle drops the write-back leg of
-   the retained-link proof that a writable one carries — the leg that would
-   demand the Topic's three-string projection accept the `piece` the board's row
-   publishes — so `setsrc --check` proves every update after this one. Like step
-   1's, the flag is a team-authorization decision under this skill's rule above,
-   and a separate one, for an unrelated reason.
-
-   **Skipping it leaves a usable board.** A Topic still on pre-graft source is
-   named by `backfillNames` like any other member, answers to
-   `deno task cf cell get /top/<n> title`, and reads back as an ordinary `index`
-   row with no `shortName` and no damage to the array around it. So naming,
-   `/top/<n>` addressing and index membership all survive the step being
-   skipped, and `shortName` — the badge, and the number on the index row — is
-   what is absent. That bounds what skipping costs from BELOW, not from above:
-   no run against a populated board has forced a Topic update, so what else a
-   completed one would change there is not known, and the record says so. Step
-   4's refusal on such a Topic is this state being enforced rather than an
-   error.
-
-3. **`backfillNames` once**, through the board. It returns the names it wrote,
-   in filing order, and is idempotent: a second run writes nothing and returns
-   an empty list.
-
-4. **`deno task cf piece link` once per Topic that `addTopic` did not wire** —
-   that is, per Topic that took step 2. A Topic that skipped it has no
-   `boardNames` input to bind, and the bind says so.
-
-### The two commands
-
-```bash
-deno task cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
-  '{"agentName":"Sol"}'
-deno task cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
-```
-
-The bind needs no `--allow-non-existing` flag after step 2. The Topic declares
-`boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>`, so `input.get()`
-exposes a `boardNames` handle whose value defaults to `[]`. That makes the
-target present for the link command's value-presence check even before a link is
-stored.
-
-Between them is the gap this procedure exists for: the board's `names` map and
-`namesTable` hold the name, and the Topic does not.
-
-```
-$ deno task cf cell get --cell "$TOPIC" shortName --step
-Cannot read piece result at "shortName": stored data is present, but its schema
-could not resolve all required values. The piece was stepped, but the required
-value still did not materialize.
-```
-
-After the bind that read answers with the number, the board's `index` row for
-that Topic carries it as `shortName`, and `deno task cf cell get /top/<n> title`
-returns its title. A Topic left unbound keeps reporting the message above, which
-is what a half-finished run looks like: the board serves every Topic either way,
-named beside unnamed, and the repair is to bind the rest. Nothing has to be
-undone.
-
-The bind is idempotent — repeating it with the same two endpoints changes
-nothing and commits nothing. Note that `wrote to space` prints either way, so it
-is not evidence that anything was written.
-
-**Read twice before concluding a bind failed.** The first read after a backfill
-can report no name for a correctly wired Topic, and the next identical command
-answers with the number, with no write in between.
-
-**Cost is one command per Topic**, serially. On a board the size of the Estuary
-one that is the bulk-CLI shape
-`docs/history/topics-board-migration-2026-08-28.md` found unreliable from a
-laptop; run it from somewhere that record vindicates.
-
-### Audit which Topics still need it
-
-The derived `shortName` is the wrong thing to audit — read the durable argument:
-
-```bash
-deno task cf cell get --cell "$TOPIC" boardNames --input --select name
-```
-
-A bound Topic returns the whole names table (`[{"name":"1"},…]`); an unbound one
-returns `[]`. Read the VALUE, not the keys: the input is declared
-`boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>` in
-`packages/patterns/topics/topic.tsx`, so the key is there either way and its
-presence says nothing.
-
-Audit only Topics whose source has already been migrated. Input reads use the
-current pattern's projection: if it does not declare `boardNames`, this targeted
-read refuses the path, including when the raw argument document holds a legacy
-link there. Updating the pattern to select the input exposes that retained link
-without rewriting it. Check the Topic's published `shortName` after the bind to
-verify that the pattern consumes its row.
-
-### Traps
-
-**A bind cannot expose an undeclared input** (#6965). A Topic that has not taken
-step 2 has no `boardNames` input in its pattern schema. Linking to it refuses
-before writing, with or without `--allow-non-existing`:
-
-```
-Cannot access path "boardNames" - property "boardNames" not found in the current pattern's input schema. Update the target pattern with cf piece setsrc to declare this input before linking, reading, or writing it. --allow-non-existing does not override the input schema.
-```
-
-Update the Topic's pattern before binding. A refused bind stores no link and
-reports no successful link receipt; targeted `deno task cf cell set --input`
-writes also refuse the undeclared path. The flag overrides missing pieces or
-endpoint values, so it can bind a declared input that has neither a value nor a
-default. It cannot override the input schema. Topics' `boardNames` default makes
-that override unnecessary for this migration.
-
-**`setsrc --check` is not read-only against the store** (#6964). It writes, even
-when it refuses and replaces nothing, so a rehearsal clone is spent after one
-and a second pass needs `deno task cf space reset`. Nothing authored moves.
-
-**Binding a piece the board does not hold** does nothing wrong and nothing
-useful: it succeeds, and the Topic reads no name. The lookup is by identity —
-`nameOf` in `packages/patterns/collection-naming/naming.ts` finds the row whose
-`member` `equals` the one asked about — so a non-member has no row to find.
+The key is the team's per-user default at that path, the same one your human
+user holds; an already-set `CF_IDENTITY` is the explicit override. When `cf`
+reports the keyfile missing or unreadable, stop and ask the human to provision
+that default or export the correct path: the check belongs to `cf`, so the shell
+never touches the key. Do not search for keys, mint an agent key, use another
+human's key, or use the publicly derivable `implicit trust` identity, and never
+print or inspect key material; `deno task cf id did "$CF_IDENTITY"` gives the
+public DID when one is needed.
+
+Every authored-content mutation carries `agentName` in the same event: one
+stable agent name, and no second signature in titles, labels, bodies, or
+comments. Fabric retains the human principal behind the key; Topics stores the
+agent name as content attribution. `mention` and `unmention` record only a
+reference edge and take no `agentName`.
+
+## What holds throughout
+
+- The running piece is authoritative, and the deployment is routinely dozens of
+  commits behind the checkout. Read the board's `piece verbs` listing before
+  mutating, and the commit its `/api/meta` reports before recording one or
+  reading a verb's behavior as a defect.
+- Discovery is bounded: survey the projected `index`, expand one Topic at a
+  time, and take an emitted `$link` unchanged.
+- A call's envelope, or its absence, is an observation and not proof of durable
+  state. One invocation session per run, one invocation id per logical mutation,
+  a read-back after every write, and no retry on the strength of a timeout,
+  which is how one Topic becomes two.
+- The body is the living document, replaced whole; comments are append-only,
+  point-in-time progress; every relevant pull request is an `addLink` with
+  `kind: "pr"`; relationships between Topics are references, never pasted fids.
+- Changing the board's or a Topic's pattern source is a production migration
+  over team-critical data, held behind the rehearsal and authorization rules in
+  `references/pattern-updates.md`.
+
+## The detail, by task
+
+| Read                               | When you are                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `references/verbs.md`              | orienting: the discovery commands and their costs, the deployment gap, the declared contract, retraction and by-reference verbs               |
+| `references/reading.md`            | surveying the board or reading a Topic: the index, addresses and how to compare them, durable inputs against stepped results                  |
+| `references/naming.md`             | citing or resolving a Topic by its number, `top/42`, and what the deployment carries                                                          |
+| `references/mutating.md`           | creating a Topic and recovering its address, the observation asymmetry, the Topic verbs, references between Topics, the editorial conventions |
+| `references/pattern-updates.md`    | changing pattern source: `setsrc` rehearsal, `--root`, team authorization                                                                     |
+| `references/namespace-backfill.md` | naming the Topics filed before the namespace: the operator procedure and its traps                                                            |
