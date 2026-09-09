@@ -342,7 +342,41 @@ describe("v2-server-refresh-timing", () => {
               }),
             );
             expect(own.error).toBeUndefined();
-            await server.flushSessions();
+            const attachmentStarted = Promise.withResolvers<void>();
+            const releaseAttachment = Promise.withResolvers<void>();
+            server.accessForTestingOnly.engineOpener = async (
+              requested,
+              openEngine,
+            ) => {
+              // After the tracked set is committed, this path opens the
+              // engine to attach operation-watch fields to the catch-up.
+              if (
+                countOf("memory/refresh/phase/tracked") === before.tracked + 1
+              ) {
+                attachmentStarted.resolve();
+                await releaseAttachment.promise;
+              }
+              return await openEngine(requested);
+            };
+            const messageCount = messages.length;
+            const flushing = server.flushSessions();
+            try {
+              await Promise.race([
+                attachmentStarted.promise,
+                flushing.then(() => {
+                  throw new Error(
+                    "`flushSessions()` completed without pausing operation-field attachment",
+                  );
+                }),
+              ]);
+              expect(countOf("memory/refresh/session/touched")).toBe(
+                before.touched,
+              );
+            } finally {
+              releaseAttachment.resolve();
+              server.accessForTestingOnly.engineOpener = undefined;
+              await flushing;
+            }
 
             expect(errors).toEqual([]);
             expect(countOf("memory/refresh/session/touched")).toBe(
@@ -352,6 +386,15 @@ describe("v2-server-refresh-timing", () => {
               before.tracked + 1,
             );
             expect(countOf("memory/refresh/phase/frame")).toBe(before.frame);
+            const effects = messages.slice(messageCount).filter((message) =>
+              message.type === "session/effect"
+            );
+            expect(effects).toHaveLength(1);
+            expect(effects[0].effect.upserts).toEqual([]);
+            expect(
+              effects[0].effect.operationFields?.map(({ watchId }) => watchId),
+            )
+              .toEqual(["watch-operation-field"]);
           } finally {
             connection.close();
           }
