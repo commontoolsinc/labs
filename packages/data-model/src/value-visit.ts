@@ -426,109 +426,22 @@ class VisitInProgress<Domain, ResultType> {
 }
 
 /**
- * Base class for value visiting. In addition to implementing `ValueVisitor`
- * vacuously -- all visitor methods `throw`ing -- this includes the mechanism
- * for actually visiting. Subclasses are expected to `override` whatever methods
- * are needed in the context of the actual expected visits.
+ * Performs a one-off visit of a value with a visitor.
  */
-export class BaseValueVisitor<Domain, ResultType>
-  implements ValueVisitor<Domain, ResultType> {
-  //
-  // Subclass contract
-  //
+export function visitValue<Domain, ResultType>(
+  value: Domain,
+  visitor: ValueVisitor<Domain, ResultType>,
+): MainVisitResult<ResultType> {
+  const inProgress = new VisitInProgress<Domain, ResultType>(visitor);
+  return inProgress.visit(value);
+}
 
-  /** @inheritDoc */
-  visitArrayContentsItem(
-    _index: number,
-    value: Domain,
-  ): ContainerIterationResult<ResultType> {
-    BaseValueVisitor.#throwMissing("visitArrayContentsItem", value);
-  }
-
-  /** @inheritDoc */
-  visitCycle(
-    value: Domain,
-    _originalDepth: number,
-    _thisDepth: number,
-  ): LeafVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitCycle", value);
-  }
-
-  /** @inheritDoc */
-  visitFabricArray(
-    value: Domain & FabricArray,
-  ): LeafVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitFabricArray", value);
-  }
-
-  /** @inheritDoc */
-  visitFabricInstance(
-    value: Domain & FabricInstance,
-  ): LeafVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitFabricInstance", value);
-  }
-
-  /** @inheritDoc */
-  visitFabricPlainObject(
-    value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitFabricPlainObject", value);
-  }
-
-  /** @inheritDoc */
-  visitFabricContainer(
-    value: Domain & FabricContainerValue,
-  ): GeneralVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitFabricContainer", value);
-  }
-
-  /** @inheritDoc */
-  visitMapContentsItem(
-    _key: Domain,
-    value: Domain,
-  ): ContainerIterationResult<ResultType> {
-    BaseValueVisitor.#throwMissing("visitMapContentsItem", value);
-  }
-
-  /** @inheritDoc */
-  visitNonFabricValue(
-    value: Domain,
-  ): LeafVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitNonFabricValue", value);
-  }
-
-  /** @inheritDoc */
-  visitPrimitive(
-    value: Domain & (Primitive | FabricPrimitive),
-    _type: ValueTag,
-  ): LeafVisitorResult<Domain, ResultType> {
-    BaseValueVisitor.#throwMissing("visitPrimitive", value);
-  }
-
-  /** @inheritDoc */
-  visitValue(value: Domain): MainVisitResult<ResultType> {
-    BaseValueVisitor.#throwMissing("visitValue", value);
-  }
-
-  //
-  // Instance members
-  //
-
-  /** Visits the indicated value. */
-  visit(value: Domain): MainVisitResult<ResultType> {
-    const inProgress = new VisitInProgress<Domain, ResultType>(this);
-    return inProgress.visit(value);
-  }
-
-  //
-  // Static members
-  //
-
-  /**
-   * `Throw`s a "missing implementation" exception.
-   */
-  static #throwMissing(methodName: string, value: unknown): never {
-    const desc = `${methodName}(${toDebugKindString(value)})`;
-    throw new Error(`Missing visitor implementation: ${backtickQuote(desc)}`);
-  }
+/**
+ * Creates a visitor function bound to the given visitor. The result is a
+ * single-argument `visit(value)` function.
+ */
+export function makeVisitFunction<Domain, ResultType>(
+  visitor: ValueVisitor<Domain, ResultType>,
+): (value: Domain) => MainVisitResult<ResultType> {
+  return (value: Domain) => visitValue(value, visitor);
 }
