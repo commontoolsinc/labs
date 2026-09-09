@@ -286,13 +286,14 @@ and by nothing else. The manifest it resolved answers the next question,
 which is why it did not: held back as too flaky, or passed over by the
 packing. Only a resolved manifest that holds the identity can support
 that last answer, and a report without one says the run did not run the
-test rather than crediting the selector with a decision nothing made. Where the manifest says the test was to have run
-— the packing reached it, or the store has never seen it, which makes it
-mandatory — a run with no record of it recorded less than it ran, and
-that is a different statement from a run that did not reach it. A test the packing did not reach is coverage
-this design traded away rather than something the change missed, and it
-must be described that way. The failure raises the test's score, so the
-next change in that area runs it.
+test rather than crediting the selector with a decision nothing made.
+Where the manifest says the test was to have run — the packing reached
+it, or the store has never seen it, which makes it mandatory — a run
+with no record of it recorded less than it ran, and that is a different
+statement from a run that did not reach it. A test the packing did not
+reach is coverage this design traded away rather than something the
+change missed, and it must be described that way. The failure raises the
+test's score, so the next change in that area runs it.
 
 A report addresses the change and never a person. No author is named, no
 figure is counted per author or per team, and no history of such reports

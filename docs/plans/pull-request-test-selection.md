@@ -2839,11 +2839,15 @@ the job and the rules that read it rather than redesigning the packer.
 **Pull requests should get *less* red, not more.** This is the opposite of
 what an early draft of this design predicted, and the difference is the
 exclusion rule. A test too flaky to judge by is not selected, so nobody's
-pull request fails for a test that disagrees with itself. What is left to
-block a pull request is stable tests with a record of catching real
-things — which is the only category where a red build is worth having.
-Set against that, a flaky-but-not-excluded item repeated three times
-fails three times as often as it would have. The net is an empirical question and the
+pull request fails for a test that disagrees with itself. Three kinds of
+test are left that can turn one red. One the packing made mandatory,
+which is a test the change touches or one the store has never seen. One
+the score reached, which is the category where a red build is worth
+having. And one the default branch is already failing, which nothing
+holds back; that failure belongs to the default branch, and fixing it
+there is what clears it. Set against all of that, a
+flaky-but-not-excluded item repeated three times fails three times as
+often as it would have. The net is an empirical question and the
 dashboard is where it gets answered.
 
 **Coverage stops being enforced across the repository, and stays enforced
