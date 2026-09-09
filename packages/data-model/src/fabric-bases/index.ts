@@ -18,5 +18,11 @@
  * codec, and the machinery driving those lives in `codec-common/`.
  */
 
-export { BaseFabricInstance } from "./BaseFabricInstance.ts";
-export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+export {
+  BaseFabricInstance,
+  DEEP_CLONE_CORE,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
+export { BaseFabricPrimitive, VALUE_TAG } from "./BaseFabricPrimitive.ts";

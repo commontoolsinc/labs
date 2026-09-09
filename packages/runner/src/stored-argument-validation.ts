@@ -46,8 +46,8 @@ interface LinkOverlayContext {
   /** Completed overlays keyed by resolved address and materialized value. */
   results: Map<string, Map<unknown, unknown>>;
 
-  /** Number of active back edges encountered during this traversal. */
-  cycleVersion: number;
+  /** Reads whose result depends on a recursion cutoff or unavailable value. */
+  incompleteReads: number;
 }
 
 /**
@@ -179,13 +179,12 @@ export function readStoredLinkChainRaw(
  *
  * The walk mirrors the materialization it repairs: from the argument doc's
  * raw bytes, following every link — across docs and spaces, to any depth —
- * via {@link readStoredLinkChainRaw}. The fleet incident this generalizes
- * from: a profile's `name` cell stores a link to its seed value's doc,
- * cold-start sync delivers the cell doc but not the seed doc, and the
- * one-hop overlay this walk replaced could not see past the first
- * resolution — so every home bricked with `profiles: 0: name: value does
- * not match type string` on the first pattern-identity move after the
- * profile was written.
+ * via {@link readStoredLinkChainRaw}. Stored links distinguish an unreadable
+ * target from a literal absence in the already-defaulted materialized view.
+ * Completed subgraphs are reused by address and view within this validation;
+ * a result affected by a recursion cutoff or unavailable raw-chain read stays
+ * local to its descent. Shared acyclic subgraphs avoid repeated expansion,
+ * while cyclic graphs retain their path-dependent cutoff behavior.
  *
  * The caller supplies an already-materialized snapshot. Exported from this
  * module for direct cycle tests: eager materialization can reject a cyclic
@@ -202,7 +201,7 @@ export function overlayUnreadableLinkPlaceholders(
     base,
     raw,
     materialized,
-    { chain: new Set(), results: new Map(), cycleVersion: 0 },
+    { chain: new Set(), results: new Map(), incompleteReads: 0 },
   );
 }
 
@@ -219,35 +218,38 @@ function overlayUnreadableLinkPlaceholdersInternal(
     const link = parseLink(raw, base);
     const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
     if (context.chain.has(key)) {
-      context.cycleVersion++;
+      context.incompleteReads++;
       return materialized;
     }
     // Resolve relative links before indexing, and keep separately defaulted
     // views of the same endpoint distinct. Reusing the whole completed walk
-    // bounds both reads and traversal work on shared linked graphs.
+    // bounds both reads and traversal work on shared acyclic linked graphs.
     let byValue = context.results.get(key);
     if (byValue?.has(materialized)) return byValue.get(materialized);
     if (byValue === undefined) {
       byValue = new Map();
       context.results.set(key, byValue);
     }
-    const cycleVersion = context.cycleVersion;
+    const incompleteBefore = context.incompleteReads;
     context.chain.add(key);
     try {
       const reading = readStoredLinkChainRaw(tx, link, context.chain);
-      if (reading.cyclic) context.cycleVersion++;
-      const result = reading.value === undefined
-        ? materialized
-        : overlayUnreadableLinkPlaceholdersInternal(
-          tx,
-          reading.base,
-          reading.value,
-          materialized,
-          context,
-        );
+      if (reading.value === undefined) {
+        // A raw chain can stop at an active ancestor or unavailable value.
+        // Its result and every enclosing result stay local to this descent.
+        context.incompleteReads++;
+        return materialized;
+      }
+      const result = overlayUnreadableLinkPlaceholdersInternal(
+        tx,
+        reading.base,
+        reading.value,
+        materialized,
+        context,
+      );
       // A back edge leaves an ancestor's materialized value in place. That
       // partial result depends on this descent and cannot serve a sibling.
-      if (cycleVersion === context.cycleVersion) {
+      if (incompleteBefore === context.incompleteReads) {
         byValue.set(materialized, result);
       }
       return result;

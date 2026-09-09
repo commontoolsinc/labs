@@ -32,9 +32,8 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { tagFromNativeBuiltinClass } from "./tagFromNativeBuiltinClass.ts";
 import { isFabricPlainObject } from "./type-check.ts";
-import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeBuiltinClassElseNull, VALUE_TAGS } from "./value-tags.ts";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting
@@ -418,19 +417,21 @@ export function isValidFabricNativeObject(
   if (Array.isArray(value)) return false;
 
   const ctor = constructorOfObject(value);
-  const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
+  const tag = (ctor !== undefined)
+    ? tagFromNativeBuiltinClassElseNull(ctor)
+    : null;
 
   // `Error.isError()` is the test that holds across realms, where `instanceof`
   // does not, and it is what sees an error whose constructor is unreachable.
   // The one environment here that rebuilds the `Error` constructor -- SES
   // lockdown -- has the method restored before any of this runs.
-  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
-    case VALUE_TAGS.Error:
-    case VALUE_TAGS.Map:
-    case VALUE_TAGS.Set:
-    case VALUE_TAGS.Date:
-    case VALUE_TAGS.Uint8Array:
-    case VALUE_TAGS.RegExp: {
+  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.JsError : null)) {
+    case VALUE_TAGS.JsError:
+    case VALUE_TAGS.JsMap:
+    case VALUE_TAGS.JsSet:
+    case VALUE_TAGS.JsDate:
+    case VALUE_TAGS.JsUint8Array:
+    case VALUE_TAGS.JsRegExp: {
       return true;
     }
 

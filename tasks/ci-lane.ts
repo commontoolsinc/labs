@@ -413,6 +413,7 @@ export async function runBatch(
     const invocations = await batch.suite.command(batch.units, {
       root: options.root,
       outputDir,
+      spoolDir: batchSpool,
       ...(options.base === undefined ? {} : { baseRef: options.base }),
     });
     for (const invocation of invocations) {

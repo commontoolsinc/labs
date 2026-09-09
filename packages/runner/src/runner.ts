@@ -235,13 +235,14 @@ const RESULT_SHORTCUT_LIMIT = 4096;
  * spent budget reads as absent, and the run pays one name-sync it may not
  * have needed. A wide argument — one whose links, and the values behind
  * them, fan out past the budget within the walk's depth — is therefore held
- * once per runtime per pattern identity even when its whole family is
- * local. That is the cheaper error. Narrowing the walk to the argument's own
- * links would skip the links a linked document's value holds, which the
- * name-sync's argument-link-target wave exists to warm; a missed absence
- * costs a conflicting first commit, a spurious hold costs a re-sync the
- * client answers from coverage it already has. The gate logs a spent budget
- * so a wide piece held for it is diagnosable.
+ * even when its whole family is local. A cached shortcut for that piece skips
+ * the probes only while its pattern identity matches the run. Eviction or
+ * replacement by another pattern can cause another probe and hold. The walk
+ * follows links in a linked document's value because the name-sync's
+ * argument-link-target wave warms them; a missed absence costs a conflicting
+ * first commit, and a spurious hold costs a re-sync the client answers from
+ * coverage it already has. The gate logs a spent budget so a wide piece
+ * held for it is diagnosable.
  */
 const NAMING_PROBE_BUDGET = 256;
 
@@ -1881,13 +1882,13 @@ export class Runner {
    * an internal cell the crossing never delivered. Bounded like the other
    * result shortcuts; an evicted entry costs a probe, never a wrong verdict.
    *
-   * A name-sync that rejects lands all the same. The run then degrades to
-   * what it was before the gate existed — over what is local, its own
-   * subscriptions fetching the rest, the rejection logged as the signal —
-   * and a later run under the same pattern is not held again for this
-   * runner's lifetime, a transient rejection included. Withholding the
-   * landing would name the piece again on every run, and the deferred run's
-   * own re-check of the gate would loop on the same rejection.
+   * A name-sync that rejects lands all the same. The run proceeds over what
+   * is local, with its own subscriptions fetching the rest and the rejection
+   * logged as the signal. The cached landing skips the probes for this piece
+   * only while its pattern identity matches the run, a transient rejection
+   * included. Eviction or replacement by another pattern's landing can cause
+   * another probe and hold. Recording the landing lets the deferred run's
+   * re-check pass the gate.
    */
   readonly #namedFamilies = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
@@ -2386,6 +2387,33 @@ export class Runner {
     }
   }
 
+  /**
+   * Validate a piece's stored argument against a candidate without staging it.
+   *
+   * Uses setup's value validation and defaults. Unreadable argument documents
+   * and linked slots defer to reactive reads; readable wrong-typed values
+   * throw a stored-argument schema refusal. Optional `undefined` fields count
+   * as absent. Validation reads the supplied transaction's snapshot.
+   */
+  validateStoredArgument<R>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<R>,
+    pattern: Pattern,
+  ): void {
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
+    if (argumentLink === undefined) return;
+    const stored = this.#runtime.getCellFromLink(argumentLink, undefined, tx)
+      .getRaw({ meta: ignoreReadForScheduling });
+    if (stored === undefined) return;
+    const defaults = extractDefaultValues(pattern.argumentSchema);
+    this.#validateArgument(
+      tx,
+      argumentLink,
+      pattern.argumentSchema,
+      defaults,
+    );
+  }
+
   #resolveSetupPattern(
     patternOrModule: Pattern | Module | undefined,
     previousIdentityRef: { identity: string; symbol: string } | undefined,
@@ -2547,36 +2575,6 @@ export class Runner {
     }
   }
 
-  /**
-   * Check a piece's STORED argument against `pattern`'s schema without staging
-   * anything. Used where the caller must not move the piece but must not
-   * report success over an argument nobody has checked either.
-   *
-   * Mirrors the re-stage branch's deferrals deliberately, so the two paths
-   * cannot disagree about what counts as valid: an argument doc that reads
-   * nothing right now is skipped (CT-1917 — a nested piece's argument lives in
-   * its host's doc, and "not synced" is not "invalid"), and `#validateArgument`
-   * itself defers any slot whose stored link chain cannot be read right now.
-   */
-  #validateStoredArgument<R>(
-    tx: IExtendedStorageTransaction,
-    resultCell: Cell<R>,
-    pattern: Pattern,
-  ): void {
-    const argumentLink = getMetaLink(resultCell, "argument");
-    if (argumentLink === undefined) return;
-    const stored = this.#runtime.getCellFromLink(argumentLink, undefined, tx)
-      .getRaw({ meta: ignoreReadForScheduling });
-    if (stored === undefined) return;
-    const defaults = extractDefaultValues(pattern.argumentSchema);
-    this.#validateArgument(
-      tx,
-      argumentLink,
-      pattern.argumentSchema,
-      defaults,
-    );
-  }
-
   #updateResultSchemaMeta<R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
@@ -2640,7 +2638,7 @@ export class Runner {
 
     if (argument === undefined && setupState.sameStoredSetup) {
       if (setupState.restageStoredArgument) {
-        this.#validateStoredArgument(tx, resultCell, pattern);
+        this.validateStoredArgument(tx, resultCell, pattern);
       }
       return { resultCell, patternRef, needsStart: false };
     }
@@ -8260,26 +8258,20 @@ export class Runner {
     };
   }
 
-  #serializeQueryResult(
-    inputsCell: Cell<any>,
-    tx: IExtendedStorageTransaction,
-  ): string {
-    try {
-      return JSON.stringify(inputsCell.getAsQueryResult([], tx));
-    } catch (_error) {
-      return "(Can't serialize to JSON)";
-    }
-  }
-
+  /**
+   * What an action's argument was validated against and what it was
+   * validated from, for the invalid-input diagnostics. The raw binding is
+   * the inputs as bound — links unresolved — so building this reads no
+   * document the argument schema does not, and registers nothing in the
+   * action's transaction beyond what validating the argument already did.
+   */
   #getJavaScriptInputState(
     module: Module,
     inputsCell: Cell<any>,
-    tx: IExtendedStorageTransaction,
-  ): { schema: Module["argumentSchema"]; raw: unknown; queryResult: string } {
+  ): { schema: Module["argumentSchema"]; raw: unknown } {
     return {
       schema: module.argumentSchema,
       raw: inputsCell.getRaw(),
-      queryResult: this.#serializeQueryResult(inputsCell, tx),
     };
   }
 
@@ -8288,7 +8280,6 @@ export class Runner {
     isValidArgument: boolean,
     module: Module,
     inputsCell: Cell<any>,
-    tx: IExtendedStorageTransaction,
   ): void {
     if (!name) return;
 
@@ -8297,7 +8288,7 @@ export class Runner {
         "action invalid input",
         `action:${name}`,
         true,
-        this.#getJavaScriptInputState(module, inputsCell, tx),
+        this.#getJavaScriptInputState(module, inputsCell),
       );
       return;
     }
@@ -9050,35 +9041,24 @@ export class Runner {
           isValidArgument,
           module,
           inputsCell,
-          tx,
         );
 
         if (!isValidArgument) {
-          const inputState = this.#getJavaScriptInputState(
-            module,
-            inputsCell,
-            tx,
-          );
           logger.error(
             "stream",
             () => [
               "action argument is undefined (potential schema mismatch) -- not running",
-              {
-                schema: inputState.schema,
-                raw: inputState.raw,
-                asQueryResult: inputState.queryResult,
-              },
+              this.#getJavaScriptInputState(module, inputsCell),
             ],
           );
-          // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
-          // a04 write-side member): record the skip on the transaction so
-          // the scheduler's event finalize can withdraw a SERVED
-          // dispatch's tx instead of sealing it. The dispatch stamper
-          // wrote the entry's `consequenced` mark into this tx BEFORE
-          // the body ran (space-server.ts), so sealing a skipped run
-          // commits a 1-op mark-only consequence — the entry permanently
-          // consumed with zero effects and no error. A fact, recorded
-          // unconditionally; the scheduler gates on `served`.
+          // Record the skip on the transaction: the scheduler's event
+          // finalize withdraws the transaction instead of sealing it and
+          // re-runs the handler (events.md §5). On a replica still loading
+          // what the argument reaches, `undefined` is a cold read rather
+          // than a mismatch, and a sealed skip would consume the event —
+          // for a served dispatch as a 1-op mark-only consequence, for a
+          // client dispatch as a commit callback reporting a handling
+          // that never happened.
           tx.dispatchedHandlerNotRun = {
             reason: "action argument is undefined (potential schema mismatch)",
           };
@@ -9412,26 +9392,16 @@ export class Runner {
           isValidArgument,
           module,
           inputsCell,
-          tx,
         );
 
         if (!isValidArgument || previouslyInvalidArgument) {
-          const inputState = this.#getJavaScriptInputState(
-            module,
-            inputsCell,
-            tx,
-          );
           logger.info(
             "action",
             () => [
               isValidArgument
                 ? "action argument is valid now -- running"
                 : "action argument is undefined (potential schema mismatch) -- not running",
-              {
-                schema: inputState.schema,
-                raw: inputState.raw,
-                asQueryResult: inputState.queryResult,
-              },
+              this.#getJavaScriptInputState(module, inputsCell),
             ],
           );
           previouslyInvalidArgument = !isValidArgument;

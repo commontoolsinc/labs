@@ -1,6 +1,11 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { harnessFabricSessionPosture } from "../src/cfc-posture.ts";
@@ -231,7 +236,6 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
   }).getRunState().fabricSessionCfc;
   assertEquals(pinnedCfc?.enforcementMode, unstatedRecord.enforcementMode.rung);
   assertEquals(pinnedCfc?.enforcementModeSource, "preset-pin");
-  assertEquals(pinnedCfc?.flowLabels, "off");
   assertEquals(pinnedCfc?.flowLabelsSource, "default");
   assertEquals(pinnedCfc?.record, unstatedRecord);
 
@@ -1994,10 +1998,15 @@ Deno.test("CfHarnessEngine records the fabric session's read ceiling in run stat
     workspaceHostPath: "/host/project",
     fabricSession: boundedSession,
   }).getRunState();
-  assertEquals(runState.fabricSessionCfc, {
+  const recorded = runState.fabricSessionCfc;
+  assertExists(recorded);
+  // Every field of the published posture but the flow-labels rung, which the
+  // `fabricSessionCfcFlowLabels()` cases in `test/cfc-posture.test.ts` read.
+  // No session here states that dial, so the source is `default`.
+  const { flowLabels: _rung, ...ceiling } = recorded;
+  assertEquals(ceiling, {
     enforcementMode: "enforce-strict",
     enforcementModeSource: "configured",
-    flowLabels: "off",
     flowLabelsSource: "default",
     readMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
     readOnExceed: "skip",

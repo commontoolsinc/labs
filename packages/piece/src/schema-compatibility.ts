@@ -28,6 +28,9 @@ import { fabricAwareEqual } from "@commonfabric/data-model";
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
 
+/** Object spelling of the unconstrained schema, shared by recursive proofs. */
+const UNCONSTRAINED_SCHEMA = internSchema({});
+
 interface CompatibilityContext {
   sourceRoot: JSONSchema;
   targetRoot: JSONSchema;
@@ -78,24 +81,20 @@ type ActivePairsByRoot = WeakMap<
 >;
 
 /**
- * The keywords a schema comparison may ignore: they annotate a schema without
- * constraining the values it admits, so adding or removing one across a piece
- * update proves nothing about compatibility either way.
+ * The annotations that describe a schema to a reader or to a listing and take
+ * no part in any comparison this module makes. Two schemas that differ only in
+ * these say the same thing, and {@link schemaSubtreesEqual} reads past them.
  *
- * Exported because a second reader classifies keywords and would otherwise
- * keep its own copy of this list. What it says is which keywords are
- * validation-neutral **to this checker**; it is not a statement about what any
- * other consumer of a schema does with a key, and a reader that acts on one —
- * the runner reserves three `$comment` values as traversal control markers —
- * has to settle that against that consumer rather than against this set.
+ * {@link ANNOTATION_KEYS} extends this set with four keywords the subset proof
+ * likewise treats as annotations but the equality walk still compares:
+ * `default` is a value compared whole, `$id` moves the base a `$ref` resolves
+ * against, and `$defs` and `definitions` are maps of schemas the walk
+ * descends. A keyword added here is dropped from equality as well; one that
+ * carries structure belongs on that list instead.
  */
-export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
+const DESCRIPTIVE_ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   "$comment",
-  "$defs",
-  "$id",
   "$schema",
-  "default",
-  "definitions",
   // Standard JSON Schema annotation. The generator emits it from
   // `@deprecated` JSDoc so `cf piece verbs` can hide legacy streams by
   // default; it is validation-neutral by spec, so it must add and remove
@@ -112,6 +111,27 @@ export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   // verbs` shows by default; `cf piece call` never consults it.
   "tier",
   "title",
+]);
+
+/**
+ * Keywords excluded from the subset proof's ordinary constraint comparison.
+ * Descriptive annotations leave the contract unchanged. Defaults and reference
+ * metadata have dedicated checks: defaults affect materialization, and reference
+ * metadata determines which schemas are compared.
+ *
+ * Exported because a second reader classifies keywords and would otherwise
+ * keep its own copy of this list. What it says is which keywords are
+ * validation-neutral **to this checker**; it is not a statement about what any
+ * other consumer of a schema does with a key, and a reader that acts on one —
+ * the runner reserves three `$comment` values as traversal control markers —
+ * has to settle that against that consumer rather than against this set.
+ */
+export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
+  ...DESCRIPTIVE_ANNOTATION_KEYS,
+  "$defs",
+  "$id",
+  "default",
+  "definitions",
 ]);
 
 const COMPLEX_CONSTRAINT_KEYS = [
@@ -482,7 +502,7 @@ const comparableIfc = (ifc: unknown): unknown => {
  * line between them is whether the caller will (re)instantiate the graph, not
  * whether the piece happens to be running: `Runner.#applySetupState` re-points
  * and validates the argument for a cold root and for the watcher's hot-swap,
- * both of which then instantiate; `Runner.#validateStoredArgument` checks a
+ * both of which then instantiate; `Runner.validateStoredArgument` checks a
  * piece that is being REUSED — its nodes stay as they are — and moves nothing
  * (`packages/runner/test/pattern-update-argument-validation.test.ts`).
  *
@@ -611,17 +631,18 @@ export function assertPatternSchemasBackwardCompatible(
  * `target`. This is used for durable links: validating only their current
  * materialization is insufficient because the linked cell can change later.
  *
- * The `ifc` reduction {@link comparableIfc} performs applies here as well, and
- * this entry point puts it to a different question. A pattern update compares
- * two versions of one contract, where a changed writer identity is the same
- * module recompiled. A link joins two separate pieces, where a differing
- * `moduleIdentity` names a different authoring module. What holds either way is
- * the reason the reduction exists: the runtime authorizes a write against the
- * claim on the location being written, re-verifying the live writer's
- * `moduleIdentity` there (`writeAuthorizedByReason`,
- * `packages/runner/src/cfc/prepare.ts`). Proving a link neither performs that
- * check nor stands in for it, and the binding `path` and the whole `uiContract`
- * are compared here as they are for an update.
+ * The `ifc` reduction {@link comparableIfc} performs reaches this proof as
+ * well, where the two claims come from two separate pieces and a differing
+ * `moduleIdentity` names a different authoring module rather than one module
+ * recompiled. The reduction stays because this proof is not what decides who
+ * may write. That is decided at write time, against the claim in the schema
+ * write-policy input recorded at the document a write reaches
+ * (`writeAuthorizedByReason`, `packages/runner/src/cfc/prepare.ts`), and a
+ * durable link reaches storage by routes this proof does not sit on — a
+ * handler writing a handle into a slot among them. A proof that refused a
+ * writer identity would therefore withhold no authority, and the binding
+ * `path` and the whole `uiContract` are compared here as they are for a
+ * pattern update.
  */
 export function assertSchemaSubset(
   source: JSONSchema,
@@ -657,6 +678,35 @@ export function assertSchemaSubset(
   if (issue !== undefined) {
     throw new Error(`${label} schema is not compatible: ${issue}`);
   }
+}
+
+/**
+ * Determines whether two valid schemas describe the same resolved contract,
+ * including defaults and reference roots. Uses the contract's IFC normalization
+ * without treating defaults as a new materialization step.
+ *
+ * @internal Used to recognize a retained consumer contract. New-link admission
+ * requires `assertSchemaSubset()`, whose default-insertion checks still apply.
+ */
+export function schemasHaveSameContract(
+  source: JSONSchema,
+  target: JSONSchema,
+  options: SchemaSubsetOptions = {},
+): boolean {
+  const sourceRoot = options.sourceRoot ?? source;
+  const targetRoot = options.targetRoot ?? target;
+  if (
+    validateSchemaDefinition(source, sourceRoot) !== undefined ||
+    validateSchemaDefinition(target, targetRoot) !== undefined
+  ) return false;
+  const sourceResolution = resolveSchema(source, sourceRoot);
+  const targetResolution = resolveSchema(target, targetRoot);
+  return sourceResolution.schema !== undefined &&
+    targetResolution.schema !== undefined &&
+    schemasResolveEqually(sourceResolution.schema, targetResolution.schema, {
+      sourceRoot: sourceResolution.root,
+      targetRoot: targetResolution.root,
+    });
 }
 
 function schemaSubsetIssue(
@@ -719,23 +769,27 @@ function schemaSubsetIssue(
   if (schemasResolveEqually(source, target, context)) return undefined;
 
   if (source === false || target === true) return undefined;
-  if (source === true) {
-    return target === false
-      ? `${path}: the candidate schema rejects values accepted previously`
-      : `${path}: an unconstrained schema is no longer accepted`;
-  }
   if (target === false) {
     return `${path}: the candidate schema rejects values accepted previously`;
+  }
+  if (source === true) {
+    // The object proof recognizes unconstrained targets such as `{}` and
+    // `type: "unknown"` while checking any constraints beside them.
+    return schemaSubsetIssue(UNCONSTRAINED_SCHEMA, target, path, {
+      ...context,
+      allowEvolutionPolicy: false,
+    });
   }
 
   if (pairIsActive(source, target, context)) return undefined;
   markPairActive(source, target, context);
   try {
-    const sourceAlternatives = schemaAlternatives(source);
-    const targetAlternatives = schemaAlternatives(target);
-    if (sourceAlternatives || targetAlternatives) {
-      const sources = sourceAlternatives ?? [[source]];
-      const targets = targetAlternatives ?? [[target]];
+    if (
+      source.anyOf || target.anyOf ||
+      Array.isArray(source.type) || Array.isArray(target.type)
+    ) {
+      const sources = schemaAlternatives(source);
+      const targets = schemaAlternatives(target);
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
           schemaConjunctionSubsetIssue(
@@ -843,6 +897,18 @@ function schemaSubsetIssue(
 
 const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   ...ANNOTATION_KEYS,
+  // Four of the five `SEMANTIC_EXTENSION_KEYS` say how a value is delivered,
+  // stored, or written, not what shape it has, so a default inserted beneath
+  // one cannot falsify it. A change to the marker itself is still refused by
+  // the exact comparison in `objectSubsetIssue`. `ifc` is left out on
+  // purpose: a label is policy the write-authority comparison reasons about
+  // (`comparableIfc`), and whether a materialized default satisfies a
+  // labeled node's floor is that comparison's question, not this one's, so
+  // a changed default beneath an `ifc` stays refused until it is decided.
+  "asCell",
+  "readOnly",
+  "scope",
+  "writeOnly",
   "$ref",
   "additionalProperties",
   "exclusiveMaximum",
@@ -1024,20 +1090,15 @@ function objectSubsetIssue(
     // A verb's event is the exception, and it is one of location rather than of
     // principle. The node sits in the result, so this covariant comparison
     // reaches it — but the pattern does not produce the event, the CALLER
-    // supplies it. Requiring a field the previous event did not is therefore a
-    // demand made of every call already written, and each one that omits it is
-    // refused at dispatch once the update has landed. Below a verb node the
-    // rule is the argument side's, stated in this comparison's direction:
-    // `source` is the candidate here, where `target` is the candidate there.
-    // The rescue turns on the field's own default and not on
-    // `allowEvolutionDefaults`, which the verb node above has already set
-    // false: `asCell` is not default-stable, so descending through one
-    // withdraws permission to introduce a default anywhere below. That
-    // withdrawal is about defaults that CHANGE, which the check above decides
-    // on its own. A field that carried the same default before and after
-    // changes nothing and still materializes for a caller that omits it, so
-    // reusing the flag here would refuse the one evolution this rule means to
-    // allow.
+    // supplies it. Requiring a field the previous event did not adds a demand
+    // on callers. Below a verb node the rule is the argument side's, stated in
+    // this comparison's direction: `source` is the candidate here, where
+    // `target` is the candidate there.
+    // A valid default on the candidate field rescues the new requirement,
+    // whether that default is retained, introduced, or changed. The stream
+    // marker permits default insertion, and dispatch fills missing fields in
+    // a present event object from defaults. Other ancestor constraints still
+    // apply their own default-stability checks.
     if (context.verbEvent) {
       for (const property of sourceRequired) {
         if (
@@ -1216,9 +1277,6 @@ function additionalPropertiesSubsetIssue(
   }
   if (targetAdditional === false) {
     return `${path}: additional properties accepted previously would now be rejected`;
-  }
-  if (sourceAdditional === true) {
-    return `${path}: additional properties are now constrained`;
   }
   return schemaSubsetIssue(
     sourceAdditional,
@@ -1438,17 +1496,22 @@ function schemaMayProduceType(
     types.some((type) => applicableTypes.includes(type));
 }
 
-function schemaAlternatives(
-  schema: SchemaObject,
-): JSONSchema[][] | undefined {
-  if (schema.anyOf) {
-    const { anyOf, ...base } = schema;
-    return anyOf.map((branch) => [base, branch]);
+/**
+ * Conjunctions for each alternative after the caller checks whole-schema
+ * defaults. The root default is omitted from both sides, including a schema
+ * with a single type, so branch comparisons concern their value constraints.
+ * Descendant schemas and their defaults remain intact.
+ */
+function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
+  const { default: _default, ...withoutDefault } = schema;
+  if (withoutDefault.anyOf) {
+    const { anyOf, ...base } = withoutDefault;
+    return anyOf.map((alternative) => [base, alternative]);
   }
-  if (Array.isArray(schema.type)) {
-    return schema.type.map((type) => [{ ...schema, type }]);
+  if (Array.isArray(withoutDefault.type)) {
+    return withoutDefault.type.map((type) => [{ ...withoutDefault, type }]);
   }
-  return undefined;
+  return [[withoutDefault]];
 }
 
 /**
@@ -1551,7 +1614,9 @@ const keywordValuesEqual = (
  * one written on the node being checked.
  *
  * Two schemas that are equal as they stand settle on the first line. Past that
- * the walk descends the keywords that hold nested schemas, so an `ifc` reached
+ * the {@link DESCRIPTIVE_ANNOTATION_KEYS} are ignored. Defaults, reference
+ * definitions, and reference boundaries remain part of the comparison. The
+ * walk descends the keywords that hold nested schemas, so an `ifc` reached
  * only through a composite keyword (`allOf`, `oneOf`, `if`/`then`, `not`) gets
  * the same reduction as one the per-node recursion reaches directly.
  *
@@ -1563,6 +1628,7 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
   if (fabricAwareEqual(left, right)) return true;
   if (!isPlainObject(left) || !isPlainObject(right)) return false;
   for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (DESCRIPTIVE_ANNOTATION_KEYS.has(key)) continue;
     if (
       key !== "ifc" && Object.hasOwn(left, key) !== Object.hasOwn(right, key)
     ) {
@@ -1576,7 +1642,7 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
 function schemasResolveEqually(
   source: unknown,
   target: unknown,
-  context: CompatibilityContext,
+  context: Pick<CompatibilityContext, "sourceRoot" | "targetRoot">,
 ): boolean {
   if (!schemaSubtreesEqual(source, target)) return false;
 

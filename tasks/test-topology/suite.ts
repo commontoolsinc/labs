@@ -14,6 +14,7 @@ import {
   serializeSkipList,
   SKIP_LIST_VARIABLE,
   type SkipList,
+  spoolWriteArgument,
   type TestIdentity,
 } from "@commonfabric/test-support/records";
 import type { CapabilityId } from "../ci-capabilities.ts";
@@ -124,6 +125,14 @@ export interface CommandContext {
    * that hold a file to being appended to compare against it.
    */
   baseRef?: string;
+
+  /**
+   * The spool this batch's records go in, absolute. An invocation that
+   * loads the registration preload is permitted to write here, which is
+   * where the preload leaves the name map that gives each identity its
+   * file.
+   */
+  spoolDir: string;
 }
 
 /** One test surface. */
@@ -331,6 +340,21 @@ export function unavailableFrom(
   return { whole, unavailable };
 }
 
+/**
+ * What an invocation takes to record: the preload, and the write
+ * permission it needs to leave its name map in the batch's spool. The
+ * permission is left out where the flags already grant one, since
+ * appending a path list to a blanket grant either ends the run or cuts
+ * the grant down to that list; `spoolWriteArgument` says which.
+ */
+export function recordingArguments(
+  flags: readonly string[],
+  context: CommandContext,
+): string[] {
+  const write = spoolWriteArgument(flags, context.spoolDir);
+  return write === undefined ? [preloadArgument()] : [preloadArgument(), write];
+}
+
 /** Writes a batch's skip list where its invocations will read it. */
 export async function writeSkipList(
   skipListPath: string,
@@ -490,7 +514,7 @@ export function fileSuite(options: FileSuiteOptions): Suite {
             Deno.execPath(),
             "test",
             ...part.flags,
-            preloadArgument(),
+            ...recordingArguments(part.flags, context),
             `--junit-path=${junitPath}`,
             ...group.map((request) =>
               path.relative(cwd, path.resolve(context.root, request.unit))

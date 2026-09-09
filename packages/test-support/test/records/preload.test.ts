@@ -150,6 +150,36 @@ describe("elsewhere", () => {
 });
 `;
 
+// A file naming each suite by the handle `describe` hands back rather
+// than by nesting inside it. The runner reports a leaf under the suite
+// its call names, so that is the identity the name map has to hold and
+// the identity a skip list has to be keyed by.
+const HANDLE_BDD_FILE = `import { describe, it } from "@std/testing/bdd";
+const outer = describe("outer");
+it(outer, "kept", () => {});
+const inner = describe(outer, "inner");
+it(inner, "dropped", () => {});
+describe(inner, "bodied", () => {
+  it("nested", () => {});
+});
+`;
+
+// A file that both declares a hook outside every `describe` and names
+// its suites by handle. The root suite the runner invents holds the
+// handle-named ones, so the chain each leaf is named by opens with the
+// root suite's name and goes on through the suite the call named.
+const HOOKED_HANDLE_FILE =
+  `import { beforeEach, describe, it } from "@std/testing/bdd";
+let ran = 0;
+beforeEach(() => {
+  ran++;
+});
+const outer = describe("outer");
+it(outer, "kept", () => {
+  if (ran === 0) throw new Error("the hook did not run");
+});
+it(outer, "dropped", () => {});
+`;
 // A second file opening with the same suite title as BDD_FILE. Nothing
 // stops two files sharing one, and several packages have a title every
 // one of their files opens with.
@@ -244,6 +274,25 @@ describe(function second() {
 const NAMELESS_FILE = `import { describe, it } from "@std/testing/bdd";
 describe(() => {
   it("kept", () => {});
+});
+`;
+
+// A file whose leaves carry no name of their own, so each is named
+// after its body. One body has a name and the other has none, and the
+// runner reports the second under a chain whose last element is empty.
+const BODY_NAMED_LEAF_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("outer", () => {
+  it(function kept() {});
+  it(() => {});
+});
+`;
+
+// A file whose leaf is given an empty name of its own. That name stands
+// in place of the body's, so the runner reports the leaf with an empty
+// last element and the body's name reaches nothing.
+const EMPTY_NAME_LEAF_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("emptied", () => {
+  it({ name: "", fn: function unused() {} });
 });
 `;
 
@@ -499,6 +548,36 @@ describe("preload", () => {
     }
   });
 
+  it("names a leaf whose call carries no name after its body", async () => {
+    const fixture = await makeFixture({
+      "leaf.test.ts": BODY_NAMED_LEAF_FILE,
+      "empty.test.ts": EMPTY_NAME_LEAF_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, ["leaf.test.ts", "empty.test.ts"]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("outer > kept")).toEqual("leaf.test.ts");
+      // A body with no name of its own leaves the last element of the
+      // chain empty, and so does an empty name the call carries.
+      expect(names.get("outer > ")).toEqual("leaf.test.ts");
+      expect(names.get("emptied > ")).toEqual("empty.test.ts");
+      expect(names.get("emptied > unused")).toBeUndefined();
+
+      // The names the runner reports, which the map has to agree with
+      // for a skip list to reach any of these leaves.
+      const reported = await outcomes(fixture);
+      expect([...reported.keys()].sort()).toEqual([
+        "emptied > ",
+        "outer > ",
+        "outer > kept",
+      ]);
+      for (const outcome of reported.values()) expect(outcome).toEqual("pass");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
   it("says so when the bdd re-export loaded before it", async () => {
     // Loading the re-export first is what makes it hand back the real
     // `describe` and `it`, and every leaf then reaches the report
@@ -695,6 +774,21 @@ describe("preload", () => {
     }
   });
 
+  it("skips a leaf whose name is the empty one its body gave it", async () => {
+    const fixture = await makeFixture({ "leaf.test.ts": BODY_NAMED_LEAF_FILE });
+    try {
+      const run = await runFixture(fixture, ["leaf.test.ts"], {
+        "leaf.test.ts": ["outer > "],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > ")).toEqual("skip");
+      expect(reported.get("outer > kept")).toEqual("pass");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
   it("skips a leaf under the root suite by the name it is reported as", async () => {
     const fixture = await makeFixture({ "hooked.test.ts": HOOKED_FILE });
     try {
@@ -725,6 +819,57 @@ describe("preload", () => {
     }
   });
 
+  it("names a leaf by the suite its call names rather than encloses it", async () => {
+    const fixture = await makeFixture({ "handle.test.ts": HANDLE_BDD_FILE });
+    try {
+      const run = await runFixture(fixture, ["handle.test.ts"], {
+        "handle.test.ts": ["outer > inner > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      // A skip list keyed by the name the report gives leaves the leaf
+      // out, which it can only do if the two are the same identity.
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > kept")).toEqual("pass");
+      expect(reported.get("outer > inner > dropped")).toEqual("skip");
+      expect(reported.get("outer > inner > bodied > nested")).toEqual("pass");
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("outer > kept")).toEqual("handle.test.ts");
+      expect(names.get("outer > inner > dropped")).toEqual("handle.test.ts");
+      expect(names.get("outer > inner > bodied > nested"))
+        .toEqual("handle.test.ts");
+
+      // The map's name and the report's name meeting is what carries the
+      // file through: a leaf recorded under a name no runner reports
+      // reaches ingestion with none.
+      const records = ingestJUnit(await Deno.readTextFile(fixture.junit), {
+        kind: "unit",
+        scope: "fixture",
+        fileByName: names,
+      });
+      const byName = new Map(records.map((r) => [r.test.n, r.file]));
+      expect(byName.get("outer > kept")).toEqual("handle.test.ts");
+      expect(byName.get("outer > inner > dropped")).toEqual("handle.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("names a handle's leaf inside the root suite a hook brings about", async () => {
+    const fixture = await makeFixture({ "both.test.ts": HOOKED_HANDLE_FILE });
+    try {
+      const run = await runFixture(fixture, ["both.test.ts"], {
+        "both.test.ts": ["global > outer > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("global > outer > kept")).toEqual("pass");
+      expect(reported.get("global > outer > dropped")).toEqual("skip");
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("global > outer > kept")).toEqual("both.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
   it("skips independently in two files holding the same leaf name", async () => {
     const fixture = await makeFixture({
       "bdd.test.ts": BDD_FILE,

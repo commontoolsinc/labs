@@ -173,7 +173,7 @@ describe("the workspace unit suites", () => {
     const outputDir = await Deno.makeTempDir({ prefix: "unit-out-" });
     const [invocation] = await suite.command(
       [{ unit: "packages/bakery/test/glaze.test.ts", skip: [] }],
-      { root, outputDir },
+      { root, outputDir, spoolDir: "/spool" },
     );
     expect(invocation!.command).toContain("--no-check");
     expect(invocation!.command).toContain("test/glaze.test.ts");
@@ -193,7 +193,7 @@ describe("the workspace unit suites", () => {
     const outputDir = await Deno.makeTempDir({ prefix: "unit-out-" });
     const [whole] = await suite.command(
       [{ unit: "packages/bakery/test/glaze.test.ts", skip: [] }],
-      { root, outputDir },
+      { root, outputDir, spoolDir: "/spool" },
     );
     expect(whole!.env?.[SKIP_LIST_VARIABLE]).toBeUndefined();
 
@@ -202,7 +202,7 @@ describe("the workspace unit suites", () => {
         unit: "packages/bakery/test/glaze.test.ts",
         skip: ["glaze > sets overnight"],
       }],
-      { root, outputDir },
+      { root, outputDir, spoolDir: "/spool" },
     );
     const listPath = partial!.env?.[SKIP_LIST_VARIABLE];
     expect(listPath).toBeDefined();
@@ -224,7 +224,7 @@ describe("running a member that cannot be handed a subset", () => {
     const outputDir = await Deno.makeTempDir({ prefix: "unit-out-" });
     const [invocation] = await suite.command(
       [{ unit: "packages/bakery", skip: ["glaze > sets overnight"] }],
-      { root, outputDir },
+      { root, outputDir, spoolDir: "/spool" },
     );
     expect(invocation!.command).toEqual([Deno.execPath(), "task", "test"]);
     // The environment a task inherits is how the list reaches a member
@@ -303,7 +303,7 @@ describe("running a member that cannot be handed a subset", () => {
         { unit: "packages/bakery#browser-test", skip: [] },
         { unit: "packages/bakery/test/glaze.test.ts", skip: [] },
       ],
-      { root, outputDir, coverageDir: "/cov" },
+      { root, outputDir, coverageDir: "/cov", spoolDir: "/spool" },
     );
     expect(made.length).toBe(2);
     expect(made.some((i) => i.command.includes("browser-test"))).toBe(true);
@@ -355,6 +355,7 @@ describe("running a member that cannot be handed a subset", () => {
       await suite.command([{ unit: "packages/elsewhere", skip: [] }], {
         root,
         outputDir: "/out",
+        spoolDir: "/spool",
       }),
     ).toEqual([]);
   });

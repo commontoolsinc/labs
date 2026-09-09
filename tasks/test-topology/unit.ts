@@ -18,10 +18,7 @@
 
 import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
-import {
-  preloadArgument,
-  SKIP_LIST_VARIABLE,
-} from "@commonfabric/test-support/records";
+import { SKIP_LIST_VARIABLE } from "@commonfabric/test-support/records";
 import { memberTasks, memberTestFiles } from "./deno-task.ts";
 import {
   claimsIdentity,
@@ -29,6 +26,7 @@ import {
   type Invocation,
   type LocatableRecord,
   type Location,
+  recordingArguments,
   type RecordSurface,
   skipListOf,
   type Suite,
@@ -259,7 +257,7 @@ function unitSuite(
               Deno.execPath(),
               "test",
               ...member.run.flags,
-              preloadArgument(),
+              ...recordingArguments(member.run.flags, context),
               `--junit-path=${junitPath}`,
               ...files.map((request) =>
                 path.relative(
