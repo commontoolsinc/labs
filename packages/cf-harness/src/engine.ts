@@ -314,18 +314,69 @@ export interface BuiltinToolOutputMap {
 }
 
 /**
- * Whether `value` is an IFC label this can represent: clauses that are lists,
- * and nothing else carrying content. A label whose `confidentiality` is a
- * string survives an equality comparison and is then dropped by the merge,
- * leaving a family that carried a requirement recorded as carrying none.
+ * Whether `value` is plain JSON data this can carry: no cycles, and nothing
+ * a serializer would refuse or silently drop.
+ *
+ * The cycle guard is a visited SET rather than a depth bound, and it is what
+ * makes this total: the alternative is discovering the cycle inside
+ * `JSON.stringify`, which throws — and an exception raised while reading a
+ * container's taint leaves the family recorded as it was, which is to say
+ * clean. A shape that cannot be read has to come back as a `false`, never as
+ * a thrown error.
+ */
+const isRepresentableJsonValue = (
+  value: unknown,
+  seen: Set<object>,
+): boolean => {
+  if (value === null) {
+    return true;
+  }
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return true;
+    case "number":
+      return Number.isFinite(value);
+    case "object":
+      break;
+    default:
+      return false;
+  }
+  const container = value as object;
+  if (seen.has(container)) {
+    return false;
+  }
+  seen.add(container);
+  try {
+    return Array.isArray(container)
+      ? container.every((entry) => isRepresentableJsonValue(entry, seen))
+      : Object.values(container).every((entry) =>
+        entry === undefined || isRepresentableJsonValue(entry, seen)
+      );
+  } finally {
+    // Removed on the way out so that the same object appearing twice in
+    // SEQUENCE — a label naming one atom in both clauses — is not mistaken
+    // for a cycle, which is an object appearing inside itself.
+    seen.delete(container);
+  }
+};
+
+/**
+ * Whether `value` is an IFC label this can represent: clauses that are lists
+ * of data this can carry, and nothing else carrying content. A label whose
+ * `confidentiality` is a string survives an equality comparison and is then
+ * dropped by the merge, leaving a family that carried a requirement recorded
+ * as carrying none — and one holding a cycle anywhere inside it would throw
+ * out of the comparison instead.
  */
 const isRepresentableIfcLabel = (value: unknown): boolean => {
   if (!isObjectNotArray(value)) {
     return false;
   }
+  const seen = new Set<object>();
   return Object.entries(value).every(([clause, entry]) =>
     (clause === "confidentiality" || clause === "integrity")
-      ? Array.isArray(entry)
+      ? Array.isArray(entry) && isRepresentableJsonValue(entry, seen)
       : entry === undefined || entry === null
   );
 };
@@ -372,9 +423,9 @@ const isCompleteExitCodeObservation = (value: unknown): boolean => {
  * Whether two labels state the same requirement.
  *
  * Both are known representable before this runs, so serializing them cannot
- * meet a cycle. That order matters: a cyclic label reaching `JSON.stringify`
- * would throw out of the taint reader, and an exception there leaves the
- * family recorded as it was — which is to say clean.
+ * meet a cycle. That order is the whole point: a cyclic label reaching
+ * `JSON.stringify` would throw out of the taint reader, and an exception
+ * there leaves the family recorded as clean.
  */
 const sameLabel = (left: unknown, right: unknown): boolean =>
   JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
@@ -409,6 +460,17 @@ const cfcSandboxTaintOfResult = (
     !isCompleteStreamObservation(stdout, "stdout") ||
     !isCompleteStreamObservation(stderr, "stderr") ||
     !isCompleteExitCodeObservation(exitCode)
+  ) {
+    return undefined;
+  }
+  // One decision covers the whole invocation: every branch of
+  // `cfcResultFromRunscSidecar` gives all three observations the same policy,
+  // because whether the container's output may be read is a fact about the
+  // container. Three that disagree were assembled by something else.
+  const policy = (stdout as { policy: unknown }).policy;
+  if (
+    (stderr as { policy: unknown }).policy !== policy ||
+    (exitCode as { policy: unknown }).policy !== policy
   ) {
     return undefined;
   }
@@ -2646,12 +2708,14 @@ export class CfHarnessEngine {
    * Whether `path` is the run family's output directory or something inside
    * it.
    *
-   * The output directory sits under the artifact root, so the reservation
-   * that keeps tools out of the run's own artifacts would otherwise keep
-   * them out of the one directory the run exists to have them write into.
-   * The reservation protects the record a run writes ABOUT itself; this
-   * directory is the run's output, and the model is told to put files there
-   * by name.
+   * The reservation that keeps tools out of the run's own artifacts must not
+   * keep them out of the one directory the run exists to have them write
+   * into. That reservation protects the record a run writes ABOUT itself;
+   * this directory is the run's output, and the model is told to put files
+   * there by name. It matters only when the two overlap — the family's
+   * directory sits under the artifact root when that is outside every
+   * writable mount, and beside the workspace when it is not — and the
+   * exemption is stated for the directory itself rather than for a layout.
    */
   #isWithinSandboxOutputRoot(path: string): boolean {
     const root = this.#sandboxOutputRootHostPath;

@@ -206,6 +206,25 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
           `attributed to this run. Nothing was read.`,
       );
     }
+    // BEFORE anything follows the name. A leaf that is a link is refused for
+    // being one, not for where it leads: resolving it first would mean the
+    // decision was taken about the link's target, and a workload can point a
+    // name inside the directory at another name inside it, or move it between
+    // the resolution and the read.
+    try {
+      const leaf = await Deno.lstat(hostPath);
+      if (leaf.isSymlink) {
+        return errorOutput(
+          `ingest_sandbox_file refuses a symbolic link: name the file itself, ` +
+            `so that what is read is what was written rather than whatever ` +
+            `the link points at when it is followed.`,
+        );
+      }
+    } catch (error) {
+      return errorOutput(
+        `ingest_sandbox_file could not read the file: ${errorMessage(error)}`,
+      );
+    }
     const resolved = await realPathWithin(root.hostPath, hostPath);
     // A path that cannot be resolved is reported as the file it names, not as
     // one outside the directory: the usual reason is that nothing is there,
@@ -234,26 +253,6 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
     // cannot tell the two directory entries apart, and a link count above one
     // is what does. The dedicated mount already makes such a link fail across
     // filesystems; this refuses the case where it did not.
-    // A leaf that is a link is refused for being one, not for where it leads.
-    // Following it and checking the destination admits the case where a
-    // workload points a name inside the directory at another name inside it:
-    // the bytes are then whatever the link's target holds at read time, which
-    // is not the file the caller named and not necessarily the file whose
-    // writing this run's taint covers.
-    try {
-      const leaf = await Deno.lstat(hostPath);
-      if (leaf.isSymlink) {
-        return errorOutput(
-          `ingest_sandbox_file refuses a symbolic link: name the file itself, ` +
-            `so that what is read is what was written rather than whatever ` +
-            `the link points at when it is followed.`,
-        );
-      }
-    } catch (error) {
-      return errorOutput(
-        `ingest_sandbox_file could not read the file: ${errorMessage(error)}`,
-      );
-    }
     let bytes: Uint8Array;
     try {
       const stat = await Deno.stat(resolved.realPath);

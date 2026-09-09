@@ -277,6 +277,7 @@ const resolveCfcInvocationContextDir = (
  *
  * @throws Error naming the directory and the mount it sits under.
  */
+
 /**
  * A path resolved as far down as it exists, with what does not exist joined
  * back on.
@@ -370,8 +371,6 @@ export const resolveDockerRunscSandboxConfig = (
     ? undefined
     : validateAbsoluteHostDir(rawCfcResultDir, "cfcResultDir");
   const cfcInvocationContextDir = resolveCfcInvocationContextDir(options);
-  // Every host directory this sandbox mounts read-write, including the
-  // workspace that holds the run family's output directory.
   // Every host directory this sandbox mounts read-write — the workspace, the
   // run family's output directory, and anything else the operator bound —
   // plus the artifact root, which is not mounted but holds the run's own
@@ -853,6 +852,12 @@ const isRepresentableRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
   // rendering that names an atom. Telling those apart needs a parser for a
   // format this deliberately does not parse, and a parser that guessed would
   // refuse honest public results.
+  //
+  // That rests on a contract with the sidecar: `xattrJSON` is the machine
+  // representation OF THE SAME taint `string` renders. Were it ever to become
+  // something else — a partial view, a different taint — the result would
+  // have to become synthetic here rather than fall back to reading `string`,
+  // which this cannot read.
   return true;
 };
 

@@ -72,10 +72,25 @@ const sandboxResult = (label: IFCLabel): CfcSandboxResult => {
   };
 };
 
-/** A result whose three labels are the same cyclic object. */
-const cyclicLabelResult = (): CfcSandboxResult => {
+/**
+ * A result whose three labels share one cyclic object.
+ *
+ * `nested` puts the cycle INSIDE the `confidentiality` array — a place the
+ * label's own shape permits, so a check that only looks at the top level
+ * passes it through to the comparison, which serializes and throws. The
+ * other puts it in an extra property, which the shape check rejects on its
+ * own. Both have to come back as a refusal rather than an exception.
+ */
+const cyclicLabelResult = (
+  where: "nested" | "top-level",
+): CfcSandboxResult => {
   const label: Record<string, unknown> = { confidentiality: [] };
-  label.self = label;
+  if (where === "nested") {
+    const clause = label.confidentiality as unknown[];
+    clause.push(clause);
+  } else {
+    label.self = label;
+  }
   const base = sandboxResult(FINANCE_LABEL);
   return {
     version: 1,
@@ -717,6 +732,30 @@ describe("ingest_sandbox_file", () => {
     }
   });
 
+  it("refuses a leaf symlink before anything follows it", async () => {
+    // The link points at nothing, so FOLLOWING it fails with a read error
+    // while REFUSING it names the link. Which message comes back is therefore
+    // evidence about the order the two checks run in, not merely that both
+    // exist.
+
+    await withRun(
+      { taint: FINANCE_LABEL },
+      async ({ engine, outputRoot, outputDir }) => {
+        await Deno.symlink(
+          join(outputRoot, "never-written.txt"),
+          join(outputRoot, "dangling.txt"),
+        );
+
+        const output = failure(
+          await ingest(engine, `${outputDir}/dangling.txt`),
+        );
+
+        expect(output.message).toContain("refuses a symbolic link");
+        expect(output.message).not.toContain("could not read the file");
+      },
+    );
+  });
+
   it("refuses a symlink inside the output directory that leads back into it", async () => {
     // Refused for being a link, not for where it leads. A link whose target
     // is also inside the directory passes every containment check, and the
@@ -738,21 +777,23 @@ describe("ingest_sandbox_file", () => {
     );
   });
 
-  it("refuses a symlink in the output directory that leads outside it", async () => {
-    // The sandbox can write into the output directory, so it can plant a link
-    // there. A lexical containment test passes it and the read follows it, and
-    // the cell would then hold bytes from a file no invocation of this run
-    // wrote.
+  it("refuses a file reached through a linked directory inside the output root", async () => {
+    // The leaf is an ordinary file, so the link check does not answer this
+    // one: what escapes is a DIRECTORY component of the path. Real-path
+    // containment is what catches it, and this is the case that keeps that
+    // check honest now that a linked leaf is refused before resolution.
 
     await withRun(
-      { taint: FINANCE_LABEL, workspaceFiles: { "outside.txt": "not ours" } },
+      { taint: FINANCE_LABEL, workspaceFiles: {} },
       async ({ engine, outputRoot, outputDir, workspace }) => {
-        await Deno.symlink(
-          join(workspace, "outside.txt"),
-          join(outputRoot, "link.txt"),
-        );
+        const outside = join(workspace, "outside");
+        await Deno.mkdir(outside);
+        await Deno.writeTextFile(join(outside, "total.txt"), "not ours");
+        await Deno.symlink(outside, join(outputRoot, "sub"));
 
-        const output = failure(await ingest(engine, `${outputDir}/link.txt`));
+        const output = failure(
+          await ingest(engine, `${outputDir}/sub/total.txt`),
+        );
 
         expect(output.message).toContain("only reads files under this run's");
       },
@@ -1327,6 +1368,16 @@ describe("ingest_sandbox_file", () => {
             label: { confidentiality: "finance" },
           },
         },
+        // Equal labels, but three policies that disagree. Whether a
+        // container's output may be read is a fact about the container, so
+        // every branch of the sidecar reader gives all three the same answer;
+        // three that differ were assembled by something else.
+        {
+          ...complete,
+          stdout: { ...complete.stdout, policy: "observed", segments: [] },
+          stderr: { ...complete.stderr, policy: "opaque" },
+          exitCode: { ...complete.exitCode, policy: "denied" },
+        },
         // Policies whose own fields are absent.
         {
           ...complete,
@@ -1379,15 +1430,25 @@ describe("ingest_sandbox_file", () => {
 
     const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
     try {
-      const engine = new CfHarnessEngine({
-        sandboxRuntime: new FakeSandbox(cyclicLabelResult(), "runsc-taint"),
-        runId,
-        workspaceHostPath: "/tmp",
-      });
+      for (const where of ["nested", "top-level"] as const) {
+        const perRunId = `${runId}-${where}`;
+        try {
+          const engine = new CfHarnessEngine({
+            sandboxRuntime: new FakeSandbox(
+              cyclicLabelResult(where),
+              "runsc-taint",
+            ),
+            runId: perRunId,
+            workspaceHostPath: "/tmp",
+          });
 
-      await engine.invokeBuiltinTool("bash", { command: "x" });
+          await engine.invokeBuiltinTool("bash", { command: "x" });
 
-      expect(engine.workspaceTaint.kind).toBe("unknown");
+          expect(engine.workspaceTaint.kind).toBe("unknown");
+        } finally {
+          forgetWorkspaceTaintForTesting(perRunId);
+        }
+      }
     } finally {
       forgetWorkspaceTaintForTesting(runId);
     }
