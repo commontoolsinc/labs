@@ -32,7 +32,7 @@ import {
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
-import { tagFromNativeValue, VALUE_TAGS } from "@/value-tags.ts";
+import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 
 describe("validity-check", () => {
@@ -717,7 +717,7 @@ describe("validity-check", () => {
 
     for (const [label, value] of LAYER_CORPUS) {
       it(`agrees with the full dispatch about ${label}`, () => {
-        const tag = tagFromNativeValue(value);
+        const tag = tagFromNativeValueElseNull(value);
         const viaDispatch = (tag !== null) && nativeObjectTags.includes(tag);
         expect(isValidFabricNativeObject(value)).toBe(viaDispatch);
       });

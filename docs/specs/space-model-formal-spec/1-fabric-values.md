@@ -3833,7 +3833,7 @@ export function fabricFromNativeValue(
 | `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
 > **Implementation: tag-based type dispatch.** The conversion functions use a
-> tag-based dispatch mechanism (`tagFromNativeValue()` in
+> tag-based dispatch mechanism (`tagFromNativeValueElseNull()` in
 > `packages/data-model/src/value-tags.ts`) to classify values in O(1) via a
 > `switch` on the value's constructor. This replaces sequential `instanceof`
 > chains with a single constructor lookup that returns a tag string (e.g.,

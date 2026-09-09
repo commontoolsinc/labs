@@ -167,7 +167,7 @@ export function tagFromFabricValueElseNull(
  * **Note:** This function is intentionally _not_ `export`ed from the
  * `data-model` barrel.
  */
-export function tagFromNativeBuiltinClass(
+export function tagFromNativeBuiltinClassElseNull(
   constructorFn: { prototype: unknown },
 ): ValueTag | null {
   // A `switch` on constructor identity, rather than sequential `instanceof`
@@ -245,9 +245,9 @@ export function tagFromNativeBuiltinClass(
  * severed prototype and across realms; then a `FabricPrimitive`, by the tag
  * its instance carries; then a `FabricInstance`, by class. A null-prototype
  * object is tagged `Object`. What remains is decided by its class, read from
- * its prototype, through `tagFromNativeBuiltinClass()`.
+ * its prototype, through `tagFromNativeBuiltinClassElseNull()`.
  */
-export function tagFromNativeValue(value: unknown): ValueTag | null {
+export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   if (value === null || typeof value !== "object") {
     return VALUE_TAGS.Primitive;
   }
@@ -279,5 +279,5 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // `Error` and silently rebuilt as one.
   const ctor = constructorOfPrototype(proto);
 
-  return (ctor === undefined) ? null : tagFromNativeBuiltinClass(ctor);
+  return (ctor === undefined) ? null : tagFromNativeBuiltinClassElseNull(ctor);
 }

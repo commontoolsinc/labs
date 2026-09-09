@@ -90,7 +90,7 @@ export {
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
   tagFromFabricValueElseNull,
-  tagFromNativeValue,
+  tagFromNativeValueElseNull,
   VALUE_TAGS,
   type ValueTag,
 } from "./value-tags.ts";
