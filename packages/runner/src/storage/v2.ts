@@ -3471,7 +3471,8 @@ export class SpaceReplica
   /**
    * The caught-up and stale-floor bookkeeping, the read builder, the
    * session-sync consumer, the watch-set refresh, the session-sync apply
-   * step, and the conflict read repair, which a test drives directly.
+   * step, and the conflict read repair, which a test drives directly. It
+   * also reports whether the replica holds a record for a document.
    */
   get accessForTestingOnly(): {
     noteCaughtUpLocalSeq(localSeq: number | undefined): void;
@@ -3493,6 +3494,11 @@ export class SpaceReplica
     waitForConflictReadRepair(
       rejection: StorageTransactionRejected,
     ): Promise<void>;
+    hasDocumentRecord(
+      id: URI,
+      scope?: CellScope,
+      identity?: ScopeKeyIdentity,
+    ): boolean;
   } {
     return {
       noteCaughtUpLocalSeq: (localSeq) => this.#noteCaughtUpLocalSeq(localSeq),
@@ -3509,6 +3515,8 @@ export class SpaceReplica
       applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
         this.#waitForConflictReadRepair(rejection),
+      hasDocumentRecord: (id, scope, identity) =>
+        this.#hasDocumentRecord(id, scope, identity),
     };
   }
 
@@ -3583,6 +3591,27 @@ export class SpaceReplica
       address.id,
       this.instanceKey(address.scope, identity, address.scopeKey),
     );
+  }
+
+  /**
+   * Whether this replica holds a record for the document. A record appears
+   * once the replica has examined the document — an examination that found
+   * a value and one that found the document absent both leave one — and
+   * also once a local write for it is pending. This is the predicate
+   * {@link loadUnexaminedAbsences} decides by. It takes `scope` and
+   * `identity` as {@link getDocument} takes them, so a caller reading the
+   * two together names one document across both.
+   *
+   * `getDocument()` reads `undefined` for a record whose value materializes
+   * as `undefined` and for a document with no record at all, so a caller
+   * separating those two reads both.
+   */
+  #hasDocumentRecord(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#docs.has(this.#docKeyOf({ id, scope }, identity));
   }
 
   /**

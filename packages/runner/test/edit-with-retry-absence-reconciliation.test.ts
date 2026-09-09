@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/memory/v2/execution-lease";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -633,9 +634,16 @@ describe("editWithRetry absence reconciliation", () => {
           actorIdentity,
         )?.value as { value?: number } | undefined)?.value,
       ).toBe(22);
-      expect(provider.replica.getDocument(userId, "user")).toBeUndefined();
-      expect(provider.replica.getDocument(sessionId, "session"))
-        .toBeUndefined();
+      // Both loads are keyed under the ACTOR's instance. The serving
+      // replica holds no record at all for its OWN instance of either
+      // document.
+      const replica = provider.replica as SpaceReplica;
+      expect(
+        replica.accessForTestingOnly.hasDocumentRecord(userId, "user"),
+      ).toBe(false);
+      expect(
+        replica.accessForTestingOnly.hasDocumentRecord(sessionId, "session"),
+      ).toBe(false);
       tx.abort("inspection only");
     } finally {
       lease?.release();
