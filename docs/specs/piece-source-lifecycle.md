@@ -631,9 +631,10 @@ depend on a recursion cutoff or an unavailable raw-chain read are not reused;
 cyclic graphs retain their path-dependent cutoff behavior.
 
 A source update can preserve a committed direct handle under an unchanged
-consumer input contract. The retained bytes must match, and each prior and
-candidate path contract must have an equal resolved counterpart, including
-defaults and reference roots. A newly introduced link cannot use this rule.
+consumer input contract. The serialized link values must compare equal under
+fabric-aware value comparison, and each prior and candidate path contract must
+have an equal resolved counterpart, including defaults and reference roots.
+A newly introduced link cannot use this rule.
 The continuity proof does not treat defaults as a new materialization step;
 bidirectional value-subset proofs alone cannot establish unchanged defaults.
 The strict default-insertion checks still govern new links and changed

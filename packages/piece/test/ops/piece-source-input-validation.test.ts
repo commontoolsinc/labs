@@ -372,6 +372,47 @@ export default pattern<{ avatar: string }, { avatar: Owned }>(
       );
     });
 
+    it("checks the producer contract when a retained handle's prior consumer schema cannot resolve", async () => {
+      const producer = runtime.getCell<string>(pieces.getSpace(), "producer");
+      const argument = runtime.getCell<{ value: unknown }>(
+        pieces.getSpace(),
+        "argument",
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        producer.withTx(tx).set("a");
+        producer.withTx(tx).setMetaRaw(
+          "schema",
+          { type: "string" },
+          rawMetaWriteAuthorization,
+        );
+        argument.withTx(tx).set({ value: producer });
+      });
+      expect(error).toBeUndefined();
+
+      const links = [{ path: ["value"], value: argument.getRaw()?.value }];
+      expect(isLink(links[0].value)).toBe(true);
+      const restore = (type: "string" | "number") =>
+        assertSuppliedLinkSchemasCompatible(
+          links,
+          {
+            type: "object",
+            properties: { value: { type, asCell: ["cell"] } },
+            required: ["value"],
+          },
+          argument,
+          pieces,
+          {
+            priorArgumentSchema: { $ref: "#/$defs/missing" },
+            linksPreservedVerbatim: true,
+          },
+        );
+
+      expect(() => restore("string")).not.toThrow();
+      expect(() => restore("number")).toThrow(
+        "type string is not accepted by the candidate schema",
+      );
+    });
+
     it("retains unchanged row defaults for identical source and a stopped source update", async () => {
       const producer = await pieces.create({
         main: "/main.tsx",
