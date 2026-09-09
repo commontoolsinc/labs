@@ -14,7 +14,9 @@
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { assertThrows } from "@std/assert";
 import type { NodeFactory } from "../src/builder/types.ts";
+import { ownedResultCause } from "../src/builtins/scope-policy.ts";
 import { type Cell, createCell } from "../src/cell.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -165,4 +167,30 @@ Deno.test("unless keeps its result store across an edit of its fallback", async 
   assertEquals(after.value, "fallback-2");
   assertEquals(before.scope, "user");
   assertEquals(after.id, before.id);
+});
+
+Deno.test("an expression builtin with no output spot has no store to name", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const piece = runtime.getCell(space, "no output spot");
+    const inputs = runtime.getImmutableCell(space, { condition: true });
+    // A node whose output binding reaches no write redirect: nothing reads
+    // the spot, so nothing can name the store every runtime must share.
+    assertThrows(
+      () =>
+        ownedResultCause("ifElse", {
+          inputs,
+          parents: piece.entityId,
+        }, piece),
+      Error,
+      "ifElse: result store requires a write-redirect output binding",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
 });
