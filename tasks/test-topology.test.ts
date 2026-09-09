@@ -57,6 +57,7 @@ describe("the test topology", () => {
         const invocation of await suite.command(requests, {
           root,
           outputDir,
+          spoolDir: "/spool",
           baseRef: "origin/main",
         })
       ) {

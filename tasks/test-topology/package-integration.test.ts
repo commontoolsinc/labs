@@ -96,6 +96,7 @@ describe("the package integration suites", () => {
     const [invocation] = await suite.command([{ unit, skip: [] }], {
       root,
       outputDir: await Deno.makeTempDir({ prefix: "package-integration-" }),
+      spoolDir: "/spool",
     });
     expect(invocation!.env?.HEADLESS).toBe("1");
     expect(invocation!.junit?.[0]?.scope).toBe("shell");

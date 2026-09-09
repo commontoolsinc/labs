@@ -27,6 +27,7 @@ function measured(outputDir: string): CommandContext {
     outputDir,
     coverageDir: "/cov",
     patternCoverageDir: "/pattern",
+    spoolDir: "/spool",
   };
 }
 
@@ -111,7 +112,7 @@ describe("the pattern and package suites", () => {
     const suite = byId("pattern-unit");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
-      { root, outputDir: await outputDir() },
+      { root, outputDir: await outputDir(), spoolDir: "/spool" },
     );
     expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBeUndefined();
     expect(invocation!.env?.DENO_COVERAGE_DIR).toBeUndefined();
@@ -133,7 +134,7 @@ describe("the pattern and package suites", () => {
       const suite = byId(id);
       const [invocation] = await suite.command(
         [{ unit: suite.units[0]!, skip: [] }],
-        { root, outputDir: await outputDir() },
+        { root, outputDir: await outputDir(), spoolDir: "/spool" },
       );
       expect(invocation!.env?.LOG_LEVEL).toBe("warn");
     }
