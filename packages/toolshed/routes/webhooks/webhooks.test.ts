@@ -208,14 +208,30 @@ describe("Webhook Utilities", () => {
     const durableIndex = async (): Promise<string[]> =>
       [...(await openIndex()).get()].sort();
 
-    /** Commit one staged change to the index through `editWithRetry()`. */
+    /**
+     * Commit one staged change to the index through `editWithRetry()`, and
+     * report how many times the change was staged: once, plus once per
+     * commit rejected as stale.
+     */
     const commit = async (
       cell: Cell<string[]>,
       stage: (tx: IExtendedStorageTransaction) => void,
-    ): Promise<void> => {
-      const { error } = await cell.runtime.editWithRetry(stage);
+    ): Promise<number> => {
+      let staged = 0;
+      const { error } = await cell.runtime.editWithRetry((tx) => {
+        staged += 1;
+        stage(tx);
+      });
       if (error) throw error;
+      return staged;
     };
+
+    // `editWithRetry()` runs its callback before it sends the commit, so two
+    // commits started in one synchronous stretch both stage against the list
+    // as it stood before either landed. The one the server takes second is
+    // rejected as stale and staged again against the first, which the staging
+    // counts pin: a run in which the commits serialized would pass on the
+    // final list alone without exercising the retry.
 
     it("keeps both IDs when two sessions add to the index concurrently", async () => {
       const first = await openIndex();
@@ -223,11 +239,12 @@ describe("Webhook Utilities", () => {
       const second = await openIndex();
       expect(second.get()).toEqual(["wh_seed"]);
 
-      await Promise.all([
+      const staged = await Promise.all([
         commit(first, (tx) => addToIndex(first, tx, "wh_a")),
         commit(second, (tx) => addToIndex(second, tx, "wh_b")),
       ]);
 
+      expect([...staged].sort()).toEqual([1, 2]);
       expect(await durableIndex()).toEqual(["wh_a", "wh_b", "wh_seed"]);
     });
 
@@ -239,11 +256,12 @@ describe("Webhook Utilities", () => {
       const second = await openIndex();
       expect(second.get()).toEqual(["wh_a", "wh_b", "wh_c"]);
 
-      await Promise.all([
+      const staged = await Promise.all([
         commit(first, (tx) => removeFromIndex(first, tx, "wh_a")),
         commit(second, (tx) => removeFromIndex(second, tx, "wh_b")),
       ]);
 
+      expect([...staged].sort()).toEqual([1, 2]);
       expect(await durableIndex()).toEqual(["wh_c"]);
     });
 
