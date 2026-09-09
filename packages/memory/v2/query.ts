@@ -108,16 +108,12 @@ export type TrackedGraphState = {
   chased: Set<string>;
 
   /** Per-version scans of this state's delivered documents for embedded
-   * schema refs (`docKey -> { seq, refs }`), consulted when the closure is
-   * re-validated over the established set on every refresh. It lives with
-   * the state whose entities it describes: exactly one entry per delivered
-   * version, so it is as large as the state and no larger, dies with it,
-   * and — being one identity's — caches every scope, where the engine-wide
-   * cache below can hold only canonical space-scoped versions. Without it
-   * a refresh scanned the whole established set again whenever that set
-   * outgrew the engine-wide cache: a session holding the Topics board
-   * (some 18k delivered documents against a 4,096-entry cache) rescanned
-   * everything on every commit anyone made. */
+   * schema refs (`docKey -> { seq, refs }`): the record the closure's
+   * re-validation over the established set is answered from on every
+   * refresh. One entry per delivered version, the schema documents the
+   * closure itself delivered included; reused by document key and sequence;
+   * every scope, since the state is one identity's; the state's lifetime.
+   * The engine-wide cache of space-scoped scans only seeds it. */
   schemaRefs: SchemaRefScans;
 };
 
@@ -1073,13 +1069,32 @@ const scanSnapshotSchemaRefs = (
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
-  const entry = { seq: snapshot.seq, refs: result };
-  scans.set(key, entry);
-  if (cacheable) {
-    if (cache.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) cache.clear();
-    cache.set(key, entry);
-  }
+  recordSchemaRefScan(engine, key, snapshot, result, scans);
   return result;
+};
+
+/**
+ * Records what a scan of `snapshot` finds — in the state's own record
+ * always, and in the engine-wide cache when the version is space-scoped, so
+ * another session delivering it is spared the scan.
+ */
+const recordSchemaRefScan = (
+  engine: Engine.Engine,
+  key: QueryDocKey,
+  snapshot: EntitySnapshot,
+  refs: ReadonlySet<string>,
+  scans: SchemaRefScans,
+): void => {
+  const entry = { seq: snapshot.seq, refs };
+  scans.set(key, entry);
+  if ((snapshot.scope ?? DEFAULT_SCOPE) !== DEFAULT_SCOPE) return;
+  let cache = schemaRefScanCaches.get(engine);
+  if (cache === undefined) {
+    cache = new Map();
+    schemaRefScanCaches.set(engine, cache);
+  }
+  if (cache.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) cache.clear();
+  cache.set(key, entry);
 };
 
 /**
@@ -1211,6 +1226,11 @@ const assembleSchemaDocClosures = (
       if (verified.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) verified.clear();
       verified.set(key, snapshot.seq);
     }
+    // The document just verified is the schema document its id names,
+    // which is all a scan of it finds: its own hash. Recording that here
+    // keeps the state's record at one entry per delivered version, so a
+    // later refresh answers the closure's documents without scanning them.
+    recordSchemaRefScan(engine, key, snapshot, new Set([hash]), scans);
     for (const dep of collectExternalSchemaRefHashes(registered)) {
       enqueue(dep);
     }
