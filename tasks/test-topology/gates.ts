@@ -101,9 +101,9 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
     name: "check-skill-facts",
     kind: "gate",
     run: ["task", "check-skill-facts"],
-    // Holds every path a skill, an `AGENTS.md` or a rule cites to
-    // resolving against the tree, so a file moved or removed anywhere
-    // can fail it.
+    // Holds every path a skill, an `AGENTS.md`, a rule or a hook script
+    // cites to resolving against the tree, so a file moved or removed
+    // anywhere can fail it.
     reachedBy: [],
   },
   {

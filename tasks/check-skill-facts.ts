@@ -1,8 +1,9 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
 //
-// Deterministic "tripwire" for the documents an agent is handed rather than
-// goes looking for — the repo-local skills under skills/, the agent guides
-// named AGENTS.md, and the path-scoped rules under .claude/rules/. It is a
+// Deterministic "tripwire" for the text an agent receives without asking for
+// it: the repo-local skills under skills/, the agent guides named AGENTS.md,
+// the path-scoped rules under .claude/rules/, and the Claude Code hook scripts
+// under .claude/scripts/, whose messages reach an agent the same way. It is a
 // cheap, instant, zero-token CI gate that fails when a fact one of them cites
 // stops resolving against the tree.
 //
@@ -365,14 +366,26 @@ export async function readWorkspaceExports(
 
 /**
  * The documents this check covers: everything under skills/, every AGENTS.md
- * at any depth, and the path-scoped rules under .claude/rules/. CLAUDE.md files
- * are excluded because each is a single `@AGENTS.md` import, and an import is
- * not written in backticks so there would be nothing here to check.
+ * at any depth, the path-scoped rules under .claude/rules/, and the hook
+ * scripts under .claude/scripts/. CLAUDE.md files are excluded because each is
+ * a single `@AGENTS.md` import, and an import is not written in backticks so
+ * there would be nothing here to check.
+ *
+ * The hook scripts are TypeScript rather than Markdown. They are covered for
+ * the property they share with the rest: an agent reads their messages without
+ * having asked for them, and cannot tell whether a path in one still exists. A
+ * test file beside a hook is not read that way, so it is excluded.
+ *
+ * TypeScript does contain backticks, in template literals. The shape rules
+ * below are what keep those from being reported, rather than any absence of
+ * backticks. A template literal's body contains whitespace and an
+ * interpolation contains `${`, and neither counts as a path citation. A short
+ * backticked token that does look like a path is checked, which is intended.
  */
 const COVERED_RE =
-  /^(?:skills\/.*\.md|(?:.*\/)?AGENTS\.md|\.claude\/rules\/.*\.md)$/;
+  /^(?:skills\/.*\.md|(?:.*\/)?AGENTS\.md|\.claude\/(?:rules\/.*\.md|scripts\/(?!.*\.test\.ts$).*\.ts))$/;
 
-/** Reads every covered markdown file that is part of the tree. */
+/** Reads every covered file that is part of the tree. */
 export async function readSkillDocs(
   root: string,
   tree: Tree,
@@ -392,9 +405,10 @@ function reportDrift(drift: Drift[]): void {
   console.error(
     [
       "",
-      "Skills, AGENTS.md guides, and the rules under .claude/rules/ are live",
-      "documentation: a citation that stops resolving is a reader sent somewhere",
-      "that isn't there. Fix the document to name the current path or specifier.",
+      "Skills, AGENTS.md guides, the rules under .claude/rules/ and the hook",
+      "scripts under .claude/scripts/ are live documentation. A citation that",
+      "stops resolving sends a reader to a path that does not exist. Fix it to",
+      "name the current path or specifier.",
       "",
       "A path cited as an illustration rather than a real location should say so",
       "with a placeholder — `packages/<pkg>/mod.ts`, `cf-{name}/cf-{name}.ts`,",
