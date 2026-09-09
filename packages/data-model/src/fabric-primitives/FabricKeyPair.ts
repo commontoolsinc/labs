@@ -24,7 +24,10 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
-import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 
 /**
@@ -150,8 +153,8 @@ export class FabricKeyPair extends BaseFabricPrimitive {
   //
 
   /** @inheritDoc */
-  get [VALUE_TAG](): ValueTag {
-    return VALUE_TAGS.FabricKeyPair;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricKeyPair;
   }
 
   /** The algorithm name (e.g. `"Ed25519"`). */

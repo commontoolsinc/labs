@@ -24,7 +24,10 @@ import {
   REALM_CODEC,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -65,8 +68,8 @@ export class FabricBytes extends BaseFabricPrimitive implements ApiFabricBytes {
   //
 
   /** @inheritDoc */
-  get [VALUE_TAG](): ValueTag {
-    return VALUE_TAGS.FabricBytes;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricBytes;
   }
 
   /** The number of bytes. */

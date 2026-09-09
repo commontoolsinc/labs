@@ -23,7 +23,10 @@ import {
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch
@@ -49,8 +52,8 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   //
 
   /** @inheritDoc */
-  get [VALUE_TAG](): ValueTag {
-    return VALUE_TAGS.EpochNsec;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.EpochNsec;
   }
 
   /**

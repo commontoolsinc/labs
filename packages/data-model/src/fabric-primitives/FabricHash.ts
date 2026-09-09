@@ -27,7 +27,10 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
-import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 
 /**
  * The encoded state of a {@link FabricHash}: the algorithm tag, and the digest
@@ -91,8 +94,8 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   //
 
   /** @inheritDoc */
-  get [VALUE_TAG](): ValueTag {
-    return VALUE_TAGS.Hash;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.Hash;
   }
 
   /** Defensive copy of the raw hash bytes. */

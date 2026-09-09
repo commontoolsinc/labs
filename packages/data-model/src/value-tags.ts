@@ -24,6 +24,26 @@ import {
 } from "@/fabric-bases/BaseFabricPrimitive.ts";
 
 /**
+ * The tags a `FabricPrimitive` reports, one per primitive class this package
+ * defines. These are the only tags a `[VALUE_TAG]` getter may return, and the
+ * only ones the primitive dispatch accepts from one.
+ */
+export const FABRIC_PRIMITIVE_VALUE_TAGS = Object.freeze(
+  {
+    EpochNsec: "EpochNsec",
+    EpochDay: "EpochDay",
+    Hash: "Hash",
+    FabricBytes: "FabricBytes",
+    FabricKeyPair: "FabricKeyPair",
+    FabricRegExp: "FabricRegExp",
+  } as const,
+);
+
+/** One of the primitive tag strings. */
+export type FabricPrimitiveValueTag =
+  typeof FABRIC_PRIMITIVE_VALUE_TAGS[keyof typeof FABRIC_PRIMITIVE_VALUE_TAGS];
+
+/**
  * Tags identifying the value types that this system recognizes for dispatch.
  * These are distinct from wire-format `TAGS`.
  *
@@ -32,7 +52,8 @@ import {
  *   the type `Primitive`, and classes represented by their respective names.
  * * **`FabricPrimitive`s**: classes defined by this package which are
  *   considered equivalent to primitives (always frozen, pass through conversion
- *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
+ *   unchanged) but aren't under the open-ended `FabricInstance` umbrella. These
+ *   are `FABRIC_PRIMITIVE_VALUE_TAGS`, which this table includes whole.
  * * **`FabricInstance`s**: container classes defined by this package, all
  *   represented by the type `FabricInstance`.
  */
@@ -46,14 +67,9 @@ export const VALUE_TAGS = Object.freeze(
     Date: "Date",
     Uint8Array: "Uint8Array",
     RegExp: "RegExp",
-    EpochNsec: "EpochNsec",
-    EpochDay: "EpochDay",
-    Hash: "Hash",
-    FabricBytes: "FabricBytes",
-    FabricKeyPair: "FabricKeyPair",
-    FabricRegExp: "FabricRegExp",
     FabricInstance: "FabricInstance",
     Primitive: "Primitive",
+    ...FABRIC_PRIMITIVE_VALUE_TAGS,
   } as const,
 );
 
@@ -62,9 +78,12 @@ export type ValueTag = typeof VALUE_TAGS[keyof typeof VALUE_TAGS];
 
 /**
  * Maps a `FabricPrimitive` to its tag. This `throw`s if it determines that the
- * given value is not valid (either a type lie or an unrecognized class).
+ * given value is not valid: a type lie, an instance of no primitive class, or
+ * one reporting a tag that is not a primitive tag.
  */
-export function tagFromFabricPrimitive(value: FabricPrimitive): ValueTag {
+export function tagFromFabricPrimitive(
+  value: FabricPrimitive,
+): FabricPrimitiveValueTag {
   const result = tagFromFabricPrimitiveElseNull(value);
 
   if (result !== null) {
@@ -77,18 +96,20 @@ export function tagFromFabricPrimitive(value: FabricPrimitive): ValueTag {
 
 /**
  * Maps a `FabricPrimitive` to its tag. This returns `null` if the given value
- * turns out not to be valid.
+ * turns out not to be valid: a type lie, an instance of no primitive class, or
+ * one reporting a tag that is not a primitive tag.
  */
 export function tagFromFabricPrimitiveElseNull(
   value: FabricPrimitive,
-): ValueTag | null {
+): FabricPrimitiveValueTag | null {
   if (!(value instanceof BaseFabricPrimitive)) {
     return null;
   }
 
   const tag = value[VALUE_TAG];
 
-  return ((typeof tag === "string") && Object.hasOwn(VALUE_TAGS, tag))
+  return ((typeof tag === "string") &&
+      Object.hasOwn(FABRIC_PRIMITIVE_VALUE_TAGS, tag))
     ? tag
     : null;
 }
@@ -242,11 +263,14 @@ export function tagFromNativeBuiltinClassElseNull(
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
  *
- * An error is recognized next, by `Error.isError()`, which holds through a
- * severed prototype and across realms; then a `FabricPrimitive`, by the tag
- * its instance carries; then a `FabricInstance`, by class. A null-prototype
- * object is tagged `Object`. What remains is decided by its class, read from
- * its prototype, through `tagFromNativeBuiltinClassElseNull()`.
+ * Everything else is decided by its class, read from its prototype, through
+ * `tagFromNativeBuiltinClassElseNull()`, that being the question a plain
+ * object answers at once, and plain objects outnumber everything else this is
+ * asked about. A null-prototype object is an error if `Error.isError()` says
+ * so and otherwise a bare record, tagged `Object`. A class the builtin lookup
+ * declines falls through to the tests that hold where a class does not: an
+ * error by `Error.isError()`, which holds across realms; a `FabricPrimitive`
+ * by the tag its instance carries; a `FabricInstance` by class.
  */
 export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   if (value === null || typeof value !== "object") {
@@ -256,21 +280,18 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   // Arrays first, and unconditionally: see above.
   if (Array.isArray(value)) {
     return VALUE_TAGS.Array;
-  } else if (Error.isError(value)) {
-    return VALUE_TAGS.Error;
-  } else if (value instanceof FabricPrimitive) {
-    return tagFromFabricPrimitiveElseNull(value);
-  } else if (value instanceof FabricInstance) {
-    return VALUE_TAGS.FabricInstance;
   }
 
   const proto = Object.getPrototypeOf(value);
 
-  // The two kinds recognized without a prototype at all, a severed array and
-  // a severed error, were decided above, so what remains here is a bare
-  // record. It is tagged `Object` so that the object rule decides it by name.
+  // A `null` prototype settles the value here, both ways it can go. It names
+  // no class, so the lookup below could recognize none; and `instanceof`
+  // walks a chain that is empty, so the fabric tests below cannot claim it
+  // either. What is left is an error whose prototype was severed, which
+  // `Error.isError()` still sees, or a bare record, tagged `Object` so that
+  // the object rule decides it by name.
   if (proto === null) {
-    return VALUE_TAGS.Object;
+    return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
   }
 
   // The class is read from the PROTOTYPE, not from the value. What is being
@@ -281,5 +302,21 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   // `Error` and silently rebuilt as one.
   const ctor = constructorOfPrototype(proto);
 
-  return (ctor === undefined) ? null : tagFromNativeBuiltinClassElseNull(ctor);
+  if (ctor !== undefined) {
+    const tag = tagFromNativeBuiltinClassElseNull(ctor);
+    if (tag !== null) return tag;
+  }
+
+  // The class was unrecognized or unreadable, so the tests that hold where a
+  // class does not decide the rest: an error from another realm, and the
+  // fabric kinds, which the builtin lookup declines by design.
+  if (Error.isError(value)) {
+    return VALUE_TAGS.Error;
+  } else if (value instanceof FabricPrimitive) {
+    return tagFromFabricPrimitiveElseNull(value);
+  } else if (value instanceof FabricInstance) {
+    return VALUE_TAGS.FabricInstance;
+  }
+
+  return null;
 }

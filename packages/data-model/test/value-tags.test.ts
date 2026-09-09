@@ -45,6 +45,8 @@ import {
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
 import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
@@ -52,7 +54,6 @@ import {
   tagFromNativeBuiltinClassElseNull,
   tagFromNativeValueElseNull,
   VALUE_TAGS,
-  type ValueTag,
 } from "@/value-tags.ts";
 import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
@@ -62,32 +63,46 @@ import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
  * and does not check it against the class.
  */
 class TaggedProbe extends BaseFabricPrimitive {
-  get [VALUE_TAG](): ValueTag {
-    return VALUE_TAGS.Hash;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.Hash;
   }
 }
 
 /** A `BaseFabricPrimitive` subclass reporting a tag the vocabulary lacks. */
 class MistaggedProbe extends BaseFabricPrimitive {
-  get [VALUE_TAG](): ValueTag {
-    return "Bogus" as ValueTag;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return "Bogus" as FabricPrimitiveValueTag;
   }
 }
+
+/**
+ * A `BaseFabricPrimitive` subclass reporting a tag the vocabulary holds but
+ * no primitive may report, which the getter's type refuses and a cast lets
+ * through.
+ */
+class NonPrimitiveTagProbe extends BaseFabricPrimitive {
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return VALUE_TAGS.Error as FabricPrimitiveValueTag;
+  }
+}
+
+/** A subclass of a production primitive that supplies no tag of its own. */
+class SubBytes extends FabricBytes {}
 
 /**
  * A `BaseFabricPrimitive` subclass reporting a name the vocabulary inherits
  * rather than declares, which a `tag in VALUE_TAGS` test would accept.
  */
 class InheritedNameProbe extends BaseFabricPrimitive {
-  get [VALUE_TAG](): ValueTag {
-    return "toString" as ValueTag;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return "toString" as FabricPrimitiveValueTag;
   }
 }
 
 /** A `BaseFabricPrimitive` subclass reporting something that is no string. */
 class UntaggedProbe extends BaseFabricPrimitive {
-  get [VALUE_TAG](): ValueTag {
-    return undefined as unknown as ValueTag;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return undefined as unknown as FabricPrimitiveValueTag;
   }
 }
 
@@ -98,7 +113,9 @@ class UntaggedProbe extends BaseFabricPrimitive {
 class RoguePrimitive extends FabricPrimitive {}
 
 /** One instance of each production primitive class, with the tag it carries. */
-const PRIMITIVE_TAGS: ReadonlyArray<[FabricPrimitive, ValueTag]> = [
+const PRIMITIVE_TAGS: ReadonlyArray<
+  [FabricPrimitive, FabricPrimitiveValueTag]
+> = [
   [new FabricBytes(new Uint8Array([1])), VALUE_TAGS.FabricBytes],
   [new FabricEpochDay(0n), VALUE_TAGS.EpochDay],
   [new FabricEpochNsec(0n), VALUE_TAGS.EpochNsec],
@@ -118,6 +135,12 @@ describe("value-tags", () => {
   describe("VALUE_TAGS", () => {
     it("is frozen", () => {
       expect(Object.isFrozen(VALUE_TAGS)).toBe(true);
+    });
+
+    it("holds every primitive tag", () => {
+      for (const [key, tag] of Object.entries(FABRIC_PRIMITIVE_VALUE_TAGS)) {
+        expect(VALUE_TAGS[key as keyof typeof VALUE_TAGS]).toBe(tag);
+      }
     });
 
     it("names each tag by its own string", () => {
@@ -154,6 +177,28 @@ describe("value-tags", () => {
       expect(new Set(tags).size).toBe(PRIMITIVE_TAGS.length);
     });
 
+    it("returns every primitive tag across the registered classes", () => {
+      // The subset is the roster's tags and nothing else, held from both
+      // sides: a tag no class reports, or a class reporting a tag outside
+      // the subset, fails here.
+
+      const tags = PRIMITIVE_TAGS.map(([value]) =>
+        tagFromFabricPrimitive(value)
+      );
+      expect(new Set(tags)).toEqual(
+        new Set(Object.values(FABRIC_PRIMITIVE_VALUE_TAGS)),
+      );
+    });
+
+    it("returns the parent's tag for a subclass that supplies none", () => {
+      // The getter is inherited like any other member. Whether that is what
+      // such a subclass means is the subclass's concern; the dispatch reads
+      // what it reports.
+
+      expect(tagFromFabricPrimitive(new SubBytes(new Uint8Array([1]))))
+        .toBe(FABRIC_PRIMITIVE_VALUE_TAGS.FabricBytes);
+    });
+
     it("returns the tag a subclass reports, whatever its class", () => {
       expect(tagFromFabricPrimitive(new TaggedProbe())).toBe(VALUE_TAGS.Hash);
     });
@@ -166,6 +211,12 @@ describe("value-tags", () => {
 
     it("throws for a reported tag the vocabulary lacks", () => {
       expect(() => tagFromFabricPrimitive(new MistaggedProbe())).toThrow(
+        "Not a valid `FabricPrimitive`",
+      );
+    });
+
+    it("throws for a reported tag outside the primitive subset", () => {
+      expect(() => tagFromFabricPrimitive(new NonPrimitiveTagProbe())).toThrow(
         "Not a valid `FabricPrimitive`",
       );
     });
@@ -190,6 +241,14 @@ describe("value-tags", () => {
 
     it("returns `null` for a reported tag the vocabulary lacks", () => {
       expect(tagFromFabricPrimitiveElseNull(new MistaggedProbe())).toBe(null);
+    });
+
+    it("returns `null` for a reported tag outside the primitive subset", () => {
+      // `Error` is a tag, but not one a primitive may report; a primitive
+      // reporting it would otherwise be rebuilt as an error by conversion.
+
+      expect(tagFromFabricPrimitiveElseNull(new NonPrimitiveTagProbe()))
+        .toBe(null);
     });
 
     it("returns `null` for a reported tag that is only an inherited name", () => {
@@ -314,6 +373,7 @@ describe("value-tags", () => {
 
     it("returns `null` for a primitive whose reported tag the vocabulary lacks", () => {
       expect(tagFromFabricValueElseNull(new MistaggedProbe())).toBe(null);
+      expect(tagFromFabricValueElseNull(new NonPrimitiveTagProbe())).toBe(null);
       expect(tagFromFabricValueElseNull(new RoguePrimitive())).toBe(null);
     });
   });

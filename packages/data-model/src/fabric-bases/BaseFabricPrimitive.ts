@@ -11,7 +11,7 @@
 
 import { FabricPrimitive } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
-import type { ValueTag } from "@/value-tags.ts";
+import type { FabricPrimitiveValueTag } from "@/value-tags.ts";
 
 /**
  * Well-known symbol keying the getter through which a concrete primitive
@@ -50,10 +50,12 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
   //
 
   /**
-   * The value tag associated with this instance, as returned from `tagFrom*()`
-   * functions.
+   * The tag this instance reports, one of `FABRIC_PRIMITIVE_VALUE_TAGS`, which
+   * the `tagFrom*()` dispatches return for it. Each concrete class supplies
+   * its own. A subclass of one that does not is tagged as its parent, which
+   * is a bug in that subclass and not one the dispatches defend against.
    */
-  abstract get [VALUE_TAG](): ValueTag;
+  abstract get [VALUE_TAG](): FabricPrimitiveValueTag;
 
   //
   // Instance members

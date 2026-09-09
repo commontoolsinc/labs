@@ -22,7 +22,10 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
-import { VALUE_TAGS, type ValueTag } from "@/value-tags.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
@@ -119,8 +122,8 @@ export class FabricRegExp extends BaseFabricPrimitive
   //
 
   /** @inheritDoc */
-  get [VALUE_TAG](): ValueTag {
-    return VALUE_TAGS.FabricRegExp;
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricRegExp;
   }
 
   /** The pattern source text. */
