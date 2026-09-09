@@ -1,0 +1,737 @@
+import {
+  action,
+  computed,
+  Default,
+  handler,
+  lift,
+  NAME,
+  pattern,
+  type PerSession,
+  Stream,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
+
+import { snippet, TOPICS_THEME, whenLabel } from "../topics/topic.tsx";
+
+// ===== What this is =====
+//
+// A per-person lens over ONE topic: the topic's summary, the agent sessions
+// attached to it, the sessions that look related, the topic's links, and a
+// composer that starts a new session for the topic.
+//
+// It is a piece in the PERSON's own space rather than a change to the topic,
+// because agent sessions are published owner-confidential by the agents
+// connector while the topic lives on a shared board. The workbench holds a
+// reference to the topic and reads the person's connector index; nothing here
+// writes into the topic.
+//
+// v0 (2026-09-08): attachments are the workbench's own record, sessions are
+// read from the connector's complete index, and "start a session" composes
+// the command to run until the connector grows a start command.
+
+// ===== Views of what this reads =====
+
+/** What the workbench reads of the topic it is about — a narrow view, never
+ * the whole piece. Every field carries a default so a topic written before a
+ * field existed still reads. */
+export interface TopicView {
+  title: string | Default<"">;
+  shortName?: string;
+  body: string | Default<"">;
+  commentCount: number | Default<0> | undefined;
+  lastActivityAt: number | Default<0> | undefined;
+  createdBy?:
+    | { kind: string; name: string; avatar?: string }
+    | Default<{ kind: "person"; name: "" }>;
+  links: TopicLinkView[] | Default<[]>;
+}
+
+export interface TopicLinkView {
+  kind: string;
+  url: string;
+  label?: string;
+  addedAt?: number;
+  removedAt?: number;
+}
+
+/** One session row of the agents connector's index, as this workbench reads
+ * it: the shallow fields and nothing under the manifest. */
+export interface SessionEntry {
+  sourceId: string;
+  nativeSessionId: string;
+  title: string | null;
+  cwd: string | null;
+  gitRepo: string | null;
+  gitBranch: string | null;
+  gitWorktreeRoot: string | null;
+  updatedAt: string | null;
+  active: boolean | null;
+  archived: boolean | null;
+  syncStatus: string;
+}
+
+/** One checkout the connector discovered below its configured roots. */
+export interface CheckoutEntry {
+  root: string;
+  branch?: string | null;
+  commit?: string | null;
+}
+
+/** The connector's session index, declared to the depth the workbench reads.
+ * Every array element the connector publishes is a linked child cell; the
+ * `undefined` branch is a child that has not loaded yet, and the reads below
+ * skip it. Declared inline, the way a board declares its linked topics: this
+ * workbench reads the shallow fields and never forwards a row as a cell. */
+export interface SessionIndexView {
+  schema: string;
+  generatedAt?: string;
+  sessions: Array<SessionEntry | undefined>;
+  checkouts?: Array<CheckoutEntry | undefined>;
+}
+
+/** A session this workbench has attached to its topic. The key is provider
+ * identity, so the row stays attached across renames and reconnections. */
+export interface Attachment {
+  sourceId: string;
+  nativeSessionId: string;
+  title: string;
+  attachedAt: number;
+}
+
+/** A session as the workbench shows it: the index row joined with whether it
+ * is attached. Plain values, derived on read. */
+export interface SessionRow {
+  key: string;
+  sourceId: string;
+  nativeSessionId: string;
+  title: string;
+  cwd: string;
+  gitBranch: string;
+  gitRepo: string;
+  updatedAt: string;
+  active: boolean;
+  attached: boolean;
+}
+
+export interface CheckoutOption {
+  label: string;
+  value: string;
+}
+
+// ===== Verbs =====
+
+export interface AttachEvent {
+  sourceId: string;
+  nativeSessionId: string;
+  /** The title as known at attach time; the live title comes from the index. */
+  title?: string;
+}
+
+export interface AttachResult {
+  attachedAt: number;
+  /** False when the session was already attached; the call is idempotent. */
+  added: boolean;
+}
+
+export interface DetachEvent {
+  sourceId: string;
+  nativeSessionId: string;
+}
+
+// ===== Inputs and outputs =====
+
+export interface WorkbenchInput {
+  /** The topic this workbench is about, linked from the board's topic piece. */
+  topic?: TopicView;
+  /** The agents connector's complete session index for this person. */
+  sessions?: SessionIndexView;
+  /** Sessions attached to the topic, the workbench's own durable record. */
+  attached?: Writable<Attachment[] | Default<[]>>;
+}
+
+export interface WorkbenchOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  attached: Attachment[] | Default<[]>;
+  attachedSessions: SessionRow[];
+  relatedSessions: SessionRow[];
+  recentSessions: SessionRow[];
+  spawnCommand: string;
+  spawnPrompt: PerSession<Writable<string>>;
+  spawnRoot: PerSession<Writable<string>>;
+  /** Attach a session by provider identity. Idempotent. */
+  attach: Stream<AttachEvent, AttachResult>;
+  /** Detach a session by provider identity. */
+  detach: Stream<DetachEvent>;
+}
+
+// ===== Derivations =====
+//
+// Module-scope lifts, because the declared parameter is what bounds the read.
+
+const sessionKey = (sourceId: string, nativeSessionId: string): string =>
+  `${sourceId}/${nativeSessionId}`;
+
+/** Every session the index holds, newest first, with the fields the rows
+ * render. Reads the shallow row and nothing under the manifest. */
+const sessionRowsOf = lift((
+  { index, attached }: {
+    index?: SessionIndexView;
+    attached: Attachment[] | Default<[]>;
+  },
+): SessionRow[] => {
+  const attachedKeys = new Set(
+    attached.map((a) => sessionKey(a.sourceId, a.nativeSessionId)),
+  );
+  const rows: SessionRow[] = [];
+  for (const s of index?.sessions ?? []) {
+    if (!s || s.syncStatus === "deleted") continue;
+    const key = sessionKey(s.sourceId, s.nativeSessionId);
+    rows.push({
+      key,
+      sourceId: s.sourceId,
+      nativeSessionId: s.nativeSessionId,
+      title: s.title ?? "",
+      cwd: s.cwd ?? "",
+      gitBranch: s.gitBranch ?? "",
+      gitRepo: s.gitRepo ?? "",
+      updatedAt: s.updatedAt ?? "",
+      active: s.active === true,
+      attached: attachedKeys.has(key),
+    });
+  }
+  return rows.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+});
+
+/** The attached sessions, in attach order, each joined with its live row when
+ * the index still carries it. A session the index no longer holds still shows,
+ * from the attachment's own record, so an attachment never silently vanishes. */
+const attachedRowsOf = lift((
+  { attached, rows }: {
+    attached: Attachment[] | Default<[]>;
+    rows: SessionRow[];
+  },
+): SessionRow[] =>
+  attached.map((a) => {
+    const key = sessionKey(a.sourceId, a.nativeSessionId);
+    return rows.find((r) => r.key === key) ?? {
+      key,
+      sourceId: a.sourceId,
+      nativeSessionId: a.nativeSessionId,
+      title: a.title,
+      cwd: "",
+      gitBranch: "",
+      gitRepo: "",
+      updatedAt: "",
+      active: false,
+      attached: true,
+    };
+  })
+);
+
+/** Sessions that name the topic without being attached: the topic's number
+ * or its title appears in the session's title. A suggestion, not a claim. */
+const relatedRowsOf = lift((
+  { rows, shortName, title }: {
+    rows: SessionRow[];
+    shortName: string;
+    title: string;
+  },
+): SessionRow[] => {
+  // The number matches as a whole token, so `#1` does not claim `#10`.
+  const number = shortName.trim();
+  const numberPattern = number
+    ? new RegExp(
+      `(?:#|top/)${number.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`,
+      "i",
+    )
+    : undefined;
+  const titleNeedle = title.trim().toLowerCase();
+  if (!numberPattern && titleNeedle.length < 3) return [];
+  return rows.filter((r) =>
+    !r.attached && (
+      (numberPattern?.test(r.title) ?? false) ||
+      (titleNeedle.length >= 3 && r.title.toLowerCase().includes(titleNeedle))
+    )
+  );
+});
+
+/** The newest unattached sessions, bounded. */
+const recentRowsOf = lift((
+  { rows, limit }: { rows: SessionRow[]; limit: number },
+): SessionRow[] => rows.filter((r) => !r.attached).slice(0, limit));
+
+/** The topic's links still present, PRs first. */
+const presentLinksOf = lift((
+  { links }: { links?: TopicLinkView[] | Default<[]> },
+): TopicLinkView[] =>
+  (links ?? []).filter((l) => l.removedAt === undefined).toSorted((a, b) =>
+    (a.kind === "pr" ? 0 : 1) - (b.kind === "pr" ? 0 : 1)
+  )
+);
+
+/** Checkouts the connector discovered, as picker options. */
+const checkoutOptionsOf = lift((
+  { index }: { index?: SessionIndexView },
+): CheckoutOption[] =>
+  (index?.checkouts ?? []).flatMap((c) =>
+    c?.root
+      ? [{
+        label: c.branch ? `${c.root}  (${c.branch})` : c.root,
+        value: c.root,
+      }]
+      : []
+  )
+);
+
+/** The prompt a session for this topic starts from: the topic's number and
+ * title, and the head of its living document. */
+const defaultPromptOf = lift((
+  { shortName, title, body }: {
+    shortName: string;
+    title: string;
+    body: string;
+  },
+): string => {
+  const head = snippet(body, 400);
+  const name = shortName ? `topic #${shortName}` : "the topic";
+  return head
+    ? `Work on ${name}, "${title}". Its living document begins: ${head}`
+    : `Work on ${name}, "${title}".`;
+});
+
+const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** The command to paste until the connector can start a session itself. */
+const spawnCommandOf = lift((
+  { root, prompt }: { root: string; prompt: string },
+): string =>
+  root.trim()
+    ? `cd ${shellQuote(root.trim())} && claude ${shellQuote(prompt)}`
+    : `claude ${shellQuote(prompt)}`
+);
+
+const whenIso = (iso: string): string =>
+  iso ? iso.replace("T", " ").slice(0, 16) : "";
+
+const tail = (path: string, parts = 2): string =>
+  path.split("/").filter(Boolean).slice(-parts).join("/");
+
+/** The one-line caption under a session's title. Module scope, because a
+ * callable used inside a reactive `.map()` must be self-contained. */
+const captionOf = (row: SessionRow): string =>
+  [
+    row.sourceId,
+    row.gitBranch,
+    row.cwd ? tail(row.cwd) : "",
+    row.updatedAt ? whenIso(row.updatedAt) : "",
+  ].filter((part) => part.length > 0).join(" · ");
+
+// ===== Handlers (browser) =====
+
+const attachFromRow = handler<void, {
+  attached: Writable<Attachment[] | Default<[]>>;
+  sourceId: string;
+  nativeSessionId: string;
+  title: string;
+}>((_, { attached, sourceId, nativeSessionId, title }) => {
+  // Read-modify-write on purpose: the append depends on the read, so a
+  // mergeable push would sit in the conflict set anyway. This record is one
+  // person's, so whole-value writes carry no contention.
+  const current = attached.get();
+  const present = current.some((a) =>
+    a.sourceId === sourceId && a.nativeSessionId === nativeSessionId
+  );
+  if (present) return;
+  attached.set([
+    ...current,
+    { sourceId, nativeSessionId, title, attachedAt: Date.now() },
+  ]);
+});
+
+const detachFromRow = handler<void, {
+  attached: Writable<Attachment[] | Default<[]>>;
+  sourceId: string;
+  nativeSessionId: string;
+}>((_, { attached, sourceId, nativeSessionId }) => {
+  attached.set(
+    attached.get().filter((a) =>
+      !(a.sourceId === sourceId && a.nativeSessionId === nativeSessionId)
+    ),
+  );
+});
+
+const useDefaultPrompt = handler<void, {
+  spawnPrompt: Writable<string>;
+  defaultPrompt: string;
+}>((_, { spawnPrompt, defaultPrompt }) => {
+  spawnPrompt.set(defaultPrompt);
+});
+
+const pickRoot = handler<void, {
+  spawnRoot: Writable<string>;
+  root: string;
+}>((_, { spawnRoot, root }) => {
+  spawnRoot.set(root);
+});
+
+// ===== The pattern =====
+
+export default pattern<WorkbenchInput, WorkbenchOutput>(
+  ({ topic, sessions, attached }) => {
+    const spawnPrompt = new Writable.perSession("");
+    const spawnRoot = new Writable.perSession("");
+
+    const title = topic?.title ?? "";
+    const shortName = topic?.shortName ?? "";
+    const body = topic?.body ?? "";
+    const commentCount = topic?.commentCount ?? 0;
+    const lastActivityAt = topic?.lastActivityAt ?? 0;
+    const hasTopic = title.trim().length > 0;
+    const hasBody = body.trim().length > 0;
+
+    const rows = sessionRowsOf({ index: sessions, attached });
+    const attachedSessions = attachedRowsOf({ attached, rows });
+    const relatedSessions = relatedRowsOf({ rows, shortName, title });
+    const recentSessions = recentRowsOf({ rows, limit: 8 });
+    const links = presentLinksOf({ links: topic?.links });
+    const checkoutOptions = checkoutOptionsOf({ index: sessions });
+    const defaultPrompt = defaultPromptOf({ shortName, title, body });
+    const spawnCommand = spawnCommandOf({
+      root: spawnRoot,
+      prompt: spawnPrompt,
+    });
+
+    const hasAttached = attachedSessions.length > 0;
+    const hasRelated = relatedSessions.length > 0;
+    const hasRecent = recentSessions.length > 0;
+    const hasLinks = links.length > 0;
+    const hasIndex = computed(() => rows.length > 0);
+    const hasPrompt = computed(() => spawnPrompt.get().trim().length > 0);
+
+    // --- Verbs (headless; a skill inside a session can attach itself) ---
+
+    const attach = action<AttachEvent, AttachResult>(
+      ({ sourceId, nativeSessionId, title: given }) => {
+        const source = (sourceId ?? "").trim();
+        const native = (nativeSessionId ?? "").trim();
+        if (!source || !native) {
+          throw new Error("attach: sourceId and nativeSessionId are required");
+        }
+        const current = attached.get();
+        const present = current.some((a) =>
+          a.sourceId === source && a.nativeSessionId === native
+        );
+        const attachedAt = Date.now();
+        if (present) return { attachedAt, added: false };
+        // Read-modify-write, for the reason the browser handler states.
+        attached.set([
+          ...current,
+          {
+            sourceId: source,
+            nativeSessionId: native,
+            title: (given ?? "").trim(),
+            attachedAt,
+          },
+        ]);
+        return { attachedAt, added: true };
+      },
+    );
+
+    const detach = action<DetachEvent>(({ sourceId, nativeSessionId }) => {
+      attached.set(
+        attached.get().filter((a) =>
+          !(a.sourceId === sourceId && a.nativeSessionId === nativeSessionId)
+        ),
+      );
+    });
+
+    return {
+      [NAME]: hasTopic ? `Workbench: ${title}` : "Workbench (no topic)",
+      [UI]: (
+        <cf-theme theme={TOPICS_THEME}>
+          <cf-screen>
+            <cf-vstack slot="header" gap="1" padding="4">
+              <cf-hstack gap="2" align="center">
+                {shortName
+                  ? (
+                    <cf-badge size="sm" color="primary" data-member-name="">
+                      {shortName}
+                    </cf-badge>
+                  )
+                  : null}
+                <cf-text
+                  block
+                  style="font-size: 1.25rem; font-weight: 600; flex: 1; min-width: 0;"
+                >
+                  {hasTopic ? title : "No topic linked yet"}
+                </cf-text>
+                {hasTopic
+                  ? <cf-cell-link $cell={topic} label="Open topic" />
+                  : null}
+              </cf-hstack>
+              <cf-text variant="caption" tone="muted">
+                {hasTopic
+                  ? `${commentCount} comments · last activity ${
+                    whenLabel(lastActivityAt)
+                  }`
+                  : "Link a topic into this workbench's `topic` input."}
+              </cf-text>
+            </cf-vstack>
+
+            <cf-vstack gap="3" padding="4">
+              {/* ── The topic's living document, read-only here ── */}
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Living document</cf-heading>
+                  {hasBody
+                    ? <cf-markdown content={body} />
+                    : (
+                      <cf-text tone="muted" block>
+                        The topic has no body yet.
+                      </cf-text>
+                    )}
+                </cf-vstack>
+              </cf-card>
+
+              {/* ── Sessions attached to this topic ── */}
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-hstack justify="between" align="center">
+                    <cf-heading level={5}>Sessions on this topic</cf-heading>
+                    <cf-text variant="caption" tone="muted">
+                      {attachedSessions.length} attached
+                    </cf-text>
+                  </cf-hstack>
+                  {hasAttached
+                    ? (
+                      <cf-vstack gap="2">
+                        {attachedSessions.map((row) => (
+                          <cf-hstack gap="2" align="center" data-session-row="">
+                            <cf-badge
+                              size="xs"
+                              color={row.active ? "accent" : "neutral"}
+                            >
+                              {row.active ? "active" : "idle"}
+                            </cf-badge>
+                            <cf-vstack gap="0" style="flex: 1; min-width: 0;">
+                              <cf-text block truncate style="font-weight: 600;">
+                                {row.title || "(untitled session)"}
+                              </cf-text>
+                              <cf-text variant="caption" tone="muted" truncate>
+                                {captionOf(row)}
+                              </cf-text>
+                            </cf-vstack>
+                            <cf-button
+                              variant="ghost"
+                              size="sm"
+                              data-detach=""
+                              onClick={detachFromRow({
+                                attached,
+                                sourceId: row.sourceId,
+                                nativeSessionId: row.nativeSessionId,
+                              })}
+                            >
+                              Detach
+                            </cf-button>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    )
+                    : (
+                      <cf-text tone="muted" block>
+                        No sessions attached. Attach one below, or start one.
+                      </cf-text>
+                    )}
+                </cf-vstack>
+              </cf-card>
+
+              {/* ── Sessions that name the topic ── */}
+              {hasRelated
+                ? (
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-heading level={5}>Looks related</cf-heading>
+                      <cf-text variant="caption" tone="muted">
+                        Sessions whose title names this topic.
+                      </cf-text>
+                      <cf-vstack gap="2">
+                        {relatedSessions.map((row) => (
+                          <cf-hstack gap="2" align="center" data-session-row="">
+                            <cf-badge
+                              size="xs"
+                              color={row.active ? "accent" : "neutral"}
+                            >
+                              {row.active ? "active" : "idle"}
+                            </cf-badge>
+                            <cf-vstack gap="0" style="flex: 1; min-width: 0;">
+                              <cf-text block truncate style="font-weight: 600;">
+                                {row.title || "(untitled session)"}
+                              </cf-text>
+                              <cf-text variant="caption" tone="muted" truncate>
+                                {captionOf(row)}
+                              </cf-text>
+                            </cf-vstack>
+                            <cf-button
+                              variant="secondary"
+                              size="sm"
+                              data-attach=""
+                              onClick={attachFromRow({
+                                attached,
+                                sourceId: row.sourceId,
+                                nativeSessionId: row.nativeSessionId,
+                                title: row.title,
+                              })}
+                            >
+                              Attach
+                            </cf-button>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    </cf-vstack>
+                  </cf-card>
+                )
+                : null}
+
+              {/* ── Recent sessions, to attach by hand ── */}
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Recent sessions</cf-heading>
+                  {hasRecent
+                    ? (
+                      <cf-vstack gap="2">
+                        {recentSessions.map((row) => (
+                          <cf-hstack gap="2" align="center" data-session-row="">
+                            <cf-badge
+                              size="xs"
+                              color={row.active ? "accent" : "neutral"}
+                            >
+                              {row.active ? "active" : "idle"}
+                            </cf-badge>
+                            <cf-vstack gap="0" style="flex: 1; min-width: 0;">
+                              <cf-text block truncate style="font-weight: 600;">
+                                {row.title || "(untitled session)"}
+                              </cf-text>
+                              <cf-text variant="caption" tone="muted" truncate>
+                                {captionOf(row)}
+                              </cf-text>
+                            </cf-vstack>
+                            <cf-button
+                              variant="secondary"
+                              size="sm"
+                              data-attach=""
+                              onClick={attachFromRow({
+                                attached,
+                                sourceId: row.sourceId,
+                                nativeSessionId: row.nativeSessionId,
+                                title: row.title,
+                              })}
+                            >
+                              Attach
+                            </cf-button>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    )
+                    : (
+                      <cf-text tone="muted" block>
+                        {hasIndex
+                          ? "Every session the connector knows is attached."
+                          : "No session index linked, or the connector has not collected yet."}
+                      </cf-text>
+                    )}
+                </cf-vstack>
+              </cf-card>
+
+              {/* ── The topic's links: PRs first ── */}
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Links</cf-heading>
+                  {hasLinks
+                    ? (
+                      <cf-vstack gap="1">
+                        {links.map((link) => (
+                          <cf-hstack gap="2" align="center" data-link-row="">
+                            <cf-badge size="xs" color="neutral">
+                              {link.kind}
+                            </cf-badge>
+                            <a
+                              href={link.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style="color: inherit;"
+                            >
+                              {link.label || link.url}
+                            </a>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    )
+                    : (
+                      <cf-text tone="muted" block>
+                        The topic has no links yet.
+                      </cf-text>
+                    )}
+                </cf-vstack>
+              </cf-card>
+
+              {/* ── Start a session for this topic ── */}
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Start a session</cf-heading>
+                  <cf-text variant="caption" tone="muted">
+                    Until the connector can start a session itself, this
+                    composes the command to run. The session appears above on
+                    the connector's next collection; attach it then.
+                  </cf-text>
+                  <cf-hstack gap="2" align="end">
+                    <cf-field label="Prompt" style="flex: 1;">
+                      <cf-textarea
+                        $value={spawnPrompt}
+                        rows={3}
+                        placeholder={defaultPrompt}
+                      />
+                    </cf-field>
+                    <cf-button
+                      variant="ghost"
+                      onClick={useDefaultPrompt({ spawnPrompt, defaultPrompt })}
+                    >
+                      Use the topic
+                    </cf-button>
+                  </cf-hstack>
+                  <cf-hstack gap="2" align="end">
+                    <cf-field label="Checkout" style="flex: 1;">
+                      <cf-select $value={spawnRoot} items={checkoutOptions} />
+                    </cf-field>
+                  </cf-hstack>
+                  {hasPrompt
+                    ? (
+                      <cf-text
+                        block
+                        data-spawn-command=""
+                        style="font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-all;"
+                      >
+                        {spawnCommand}
+                      </cf-text>
+                    )
+                    : null}
+                </cf-vstack>
+              </cf-card>
+            </cf-vstack>
+          </cf-screen>
+        </cf-theme>
+      ),
+      attached,
+      attachedSessions,
+      relatedSessions,
+      recentSessions,
+      spawnCommand,
+      spawnPrompt,
+      spawnRoot,
+      attach,
+      detach,
+    };
+  },
+);
