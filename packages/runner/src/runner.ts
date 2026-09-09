@@ -226,6 +226,23 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
  */
 const RESULT_SHORTCUT_LIMIT = 4096;
 
+/**
+ * Presence probes `Runner.#patternToNameBeforeRun` may spend before it stops
+ * looking and holds the run for a name-sync. Each probe is one read of the
+ * local replica, so the budget bounds the walk's cost and not its verdict: a
+ * spent budget reads as absent, and the run pays one name-sync it may not
+ * have needed. A wide argument — one whose links, and the values behind
+ * them, fan out past the budget within the walk's depth — is therefore held
+ * once per runtime per pattern identity even when its whole family is
+ * local. That is the cheaper error. Narrowing the walk to the argument's own
+ * links would skip the links a linked document's value holds, which the
+ * name-sync's argument-link-target wave exists to warm; a missed absence
+ * costs a conflicting first commit, a spurious hold costs a re-sync the
+ * client answers from coverage it already has. The gate logs a spent budget
+ * so a wide piece held for it is diagnosable.
+ */
+const NAMING_PROBE_BUDGET = 256;
+
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
   "fetchJson",
@@ -2069,6 +2086,14 @@ export class Runner {
    * landed for. A run under another pattern probes again: an upgrade can add
    * an internal cell the crossing never delivered. Bounded like the other
    * result shortcuts; an evicted entry costs a probe, never a wrong verdict.
+   *
+   * A name-sync that rejects lands all the same. The run then degrades to
+   * what it was before the gate existed — over what is local, its own
+   * subscriptions fetching the rest, the rejection logged as the signal —
+   * and a later run under the same pattern is not held again for this
+   * runner's lifetime, a transient rejection included. Withholding the
+   * landing would name the piece again on every run, and the deferred run's
+   * own re-check of the gate would loop on the same rejection.
    */
   readonly #namedFamilies = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
@@ -2133,6 +2158,9 @@ export class Runner {
    */
   #dependencySyncer: DependencySyncer | undefined = undefined;
 
+  /** `NAMING_PROBE_BUDGET`, lowered by a test to reach the spent-budget hold. */
+  #namingProbeBudget = NAMING_PROBE_BUDGET;
+
   /**
    * The committer a test supplies around a commit-gated start's commit;
    * `undefined` means the runner's own.
@@ -2183,6 +2211,7 @@ export class Runner {
     readonly activeStartAttempts: Set<StartAttempt>;
     dependencySyncer: DependencySyncer | undefined;
     deferredStartCommitter: DeferredStartCommitter | undefined;
+    namingProbeBudget: number;
     createStorageSubscription(): IStorageSubscription;
     setupInternal<T, R>(
       providedTx: IExtendedStorageTransaction | undefined,
@@ -2255,6 +2284,12 @@ export class Runner {
       },
       set deferredStartCommitter(value) {
         outerThis.#deferredStartCommitter = value;
+      },
+      get namingProbeBudget() {
+        return outerThis.#namingProbeBudget;
+      },
+      set namingProbeBudget(value) {
+        outerThis.#namingProbeBudget = value;
       },
       createStorageSubscription: () => this.#createStorageSubscription(),
       setupInternal: (
@@ -5227,24 +5262,49 @@ export class Runner {
     // schema, which answers an absent document with the schema's default.
     // A cell nothing has written yet — a derived cell whose producer never
     // ran — reads absent here too, and holds the run once; the probes stop
-    // at a budget, and a budget spent reads absent as well: a hold costs one
-    // name-sync, a wrong local verdict costs a conflicting commit.
+    // at a budget (`NAMING_PROBE_BUDGET`), and a budget spent reads absent
+    // as well: a hold costs one name-sync, a wrong local verdict costs a
+    // conflicting commit.
     const readTx = this.#runtime.readTx();
     const cell = resultCell.withTx(readTx);
-    let probes = 256;
-    const present = (link: NormalizedFullLink): boolean =>
-      probes-- > 0 &&
-      readTx.readOrThrow(
-          {
-            space: link.space,
-            id: link.id,
-            path: ["value"],
-            ...(link.scope !== undefined && { scope: link.scope }),
-          },
-          { meta: ignoreReadForScheduling },
-        ) !== undefined;
+    let probes = this.#namingProbeBudget;
+    let budgetSpent = false;
+    const present = (link: NormalizedFullLink): boolean => {
+      if (probes === 0) {
+        budgetSpent = true;
+        return false;
+      }
+      probes--;
+      return readTx.readOrThrow(
+        {
+          space: link.space,
+          id: link.id,
+          path: ["value"],
+          ...(link.scope !== undefined && { scope: link.scope }),
+        },
+        { meta: ignoreReadForScheduling },
+      ) !== undefined;
+    };
     const held = { pattern: resolved.pattern, entryKey };
-    if (!present(argumentLink)) return held;
+    // The hold, with what decided it: a document of `stage` read absent, or
+    // the budget ran out on a probe of that stage — the case worth a log,
+    // since a piece held for its width and not for an absence looks, from
+    // outside, like any other named run.
+    const hold = (stage: string): { pattern: Pattern; entryKey: string } => {
+      if (budgetSpent) {
+        logger.debug("named-run-gate", () => [
+          "probe budget spent; holding the run for a name-sync",
+          {
+            resultCell: resultCell.getAsNormalizedFullLink().id,
+            pattern: entryKey,
+            budget: this.#namingProbeBudget,
+            stage,
+          },
+        ]);
+      }
+      return held;
+    };
+    if (!present(argumentLink)) return hold("the argument document");
     // What the run reads through the argument: every document the caller's
     // argument and the stored argument link to, followed through the
     // targets those links resolve into — a coordinator's element link is a
@@ -5280,7 +5340,9 @@ export class Runner {
       }
       return false;
     };
-    if (linksAbsent(argument, 4)) return held;
+    if (linksAbsent(argument, 4)) {
+      return hold("a document the caller's argument links to");
+    }
     if (
       linksAbsent(
         readTx.readOrThrow(
@@ -5296,7 +5358,7 @@ export class Runner {
         4,
       )
     ) {
-      return held;
+      return hold("a document the stored argument links to");
     }
     // The owned cells the run reads: the pattern's derived internal cells
     // and, through each nested sub-pattern's result spot, those of the
@@ -5311,7 +5373,9 @@ export class Runner {
       readTx,
     );
     for (const ownedCell of owned) {
-      if (!present(ownedCell.getAsNormalizedFullLink())) return held;
+      if (!present(ownedCell.getAsNormalizedFullLink())) {
+        return hold("an owned cell");
+      }
     }
     return undefined;
   }
@@ -5407,6 +5471,11 @@ export class Runner {
             toName = again;
             continue;
           }
+          // The run consults the gate once more on its way in and gets the
+          // answer the re-check just got: the landing that satisfied it is
+          // recorded, and nothing runs between the two that could evict it —
+          // an eviction takes a name-sync landing for another piece, and this
+          // stretch is synchronous.
           started = this.#runWithStartOwnership(
             startTx,
             patternOrModule,
