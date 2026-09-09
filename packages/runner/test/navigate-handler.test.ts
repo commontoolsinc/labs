@@ -2,6 +2,8 @@ import { assert, assertEquals } from "@std/assert";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -365,10 +367,10 @@ Deno.test(
       );
 
       const rejectedTx = runtime.edit();
-      rejectedTx.markCfcRelevant("navigateTo retry regression");
+      refuseAtCommitBoundary(rejectedTx, "navigateTo retry regression");
       builtin.action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
-      assert(rejectedResult.error !== undefined);
+      assert(isCfcEnforcementRejection(rejectedResult.error));
       await runtime.settled();
       assertEquals(navigations.length, 0);
 
