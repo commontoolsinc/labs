@@ -252,23 +252,23 @@ describe("what the tree half looks at", () => {
     }
   });
 
-  it("holds a listed exception to still being in the tree", () => {
+  it("holds a listed fixture to still being in the tree", () => {
     // A file that gets registered or deleted takes its line with it,
     // which is what stops the list describing a tree nobody has.
     const findings = checkTree([], [], {
-      unregistered: [{ path: "packages/gone.test.ts", reason: "moved away" }],
+      fixtures: [{ path: "packages/gone.test.ts", reason: "moved away" }],
     });
     expect(findings.map((finding) => finding.fails)).toEqual([true]);
     expect(findings[0]!.message).toContain("no longer holds it");
   });
 
-  it("holds a listed exception to still being unclaimed", () => {
+  it("holds a listed fixture to still being unclaimed", () => {
     const claimed = suite({ id: "workspace-unit", units: ["a.test.ts"] });
     const findings = checkTree([claimed], ["a.test.ts"], {
       fixtures: [{ path: "a.test.ts", reason: "a fixture a test drives" }],
     });
     expect(findings.map((finding) => finding.fails)).toEqual([true]);
-    expect(findings[0]!.message).toContain("still listed as unclaimed");
+    expect(findings[0]!.message).toContain("still listed as a fixture");
   });
 });
 
@@ -324,16 +324,15 @@ describe("reading a run's records", () => {
 });
 
 describe("what the guard declines to fail on", () => {
-  it("accepts a declared fixture and reports a declared unrun test", () => {
+  it("accepts a declared fixture and fails on anything else", () => {
     const findings = checkTree([], ["fixture.test.ts", "unrun.test.ts"], {
       fixtures: [{ path: "fixture.test.ts", reason: "a test drives it" }],
-      unregistered: [{ path: "unrun.test.ts", reason: "no suite runs it" }],
     });
-    // A fixture is not a test surface and says nothing. A test nothing
-    // runs is a defect, reported so somebody can act on it, and not a
-    // failure, because registering one means deciding where it runs.
-    expect(findings.map((finding) => finding.fails)).toEqual([false]);
-    expect(findings[0]!.message).toContain("runs nowhere");
+    // A fixture is not a test surface and says nothing. Everything else
+    // is, so a suite has to account for it — a suite that runs it, or one
+    // that holds it and says why this configuration does not.
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toBe("unrun.test.ts is claimed by no suite");
   });
 
   it("counts one recorded identity once, however often it was run", () => {

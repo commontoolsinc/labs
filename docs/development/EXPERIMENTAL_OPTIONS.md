@@ -1179,7 +1179,9 @@ the per-epic implementation notes).
   [`packages/shell/src/lib/render-ceiling.ts`](../../packages/shell/src/lib/render-ceiling.ts).
   Because the ceiling crosses the worker boundary in the fixed initialization
   data, flipping it takes effect on the next runtime (a reload or re-login), not
-  live.
+  live. A browser integration test states the side it needs through the
+  `renderCeiling` option of `ShellIntegration.goto`, which writes the same key
+  after the navigation and before the login.
 - **Added by.** Bernhard Seefeld, in "populate the render confidentiality
   ceiling behind a shell dogfood flag (Epic H3a)" (#4550, 2026-07-07).
 - **Purpose.** Populates the CFC render confidentiality ceiling in the shell's
@@ -1319,9 +1321,24 @@ site has:
 
 The second is the weaker claim, but it does not fail quietly, and that is the
 point. Add a production use of one of these values and the throw fires — at the
-moment the use is added, in the change that added it — leaving exactly two
-honest ways forward: implement the handling the throw names, or back the use
-out. So the tripwire is its own enforcement, which is why an ungated site is
+moment the use is added, in the change that added it. Three honest ways lead out
+of that: implement the handling the throw names, back the use out, or establish
+that the site was never one a refusal belonged at and give it the answer it
+owes.
+
+That third one is rare and carries the heaviest burden of proof, because it
+closes nothing. A site taking it still cannot reach what the value holds; what
+changes is that it reports that in a form its caller can act on rather than
+throwing. So it is available only where the site has somewhere to put the
+report and records it there, and where refusing would cost more than the gap
+does — a walk under a subscription that has to keep delivering cannot throw at
+all, and a walk that only decides what a path finds is reporting an absence
+rather than handing back a wrong value. Reaching for a non-throwing predicate,
+on its own, is not this: without the record it is the quiet exemption the next
+obligation rules out, and the two are told apart by what the site does with the
+answer rather than by which identifier it calls.
+
+So the tripwire is its own enforcement, which is why an ungated site is
 legitimate. What it is not is a flag, so do not cite this section as though one
 stood behind every throw.
 
@@ -1339,7 +1356,10 @@ than at any one of the sites:
 - **Meeting one.** A throw firing is the instrument working, not a defect in it.
   Implement the missing handling at the site it names — for a flag-gated site
   that work _is_ the flag's graduation work — or back out the use that reached
-  it. What is not on the list is exempting the value so the walk stays quiet.
+  it, or take the third way above and say in the change why the site owes an
+  answer rather than a refusal. What is not on the list is exempting the value
+  so the walk stays quiet, and swapping a throwing call for a non-throwing one
+  without recording what the site now under-reports is that.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these

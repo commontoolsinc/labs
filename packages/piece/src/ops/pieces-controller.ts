@@ -301,6 +301,11 @@ export class PiecesController<T = unknown> {
        * Open the space's session without syncing the space cell's contents. A
        * caller that reaches pieces by id, and never reads the space record,
        * does not need those contents.
+       *
+       * Defaults to `false` here: `initialize` syncs the space cell before it
+       * returns. The CLI's `loadPieces` defaults the same option to `true`,
+       * so a caller moving between the two surfaces should pass it
+       * explicitly rather than carry one default across to the other.
        */
       deferSpaceCellSync?: boolean;
 
@@ -1722,14 +1727,13 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Set the target cell's argument cell at target path to be a link to the
-   * link cell's content at linkPath.
+   * Links the source result at `linkPath` into the target argument at
+   * `targetPath`. A target piece must declare the path in its current input
+   * schema; raw cell targets accept paths without a piece-schema check.
    *
-   * @param linkPieceId
-   * @param linkPath
-   * @param targetPieceId
-   * @param targetPath
-   * @param options
+   * @throws {PieceInputPathError} If the target piece's input schema does not
+   * expose the path. Update its source with `cf piece setsrc` to declare the
+   * input before linking it.
    */
   async link(
     linkPieceId: string,

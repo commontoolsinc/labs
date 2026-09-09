@@ -231,7 +231,9 @@ equally a thing a diff shows you. A file header is a doc comment at the very
 top, above the first `import` and the first `export`; a new file carrying none,
 or carrying one written as a `//` block or parked below the import block, is a
 finding nothing else in the file will point you at. See the same document, "File
-headers".
+headers", for the four kinds of file that carry none by design — a unit test
+file among them, since a header that would only name the file under test is left
+out — before writing the finding.
 
 ### 6. Craft & conventions
 

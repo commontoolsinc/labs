@@ -411,13 +411,48 @@ Deno.test("every work step is bounded before its job is", async () => {
   }
 });
 
-Deno.test("Coverage Comment follows the CI workflow by name", async () => {
+Deno.test("Pull Request Comments follows the CI workflow by name", async () => {
   const deno = await workflow("deno.yml");
-  const comment = await workflow("coverage-comment.yml");
+  const comment = await workflow("pull-request-comments.yml");
   const name = deno.match(/^name: (.+)$/m);
   assert(name, "workflow name not found");
 
   assertStringIncludes(comment, `    workflows: ["${name[1]}"]\n`);
+});
+
+// A workflow_run payload describes the run it names, not the run that
+// triggered it, so only a first-level follower of the test workflow can
+// read a run's own event, branch and head. A follower of a follower gets
+// the default branch and its tip whatever the triggering run was.
+Deno.test("each comment job selects runs by the triggering run's own facts", async () => {
+  const comment = await workflow("pull-request-comments.yml");
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.event == 'pull_request' &&",
+  );
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.event == 'push' &&",
+  );
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.head_branch == 'main' &&",
+  );
+});
+
+// The run report reads the tree of the commit it reports on, so that the
+// topology it packs is the pull request's tree as it landed and the diff
+// it reads is the change itself. That commit is on the default branch,
+// which is what makes it safe to run in a job holding a write token; a
+// pull request head in the same job would be running fork-authored code
+// with permission to comment as the repository.
+Deno.test("the run report checks out the commit it reports on", async () => {
+  const comment = await workflow("pull-request-comments.yml");
+  assertStringIncludes(
+    comment,
+    "ref: ${{ github.event.workflow_run.head_sha }}",
+  );
+  assertStringIncludes(comment, "fetch-depth: 2");
 });
 
 Deno.test("coverage requirements follow sharded test matrices", async () => {
@@ -620,6 +655,42 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
       "            ${{ env.IMAGE }}:${{ github.sha }}\n" +
       "            ${{ env.IMAGE }}:latest\n",
   );
+});
+
+Deno.test("the Dashboard workflow records no tests", async () => {
+  const dashboard = withoutComments(await workflow("dashboard-image.yml"));
+  const relay = withoutComments(await workflow("test-records-relay.yml"));
+
+  // CI runs `packages/dashboard`'s test task on the same commit and records
+  // what it runs. Recording the same task again here would file each of those
+  // tests twice against one commit, so this workflow takes no part in test
+  // records at either end: it spools nothing, and the relay does not follow
+  // it. Reinstating either half alone produces a run whose records are
+  // gathered and never shipped.
+  assertEquals(dashboard.includes("CF_TEST_RECORDS_DIR"), false);
+  assertEquals(dashboard.includes("run-recorded"), false);
+  assertEquals(dashboard.includes("test-records-ship"), false);
+  assertStringIncludes(workflowTriggers(relay), '    workflows: ["CI"]\n');
+});
+
+Deno.test("the Coverage Check job records no tests", async () => {
+  const job = jobBlock(
+    withoutComments(await workflow("deno.yml")),
+    "coverage-check",
+  );
+
+  // The gate reads the coverage artifacts of every test job in this run, so no
+  // lane can be asked to run it, and the criterion in `docs/specs/test-records.md`
+  // under "Recording" puts it outside test records: no spool directory, no
+  // wrapper, no ship step.
+  assert(!job.includes("CF_TEST_RECORDS_DIR"), "the job spools test records");
+  assert(
+    !job.includes("run-recorded"),
+    "the job wraps its command in run-recorded",
+  );
+  assert(!job.includes("test-records-ship"), "the job ships test records");
+  // The gate itself runs.
+  assertStringIncludes(job, "tasks/coverage-check.ts");
 });
 
 Deno.test("One commit publishes one set of release artifacts", async () => {

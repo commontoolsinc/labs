@@ -9,6 +9,7 @@ import {
 } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  boundReadValue,
   CellSelectionError,
   deriveSelectedValue,
   evaluateSelectionPredicate,
@@ -411,6 +412,30 @@ describe("cf cell get transforms", () => {
     });
     expect(Object.keys((selected as { properties: object }).properties))
       .toEqual(["visible"]);
+  });
+
+  it("drops a required entry named like a prototype member that the mask did not select", () => {
+    // `required` is filtered to the SELECTED properties. That test must ask
+    // whether the selection holds the key as its own: a `required` entry
+    // spelled `toString` is found on every object by `in`, and an unselected
+    // one used to survive into the selected schema's `required`.
+    const properties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    properties["toString"] = { type: "string" };
+    const source: JSONSchema = {
+      type: "object",
+      properties,
+      required: ["label", "toString"],
+    };
+    const selected = selectSourceSchema(source, {
+      type: "object",
+      properties: { label: true },
+      additionalProperties: false,
+    }) as { properties: object; required?: string[] };
+
+    expect(Object.keys(selected.properties)).toEqual(["label"]);
+    expect(selected.required).toEqual(["label"]);
   });
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
@@ -2051,6 +2076,194 @@ describe("cf cell get transforms", () => {
     } finally {
       (runtime as any).edit = originalEdit;
     }
+  });
+
+  it("returns projection-ordered output without a storage-wide sync", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-output-readiness-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            label: { type: "string" },
+            ignored: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, label: "first", ignored: "not selected" },
+      { id: 2, label: "second", ignored: "not selected" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const originalSynced = storageManager.synced.bind(storageManager);
+    let storageWideSyncs = 0;
+    storageManager.synced = () => {
+      storageWideSyncs++;
+      return originalSynced();
+    };
+    try {
+      const result = await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("label,id"),
+      });
+      expect(result).toEqual([
+        { label: "first", id: 1 },
+        { label: "second", id: 2 },
+      ]);
+      expect(JSON.stringify(result)).toBe(
+        '[{"label":"first","id":1},{"label":"second","id":2}]',
+      );
+      expect(storageWideSyncs).toBe(0);
+    } finally {
+      storageManager.synced = originalSynced;
+    }
+  });
+
+  it("orders an open projection's declared keys first, then retained extras in value order", async () => {
+    const setup = runtime.edit();
+    // The `toString` entry is added by key: in an object literal TypeScript
+    // types a property of that name as `Object.prototype.toString` and
+    // refuses the schema.
+    const sourceProperties: Record<string, JSONSchema> = {
+      id: { type: "number" },
+      zeta: { type: "string" },
+      label: { type: "string" },
+      alpha: { type: "string" },
+    };
+    sourceProperties["toString"] = { type: "string" };
+    const source = runtime.getCell(
+      space,
+      "transform-open-projection-order-source",
+      { type: "object", properties: sourceProperties },
+      setup,
+    );
+    // Three extras beyond the declaration, one of them spelled like an
+    // `Object.prototype` member, which `in` would have mistaken for
+    // present-on-every-object and dropped.
+    source.set({
+      id: 1,
+      zeta: "z",
+      label: "first",
+      toString: "own",
+      alpha: "a",
+    });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // Open (`additionalProperties: true`) and declaring `label` before `id`:
+    // the declaration orders the keys it names, and what the projection
+    // retains beyond it follows in the order the value holds them — which,
+    // after a storage round trip, is the canonical (sorted) order the
+    // materialized value arrives in, not the order `set()` was handed.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"type":"object","properties":{"label":true,"id":true},"additionalProperties":true}',
+      ),
+    });
+    expect(JSON.stringify(result)).toBe(
+      '{"label":"first","id":1,"alpha":"a","toString":"own","zeta":"z"}',
+    );
+  });
+
+  it("orders an open projection's declared keys first across an array of objects", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-open-projection-array-order-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            label: { type: "string" },
+            extra: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, label: "first", extra: "kept" },
+      { id: 2, label: "second", extra: "kept" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // The open × array combination: `projectValue` decomposes the array
+    // projection to its item schema, and each element renders its declared
+    // keys in schema order (label before id) with the retained extra after.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"type":"array","items":{"type":"object","properties":{"label":true,"id":true},"additionalProperties":true}}',
+      ),
+    });
+    expect(JSON.stringify(result)).toBe(
+      '[{"label":"first","id":1,"extra":"kept"},{"label":"second","id":2,"extra":"kept"}]',
+    );
+  });
+
+  it("a bound read composes no address for a marked position the value does not hold, prototype names included", async () => {
+    // A declared result whose recursion re-enters at a property spelled like
+    // an `Object.prototype` member: the cut marks that position, and the
+    // bound read composes an address for it only where the value holds the
+    // key as its own. `in` found `Object.prototype.toString` on a value
+    // without one and composed an address for a key the value never had.
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-bound-read-prototype-source",
+      { type: "object", properties: { label: { type: "string" } } },
+      setup,
+    );
+    source.set({ label: "held" });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const nodeProperties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    nodeProperties["toString"] = { $ref: "#/$defs/Node" };
+    const declared: JSONSchema = {
+      $defs: { Node: { type: "object", properties: nodeProperties } },
+      $ref: "#/$defs/Node",
+    };
+
+    const result = await boundReadValue(
+      source,
+      declared,
+      { label: "held" },
+      space,
+    ) as Record<string, unknown>;
+    expect(Object.keys(result)).toEqual(["label"]);
+    expect(Object.hasOwn(result, "toString")).toBe(false);
+  });
+
+  it("a closed projection emits only keys the value holds, prototype names included", async () => {
+    const setup = runtime.edit();
+    const sourceProperties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    sourceProperties["toString"] = { type: "string" };
+    const source = runtime.getCell(
+      space,
+      "transform-closed-projection-prototype-source",
+      { type: "object", properties: sourceProperties },
+      setup,
+    );
+    source.set({ label: "only" });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // `toString` is selected but absent from the value; `in` would have
+    // found `Object.prototype.toString` and emitted the native function.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: parseSelectProjection("label,toString"),
+    }) as Record<string, unknown>;
+    expect(Object.keys(result)).toEqual(["label"]);
+    expect(Object.hasOwn(result, "toString")).toBe(false);
   });
 
   describe("the labels a selection carries", () => {

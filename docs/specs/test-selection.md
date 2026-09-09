@@ -51,12 +51,19 @@ A failure on the default branch cannot be judged when it happens. Every
 push there is a distinct commit with one run, so a test that is flaky
 there never contradicts itself, and counting each such failure as a catch
 would make the least valuable test in the repository look like the most
-valuable. Such a failure waits for the next run on that branch: still
-failing is the same breakage continuing and nothing new is learned;
-passing means the change between the two commits fixed it, which is what
-the test caught. Telling a fix apart from a failure that healed itself
-needs the coverage attribution map, and without one the judgement errs
-toward calling a failure a catch.
+valuable. Such a failure waits for the next run on that branch. Still
+failing is the same breakage continuing, and nothing new is learned.
+Passing at the same commit is the test disagreeing with itself, and counts
+as a flake observation. Passing at a later commit counts as a catch: the
+change between the two commits fixed what the test found. A run of
+failures ended by one pass counts one catch, dated to the first of them,
+so a week of the branch being red is worth one catch and not seven.
+
+Nothing separates a failure a change fixed from one that healed itself, so
+a test flaky on the default branch is credited for its own noise. The
+judgement errs toward crediting a test rather than away from it. An
+overstated score costs run time, and an understated one costs a test its
+place.
 
 ### Where a catch happened
 
@@ -153,16 +160,14 @@ never laxer. Nothing is retried and nothing is masked.
 
 ## What must run, and what must not
 
-Two rules keep a test out. Both make a change less red rather than more,
-and both exist so that nobody's change fails for something its author
-cannot act on.
+One rule keeps a test out, and it makes a change less red rather than
+more. An identity above `FLAKE_EXCLUSION_RATE` is not selected, since a
+test that disagrees with itself fails somebody's change for something
+its author cannot act on.
 
-- An identity failing in the most recent run on the default branch is not
-  selected.
-- An identity above `FLAKE_EXCLUSION_RATE` is not selected.
-
-Either comes back the moment the change touches what it covers, since that
-is very likely a fix and has to be allowed to prove itself.
+It comes back the moment the change edits the test itself, or its suite
+maps the change onto its unit, since that is very likely a fix and has to
+be allowed to prove itself.
 
 Two rules force a test in.
 
@@ -173,8 +178,10 @@ Two rules force a test in.
   data and that a renamed test is an unknown identity until an alias line
   lands.
 - **What the change touches must run.** A changed test file's identities
-  are mandatory. A changed source file resolves through the coverage
-  attribution map to the identities that execute its lines.
+  are mandatory. A unit that is not a file, such as a type-check group or
+  a binary, is one its suite maps the change onto, because only the suite
+  knows what its unit covers. Nothing else about a changed source file
+  forces a test in. Which tests run for it is what the score decides.
 
 ## The manifest
 
@@ -184,7 +191,7 @@ under the dataset area
 schema version, the generation time, the exploration seed, the commit
 whose tree was enumerated, how many runs the aggregate saw, every dial it
 was built with, the fitted calibration numbers, every identity with its
-score and the inputs behind it, the withheld sets with their reasons, the
+score and the inputs behind it, the withheld set with its reason, the
 tests a configuration deliberately does not run, a reference packing into
 lanes, the unschedulable list, a count and digest of known identities, and
 the per-package coverage baselines.
@@ -194,6 +201,12 @@ field rejects the object rather than leaving a consumer obeying half of
 it. A manifest whose schema version a reader does not know is treated as
 absent, because a reader that does not know a field cannot know what
 obeying the rest would mean.
+
+A withheld entry naming a reason the reader has no rule for is the one
+thing dropped rather than refused. Refusing it would refuse the whole
+manifest, a refused manifest is treated as an absent one, and an absent
+manifest makes the whole corpus mandatory. Dropping the entry costs one
+test its exclusion; refusing the manifest costs every test its score.
 
 A consumer that finds no manifest runs rather than failing. Nothing then
 has records, so every unit the tree holds is an identity with none, and
@@ -229,6 +242,69 @@ another's record, and since the whole score rests on catch attribution
 there is no downstream check that would notice. Suggesting a line is help;
 writing one unasked is not.
 
+## What a run on the default branch owes the change behind it
+
+Selection trades away the guarantee that a pull request runs every test
+that could have caught its regression. The counterpart of that trade is
+that the run on the default branch which does catch one reports it back
+to the change that caused it. A consumer of the store may build that
+report; what follows is what it may and may not conclude.
+
+Attribution is a comparison of two runs and nothing else. A test failed
+for the first time at a commit when the previous run on the default
+branch passed it and the run at that commit failed it. A test the
+previous run did not judge — because it did not run, or skipped, or was
+already failing — is not attributable to the commit, however long it has
+been failing. Nothing may stand in for that comparison, and in
+particular the identity of whoever merged next may not: that assumption
+is exactly the mistake the comparison exists to prevent.
+
+The previous run is the run at the commit's parent. Pushes to the default
+branch are not cancelled by their successors, so two of them overlap
+whenever two merges land close together; taking the run before this one
+from a listing of finished runs then reaches past the run in between, and
+attributes whatever that commit broke to this change.
+
+A run's records are evidence for what they cover and for nothing else. A
+run killed at its bound judged what it reached, and what it reached is
+worth reading; what it did not reach is not evidence that anything is
+absent. So every conclusion a consumer draws rests on a record that is
+there — a failure here against a pass there, a disagreement at one
+commit, a unit that recorded something — and never on a record that is
+missing. A run whose records cannot be found at all is a run nothing is
+known about, and in particular is not a run that skipped every test.
+
+A test that both passed and failed at one commit is that test
+disagreeing with itself, which is flake evidence rather than a catch, and
+it is not a first failure. That a test is new is likewise a claim about
+the store rather than about one run: an identity the store has never seen
+is new, and an identity absent from one run's records is only absent from
+that run.
+
+Whether a change's own run ran a test is settled by that run's records
+and by nothing else. The manifest it resolved answers the next question,
+which is why it did not: held back as too flaky, or passed over by the
+packing. Only a resolved manifest that holds the identity can support
+that last answer, and a report without one says the run did not run the
+test rather than crediting the selector with a decision nothing made.
+Where the manifest says the test was to have run — the packing reached
+it, or the store has never seen it, which makes it mandatory — a run
+with no record of it recorded less than it ran, and that is a different
+statement from a run that did not reach it. A test the packing did not
+reach is coverage this design traded away rather than something the
+change missed, and it must be described that way. The failure raises the
+test's score, so the next change in that area runs it.
+
+A report addresses the change and never a person. No author is named, no
+figure is counted per author or per team, and no history of such reports
+is kept anywhere: a report is a pure function of one run, and nothing
+rolls a series of them up. A test the store holds a flake rate for is
+labelled as one, so nobody is told they broke something that breaks on
+its own.
+
+Nothing gates on any of this. A report is best-effort, and a run on the
+default branch is never failed by it.
+
 ## Determinism
 
 The packing function is pure. No clock, no unseeded randomness, no
@@ -250,9 +326,9 @@ The policy is an input because one function serves both the run on the
 default branch and the run on a change. It takes two values. The budgeted
 policy spends a bounded amount on the tests worth the most, by the rules
 under [what must run](#what-must-run-and-what-must-not) and the score
-above them. The full policy requires every identity, so the two rules
-that keep a test out have nothing to act on and the discretionary part of
-the packing finds nothing left to take; everything after that behaves the
+above them. The full policy requires every identity, so the rule that
+keeps a test out has nothing to act on and the discretionary part of the
+packing finds nothing left to take; everything after that behaves the
 same for both. A consumer that packs the two runs through different code
 will drift, and what it drifts into is running different sets of tests in
 the two places that are meant to agree.

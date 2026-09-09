@@ -13,6 +13,7 @@ import {
   serializeContextLine,
   serializeRecordLine,
   testIdentityKey,
+  testIdentityOfKey,
   type TestRecord,
 } from "./schema.ts";
 
@@ -116,6 +117,30 @@ describe("schema", () => {
         .toBe(
           '["unit","bakery","glaze > thickens when heated","wood-fired"]',
         );
+    });
+  });
+
+  describe("testIdentityOfKey()", () => {
+    it("gives back the identity a key was built from", () => {
+      const variant = { ...RECORD.test, v: "wood-fired" };
+      expect(testIdentityOfKey(testIdentityKey(RECORD.test)))
+        .toEqual(RECORD.test);
+      expect(testIdentityOfKey(testIdentityKey(variant))).toEqual(variant);
+    });
+
+    it("gives nothing for text that is not a key", () => {
+      for (
+        const text of [
+          "not json",
+          '{"k":"unit"}',
+          '["unit","bakery"]',
+          '["unit","bakery","glaze","wood-fired","extra"]',
+          '["unit","","glaze"]',
+          '["unit","bakery","glaze",7]',
+        ]
+      ) {
+        expect(testIdentityOfKey(text)).toBeUndefined();
+      }
     });
   });
 

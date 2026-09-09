@@ -279,12 +279,12 @@ invisible, the prompt renders the whole ambient record — place and scope
     so a run's handles stay valid until a new listing resets them.
 25. **List views watch membership raw, elements deep, window only.**
     Reader schemas cannot express a membership-only subscription (verified
-    — shapes that look shallow to a reader do not bound what the server
-    syncs), so membership comes from a raw-document subscription on the
-    collection doc and only visible rows sink deeply — cost bounded by
-    the visible page in element documents; membership is one document whose
-    size grows with the collection's link array — linear in links, not in
-    element closures. The seam and solution lanes are
+    — an opaque item schema bounds the element closure but still delivers
+    every element's root document), so membership comes from a raw-document
+    subscription on the collection doc and only visible rows sink deeply —
+    cost bounded by the visible page in element documents; membership is
+    one document whose size grows with the collection's link array — linear
+    in links, not in element closures. The seam and solution lanes are
     issue [#6534](https://github.com/commontoolsinc/labs/issues/6534); B3
     opens by proving the seam, and falls back to a capped deep sink with
     an honest label if it disappoints. The raw subscription serves the

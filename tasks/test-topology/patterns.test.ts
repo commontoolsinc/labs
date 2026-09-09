@@ -30,6 +30,20 @@ describe("the pattern and package suites", () => {
     expect(invocation!.junit?.[0]?.scope).toBe("patterns");
   });
 
+  it("leaves the pattern integration type check to the type check", async () => {
+    // `packages/patterns/integration` is one of the paths
+    // `tasks/typecheck.ts` lists, so a run that checks them again is
+    // doing that work twice.
+    for (const id of ["pattern-integration", "pattern-integration-opposite"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        { root, outputDir: await outputDir() },
+      );
+      expect(invocation!.command).toContain("--no-check");
+    }
+  });
+
   it("runs the opposite arm with an explicit define and history", async () => {
     const opposite = serverExecutionCiLane("opposite");
     const suite = byId("pattern-integration-opposite");

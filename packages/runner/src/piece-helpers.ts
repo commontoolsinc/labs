@@ -50,7 +50,7 @@ export function resolveCellPath<T>(
 ): unknown {
   let currentCell: Cell<unknown> = cell;
   let value: unknown = cell.get();
-  for (const segment of path) {
+  for (const [index, segment] of path.entries()) {
     if (isCell(value)) {
       currentCell = value;
       value = value.get();
@@ -60,7 +60,7 @@ export function resolveCellPath<T>(
       // A sparse root can fail to materialize while a selected child is
       // readable. Correlated schemas require a matching root projection.
       value = currentCell.get();
-      if (value !== undefined) continue;
+      if (value !== undefined || index < path.length - 1) continue;
     }
     if (value != null && typeof value !== "object") {
       throw new Error(

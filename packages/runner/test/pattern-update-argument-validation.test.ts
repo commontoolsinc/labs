@@ -1108,9 +1108,14 @@ describe("pattern update validates the stored argument", () => {
         new Set(),
       );
       expect(reading.value).toBeUndefined();
+      expect(reading.cyclic).toBe(true);
       // The other no-tree dead ends, exercised at the same seam: a doc the
       // store has never held, and a path that reads through a primitive.
       const absent = rt.getCell<unknown>(space, "walk-absent-target");
+      expect(
+        readStoredLinkChainRaw(tx, absent.getAsNormalizedFullLink(), new Set())
+          .cyclic,
+      ).toBeUndefined();
       expect(
         readStoredLinkChainRaw(
           tx,

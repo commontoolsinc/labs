@@ -73,7 +73,7 @@ describe("structural predicate narrowing", () => {
     it("narrows an `object`-typed caller too", () => {
       // `object` is assignable to neither narrow target, so it selects the
       // narrowing overload rather than the first one. That is what lets
-      // `data-model`'s `type-check.ts` walk a value typed `object` with no
+      // `data-model`'s `validity-check.ts` walk a value typed `object` with no
       // cast, and the module header claims it in as many words.
       const record: object = { a: 1 };
       const array: object = [1];

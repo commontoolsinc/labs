@@ -78,7 +78,7 @@ function manifestOf(entries: readonly Partial<ManifestEntry>[]): Manifest {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
       ...entry,
@@ -888,7 +888,7 @@ describe("running a lane's work", () => {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1.5,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
     };
@@ -946,27 +946,26 @@ describe("running a lane's work", () => {
   });
 
   it("names what the manifest withheld, and what came back", () => {
-    const red = { k: "unit", s: "bakery", n: "glaze > sets" };
-    const flaky = { k: "unit", s: "bakery", n: "proof > rises" };
+    const touched = { k: "unit", s: "bakery", n: "glaze > sets" };
+    const untouched = { k: "unit", s: "bakery", n: "proof > rises" };
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
     try {
       describeWithheld(
         [
-          { test: red, suite: "workspace-unit", reason: "main-red" },
-          { test: flaky, suite: "workspace-unit", reason: "flaky" },
+          { test: touched, suite: "workspace-unit", reason: "flaky" },
+          { test: untouched, suite: "workspace-unit", reason: "flaky" },
         ],
-        new Map([[testIdentityKey(red), "changed"]]),
+        new Map([[testIdentityKey(touched), "changed"]]),
       );
     } finally {
       console.log = log;
     }
     const printed = lines.join("\n");
-    expect(printed).toContain("already failing in the latest run on `main`");
     expect(printed).toContain("too noisy to judge a change by");
-    // The change reaches the failing one, which is very likely a fix, so
-    // it runs in spite of being withheld.
+    // The change reaches one of them, which is very likely a fix, so it
+    // runs in spite of being withheld.
     expect(printed).toContain("yes, the change reaches it");
     expect(printed).toContain("| no |");
   });
@@ -1505,9 +1504,10 @@ describe("what a lane records about itself", () => {
         {
           manifest: () =>
             Promise.resolve({
-              // A gate the change did not touch, costing most of a lane:
-              // `always` outranks the budget, so the lane takes it and
-              // reports what that cost rather than dropping it.
+              // A manifest that knows one gate, which leaves every
+              // other unit in the tree unknown and therefore mandatory.
+              // The lane takes them all and says what that cost rather
+              // than dropping work.
               manifest: manifestOf([{
                 test: { k: "format", s: "repo", n: "deno-fmt" },
                 suite: "repo-gates",

@@ -19,7 +19,10 @@ import {
 } from "@commonfabric/runner/cfc";
 import { presetCfcOptions } from "@commonfabric/runner";
 
-import type { HarnessFabricSessionConfig } from "./config.ts";
+import {
+  fabricSessionPresetCfcDials,
+  type HarnessFabricSessionConfig,
+} from "./config.ts";
 
 /**
  * The posture the session's runtime will run at, as the shared record.
@@ -40,20 +43,10 @@ import type { HarnessFabricSessionConfig } from "./config.ts";
  */
 export const harnessFabricSessionPosture = (
   config: HarnessFabricSessionConfig,
-): CfcPostureReport => {
-  const options = presetCfcOptions({
-    ...(config.cfcPosture !== undefined
-      ? { cfcPosture: config.cfcPosture }
-      : {}),
-    ...(config.cfcEnforcementMode !== undefined
-      ? { cfcEnforcementMode: config.cfcEnforcementMode }
-      : {}),
-    ...(config.cfcFlowLabels !== undefined
-      ? { cfcFlowLabels: config.cfcFlowLabels }
-      : {}),
-  });
-  return projectedCfcPostureReport(options);
-};
+): CfcPostureReport =>
+  projectedCfcPostureReport(
+    presetCfcOptions(fabricSessionPresetCfcDials(config)),
+  );
 
 const dialLine = (
   name: string,

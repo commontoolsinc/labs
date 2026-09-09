@@ -556,6 +556,7 @@ export const createLoomLocalCfHarnessHost = async (
       const parsed = parseHarnessInteractiveChatStdioCliOptions(
         args,
         processEnv,
+        options.cliDependencies?.cwd ?? Deno.cwd(),
       );
       if (parsed.help) {
         Deno.stderr.writeSync(

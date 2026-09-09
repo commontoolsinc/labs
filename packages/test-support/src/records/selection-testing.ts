@@ -24,7 +24,7 @@ export function sampleEntry(
     unit: `packages/${test.s}/test/${test.s}.test.ts`,
     cost: 0.05,
     score: 0.05,
-    inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+    inputs: { catches: 0, sources: 0, churn: 0 },
     flakeRate: 0,
     repeats: 1,
     ...fields,

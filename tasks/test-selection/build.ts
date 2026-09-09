@@ -16,6 +16,7 @@ import {
   type StoredReport,
   type TestIdentity,
   testIdentityKey,
+  testIdentityOfKey,
 } from "@commonfabric/test-support/records";
 import {
   costSeconds,
@@ -40,6 +41,7 @@ import {
   value,
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
+import { isLaneMeasurement } from "../lane-measurement.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   type Calibration,
@@ -98,6 +100,19 @@ export interface AggregateState {
   compacted: string[];
 
   states: Record<string, IdentityState>;
+
+  /**
+   * Every identity no run has worked out a unit for, kept from one
+   * publish to the next. A run reads surfaces only from the objects it
+   * folds for the first time, so a surface recording less often than the
+   * publisher runs is absent from most runs; keeping the list across them
+   * is what lets a run tell an identity recorded once and not yet given a
+   * unit from one whose records keep arriving and keep saying too little.
+   * An entry is removed when the topology has a unit for its identity, or
+   * when it names something the count no longer holds, so the list is
+   * what the tree still says nothing about.
+   */
+  unclaimed?: string[];
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -183,6 +198,13 @@ export function parseAggregate(text: string): AggregateState | undefined {
   const compacted = state.compacted === undefined
     ? (written as string[]).map((day) => sourceDateKey(CI_SOURCE, day))
     : written as string[];
+  // What was unplaced last time is compared against rather than folded,
+  // so an aggregate written without it, or with something that is not a
+  // list of identities, is read as having nothing to compare against.
+  const unclaimed = Array.isArray(state.unclaimed) &&
+      state.unclaimed.every((key) => typeof key === "string")
+    ? state.unclaimed as string[]
+    : undefined;
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
@@ -190,6 +212,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
     context: serializeContext(parseContext(state.context)),
     compacted,
     states: state.states as Record<string, IdentityState>,
+    ...(unclaimed === undefined ? {} : { unclaimed }),
   };
 }
 
@@ -319,10 +342,22 @@ export function recordSurface(
   test: TestIdentity,
   file: string | undefined,
 ): Surface {
-  const suite = test.v === undefined
+  return {
+    suite: surfaceName(test),
+    unit: file ?? test.n,
+    fromFile: file !== undefined,
+  };
+}
+
+/**
+ * The surface an identity's own record names: the kind of check, the
+ * workspace member that owns it, and the configuration it ran under where
+ * that is not the default one.
+ */
+export function surfaceName(test: TestIdentity): string {
+  return test.v === undefined
     ? `${test.k}:${test.s}`
     : `${test.k}:${test.s}:${test.v}`;
-  return { suite, unit: file ?? test.n, fromFile: file !== undefined };
 }
 
 /** What the topology could not place, and why. */
@@ -337,10 +372,21 @@ export interface Unplaced {
   suiteLevel: string[];
 
   /**
-   * Identities no suite claims at a unit level. An identity recorded
-   * before the registration preload carried its file is the usual one:
-   * the store knows the test and nothing knows which file registers it,
-   * so it will be placed again the first time it runs and records one.
+   * Identities the topology has no unit for. What decides an identity's
+   * unit is its own records: the file, for a suite whose units are files,
+   * and the recorded name for one whose units are not. An identity whose
+   * records say neither is given a unit the first time it records one the
+   * tree holds. An identity that matches two suites is here as well, which
+   * is a topology defect the drift guard fails on rather than a record
+   * that says too little. The lane's measurements of itself are not here:
+   * they are not test surfaces, and `isLaneMeasurement` is what says so.
+   *
+   * A count of these alone says nothing about which of those it holds. A
+   * run reads surfaces only from the objects it folds for the first time,
+   * so an identity here that `AggregateState.unclaimed` already held has
+   * recorded more since and still has no unit. That is a surface whose
+   * records never say which unit, rather than one whose next record
+   * will.
    */
   unclaimed: string[];
 }
@@ -368,8 +414,11 @@ export function locateSurfaces(
   const placed = new Map<string, Surface>();
   const unplaced: Unplaced = { suiteLevel: [], unclaimed: [] };
   for (const [key, surface] of surfaces) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
+    // A lane's measurement of its own setup or of one of its batches is
+    // not a test surface: no suite claims one, and none should.
+    if (isLaneMeasurement(test)) continue;
     const claims = claimsFor(suites, {
       test,
       // The unit a record's own surface fell back to is the file where
@@ -411,9 +460,6 @@ export function repeatsFor(rate: number): number {
 export interface BuildInput {
   states: Map<string, IdentityState>;
 
-  /** Identities failing in the newest run on `main`. */
-  mainRed: ReadonlySet<string>;
-
   /** Where each identity runs, by identity key. */
   surfaces: ReadonlyMap<string, Surface>;
 
@@ -431,24 +477,6 @@ export interface BuildInput {
 function round(value: number, places: number): number {
   const scale = 10 ** places;
   return Math.round(value * scale) / scale;
-}
-
-/** The identity a key names, parsed back out of its canonical form. */
-export function identityOfKey(key: string): TestIdentity | undefined {
-  let parts: unknown;
-  try {
-    parts = JSON.parse(key);
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(parts) || parts.length < 3) return undefined;
-  const [k, s, n, v] = parts;
-  if (typeof k !== "string" || typeof s !== "string" || typeof n !== "string") {
-    return undefined;
-  }
-  const test: TestIdentity = { k, s, n };
-  if (typeof v === "string") test.v = v;
-  return test;
 }
 
 /**
@@ -471,7 +499,7 @@ export function buildManifest(input: BuildInput): Manifest {
   const entries: ManifestEntry[] = [];
   const withheld: WithheldEntry[] = [];
   for (const [key, state] of input.states) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
@@ -493,9 +521,7 @@ export function buildManifest(input: BuildInput): Manifest {
       repeats: repeatsFor(rate),
       ...(ran === undefined ? {} : { lastRun: ran }),
     });
-    if (input.mainRed.has(key)) {
-      withheld.push({ test, suite: surface.suite, reason: "main-red" });
-    } else if (rate > FLAKE_EXCLUSION_RATE) {
+    if (rate > FLAKE_EXCLUSION_RATE) {
       withheld.push({ test, suite: surface.suite, reason: "flaky" });
     }
   }
@@ -695,10 +721,6 @@ export class Fold {
     for (const state of this.#states.values()) {
       trimWindows(state, this.#today);
     }
-    const mainRed = new Set<string>();
-    for (const [key, state] of this.#states) {
-      if (state.lastMainOutcome === "fail") mainRed.add(key);
-    }
     return {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
@@ -709,7 +731,6 @@ export class Fold {
         states: Object.fromEntries(this.#states),
       },
       states: this.#states,
-      mainRed,
       surfaces: this.#surfaces,
       observations: this.#observations,
     };
@@ -749,7 +770,6 @@ export class Fold {
 export interface FoldResult {
   aggregate: AggregateState;
   states: Map<string, IdentityState>;
-  mainRed: Set<string>;
   surfaces: Map<string, Surface>;
   observations: number;
 }

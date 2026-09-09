@@ -6,16 +6,21 @@
  * renderer is pinned because it is the only form most operators ever see the
  * record in — an ungated sink that did not reach the output is a gap nobody
  * reads about.
+ *
+ * The itemized enforcement dial belongs here too. A run records it beside the
+ * record, from the same configuration, and an audit reads both.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { presetCfcOptions } from "@commonfabric/runner";
 
 import {
   harnessFabricSessionPosture,
   harnessFabricSessionPostureBanner,
   renderCfcPostureReport,
 } from "../src/cfc-posture.ts";
+import { fabricSessionCfcEnforcementMode } from "../src/config.ts";
 
 const SESSION = {
   apiUrl: "https://toolshed.example/",
@@ -31,9 +36,15 @@ describe("cfc-posture", () => {
       expect(harnessFabricSessionPosture(SESSION).provenance).toBe("projected");
     });
 
-    it("resolves the fleet posture when the session states no dials", () => {
-      const record = harnessFabricSessionPosture(SESSION);
-      expect(record.enforcementMode.rung).toBe("enforce-explicit");
+    it("marks a rung that decides nothing as diagnostic-only, and carries no digest without a policy", () => {
+      // `off` is the rung the first two assertions read. Whether a dial is
+      // diagnostic-only is derived from its rung rather than stated, and a
+      // session selecting no bundle configures no policy records, so there
+      // is no snapshot for a digest to be taken of.
+      const record = harnessFabricSessionPosture({
+        ...SESSION,
+        cfcFlowLabels: "off",
+      });
       expect(record.flowLabels.rung).toBe("off");
       expect(record.flowLabels.diagnosticOnly).toBe(true);
       expect(record.policyDigest).toBe(null);
@@ -70,6 +81,44 @@ describe("cfc-posture", () => {
       });
       expect(record.deviations.map((deviation) => deviation.owner.length > 0))
         .toEqual([true, true, true, true]);
+    });
+  });
+
+  describe("fabricSessionCfcEnforcementMode()", () => {
+    it("leaves the dial on the pin under the named bundle", () => {
+      // The bundle sets every other staged enforcement dial and this one it
+      // leaves alone.
+      expect(
+        fabricSessionCfcEnforcementMode({
+          ...SESSION,
+          cfcPosture: "max-enforcement",
+        }),
+      ).toBe(presetCfcOptions({}).cfcEnforcementMode);
+    });
+
+    it("names the rung the session states", () => {
+      expect(
+        fabricSessionCfcEnforcementMode({
+          ...SESSION,
+          cfcEnforcementMode: "enforce-strict",
+        }),
+      ).toBe("enforce-strict");
+    });
+
+    it("agrees with the record the same configuration projects", () => {
+      // A run records both from the same config: the itemized dial an audit
+      // compares against, and the whole record beside it. Each rung below is
+      // the one both sides of the assertion read back.
+      for (
+        const session of [
+          SESSION,
+          { ...SESSION, cfcEnforcementMode: "enforce-strict" as const },
+        ]
+      ) {
+        expect(fabricSessionCfcEnforcementMode(session)).toBe(
+          harnessFabricSessionPosture(session).enforcementMode.rung,
+        );
+      }
     });
   });
 

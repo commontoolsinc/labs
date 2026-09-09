@@ -356,32 +356,6 @@ function isReferenceOnlySchema(
   return false;
 }
 
-/**
- * The form a resume pre-sync's cell wave syncs a cell in.
- *
- * A cell whose link carries a trivially-permissive schema (`true`/`{}`) is
- * synced as the DOCUMENT it names, not as a declaration: such a schema is
- * the absence of a bound, and a sync honoring one walks the target's whole
- * reachable graph — on a populated space, thousands of documents to resume
- * one piece. The pre-sync's job is locality: the values instantiation reads
- * must be local so their reads do not enter the commit basis cold, and the
- * doc itself provides that. A shaped or undeclared cell keeps its own sync —
- * the deep reach belongs to the argument link-target wave, which follows
- * declared schemas.
- *
- * Exported for its test: current authoring stamps declared schemas on every
- * link it writes, so a wave carrying a trivially-permissive link is vintage
- * data — deployed pieces wired by older writers — which a test cannot author
- * through the current stack.
- */
-export function documentBoundedResumeCell(cell: Cell<any>): Cell<any> {
-  const link = cell.getAsNormalizedFullLink();
-  return link.schema !== undefined &&
-      ContextualFlowControl.isTrueSchema(link.schema)
-    ? cell.asSchema(false)
-    : cell;
-}
-
 // The debug-name builders reuse the action's already-computed
 // `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
 // the same links a second time (one hashOf per action creation, not two). The
@@ -6199,8 +6173,7 @@ export class Runner {
     // wall cost is bounded by the enclosing `#syncCellsForRunningPattern()`
     // span).
     const cellSyncWaveStart = performance.now();
-    await Promise.all(cells.map((cell) => {
-      const c = documentBoundedResumeCell(cell);
+    await Promise.all(cells.map((c) => {
       const cellSyncStart = performance.now();
       return Promise.resolve(c.sync()).finally(() =>
         logger.time(cellSyncStart, "start", "resumeCellSync")
@@ -6515,7 +6488,7 @@ export class Runner {
       const syncWaveStart = performance.now();
       await Promise.all(fresh.map((cell) => {
         const syncStart = performance.now();
-        return Promise.resolve(documentBoundedResumeCell(cell).sync())
+        return Promise.resolve(cell.sync())
           .catch((error) => {
             logger.warn("resume-list-children", () => [
               "list slot resolution sync failed; resuming without it",
@@ -6658,7 +6631,7 @@ export class Runner {
               const unbound = this.#runtime.getCellFromLink(link);
               const syncStart = performance.now();
               promises.push(
-                Promise.resolve(documentBoundedResumeCell(unbound).sync())
+                Promise.resolve(unbound.sync())
                   .catch((error) => {
                     logger.warn("resume-list-children", () => [
                       "list child sync failed; resuming without it",
@@ -6690,7 +6663,7 @@ export class Runner {
                 named.add(ownedKey);
                 const ownedStart = performance.now();
                 promises.push(
-                  Promise.resolve(documentBoundedResumeCell(cell).sync())
+                  Promise.resolve(cell.sync())
                     .catch((error) => {
                       logger.warn("resume-list-children", () => [
                         "list child owned-cell sync failed; resuming without it",
