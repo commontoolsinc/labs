@@ -226,7 +226,7 @@ describe("event dispatch whose handler body did not run", () => {
     expect(error.message).toContain(NOT_RUN_REASON);
   });
 
-  it("drops a one-shot (`retries: false`) at once, with the callback seeing the aborted transaction", async () => {
+  it("drops a one-shot (`retries: false`) at once, with the callback seeing the aborted transaction and nothing on the error channel", async () => {
     const { runtime, tx } = env;
     const eventCell = runtime.getCell<number>(
       space,
@@ -246,6 +246,10 @@ describe("event dispatch whose handler body did not run", () => {
       handler,
       eventCell.getAsNormalizedFullLink(),
     );
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => {
+      errors.push(error);
+    });
 
     const callbackStatuses: string[] = [];
     runtime.scheduler.queueEvent(
@@ -262,5 +266,51 @@ describe("event dispatch whose handler body did not run", () => {
     expect(runs).toBe(1);
     expect(callbackStatuses).toEqual(["error"]);
     expect(committedChanges()).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
+  it("seals the skip of a flag-ON client echo, which the server re-drains, instead of re-running it", async () => {
+    await disposeSchedulerTestRuntime(env);
+    env = createSchedulerTestRuntime(import.meta.url, {
+      experimental: { serverExecution: true },
+    });
+    const { runtime, tx } = env;
+    const eventCell = runtime.getCell<number>(
+      space,
+      "not-run-echo-events",
+      undefined,
+    );
+    await tx.commit();
+    env.tx = runtime.edit();
+
+    let runs = 0;
+    const handler: EventHandler = (actionTx) => {
+      runs++;
+      actionTx.dispatchedHandlerNotRun = { reason: NOT_RUN_REASON };
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => {
+      errors.push(error);
+    });
+
+    const callbackStatuses: string[] = [];
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      (commitTx) => {
+        callbackStatuses.push(commitTx.status().status);
+      },
+    );
+    await runtime.idle();
+    await runtime.scheduler.idleWithPendingCommits();
+
+    expect(runs).toBe(1);
+    expect(callbackStatuses).toEqual(["done"]);
+    expect(errors).toEqual([]);
   });
 });

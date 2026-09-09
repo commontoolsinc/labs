@@ -1645,8 +1645,17 @@ export async function dispatchQueuedEvent(state: {
     // publishes `undefined` until the load lands, so a handler reading
     // through it finds its argument unresolved in exactly that window.
     // Both arms below withdraw the transaction and run the handler again
-    // once the replica has moved; what differs is who re-delivers.
-    if (tx.dispatchedHandlerNotRun !== undefined) {
+    // once the replica has moved; what differs is who re-delivers. Under
+    // events-down (server-execution v2 Phase 3) a dispatch without a served
+    // carriage is the client's speculative echo of an entry the server
+    // handles authoritatively and re-drains itself, so it takes neither arm:
+    // its skip seals as an empty speculative commit the authoritative
+    // consequence replaces.
+    if (
+      tx.dispatchedHandlerNotRun !== undefined &&
+      (served !== undefined ||
+        state.runtime.experimental.serverExecution !== true)
+    ) {
       const reason = tx.dispatchedHandlerNotRun.reason;
       // Taken before the abort, since the read set is what the client arm
       // parks on.

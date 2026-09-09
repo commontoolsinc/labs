@@ -536,8 +536,13 @@ loop's duty).
   the backoff step. The requeued head takes the dependency preflight
   again, which waits for an invalid upstream computation. Past the window
   the handling fails loudly — `EventHandlerNotRunError` through the
-  scheduler error channel, the callback seeing the aborted transaction —
-  and a one-shot (`retries: false`) fails that way at once.
+  scheduler error channel, the callback seeing the aborted transaction. A
+  one-shot (`retries: false`) is not re-run: its callback sees the aborted
+  transaction at once, and nothing reaches the error channel. Under
+  events-down a client dispatch without a served carriage is the
+  speculative echo of an entry the server re-drains itself, and takes
+  neither arm: its skip seals as an empty speculative commit that the
+  authoritative consequence replaces.
 - A served event's typed delivery failure records a server-owned
   processing checkpoint on its stream entry. Dispatch-load and
   commit-preparation failures accumulate only intervals in which the

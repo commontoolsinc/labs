@@ -1672,7 +1672,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * pending-unconsequenced and the drain re-delivers it. A client
    * dispatch is requeued by the scheduler within its retry window, parked
    * on the loads the run registered when any are in flight, and fails
-   * loudly once the window is spent or when it opted out of retrying.
+   * loudly once the window is spent; one that opted out of retrying is
+   * not re-run, and its callback sees the aborted transaction. Under
+   * events-down a client dispatch without a served carriage is the
+   * speculative echo of an entry the server re-drains, and its skip seals
+   * as an empty speculative commit.
    */
   dispatchedHandlerNotRun?: { reason: string };
 
