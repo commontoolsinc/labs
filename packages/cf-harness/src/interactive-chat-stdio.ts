@@ -77,7 +77,7 @@ export interface RunHarnessInteractiveChatStdioOptions {
 }
 
 export interface HarnessInteractiveChatStdioCliOptions {
-  /** Trusted Fabric binding shared by every turn in the service. */
+  /** Resolved CLI binding, supplied through the host's basePromptLoopOptions. */
   fabricSession?: HarnessFabricSessionConfig;
 
   /** Operator-owned configuration resolved before the interactive service starts. */
@@ -210,6 +210,11 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
     );
     if (fabricOption !== undefined) {
       const prefix = `--${fabricOption}=`;
+      // A following flag is not an option value. Literal leading dashes can
+      // still be supplied with `--name=value`, as in the batch CLI.
+      if (!arg.startsWith(prefix) && args[index + 1]?.startsWith("-")) {
+        throw new Error(`--${fabricOption} requires a non-empty value`);
+      }
       fabricSessionArgs[fabricOption] = arg.startsWith(prefix)
         ? nonEmptyOptionValue(`--${fabricOption}`, arg.slice(prefix.length))
         : nonEmptyOptionValue(`--${fabricOption}`, args[++index]);
@@ -730,7 +735,12 @@ export const runHarnessInteractiveChatStdioCli = async (
     cwd ?? Deno.cwd(),
   );
   await run({
-    ...options,
+    ...(options.sessionDbPath !== undefined
+      ? { sessionDbPath: options.sessionDbPath }
+      : {}),
+    ...(options.maxInMemoryEvents !== undefined
+      ? { maxInMemoryEvents: options.maxInMemoryEvents }
+      : {}),
     ...(Object.keys(provisioning).length > 0
       ? { basePromptLoopOptions: provisioning }
       : {}),

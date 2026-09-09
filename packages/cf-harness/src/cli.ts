@@ -487,11 +487,12 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs | loom_compose | loom_inspect | loom_authoring_context);
                                 run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
                                 search_skills and acquire_skill require --skills-registry-url,
-                                and query_docs requires a resolved documentation corpus
+                                query_docs requires a resolved documentation corpus,
+                                and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)

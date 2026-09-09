@@ -22,6 +22,7 @@ import {
 } from "../src/interactive-chat-stdio.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
 import { createLoomLocalCfHarnessHost } from "../src/loom-local-host.ts";
+import { parseCfHarnessCliArgs } from "../src/cli.ts";
 
 /** Host settings isolated from the invoking developer's persisted sessions. */
 const hostKeys = [
@@ -290,6 +291,34 @@ describe("interactive-fabric-session", () => {
           CF_HARNESS_FABRIC_SPACE: "environment-space",
         });
         expect(options.fabricSession?.space).toBe("chosen-space");
+      });
+      it("keeps repeated Fabric flags consistent with the batch parser", async () => {
+        const flags = [
+          "--fabric-space",
+          "first-space",
+          "--fabric-space",
+          "last-space",
+        ];
+        const env = {
+          CF_HARNESS_FABRIC_API_URL: "http://localhost:8123",
+          CF_HARNESS_FABRIC_IDENTITY: "/tmp/synthetic-identity.pem",
+          CF_HARNESS_FABRIC_SPACE: "environment-space",
+        };
+        const batch = await parseCfHarnessCliArgs([
+          "--prompt",
+          "Synthetic input",
+          ...flags,
+        ], { cwd: "/tmp", env });
+        if ("help" in batch) throw new Error("Unexpected help");
+        const { options } = await observeTurn(entrypoint, flags, env);
+        expect(options.fabricSession).toEqual(batch.fabricSession);
+        expect(options.fabricSession?.space).toBe("last-space");
+      });
+      it("refuses a missing Fabric value instead of treating the next flag as its value", async () => {
+        await expect(observeTurn(entrypoint, ["--fabric-space", "--help"], {
+          CF_HARNESS_FABRIC_API_URL: "http://localhost:8123",
+          CF_HARNESS_FABRIC_IDENTITY: "/tmp/synthetic-identity.pem",
+        })).rejects.toThrow("--fabric-space requires a non-empty value");
       });
     });
   }
