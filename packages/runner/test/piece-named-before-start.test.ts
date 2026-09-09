@@ -8,6 +8,7 @@ import {
 } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
@@ -95,7 +96,7 @@ const CARDS_ITEM_SCHEMA = {
   },
 } as const;
 // One card per case, each cold on the replica that runs it.
-const CARD_COUNT = 10;
+const CARD_COUNT = 11;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -139,6 +140,40 @@ function countPendingDeferredStarts(
     runtime.telemetry.removeEventListener("telemetry", listener);
     return count;
   };
+}
+
+type Emission = { key: string; parts: unknown[] };
+
+/**
+ * Records every `debug` the runner's logger emits while `fn` runs, resolving
+ * each call's lazy message thunk the way the logger itself does. Captured at
+ * the logger, not the console: the runner logger's configured level is
+ * `warn`, so its debug calls never reach the console at all.
+ */
+async function captureRunnerDebug(
+  fn: () => Promise<void>,
+): Promise<Emission[]> {
+  const logger = getLogger("runner") as unknown as {
+    debug: (key: string, ...messages: unknown[]) => void;
+  };
+  const emissions: Emission[] = [];
+  const original = logger.debug;
+  logger.debug = (key: string, ...messages: unknown[]) => {
+    emissions.push({
+      key,
+      parts: messages.flatMap((message) => {
+        const resolved = typeof message === "function" ? message() : message;
+        return Array.isArray(resolved) ? resolved : [resolved];
+      }),
+    });
+    original.call(logger, key, ...messages);
+  };
+  try {
+    await fn();
+  } finally {
+    logger.debug = original;
+  }
+  return emissions;
 }
 
 /** Resolves with the next deferred-start marker of `type` for `key`. */
@@ -719,5 +754,51 @@ describe("piece-named-before-start", () => {
     expect(String((failures[0].error as Error).message)).toContain(
       "Unknown pattern",
     );
+  });
+  it("holds the run once when the probe budget is spent, and says so", async () => {
+    const { cardB, itemB, argumentId, key } = locateCard(10);
+    // The family is local, as in the case that runs without a hold, so only
+    // the budget can hold this run.
+    await nameLinkChain(argumentId, 4);
+    await itemB.sync();
+    await quiesce(b);
+    const access = b.runner.accessForTestingOnly;
+    expect(access.namingProbeBudget).toBe(256);
+    // One probe. The argument document spends it, and the first link the
+    // caller's argument holds finds the budget gone.
+    access.namingProbeBudget = 1;
+    const settled = waitForDeferredStart(
+      b,
+      "runner.deferred-start.settled",
+      key,
+    );
+    const emissions = await captureRunnerDebug(async () => {
+      await runCard(cardB, itemB);
+      expect((await settled).outcome).toBe("installed");
+      await quiesce(b);
+    });
+    const spent = emissions.filter((emission) =>
+      emission.key === "named-run-gate"
+    );
+    expect(spent.length).toBe(1);
+    expect(spent[0].parts[0]).toBe(
+      "probe budget spent; holding the run for a name-sync",
+    );
+    expect(spent[0].parts[1]).toMatchObject({
+      resultCell: cardB.getAsNormalizedFullLink().id,
+      budget: 1,
+      stage: "a document the caller's argument links to",
+    });
+    // Landed: a later run under the same pattern is not held, and spends no
+    // probes to find that out.
+    let heldAgain = false;
+    waitForDeferredStart(b, "runner.deferred-start.pending", key).then(() => {
+      heldAgain = true;
+    });
+    await runCard(cardB, itemB);
+    await quiesce(b);
+    expect(heldAgain).toBe(false);
+    expect(await bump(cardB)).toBe(1);
+    expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
 });

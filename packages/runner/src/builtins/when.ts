@@ -4,8 +4,9 @@ import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { ownedCell } from "./runtime-owned-store.ts";
-import { resolvedCellScope } from "./scope-policy.ts";
+import { ownedResultCause, resolvedCellScope } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
+import type { RawNodeCause } from "../module.ts";
 
 /**
  * when(condition, value) - && semantics
@@ -15,18 +16,20 @@ export function when(
   inputsCell: Cell<{ condition: any; value: any }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  cause: RawNodeCause,
   parentCell: Cell<any>,
   runtime: Runtime,
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
     const conditionCell = inputsCell.key("condition");
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
+    // Keyed on the output spot, never on the inputs document (see
+    // `ownedResultCause`).
     const result = ownedCell<any>(
       runtime,
       tx,
       parentCell,
-      { when: cause },
+      ownedResultCause("when", cause, parentCell),
       undefined,
       resultScope,
     );

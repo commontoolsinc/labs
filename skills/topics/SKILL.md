@@ -66,8 +66,8 @@ smaller document to hold in context, and it is complete for calling. Use
 `describe` when you need the piece-wide purpose, state, or input documentation.
 Use `deno task cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only
 after choosing a verb and when its generated flags or standalone help are
-useful; help is served through the dispatch path, which also starts the space
-root, so it is the most expensive of the three. Each command is an independent
+useful; help is served through the dispatch path, which starts the addressed
+piece, so it is the most expensive of the three. Each command is an independent
 cold CLI process, so do not run all three by default.
 
 The deployment can be well behind the checkout the CLI runs from, and that gap
@@ -427,6 +427,12 @@ deno task cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames
 deno task cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
 ```
 
+The bind needs no `--allow-non-existing` flag after step 2. The Topic declares
+`boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>`, so `input.get()`
+exposes a `boardNames` handle whose value defaults to `[]`. That makes the
+target present for the link command's value-presence check even before a link is
+stored.
+
 Between them is the gap this procedure exists for: the board's `names` map and
 `namesTable` hold the name, and the Topic does not.
 
@@ -471,38 +477,29 @@ returns `[]`. Read the VALUE, not the keys: the input is declared
 `packages/patterns/topics/topic.tsx`, so the key is there either way and its
 presence says nothing.
 
-Audit only Topics whose source has already been migrated. This read answers for
-the argument document, not for what the pattern can see, so a Topic that was
-force-bound before its source moved — see the first trap below — reads as bound
-here while its name never appears anywhere. On a board migrated in the order
-above that case cannot arise; if the order slipped, the honest check is whether
-the Topic publishes `shortName` at all.
+Audit only Topics whose source has already been migrated. Input reads use the
+current pattern's projection: if it does not declare `boardNames`, this targeted
+read refuses the path, including when the raw argument document holds a legacy
+link there. Updating the pattern to select the input exposes that retained link
+without rewriting it. Check the Topic's published `shortName` after the bind to
+verify that the pattern consumes its row.
 
 ### Traps
 
-**Never pass `--allow-non-existing` to the bind** (#6965). On a Topic whose
-pattern has no `boardNames` input — one that has not taken step 2, whether
-because the order slipped or because step 2 was deliberately skipped — the bind
-refuses, and that refusal is the guard that keeps step 4 behind step 2:
+**A bind cannot expose an undeclared input** (#6965). A Topic that has not taken
+step 2 has no `boardNames` input in its pattern schema. Linking to it refuses
+before writing, with or without `--allow-non-existing`:
 
 ```
-Target path "boardNames" does not exist on piece fid1:…
-
-Use --allow-non-existing to link anyway.
+Cannot access path "boardNames" - property "boardNames" not found in the current pattern's input schema. Update the target pattern with cf piece setsrc to declare this input before linking, reading, or writing it. --allow-non-existing does not override the input schema.
 ```
 
-Taking that suggestion prints `Linked …` and buys nothing: the Topic's input map
-does not gain the key — neither `deno task cf cell get --cell "$TOPIC" --input`
-nor `deno task cf piece inspect`'s Source (Inputs) shows it — and its name never
-appears. What it does do is write the link into the argument document, where the
-pattern cannot reach it but
-`deno task cf cell get --cell "$TOPIC" boardNames --input` can, which is what
-makes the audit above read it as bound. The next `setsrc` of that Topic then
-fails with an extra
-`updated arguments do not match the candidate schema: boardNames: value does not
-match type array`
-that a clean control piece does not produce. The forced bind poisons the Topic
-against its own migration.
+Update the Topic's pattern before binding. A refused bind stores no link and
+reports no successful link receipt; targeted `deno task cf cell set --input`
+writes also refuse the undeclared path. The flag overrides missing pieces or
+endpoint values, so it can bind a declared input that has neither a value nor a
+default. It cannot override the input schema. Topics' `boardNames` default makes
+that override unnecessary for this migration.
 
 **`setsrc --check` is not read-only against the store** (#6964). It writes, even
 when it refuses and replaces nothing, so a rehearsal clone is spent after one

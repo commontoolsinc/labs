@@ -422,9 +422,8 @@ describe("piece-describe", () => {
     };
 
     it("loads the addressed piece without starting it or the space root", async () => {
-      // Discovery reads the addressed piece and nothing else: the space
-      // root's bootstrap and the target's start are dispatch concerns, not a
-      // description's.
+      // Discovery uses stored callable metadata, so describing a piece needs
+      // neither its runtime graph nor the space root to be initialized.
       const fixture = pieceDouble();
       const resultRoot = await fixture.result.getCell();
       const inputRoot = await fixture.input.getCell();

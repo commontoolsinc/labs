@@ -105,3 +105,8 @@ export {
   type ResolvedPieceOriginSource,
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
+
+export {
+  assertPieceInputPath,
+  PieceInputPathError,
+} from "./piece-input-path.ts";
