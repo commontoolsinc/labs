@@ -1291,24 +1291,22 @@ export type TraversalContext = {
 
   /**
    * Whether a document the traversal loads mid-walk, through a link
-   * crossing, chases its metadata family (`loadMetaLinkedDocs`). On by
+   * crossing, has its metadata-linked documents loaded with it
+   * (`loadMetaLinkedDocs`), out of this runtime's own replica. On by
    * default: a runtime traversal that loads a document generally intends
-   * to interpret it. The memory server's graph-query walk turns it off,
-   * because a document reached through a crossing is owed only what the
-   * selector that reached it selects, plus the schema document its `cfc`
-   * envelope names (`loadLabelSchemaDoc`), which a reader of a labeled
-   * document checks its reads against; a family belongs to the documents
-   * a query names, and the walk chases it for each named root itself.
-   * Consulted only where `includeMeta` already gates the chase; it does
-   * not affect `traverseCells`, which `includeMeta` also carries.
+   * to interpret it. The memory server's graph-query walk turns it off:
+   * what the server delivers with a document is the schema document its
+   * `cfc` envelope names (`loadLabelSchemaDoc`) and nothing else of its
+   * metadata, whichever way the walk reached it; a caller that wants a
+   * metadata target names it. Consulted only where `includeMeta` already
+   * gates the load; it does not affect `traverseCells`, which
+   * `includeMeta` also carries.
    */
   chaseLoadedMeta: boolean;
 
   /**
-   * Tracker keys whose metadata family this traversal has chased, and the
-   * absent family targets it tracked along the way: an absent target is
-   * owed its own family when it arrives, exactly as a loaded member was
-   * owed one on the visit.
+   * Tracker keys of the documents whose metadata links this traversal has
+   * followed, and of the absent targets it tracked along the way.
    */
   metaDocsVisited: Set<string>;
 
@@ -2620,7 +2618,7 @@ function trackVisitedDoc(
     );
   }
   // Load the metadata-linked docs recursively unless the address holds no
-  // value: the whole family where the context grants a mid-walk load one
+  // value: every rail where the context grants a mid-walk load them
   // (`chaseLoadedMeta`), and otherwise only the schema document the
   // loaded document's `cfc` envelope names.
   if (context.includeMeta) {
@@ -2646,7 +2644,7 @@ function trackVisitedDoc(
 // These meta links don't have full link chains. We only follow the first link.
 // `owed` receives the tracker key of each target the rail names that is
 // absent from the store: tracked, so its arrival re-runs the load, and
-// recorded so the arrival is walked as a family member.
+// recorded so the arrival has its own metadata links followed in turn.
 function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -2727,9 +2725,8 @@ function loadMetaLinkedDocFromLink(
   owed?: Set<string>,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
-  // A metadata family is a same-space structure (05-queries.md): a link
-  // resolving to another space selects nothing — the per-space engine
-  // could not read it.
+  // A metadata link is a same-space link (05-queries.md): one resolving to
+  // another space selects nothing — the per-space engine could not read it.
   if (link.space !== valueEntry.address.space) {
     logger.warn(
       "traverse",
@@ -2895,7 +2892,7 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   return undefined;
 }
 
-/** The rails a document's metadata family hangs off. */
+/** The metadata fields that name other documents. */
 type MetaRail = "cfc" | "result" | "pattern" | "argument" | "internal";
 
 const ALL_META_RAILS: readonly MetaRail[] = [
@@ -2955,12 +2952,11 @@ export function loadMetaLinkedDocs(
 
 /**
  * Loads the schema document a document's `cfc` envelope names, and nothing
- * else of its metadata family, into the traversal. A reader of a labeled
- * document checks what it may read against that schema, so the document
- * is owed it wherever a walk reaches it, named or not. The target enters
- * the schema tracker exactly as a named root's `cfc` rail enters it, so an
- * absent one arrives when it is written. A document without an envelope
- * loads nothing.
+ * else of its metadata, into the traversal. A reader of a labeled document
+ * checks what it may read against that schema, so the document is owed it
+ * wherever a walk reaches it, named or not. The target enters the schema
+ * tracker, so an absent one arrives when it is written. A document without
+ * an envelope loads nothing.
  */
 export function loadLabelSchemaDoc(
   tx: IExtendedStorageTransaction,

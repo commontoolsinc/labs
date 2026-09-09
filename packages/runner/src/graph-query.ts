@@ -30,7 +30,6 @@ import {
   type IAttestation,
   type IMemorySpaceValueAttestation,
   loadLabelSchemaDoc,
-  loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
@@ -197,16 +196,11 @@ export class GraphQueryWalk {
       },
       undefined,
       undefined,
-      // A document this walk loads through a link crossing is delivered
-      // under the selector that reached it, without its metadata family
-      // beyond the schema document its `cfc` envelope names, which a
-      // reader of a labeled document checks its reads against. The family
-      // belongs to the documents a query names: `visit()` chases every
-      // rail for its named document, which is what a caller that intends
-      // to load and run one — a piece resume, a setsrc staging read —
-      // relies on. Chasing it at every crossing instead multiplies a wide
-      // walk by each visited piece's whole doc set (pattern, argument,
-      // internal and their recursion) for documents nothing asked to run.
+      // A document this walk loads is delivered under the selector that
+      // reached it, with the schema document its `cfc` envelope names —
+      // which a reader of a labeled document checks its reads against —
+      // and no other metadata target: those links are data on the
+      // document, and a caller that wants a target names it.
       false,
     );
     this.#memo = options.memo ?? createSchemaMemo();
@@ -214,29 +208,10 @@ export class GraphQueryWalk {
   }
 
   /**
-   * Tracker keys of every document whose metadata family this walk has
-   * chased: each named document a `visit()` was owed the family of, each
-   * document loaded as a member of such a family, whose own family the
-   * chase followed in turn, and each absent target a family link named,
-   * which is owed its family when it arrives. A document a caller named
-   * under its own `docKey` is reported under that key. A caller keeping
-   * watch state records these so a later re-walk of a member chases its
-   * family again.
-   */
-  get chasedFamilyKeys(): ReadonlySet<string> {
-    const keys = new Set<string>();
-    for (const key of this.#context.metaDocsVisited) {
-      keys.add(this.#keyOverrides.get(key) ?? key);
-    }
-    return keys;
-  }
-
-  /**
    * Walks `document` under `selector`, recording every document the schema
-   * reaches in the walk's schema tracker. The named document's own metadata
-   * family — pattern, source, cfc, and the rest — is recorded with it;
-   * documents the walk merely reaches through link crossings are recorded
-   * under the selectors that reached them, without their families.
+   * reaches in the walk's schema tracker, and with each of them — the
+   * named document and the documents reached through link crossings alike
+   * — the schema document its `cfc` envelope names.
    *
    * The document records under `schemaTrackerKey` over the walk's identity
    * unless the caller passes `docKey`: a caller that named an explicit
@@ -248,14 +223,6 @@ export class GraphQueryWalk {
     document: IAttestation,
     selector: SchemaPathSelector,
     docKey?: `${string}/${ScopeKey}/${string}`,
-    // Whether the visited document is owed its metadata family. A document
-    // a query NAMES, or one delivered as a member of a named document's
-    // family, is a "root": the whole family, eagerly. A tracked document
-    // being re-walked that no query ever named or chased — dirty-refresh
-    // territory — is a "crossing": no family, exactly as when a mid-walk
-    // crossing first reached it, so a document's delivered shape does not
-    // depend on its update history.
-    role: "root" | "crossing" = "root",
   ): void {
     const effectiveSelector = selector.schema === undefined
       ? { ...selector, schema: false }
@@ -320,22 +287,15 @@ export class GraphQueryWalk {
       }
     }
 
-    // A named root's FULL family — every rail, eagerly — chased even when
-    // selector coverage skips the traversal above: a crossing may have
-    // covered this document before a root named it, and coverage proves
-    // reach, not family. What a caller names, it may intend to load; what
-    // a walk merely reaches, it does not, so a crossing-role visit chases
-    // nothing beyond the schema document its `cfc` envelope names. The
-    // family chase dedupes through `metaDocsVisited`.
+    // The schema document the labels are stated against, loaded even when
+    // selector coverage skipped the traversal above: coverage proves reach,
+    // and a reader of a labeled document is owed that schema wherever it
+    // reached the document from.
     const loaded = {
       address: { ...document.address, space: this.#space },
       value: document.value,
     };
-    if (role === "root") {
-      loadMetaLinkedDocs(tx, loaded, this.#context);
-    } else {
-      loadLabelSchemaDoc(tx, loaded, this.#context);
-    }
+    loadLabelSchemaDoc(tx, loaded, this.#context);
   }
 
   #addTraverserStats(traverser: SchemaObjectTraverser<FabricValue>): void {

@@ -4291,7 +4291,42 @@ export class Runner {
             newRef.symbol,
           ) as Pattern | undefined;
           if (live) {
-            swapToPattern(live, newRef);
+            // A pointer moved here, by this runtime or by a transition it
+            // took part in, has what the incoming pattern reads in place
+            // and swaps at once, in the state the pointer moved in. One
+            // moved elsewhere may point at a pattern whose argument and
+            // owned cells another replica wrote: the store delivers none of
+            // them with the pointer, so they are named before the swap
+            // reads them.
+            const argumentLink = getMetaLink(resultCell, "argument");
+            if (
+              argumentLink === undefined ||
+              !this.#familyAbsent(
+                this.#resolveToPattern(live),
+                undefined,
+                argumentLink,
+                resultCell,
+              )
+            ) {
+              swapToPattern(live, newRef);
+              return;
+            }
+            const named = this.#syncCellsForRunningPattern(resultCell, live)
+              .then(() => {
+                if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
+                  return;
+                }
+                swapToPattern(live, newRef);
+              })
+              .catch((err) => {
+                logger.error(
+                  "pattern-swap-name-error",
+                  `Naming swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+                  err,
+                );
+              });
+            this.#pendingWatcherPatternLoads.add(named);
+            named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
             return;
           }
           // Async load for a pattern change after initial start. Errors are
@@ -4449,7 +4484,16 @@ export class Runner {
               logger.info("pattern changed", {
                 to: { ref: newRef, pattern: loaded },
               });
-              swapToPattern(loaded, newRef);
+              // Loaded from the store, so what it reads may be absent here
+              // too; named before the swap as on the live path.
+              return this.#syncCellsForRunningPattern(resultCell, loaded).then(
+                () => {
+                  if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
+                    return;
+                  }
+                  swapToPattern(loaded, newRef);
+                },
+              );
             })
             .catch((err) => {
               if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
@@ -5220,6 +5264,32 @@ export class Runner {
     // already, however much of it the store holds; a missing entry costs a
     // probe, never a wrong verdict.
     if (this.#locallyPreparedResults.get(key) === entryKey) return undefined;
+    return this.#familyAbsent(
+        resolved.pattern,
+        argument,
+        argumentLink,
+        resultCell,
+      )
+      ? { pattern: resolved.pattern, entryKey }
+      : undefined;
+  }
+
+  /**
+   * Whether a document a run of `pattern` over `resultCell` reads is absent
+   * from this replica: the argument document `argumentLink` names, a
+   * document the caller's `argument` or the stored argument links to through
+   * the redirect chains those links form, or an owned cell of the pattern
+   * or of a sub-piece it instantiates. The store delivers none of these with
+   * the result document; a run that reads one absent commits against a
+   * document the store holds and is refused, so a caller that finds one
+   * absent names the family before it runs.
+   */
+  #familyAbsent(
+    pattern: Pattern,
+    argument: unknown,
+    argumentLink: NormalizedFullLink,
+    resultCell: Cell<any>,
+  ): boolean {
     // Presence probes on a read transaction of their own, so an absent
     // document enters neither the caller's dependencies nor its commit's
     // read set: the run that follows the name-sync reads these for real.
@@ -5243,8 +5313,7 @@ export class Runner {
           },
           { meta: ignoreReadForScheduling },
         ) !== undefined;
-    const held = { pattern: resolved.pattern, entryKey };
-    if (!present(argumentLink)) return held;
+    if (!present(argumentLink)) return true;
     // What the run reads through the argument: every document the caller's
     // argument and the stored argument link to, followed through the
     // targets those links resolve into — a coordinator's element link is a
@@ -5280,7 +5349,7 @@ export class Runner {
       }
       return false;
     };
-    if (linksAbsent(argument, 4)) return held;
+    if (linksAbsent(argument, 4)) return true;
     if (
       linksAbsent(
         readTx.readOrThrow(
@@ -5296,7 +5365,7 @@ export class Runner {
         4,
       )
     ) {
-      return held;
+      return true;
     }
     // The owned cells the run reads: the pattern's derived internal cells
     // and, through each nested sub-pattern's result spot, those of the
@@ -5304,16 +5373,16 @@ export class Runner {
     // syncs by name.
     const owned: Cell<any>[] = [];
     this.#collectResumeOwnedCells(
-      resolved.pattern,
+      pattern,
       cell,
       owned,
       new Set(),
       readTx,
     );
     for (const ownedCell of owned) {
-      if (!present(ownedCell.getAsNormalizedFullLink())) return held;
+      if (!present(ownedCell.getAsNormalizedFullLink())) return true;
     }
-    return undefined;
+    return false;
   }
 
   /**
@@ -6704,8 +6773,15 @@ export class Runner {
           });
         });
       }
+      // The argument document itself, whole and under no schema: setup
+      // reads it raw to write the argument over the slots it holds, and the
+      // second wave below scans what it links to, which it can only do once
+      // the document has arrived. The node links above carry the narrower
+      // schemas the runs read through it with.
+      const argumentCell = this.#runtime.getCellFromLink(argumentMetaLink);
+      cells.push(argumentCell);
       argumentRoots.push({
-        cell: this.#runtime.getCellFromLink(argumentMetaLink),
+        cell: argumentCell,
         schema: pattern.argumentSchema,
       });
     }
