@@ -1156,7 +1156,12 @@ function carriesInlineObject(value: unknown, atRoot = true): boolean {
   );
 }
 
-function cloneWithoutBoundToolKeys(
+/**
+ * A tool's argument schema as a caller sees it: the schema less the `result`
+ * slot and every parameter the tool binds through `extraParams`, which a
+ * caller cannot set.
+ */
+export function cloneWithoutBoundToolKeys(
   schema: JSONSchema,
   extraParams: Record<string, unknown>,
 ): JSONSchema {

@@ -208,13 +208,17 @@ describe("cross-space value reads (CT-1667)", () => {
 
       const parentCell = rt2.getCellFromLink(parentLink);
       await parentCell.sync();
-      // Resolve the child link to a cell (what cf-profile-badge does with
-      // $profile) and subscribe with a minimal schema. NOTE: derived from the
-      // parent's read — the handle inherits the parent's synced state.
+      // The parent's `items` is a link to a document of its own, and the
+      // parent's sync delivers the link and nothing behind it, so the list
+      // is synced under a schema whose selector reaches that document
+      // through the link. Resolving the child link to a cell (what
+      // cf-profile-badge does with $profile) and subscribing with a minimal
+      // schema derives from that read — the handle inherits the list's
+      // synced state.
+      const itemsCell = parentCell.key("items").asSchema(linkListSchema);
+      await itemsCell.sync();
       // deno-lint-ignore no-explicit-any
-      const links = parentCell.key("items").asSchema(linkListSchema)
-        // deno-lint-ignore no-explicit-any
-        .get() as any[];
+      const links = itemsCell.get() as any[];
       expect(links.length).toBe(1);
       const childCell = links[0].asSchema(nameSchema);
 

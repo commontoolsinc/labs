@@ -328,57 +328,9 @@ describe("piece-describe", () => {
   });
 
   describe("describePiece", () => {
-    /** A piece double with one stream on its result cell, a compiled pattern,
-     * and a NAME cell — the three sources the description assembles. */
+    /** A piece double with a compiled pattern declaring one stream, and a
+     * NAME cell — the two sources the description assembles. */
     function pieceDouble(overrides: Record<string, unknown> = {}) {
-      const resultValue = { addItem: { "$stream": true }, items: [] };
-      const resultSchema: JSONSchema = {
-        type: "object",
-        properties: {
-          addItem: { type: "object" },
-          items: { type: "array" },
-        },
-      } as JSONSchema;
-      const resultCell = {
-        schema: resultSchema,
-        get: () => resultValue,
-        getRaw: () => resultValue,
-        // The listing enumerates a root's stored names through `asSchema`,
-        // which answers one handle per name without materializing anything
-        // under them.
-        asSchema: (_schema: unknown) => ({
-          get: () =>
-            Object.fromEntries(
-              Object.keys(resultValue).map((name) => [
-                name,
-                resultCell.key(name),
-              ]),
-            ),
-        }),
-        asSchemaFromLinks: function () {
-          return this;
-        },
-        // Descent below a property answers nothing: a child whose own `key`
-        // echoed a value would satisfy the tool probe (`pattern` +
-        // `extraParams` both defined) and classify plain data as callable.
-        key: (name: string) => {
-          const dead = {
-            schema: undefined,
-            get: () => undefined,
-            getRaw: () => undefined,
-            asSchemaFromLinks: () => dead,
-            key: () => dead,
-          };
-          const self = {
-            schema: undefined,
-            get: () => (resultValue as Record<string, unknown>)[name],
-            getRaw: () => (resultValue as Record<string, unknown>)[name],
-            asSchemaFromLinks: () => self,
-            key: () => dead,
-          };
-          return self;
-        },
-      };
       const compiled = Object.assign(() => {}, {
         argumentSchema: BOARD_ARGUMENT,
         resultSchema: BOARD_RESULT,
@@ -386,24 +338,9 @@ describe("piece-describe", () => {
         nodes: [],
       });
       return {
-        result: { getCell: () => Promise.resolve(resultCell) },
-        input: {
-          getCell: () =>
-            Promise.resolve({
-              get: () => undefined,
-              getRaw: () => undefined,
-              asSchema: (_schema: unknown) => ({ get: () => undefined }),
-              asSchemaFromLinks: function () {
-                return this;
-              },
-              key: function () {
-                return this;
-              },
-            }),
-        },
         getPattern: () => Promise.resolve(compiled),
         getCell: () => ({
-          get: () => resultValue,
+          get: () => ({}),
           asSchema: (_schema: unknown) => ({ get: () => undefined }),
           key: (key: unknown) =>
             key === NAME
@@ -422,15 +359,11 @@ describe("piece-describe", () => {
     };
 
     it("loads the addressed piece without starting it or the space root", async () => {
-      // Discovery uses stored callable metadata, so describing a piece needs
-      // neither its runtime graph nor the space root to be initialized.
-      const fixture = pieceDouble();
-      const resultRoot = await fixture.result.getCell();
-      const inputRoot = await fixture.input.getCell();
-      const pieceRoot = {
-        ...fixture.getCell(),
-        entityId: { "/": config.piece },
-      };
+      // Discovery reads the addressed piece and nothing else: the space
+      // root's bootstrap and the target's start are dispatch concerns, not a
+      // description's. The root double carries no pattern a controller could
+      // load, so the description it yields is the honest empty one.
+      const pieceRoot = { entityId: { "/": config.piece } };
       const getPieceCellCalls: unknown[][] = [];
       let ensureCalls = 0;
       const manager = {
@@ -442,8 +375,6 @@ describe("piece-describe", () => {
           getPieceCellCalls.push(args);
           return Promise.resolve(pieceRoot);
         },
-        getResult: () => resultRoot,
-        getArgument: () => inputRoot,
         getSpace: () => "home",
       };
 
@@ -460,7 +391,8 @@ describe("piece-describe", () => {
           undefined,
         ],
       ]);
-      expect(description.verbs.map((verb) => verb.name)).toEqual(["addItem"]);
+      expect(description.verbs).toEqual([]);
+      expect(description.incomplete).toBe("pattern-unavailable");
     });
 
     it("assembles name, purpose, fields, and verbs from one piece", async () => {
@@ -715,7 +647,7 @@ describe("piece-describe", () => {
       expect(lines).not.toContain("STATE");
       expect(lines).not.toContain("INPUTS");
       expect(lines[lines.length - 1]).toBe(
-        "(the pattern could not be read, so its purpose, state, and inputs are missing, and so are verbs its result type omits; the verbs listed are still callable)",
+        "(the pattern could not be read, so its purpose, state, inputs, and verbs are missing; a verb the piece stores is still callable by name)",
       );
     });
 

@@ -623,6 +623,15 @@ export interface LaneDeps {
    * repository's real suites to find out.
    */
   topology?: (root: string) => Promise<Suite[]>;
+
+  /**
+   * Where the lane writes what it measured about itself. The default is
+   * the enclosing run's spool, which is the job the lane is. A caller
+   * that supplies one is saying where those measurements go, and a lane
+   * run from inside a test needs to, because the enclosing run there is
+   * the run testing it and its spool ships.
+   */
+  spool?: () => string | undefined;
 }
 
 /** What reading this tree against its manifest came to. */
@@ -809,7 +818,7 @@ export async function runLane(
   if (options.dryRun) return true;
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
-  const spool = recordsDir();
+  const spool = (deps.spool ?? recordsDir)();
   // The directory belongs to the lane from the moment it exists, and a
   // capability that refuses to open is one of the ways the lane ends.
   let opened;
