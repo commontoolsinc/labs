@@ -115,21 +115,23 @@ plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
 hop budget are declared `unknown` at their edges, where the traverser answers
 presence and stops, so no depth constant stands in for that.
 
-Two things the server walk cannot reach stay with the runner, in the shape
-`presyncInputs` already has:
+The server walk crosses `asCell` positions as it crosses any other: the
+query traversal runs with `traverseCells` on, and only an `opaque` cell stops
+it, so a handle's document is delivered with the rest. `presyncInputs`
+therefore collapses to the same call over the inputs with the event folded
+in; its handle collection goes.
 
-- **Cross-space targets past the first hop.** The server walk stops at its
-  space boundary; the storage manager opens the target space for a
-  first-hop link and no deeper. After the schema sync lands, the pre-sync
-  materializes the argument under `readSchema` in a read transaction of its
-  own, collects the traversal's `onMissingLinkTarget` reports, syncs those,
-  and repeats until a pass reports nothing. The read's own traversal decides
-  what is missing, so no second walk exists.
-- **Cell handles**, for handlers only. An `asCell` boundary is not traversed,
-  so a handle's document is not pulled. A lift that reads a cold handle
-  re-runs when the load lands; a handler is at-most-once and reads it now.
-  The handle collection `presyncInputs` does today stays as the second half
-  of the same function.
+Cross-space targets past the first hop are the one thing the server walk
+cannot deliver, since its query is per space. Nothing in the pre-sync needs
+to stand in for it. A read that dead-ends on a link into another space kicks
+a load there (`ensureLinkedDocLoaded`), and that load is the subscription:
+the storage manager opens the space, tracks the load so `synced()` awaits
+it, and the absent document is a tracked read, so the run re-runs when it
+arrives. A space the transaction only read produces no commit, and its reads
+enter no commit's basis (`v2-transaction.ts`, the read-only-spaces handoff),
+so the cold read costs one re-run and never a conflict. Whether that re-run
+is worth parking the first run on the load it kicked is a stage 4 question,
+answered by measurement.
 
 One correction on the way: `#collectLinkedCellSyncs` syncs a first-hop link
 under `link.schema ?? schema`, the link's declared schema before the
@@ -237,8 +239,8 @@ writes rather than plans.
       immutable cell holding a link that carries a wide schema, synced under
       a narrow one, pulls the narrow selection.
 - [ ] Replace the node walk in `#syncCellsForRunningPatternInner` with one
-      `sync()` per node plan under its `readSchema`, followed by the
-      missing-target loop, and for handler nodes the handle collection.
+      `sync()` per node plan under its `readSchema`, and `presyncInputs`
+      with the same call over the inputs and the event.
 - [ ] Name each plan's outputs under the output binding's schema, the child
       result cell included.
 - [ ] Delete `#syncArgumentLinkTargets`, `LINK_HOPS`, `ArgumentLinkRoot`,
@@ -253,8 +255,10 @@ writes rather than plans.
 - [ ] Test: a lift body that reads through three stored documents finds the
       third local, which the two-hop walk never delivered.
 - [ ] Test: the `defaultProfile` shape, a container in the piece's space
-      linking to a document in another space, arrives through the
-      missing-target loop before the first run.
+      linking to a document in another space. The first run's read kicks the
+      load, the run re-runs once when it lands, and no commit conflicts.
+- [ ] Test: a handler whose argument holds a cell handle finds the handle's
+      document local at dispatch without the handle collection.
 - [ ] Measure on the topics board and the default app: `resumeCellSync`
       count and the link-target sync total from the runner timing stats,
       before and after, and the count of `piece-start-commit-recovering`
@@ -288,6 +292,9 @@ argument, the stand-in aside.
       `#startCore` to the scheduler as the initial-run hold, for the top
       level, for sub-pieces from their own wave, and for list children from
       the list-children pass.
+- [ ] Decide, from stage 2's `defaultProfile` measurement, whether a first
+      run parks on the cross-space loads its own reads kicked, the way a
+      dispatch does since #7189, or takes the one re-run.
 - [ ] Retire `awaitSyncBeforeInitialRun`'s space-wide `synced()` wait and
       `INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS`. The option name can stay as the
       carrier of the per-node promise, or be renamed; the plan does not care
