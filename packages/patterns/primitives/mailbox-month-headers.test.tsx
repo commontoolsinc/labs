@@ -105,6 +105,36 @@ const seedMailbox = handler<void, { db: SqliteDb }>((_, { db }) => {
   ]);
 });
 
+/**
+ * A messages table missing the columns the atom projects, which is what a
+ * handle wired to a store of another shape looks like from inside the query.
+ */
+const narrowMessagesTable = () =>
+  table({ id: "integer primary key", received_at: "text" });
+
+/** One row, so the query over the narrow table has a reason to run. */
+const seedNarrow = handler<void, { db: SqliteDb }>((_, { db }) => {
+  db.exec("INSERT INTO messages (id, received_at) VALUES (?, ?)", [
+    1,
+    "2026-03-01T09:00:00Z",
+  ]);
+});
+
+/**
+ * Seeds 600 live messages in June through one recursive-CTE insert, so the
+ * 500-row ceiling has more rows to refuse than it admits. `received_at`
+ * encodes the row number, so lexicographic order is row order.
+ */
+const seedBulk = handler<void, { db: SqliteDb }>((_, { db }) => {
+  db.exec(
+    "INSERT INTO messages (id, subject, snippet, received_at, sender_id, " +
+      "deleted_at) WITH RECURSIVE c(n) AS (SELECT 1000 UNION ALL " +
+      "SELECT n + 1 FROM c WHERE n < 1599) " +
+      "SELECT n, 'Bulk ' || n, '', " +
+      "'2026-06-01T00:00:00.' || printf('%04d', n) || 'Z', 1, NULL FROM c",
+  );
+});
+
 export default pattern(() => {
   const db = sqliteDatabase({
     tables: { messages: messagesTable(), participants: participantsTable() },
@@ -117,6 +147,16 @@ export default pattern(() => {
   const limit = new Writable(200);
   const mailbox = MailboxMonthHeaders({ mail: db, month, limit });
 
+  // A store whose messages table does not carry the columns the atom
+  // projects, and which has no participants table to join.
+  const narrow = sqliteDatabase({
+    tables: { messages: narrowMessagesTable() },
+  });
+  const seedBulkRows = seedBulk({ db });
+  const seedNarrowRow = seedNarrow({ db: narrow });
+  const brokenMonth = new Writable("1970-01");
+  const broken = MailboxMonthHeaders({ mail: narrow, month: brokenMonth });
+
   return {
     // The one warning this allows is normalizeAndDiff's "Storing a
     // session-scoped link in space-scoped data", raised when reading `[UI]`
@@ -127,9 +167,23 @@ export default pattern(() => {
     allowConsoleWarnings: true,
     [TESTS]: [
       { assertion: assert(() => mailbox.headerCount === 0) },
+      { assertion: assert(() => broken.headerCount === 0) },
 
       { action: action(() => seed.send()) },
+      { action: action(() => seedNarrowRow.send()) },
       { action: action(() => month.set("2026-03")) },
+      { action: action(() => brokenMonth.set("2026-03")) },
+
+      // A store of another shape reports why rather than an empty month, and
+      // the view says so.
+      { assertion: assert(() => broken.errorMessage !== "") },
+      { assertion: assert(() => broken.headerCount === 0) },
+      {
+        assertion: assert(() =>
+          findElementByText(broken[UI], "cf-alert", broken.errorMessage) !==
+            undefined
+        ),
+      },
 
       // The three live March messages, newest first. The deleted one is gone
       // and so is the one in April.
@@ -170,10 +224,12 @@ export default pattern(() => {
         ),
       },
 
-      // A limit the caller names bounds the rows.
+      // A limit the caller names bounds the rows, and takes the newest ones
+      // in order rather than any two of them.
       { action: action(() => limit.set(2)) },
       { assertion: assert(() => mailbox.headerCount === 2) },
       { assertion: assert(() => mailbox.headers[0].subject === "Third") },
+      { assertion: assert(() => mailbox.headers[1].subject === "Second") },
 
       // A negative limit is SQLite's spelling for "no limit at all", so the
       // atom's own floor is what the query gets instead.
@@ -181,11 +237,23 @@ export default pattern(() => {
       { assertion: assert(() => mailbox.headerCount === 1) },
       { assertion: assert(() => mailbox.errorMessage === "") },
 
-      // A limit past the ceiling reads to the ceiling rather than refusing,
-      // and this mailbox holds fewer rows than either.
+      // A limit past the ceiling reads to the ceiling rather than refusing.
+      // June holds 600 live messages, so 500 is a bound the rows can reach:
+      // the newest 500 come back, and the 501st is not among them.
+      { action: action(() => seedBulkRows.send()) },
       { action: action(() => limit.set(100000)) },
-      { assertion: assert(() => mailbox.headerCount === 3) },
+      { action: action(() => month.set("2026-06")) },
       { assertion: assert(() => mailbox.errorMessage === "") },
+      { assertion: assert(() => mailbox.headerCount === 500) },
+      { assertion: assert(() => mailbox.headers[0].subject === "Bulk 1599") },
+      { assertion: assert(() => mailbox.headers[499].subject === "Bulk 1100") },
+
+      // The ceiling named exactly reads the same 500, so the clamp neither
+      // narrows a limit that already sits on it nor lets one past.
+      { action: action(() => limit.set(500)) },
+      { assertion: assert(() => mailbox.headerCount === 500) },
+      { assertion: assert(() => mailbox.headers[0].subject === "Bulk 1599") },
+      { assertion: assert(() => mailbox.headers[499].subject === "Bulk 1100") },
 
       // A month the seed left empty reads back empty rather than stale, and
       // the view says so.

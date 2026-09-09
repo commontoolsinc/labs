@@ -106,6 +106,21 @@ const seedLedger = handler<void, { db: SqliteDb }>((_, { db }) => {
   ]);
 });
 
+/**
+ * A ledger table missing the columns the atom projects, which is what a handle
+ * wired to a store of another shape looks like from inside the query.
+ */
+const narrowLedgerTable = () =>
+  table({ record_id: "text primary key", date: "text" });
+
+/** One row, so the query over the narrow table has a reason to run. */
+const seedNarrow = handler<void, { db: SqliteDb }>((_, { db }) => {
+  db.exec(
+    "INSERT INTO rows_plaid_transaction (record_id, date) VALUES (?, ?)",
+    ["narrow", "2026-03-04"],
+  );
+});
+
 export default pattern(() => {
   const db = sqliteDatabase({
     tables: { rows_plaid_transaction: ledgerTable() },
@@ -123,6 +138,16 @@ export default pattern(() => {
     month,
   });
 
+  // A store whose ledger table does not carry the columns the atom projects,
+  // which is what a handle wired to a store of another shape looks like from
+  // inside the query.
+  const narrow = sqliteDatabase({
+    tables: { rows_plaid_transaction: narrowLedgerTable() },
+  });
+  const seedNarrowRow = seedNarrow({ db: narrow });
+  const brokenMonth = new Writable("1970-01");
+  const broken = LedgerMonthTransactions({ bank: narrow, month: brokenMonth });
+
   return {
     // The one warning this allows is normalizeAndDiff's "Storing a
     // session-scoped link in space-scoped data", raised when reading `[UI]`
@@ -133,8 +158,22 @@ export default pattern(() => {
     allowConsoleWarnings: true,
     [TESTS]: [
       { assertion: assert(() => ledger.rowCount === 0) },
+      { assertion: assert(() => broken.rowCount === 0) },
 
       { action: action(() => seed.send()) },
+      { action: action(() => seedNarrowRow.send()) },
+      { action: action(() => brokenMonth.set("2026-03")) },
+
+      // A store of another shape reports why rather than an empty month, and
+      // the view says so.
+      { assertion: assert(() => broken.errorMessage !== "") },
+      { assertion: assert(() => broken.rowCount === 0) },
+      {
+        assertion: assert(() =>
+          findElementByText(broken[UI], "cf-alert", broken.errorMessage) !==
+            undefined
+        ),
+      },
       { action: action(() => month.set("2026-03")) },
 
       // The live row survives; the tombstone does not, and neither does the

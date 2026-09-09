@@ -92,13 +92,18 @@ const rowsSql = (): string =>
     "LIMIT 500",
   ].join("\n");
 
-/** What a query reports about a failure, empty when it has not failed. */
-const errorText = (error: unknown): string => {
-  if (error === undefined || error === null) return "";
-  if (typeof error === "string") return error;
-  const message = (error as { message?: unknown }).message;
-  return typeof message === "string" ? message : "The query failed.";
-};
+/**
+ * What a query reports about a failure, empty when it has not failed.
+ *
+ * The same narrowing the sqlite builtin applies before it writes one, so a
+ * value that reaches here already a message passes through unchanged.
+ */
+const errorText = (error: unknown): string =>
+  error === undefined || error === null
+    ? ""
+    : error instanceof Error
+    ? error.message
+    : String(error);
 
 /** `amount` as a signed figure in `code`, to the cent. */
 const money = (amount: number, code: string): string =>
