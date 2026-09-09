@@ -23,17 +23,14 @@ import {
 
 const NOW = Date.parse("2026-08-20T04:00:00.000Z");
 
-/** A manifest whose one test was held back for the reason given. */
-function heldBack(
-  reason: "flaky" | "main-red",
-  fields: Partial<Manifest> = {},
-): Manifest {
+/** A manifest whose one test was held back as flaky. */
+function heldBack(fields: Partial<Manifest> = {}): Manifest {
   const entry = sampleEntry({ k: "unit", s: "memory", n: "space > writes" }, {
     flakeRate: 0.42,
   });
   return sampleManifest({
     entries: [entry],
-    withheld: [{ test: entry.test, suite: entry.suite, reason }],
+    withheld: [{ test: entry.test, suite: entry.suite, reason: "flaky" }],
     ...fields,
   });
 }
@@ -47,7 +44,7 @@ describe("test-selection-page", () => {
     });
 
     it("names a flaky test in full, beside the rate it was measured at", () => {
-      const page = testSelectionPage(heldBack("flaky"), NOW);
+      const page = testSelectionPage(heldBack(), NOW);
       expect(page).toContain("space &gt; writes");
       expect(page).toContain("42.0%");
       expect(page).toContain(`id="${FLAKY_SECTION_ID}"`);
@@ -56,14 +53,14 @@ describe("test-selection-page", () => {
     it("says the flake share counts failures rather than runs", () => {
       // 100% is a share of one test's failures, so it says nothing about
       // how often that test fails. A page showing the figure has to say so.
-      const page = testSelectionPage(heldBack("flaky"), NOW);
+      const page = testSelectionPage(heldBack(), NOW);
       expect(page).toContain("counts failures rather than runs");
       expect(page).toContain("failed once and flaked once reads 100%");
     });
 
     it("takes the flake window and threshold from the manifest's own dials", () => {
       const page = testSelectionPage(
-        heldBack("flaky", {
+        heldBack({
           dials: { FLAKE_WINDOW_DAYS: 30, FLAKE_EXCLUSION_RATE: 0.2 },
         }),
         NOW,
@@ -73,7 +70,7 @@ describe("test-selection-page", () => {
     });
 
     it("falls back to the published policy when the dials name neither", () => {
-      const page = testSelectionPage(heldBack("flaky"), NOW);
+      const page = testSelectionPage(heldBack(), NOW);
       expect(page).toContain(`over the last ${FLAKE_WINDOW_FALLBACK_DAYS} days`);
       expect(page).toContain(
         `Past ${(FLAKE_EXCLUSION_FALLBACK * 100).toFixed(1)}% a test`,
@@ -105,16 +102,8 @@ describe("test-selection-page", () => {
       expect(worstAt).toBeLessThan(mildAt);
     });
 
-    it("names a test held back while main is red, without a rate", () => {
-      const page = testSelectionPage(heldBack("main-red"), NOW);
-      expect(page).toContain("Held back while main is red · 1");
-      expect(page).toContain("<tr><td>unit</td>");
-      expect(page).not.toContain("42.0%");
-    });
-
-    it("leaves out a section nothing was held back for", () => {
-      const page = testSelectionPage(heldBack("flaky"), NOW);
-      expect(page).not.toContain("Held back while main is red");
+    it("leaves out a section with nothing to list", () => {
+      const page = testSelectionPage(heldBack(), NOW);
       expect(page).not.toContain("Too long for any lane");
     });
 

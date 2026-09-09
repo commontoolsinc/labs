@@ -152,13 +152,13 @@ describe("plan", () => {
   });
 
   describe("what must not run", () => {
-    it("leaves out an identity failing in the newest run on main", () => {
+    it("leaves out an identity the manifest withholds", () => {
       const manifest = sampleManifest({ entries: entries(5) });
       const held = manifest.entries[2]!;
       manifest.withheld = [{
         test: held.test,
         suite: held.suite,
-        reason: "main-red",
+        reason: "flaky",
       }];
       const result = run(manifest);
       expect(selected(result).some((s) => s.entry.test.n === "case 2")).toBe(
@@ -184,7 +184,7 @@ describe("plan", () => {
       manifest.withheld = [{
         test: held.test,
         suite: held.suite,
-        reason: "main-red",
+        reason: "flaky",
       }];
       const mandatory = new Map([
         [testIdentityKey(held.test), "changed" as const],
@@ -202,7 +202,7 @@ describe("plan", () => {
       manifest.withheld = [{
         test: manifest.entries[1]!.test,
         suite: "workspace-unit",
-        reason: "main-red",
+        reason: "flaky",
       }];
       expect(run(manifest).withheld).toEqual(manifest.withheld);
     });
@@ -681,7 +681,7 @@ describe("running everything", () => {
       withheld: [{
         test: { k: "unit", s: "memory", n: "worthless" },
         suite: "workspace-unit",
-        reason: "main-red",
+        reason: "flaky",
       }],
     });
   }

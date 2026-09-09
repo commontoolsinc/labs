@@ -460,9 +460,6 @@ export function repeatsFor(rate: number): number {
 export interface BuildInput {
   states: Map<string, IdentityState>;
 
-  /** Identities failing in the newest run on `main`. */
-  mainRed: ReadonlySet<string>;
-
   /** Where each identity runs, by identity key. */
   surfaces: ReadonlyMap<string, Surface>;
 
@@ -524,9 +521,7 @@ export function buildManifest(input: BuildInput): Manifest {
       repeats: repeatsFor(rate),
       ...(ran === undefined ? {} : { lastRun: ran }),
     });
-    if (input.mainRed.has(key)) {
-      withheld.push({ test, suite: surface.suite, reason: "main-red" });
-    } else if (rate > FLAKE_EXCLUSION_RATE) {
+    if (rate > FLAKE_EXCLUSION_RATE) {
       withheld.push({ test, suite: surface.suite, reason: "flaky" });
     }
   }
@@ -726,10 +721,6 @@ export class Fold {
     for (const state of this.#states.values()) {
       trimWindows(state, this.#today);
     }
-    const mainRed = new Set<string>();
-    for (const [key, state] of this.#states) {
-      if (state.lastMainOutcome === "fail") mainRed.add(key);
-    }
     return {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
@@ -740,7 +731,6 @@ export class Fold {
         states: Object.fromEntries(this.#states),
       },
       states: this.#states,
-      mainRed,
       surfaces: this.#surfaces,
       observations: this.#observations,
     };
@@ -780,7 +770,6 @@ export class Fold {
 export interface FoldResult {
   aggregate: AggregateState;
   states: Map<string, IdentityState>;
-  mainRed: Set<string>;
   surfaces: Map<string, Surface>;
   observations: number;
 }

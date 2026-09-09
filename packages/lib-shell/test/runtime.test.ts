@@ -4,6 +4,11 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import {
+  CFC_ENFORCEMENT_MODES,
+  cfcEnforcementStrictness,
+  RUNTIME_CFC_DIAL_DEFAULTS,
+} from "@commonfabric/runner/cfc";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { DID } from "@commonfabric/identity";
 import {
@@ -782,6 +787,10 @@ describe("RuntimeInternals", () => {
       session,
       apiUrl: new URL("http://shell.test/"),
       experimental,
+      // The two dials the assertions below read back, stated rather than
+      // left to the host default.
+      cfcEnforcementMode: "enforce-explicit",
+      cfcRenderCeiling: false,
     });
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
@@ -797,11 +806,34 @@ describe("RuntimeInternals", () => {
     expect(options.spaceDid).toBe(session.space);
     expect(options.spaceName).toBe(session.spaceName);
     expect(options.experimental).toBe(experimental);
-    // Epic H3a: the render ceiling is a dogfood flag, default OFF — absent
-    // fields keep today's unbounded rendering (no ceiling, author
-    // declassification honored).
+    // With the render ceiling off, neither ceiling field reaches the worker:
+    // rendering is unbounded and author declassification is honored. The case
+    // below reads the same two fields with the ceiling on.
     expect(options.renderDeclassificationPolicy).toBeUndefined();
     expect(options.renderConfidentialityCeiling).toBeUndefined();
+  });
+
+  it("defaults the CFC enforcement rung no lower than a runtime resolves on its own", async () => {
+    // An embedder that states no dial gets the shell's default. A default
+    // below the rung a Runtime resolves for a construction naming none would
+    // hand that embedder less enforcement through the shell than without it.
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-enforcement-floor",
+    });
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+    });
+
+    expect(
+      CFC_ENFORCEMENT_MODES.filter((rung) =>
+        cfcEnforcementStrictness(rung) >=
+          cfcEnforcementStrictness(RUNTIME_CFC_DIAL_DEFAULTS.cfcEnforcementMode)
+      ),
+    ).toContain(options.cfcEnforcementMode);
   });
 
   it("populates the §8.10.6 render ceiling when cfcRenderCeiling is on", async () => {
@@ -1418,6 +1450,8 @@ describe("RuntimeInternals", () => {
           apiUrl: new URL("http://shell.test/"),
           transport: transport as unknown as RuntimeTransport,
           attach: true,
+          // The rung the attach frame carries, read back below.
+          cfcEnforcementMode: "enforce-explicit",
         })
       );
       try {

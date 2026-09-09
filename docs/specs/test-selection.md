@@ -160,17 +160,14 @@ never laxer. Nothing is retried and nothing is masked.
 
 ## What must run, and what must not
 
-Two rules keep a test out. Both make a change less red rather than more,
-and both exist so that nobody's change fails for something its author
-cannot act on.
+One rule keeps a test out, and it makes a change less red rather than
+more. An identity above `FLAKE_EXCLUSION_RATE` is not selected, since a
+test that disagrees with itself fails somebody's change for something
+its author cannot act on.
 
-- An identity failing in the most recent run on the default branch is not
-  selected.
-- An identity above `FLAKE_EXCLUSION_RATE` is not selected.
-
-Either comes back the moment the change edits the test itself, or its
-suite maps the change onto its unit, since that is very likely a fix and
-has to be allowed to prove itself.
+It comes back the moment the change edits the test itself, or its suite
+maps the change onto its unit, since that is very likely a fix and has to
+be allowed to prove itself.
 
 Two rules force a test in.
 
@@ -194,7 +191,7 @@ under the dataset area
 schema version, the generation time, the exploration seed, the commit
 whose tree was enumerated, how many runs the aggregate saw, every dial it
 was built with, the fitted calibration numbers, every identity with its
-score and the inputs behind it, the withheld sets with their reasons, the
+score and the inputs behind it, the withheld set with its reason, the
 tests a configuration deliberately does not run, a reference packing into
 lanes, the unschedulable list, a count and digest of known identities, and
 the per-package coverage baselines.
@@ -204,6 +201,12 @@ field rejects the object rather than leaving a consumer obeying half of
 it. A manifest whose schema version a reader does not know is treated as
 absent, because a reader that does not know a field cannot know what
 obeying the rest would mean.
+
+A withheld entry naming a reason the reader has no rule for is the one
+thing dropped rather than refused. Refusing it would refuse the whole
+manifest, a refused manifest is treated as an absent one, and an absent
+manifest makes the whole corpus mandatory. Dropping the entry costs one
+test its exclusion; refusing the manifest costs every test its score.
 
 A consumer that finds no manifest runs rather than failing. Nothing then
 has records, so every unit the tree holds is an identity with none, and
@@ -280,17 +283,17 @@ that run.
 
 Whether a change's own run ran a test is settled by that run's records
 and by nothing else. The manifest it resolved answers the next question,
-which is why it did not: held back as too flaky, held back as already
-failing, or passed over by the packing. Only a resolved manifest that
-holds the identity can support that last answer, and a report without one
-says the run did not run the test rather than crediting the selector with
-a decision nothing made. Where the manifest says the test was to have run
-— the packing reached it, or the store has never seen it, which makes it
-mandatory — a run with no record of it recorded less than it ran, and
-that is a different statement from a run that did not reach it. A test the packing did not reach is coverage
-this design traded away rather than something the change missed, and it
-must be described that way. The failure raises the test's score, so the
-next change in that area runs it.
+which is why it did not: held back as too flaky, or passed over by the
+packing. Only a resolved manifest that holds the identity can support
+that last answer, and a report without one says the run did not run the
+test rather than crediting the selector with a decision nothing made.
+Where the manifest says the test was to have run — the packing reached
+it, or the store has never seen it, which makes it mandatory — a run
+with no record of it recorded less than it ran, and that is a different
+statement from a run that did not reach it. A test the packing did not
+reach is coverage this design traded away rather than something the
+change missed, and it must be described that way. The failure raises the
+test's score, so the next change in that area runs it.
 
 A report addresses the change and never a person. No author is named, no
 figure is counted per author or per team, and no history of such reports
@@ -323,9 +326,9 @@ The policy is an input because one function serves both the run on the
 default branch and the run on a change. It takes two values. The budgeted
 policy spends a bounded amount on the tests worth the most, by the rules
 under [what must run](#what-must-run-and-what-must-not) and the score
-above them. The full policy requires every identity, so the two rules
-that keep a test out have nothing to act on and the discretionary part of
-the packing finds nothing left to take; everything after that behaves the
+above them. The full policy requires every identity, so the rule that
+keeps a test out has nothing to act on and the discretionary part of the
+packing finds nothing left to take; everything after that behaves the
 same for both. A consumer that packs the two runs through different code
 will drift, and what it drifts into is running different sets of tests in
 the two places that are meant to agree.

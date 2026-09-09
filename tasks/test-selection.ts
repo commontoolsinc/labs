@@ -217,12 +217,7 @@ export function explainLines(
     (candidate) => testIdentityKey(candidate.test) === key,
   );
   if (held !== undefined) {
-    lines.push(
-      held.reason === "main-red"
-        ? "  withheld: it is failing in the newest run on main, so a pull " +
-          "request cannot act on it"
-        : "  withheld: it is too flaky to judge a change by",
-    );
+    lines.push("  withheld: it is too flaky to judge a change by");
   } else if (verdict.unschedulable) {
     const seconds = verdict.loneSeconds ?? entry.cost;
     lines.push(
