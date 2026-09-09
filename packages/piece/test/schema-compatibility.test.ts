@@ -43,6 +43,27 @@ const oldPattern = pattern(
 
 describe("piece schema compatibility", () => {
   describe("schemasHaveSameContract()", () => {
+    it("returns `true` when defaulted unions differ only in descriptions", () => {
+      const schema = (description: string): JSONSchema => ({
+        type: "object",
+        description,
+        properties: {
+          name: { type: ["string", "undefined"], default: "", description },
+        },
+      });
+      expect(schemasHaveSameContract(schema("Producer"), schema("Consumer")))
+        .toBe(true);
+    });
+
+    it("returns `false` when a defaulted union's default changes", () => {
+      const source: JSONSchema = {
+        type: ["string", "undefined"],
+        default: "Donut",
+      };
+      expect(schemasHaveSameContract(source, { ...source, default: "Glaze" }))
+        .toBe(false);
+    });
+
     it("recognizes unchanged defaults without allowing new-link default insertion", () => {
       const schema: JSONSchema = {
         anyOf: [
@@ -2123,7 +2144,7 @@ describe("piece schema compatibility", () => {
         pattern(true, oldPattern.resultSchema),
         pattern({ type: "string" }, oldPattern.resultSchema),
       )
-    ).toThrow(/unconstrained schema is no longer accepted/);
+    ).toThrow(/argument: the candidate no longer accepts every previous type/);
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern({ type: "string" }, oldPattern.resultSchema),
@@ -2131,6 +2152,263 @@ describe("piece schema compatibility", () => {
       )
     ).toThrow(/candidate schema rejects values accepted previously/);
   });
+
+  it("accepts equivalent unconstrained link contracts", () => {
+    const targets: Exclude<JSONSchema, boolean>[] = [
+      {},
+      { description: "Any retained value" },
+      { type: "unknown" },
+      { default: "fallback" },
+      {
+        $ref: "#/$defs/Anything",
+        $defs: { Anything: { title: "Any value" } },
+      },
+    ];
+    for (const target of targets) {
+      expect(() => assertSchemaSubset(true, target)).not.toThrow();
+      expect(() => assertSchemaSubset(target, true)).not.toThrow();
+      const targetRoot: JSONSchema = {
+        type: "object",
+        additionalProperties: target,
+      };
+      expect(() =>
+        assertSchemaSubset(
+          { type: "object" },
+          targetRoot,
+          "linked object",
+          { targetRoot },
+        )
+      ).not.toThrow();
+    }
+  });
+
+  it("reports the constraint that rejects unconstrained additional properties", () => {
+    for (const additionalProperties of [undefined, true]) {
+      const source: JSONSchema = { type: "object", additionalProperties };
+      expect(() =>
+        assertSchemaSubset(source, {
+          type: "object",
+          additionalProperties: { type: "string" },
+        }, "linked object")
+      ).toThrow(
+        "linked object.*: the candidate no longer accepts every previous type",
+      );
+      expect(() =>
+        assertSchemaSubset(source, {
+          type: "object",
+          additionalProperties: { maxLength: 3 },
+        }, "linked object")
+      ).toThrow("linked object.*: maxLength became more restrictive");
+    }
+  });
+
+  it("fills an unconstrained required member's default for links but refuses its introduction from `true` during evolution", () => {
+    const target: JSONSchema = {
+      required: ["count"],
+      properties: { count: { default: 1 } },
+    };
+    expect(() => assertSchemaSubset(true, target)).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(true, true),
+        pattern(target, true),
+      )
+    ).toThrow("argument.count: newly required argument field has no default");
+  });
+
+  it("accepts annotation changes on a defaulted union", () => {
+    const source: JSONSchema = {
+      type: ["string", "undefined"],
+      default: "",
+      description: "The producer's display name",
+    };
+    const target: JSONSchema = {
+      ...source,
+      description: "The consumer's display name",
+      title: "Name",
+      examples: ["A topic"],
+      deprecated: true,
+      tags: ["display"],
+    };
+    expect(() => assertSchemaSubset(source, target)).not.toThrow();
+    expect(() => assertSchemaSubset(target, source)).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(source, source),
+        pattern(target, target),
+      )
+    ).not.toThrow();
+  });
+
+  it("preserves restrictions beside changed annotations", () => {
+    const source: JSONSchema = {
+      type: ["string", "undefined"],
+      default: "",
+      description: "Producer",
+    };
+    const targets: Exclude<JSONSchema, boolean>[] = [
+      { ...source, type: ["number", "undefined"], default: 0 },
+      { ...source, asCell: ["readonly"] },
+      { ...source, scope: "user" },
+      { ...source, customConstraint: true } as Exclude<JSONSchema, boolean>,
+    ];
+    for (const target of targets) {
+      expect(() =>
+        assertSchemaSubset(source, { ...target, description: "Consumer" })
+      ).toThrow();
+    }
+    for (
+      const target of [
+        { type: "string" },
+        { type: "unknown", maxLength: 3 },
+        { type: "unknown", asCell: ["readonly"] },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(() => assertSchemaSubset(true, target)).toThrow();
+    }
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(true, true),
+        pattern({ properties: { field: { type: "string" } } }, true),
+      )
+    ).toThrow(
+      /argument\.field: the candidate no longer accepts every previous type/,
+    );
+    expect(() =>
+      assertSchemaSubset(
+        { const: { description: "Authored content" } },
+        { const: { description: "Different content" } },
+      )
+    ).toThrow();
+  });
+
+  it("preserves default and reference semantics beside changed descriptions", () => {
+    const withDefault = (description: string, value: string): JSONSchema => ({
+      type: "array",
+      uniqueItems: true,
+      items: {
+        type: "object",
+        properties: { name: { type: "string", default: value, description } },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(withDefault("Producer", "old"), true),
+        pattern(withDefault("Consumer", "new"), true),
+      )
+    ).toThrow(/defaults changed/);
+
+    const withRef = (description: string): JSONSchema => ({
+      $ref: "#/$defs/Value",
+      description,
+    });
+    expect(() =>
+      assertSchemaSubset(withRef("Producer"), withRef("Consumer"), "value", {
+        sourceRoot: { $defs: { Value: { type: "number" } } },
+        targetRoot: { $defs: { Value: { type: "string" } } },
+      })
+    ).toThrow();
+  });
+
+  it("judges a defaulted union's default once, on the union", () => {
+    const narrow: JSONSchema = { type: ["string", "undefined"], default: "" };
+    const wide: JSONSchema = {
+      type: ["string", "number", "undefined"],
+      default: "",
+    };
+    expect(() => assertSchemaSubset(narrow, wide)).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(narrow, true),
+        pattern(wide, true),
+      )
+    ).not.toThrow();
+    expect(() => assertSchemaSubset(wide, narrow)).toThrow(
+      /schema alternative accepted previously/,
+    );
+    expect(() => assertSchemaSubset(narrow, { ...wide, default: true }))
+      .toThrow(/not stable under default insertion/);
+  });
+
+  for (const boundary of ["asCell", "ifc", "uniqueItems"] as const) {
+    const wrap = (schema: Exclude<JSONSchema, boolean>): JSONSchema =>
+      boundary === "asCell"
+        ? { ...schema, asCell: ["cell"] }
+        : boundary === "ifc"
+        ? {
+          ...schema,
+          ifc: {
+            writeAuthorizedBy: { __ctWriterIdentityOf: baselineIdentity },
+          },
+        }
+        : { type: "array", uniqueItems: true, items: schema };
+
+    it(`accepts safe single-type and union updates with unchanged defaults under \`${boundary}\``, () => {
+      const single = wrap({ type: "string", default: "" });
+      for (const type of [["string"], ["string", "undefined"]] as const) {
+        const union = wrap({ type, default: "" });
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(single, true),
+            pattern(union, true),
+          )
+        ).not.toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, union),
+            pattern(true, single),
+          )
+        ).not.toThrow();
+      }
+    });
+
+    it(`refuses narrowed arguments and widened results across single-type and union schemas under \`${boundary}\``, () => {
+      const single = wrap({ type: "string", default: "" });
+      const union = wrap({ type: ["string", "undefined"], default: "" });
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(union, true),
+          pattern(single, true),
+        )
+      ).toThrow(/schema alternative accepted previously/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, single),
+          pattern(true, union),
+        )
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    const defaultChanges = boundary === "asCell" ? "accepts" : "refuses";
+    it(`${defaultChanges} changed, added, or removed defaults during union expansion under \`${boundary}\``, () => {
+      const single = wrap({ type: "string", default: "" });
+      for (
+        const schema of [
+          { type: ["string", "undefined"], default: "changed" },
+          { type: ["string", "undefined"] },
+        ] satisfies JSONSchema[]
+      ) {
+        const union = wrap(schema);
+        const updateArgument = () =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(single, true),
+            pattern(union, true),
+          );
+        const updateResult = () =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, union),
+            pattern(true, single),
+          );
+        if (boundary === "asCell") {
+          expect(updateArgument).not.toThrow();
+          expect(updateResult).not.toThrow();
+        } else {
+          expect(updateArgument).toThrow(/defaults changed/);
+          expect(updateResult).toThrow(/defaults changed/);
+        }
+      }
+    });
+  }
 
   it("rejects unresolved references and terminates on recursive references", () => {
     const unresolved = pattern(
@@ -2823,7 +3101,9 @@ describe("piece schema compatibility", () => {
         pattern(schema(undefined), oldPattern.resultSchema),
         pattern(schema({ type: "number" }), oldPattern.resultSchema),
       )
-    ).toThrow(/additional properties are now constrained/);
+    ).toThrow(
+      /argument\.\*: the candidate no longer accepts every previous type/,
+    );
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(schema({ type: "number" }), oldPattern.resultSchema),
@@ -3425,7 +3705,9 @@ describe("verb event closed-world transitions", () => {
         verbPattern(openEvent),
         verbPattern(shaped),
       )
-    ).toThrow(/additional properties are now constrained/);
+    ).toThrow(
+      /argument\.addComment\.\*: the candidate no longer accepts every previous type/,
+    );
   });
 
   it("closed verb events still gain optional fields (evolution policy)", () => {
