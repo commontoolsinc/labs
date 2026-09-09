@@ -154,6 +154,25 @@ import {
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
 
+/**
+ * The epoch position of a snapshot memo key for the current instant, which no
+ * read epoch is written as.
+ */
+const CURRENT_INSTANT = "now";
+
+let nextReadMetaIdentity = 0;
+const readMetaIdentities = new WeakMap<Metadata, number>();
+
+/** Helper for `#snapshotMemoKey()`, which tags a metadata object by identity. */
+const readMetaIdentity = (meta: Metadata): number => {
+  let identity = readMetaIdentities.get(meta);
+  if (identity === undefined) {
+    identity = ++nextReadMetaIdentity;
+    readMetaIdentities.set(meta, identity);
+  }
+  return identity;
+};
+
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
   level: "error",
@@ -525,11 +544,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   /**
    * Per-transaction memo for derivations that read only this snapshot — link
-   * resolution and CFC label views, each under its own key prefix. Dropped on
-   * any write alongside the read cache above, and bounded the same way: it
-   * retains only what was derived since this transaction's last write.
+   * resolution, CFC label views and proxy views, each under its own key
+   * prefix. This map holds what was derived at the current instant outside
+   * any ambient-read-meta scope; `#scopedSnapshotMemos` holds the rest, and
+   * `getSnapshotMemo()` picks between them. Dropped on any write alongside
+   * the read cache above, unless a reader holds the instant it describes, in
+   * which case `#retireSnapshotMemos()` files it under that reader's epoch.
    */
   #snapshotMemo = new Map<string, unknown>();
+
+  /**
+   * The snapshot memos a reader in a narrower context takes from: one per
+   * read epoch and ambient read metadata, keyed by `#snapshotMemoKey()`. An
+   * entry made under an epoch describes an instant no later write changes,
+   * so those maps outlive writes and end with the transaction; the ones at
+   * the current instant go the way `#snapshotMemo` goes.
+   */
+  #scopedSnapshotMemos = new Map<string, Map<string, unknown>>();
+
+  /**
+   * The epoch handed to a reader since this transaction last wrote, if any.
+   * It names the instant every current-instant memo describes, which is what
+   * lets a write retire those memos under it rather than drop them.
+   */
+  #epochIssuedSinceWrite: number | undefined;
 
   /**
    * The seal destination (`serving-loop.md` §3d): when installed, `commit()`
@@ -1362,6 +1400,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // memoized link resolution issues no reads, so it would contribute nothing
     // to the scope taken afterwards and the answer would come out too wide.
     this.#snapshotMemo = new Map();
+    this.#scopedSnapshotMemos = new Map();
   }
 
   markLazyMaterialize(enabled = true): void {
@@ -1374,7 +1413,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   issueReadEpoch(): number | undefined {
-    return this.tx.issueReadEpoch?.();
+    const epoch = this.tx.issueReadEpoch?.();
+    // Issued while no epoch is in force, the epoch names the current instant,
+    // which is the one the current-instant memos describe. Issued under an
+    // epoch it names that earlier instant instead (a child view inherits its
+    // parent's), and says nothing about the memos.
+    if (epoch !== undefined && this.#readEpoch === undefined) {
+      this.#epochIssuedSinceWrite = epoch;
+    }
+    return epoch;
   }
 
   enterReadEpoch(epoch: number | undefined): number | undefined {
@@ -1462,25 +1509,74 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A finished transaction answers no reads, so nothing it memoized earlier
     // may be handed out as if it had.
     if (this.status().status !== "ready") return undefined;
-    // A read resolving against an earlier epoch describes a different instant
-    // than the memo does; see `getCachedReadResult`.
-    if (this.#readEpoch !== undefined) return undefined;
     // Once CFC is prepared, the read path's `read-after-prepare` invalidation
     // is load-bearing: a memoized resolution issues no reads and would leave a
     // prepared digest standing over a read it never made.
     if (this.#cfcState.prepare.status === "prepared") return undefined;
-    // Inside an ambient-read-meta scope the reads a derivation issues carry
-    // metadata that flow-label derivation reads. Serving one across the scope
-    // boundary — either way — would journal the wrong ones, so the scope
-    // neither reads the memo nor writes to it.
-    if (this.#ambientReadMeta !== undefined) return undefined;
-    // Same for the UI-input blind-write mode, which tags every read it sees
+    // The UI-input blind-write mode tags every read it sees
     // `ignoreReadForCommit`. An entry made under it, served after it is
     // cleared, would stand in for reads that are supposed to carry a
     // value-equality commit precondition — and the precondition would simply
     // not be there.
     if (isUiInputBlindWriteTx(this)) return undefined;
-    return this.#snapshotMemo;
+    const epoch = this.#readEpoch;
+    const meta = this.#ambientReadMeta;
+    if (epoch === undefined && meta === undefined) return this.#snapshotMemo;
+    // A read at an earlier epoch describes a different instant than the
+    // current-instant memo does, and inside an ambient-read-meta scope the
+    // reads a derivation issues carry metadata that flow-label derivation
+    // reads. Either way an entry may only stand in for reads journaled the
+    // way the caller's own would be, so each instant and each metadata takes
+    // a map of its own, and nothing is served across those boundaries.
+    const key = this.#snapshotMemoKey(epoch, meta);
+    let memo = this.#scopedSnapshotMemos.get(key);
+    if (memo === undefined) {
+      memo = new Map();
+      this.#scopedSnapshotMemos.set(key, memo);
+    }
+    return memo;
+  }
+
+  /**
+   * Helper for `getSnapshotMemo()`, which names the memo a reader at `epoch`
+   * under `meta` takes from. Metadata is told apart by identity: a scope
+   * entered with the same object journals the same way, and a merged one is
+   * a fresh object that names a memo of its own.
+   */
+  #snapshotMemoKey(
+    epoch: number | undefined,
+    meta: Metadata | undefined,
+  ): string {
+    const metaTag = meta === undefined ? "" : String(readMetaIdentity(meta));
+    return `${epoch ?? CURRENT_INSTANT}|${metaTag}`;
+  }
+
+  /**
+   * Helper for `#invalidateReadResultCache()`, which files every
+   * current-instant memo under `epoch` — the instant a reader was handed and
+   * the one those memos describe — where a read at that epoch after the write
+   * still finds what they hold, and clears them for the instant the write
+   * begins.
+   */
+  #retireSnapshotMemos(epoch: number): void {
+    const retire = (from: Map<string, unknown>, key: string) => {
+      const into = this.#scopedSnapshotMemos.get(key);
+      if (into === undefined) {
+        if (from.size > 0) this.#scopedSnapshotMemos.set(key, from);
+        return;
+      }
+      // Both describe the same instant, so either entry may stand.
+      for (const [entryKey, entry] of from) {
+        if (!into.has(entryKey)) into.set(entryKey, entry);
+      }
+    };
+    retire(this.#snapshotMemo, this.#snapshotMemoKey(epoch, undefined));
+    const prefix = `${CURRENT_INSTANT}|`;
+    for (const [key, memo] of this.#scopedSnapshotMemos) {
+      if (!key.startsWith(prefix)) continue;
+      this.#scopedSnapshotMemos.delete(key);
+      retire(memo, `${epoch}|${key.slice(prefix.length)}`);
+    }
   }
 
   getReadResultCacheStats(): {
@@ -1531,8 +1627,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // the links a resolution walked, which a write can add, retarget or
     // replace with a plain value. Drop both caches by replacing the maps; this
     // enforces the "no writes between the last read and this one" invariant
-    // they rely on.
+    // they rely on. What a reader still holds is not dropped but filed under
+    // the epoch it was handed: the storage keeps the roots this write
+    // displaces for exactly that reader, so what was memoized at the instant
+    // it describes stays what a read at that epoch would find.
     this.#readResultCache = new Map();
+    const issued = this.#epochIssuedSinceWrite;
+    if (issued !== undefined) {
+      this.#retireSnapshotMemos(issued);
+      this.#epochIssuedSinceWrite = undefined;
+    } else {
+      const prefix = `${CURRENT_INSTANT}|`;
+      for (const key of this.#scopedSnapshotMemos.keys()) {
+        if (key.startsWith(prefix)) this.#scopedSnapshotMemos.delete(key);
+      }
+    }
     this.#snapshotMemo = new Map();
   }
 
@@ -2650,7 +2759,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     >,
   ): void {
     this.#assertWritable("writeValuesOrThrow()");
-    this.#invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
       // writes (S18). This is not inert, and never was: `#noteSystemWrite`'s
@@ -2686,6 +2794,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
       const noteWriteIdentity = () => this.#noteWriteIdentity();
+      // The read caches go the same way: dropped ahead of the first write the
+      // batch yields, and kept when it yields none. A `set()` whose diff
+      // finds nothing to write arrives here as an empty batch, and a lift
+      // that re-asserts an unchanged row per element of a scan would
+      // otherwise pay a full re-resolution of everything the scan had
+      // memoized, once per element.
+      let cachesInvalidated = false;
+      const invalidateReadCaches = () => {
+        if (cachesInvalidated) return;
+        cachesInvalidated = true;
+        this.#invalidateReadResultCache();
+      };
       // Collected while the batch consumes the generator, staged after it
       // returns: the schema-document closure behind each written link (the
       // write-side delivery guarantee, and what makes a same-transaction
@@ -2701,6 +2821,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             if (!write.delete && getContentAddressedSchemasConfig()) {
               staged.push({ address, value: write.value });
             }
+            // After the chokepoint, so a write it refuses leaves the caches
+            // standing over a state it did not change.
+            invalidateReadCaches();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
