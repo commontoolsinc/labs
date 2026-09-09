@@ -3952,9 +3952,9 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  * and allocation).
  *
  * Relationship to other functions and checks:
- * - `isValidFabricValue(x)` (in `validity-check.ts`): the narrower check —
- *   "is `x` already a `FabricValue`?" — which does NOT accept raw native types
- *   like `Error` or `Map`.
+ * - `isValidFabricValue(x)` (in `packages/data-model/src/validity-check.ts`):
+ *   the narrower check — "is `x` already a `FabricValue`?" — which does NOT
+ *   accept raw native types like `Error` or `Map`.
  * - `isValidFabricConvertibleValue(x)`: "Could `x` be converted to a
  *   `FabricValue` via `fabricFromNativeValue()`?" Returns `true` for both
  *   `FabricValue` values AND `FabricNativeObject` values (and deep trees
