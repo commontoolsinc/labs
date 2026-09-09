@@ -126,7 +126,10 @@ import {
   sendValueToBinding,
   unwrapOneLevelAndBindToDoc,
 } from "./pattern-binding.ts";
-import { PatternManager } from "./pattern-manager.ts";
+import {
+  PatternManager,
+  type PreparedSourceUpdate,
+} from "./pattern-manager.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
 import { type Action, ignoreReadForScheduling } from "./scheduler.ts";
@@ -1165,6 +1168,9 @@ export interface RunSyncedWithCommitOptions extends RunSyncedOptions {
 }
 
 type SetupValidationOptions = {
+  /** Proposed module authority owned by this source transition. */
+  sourceUpdate?: PreparedSourceUpdate;
+
   /** Optional invariant over the argument stored before setup changes it. */
   validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
 
@@ -3307,6 +3313,15 @@ export class Runner {
         entryRef,
         validationOptions.pieceSourceTransition,
       );
+      if (validationOptions.sourceUpdate !== undefined) {
+        this.#runtime.patternManager.stageSourceUpdate(
+          validationOptions.sourceUpdate,
+          resultCell.space,
+          validationOptions.pieceSourceTransition.expected.pattern.identity,
+          entryRef.identity,
+          tx,
+        );
+      }
     }
 
     const runningSetup = this.#maybeReuseRunningSetup(
@@ -5996,6 +6011,18 @@ export class Runner {
       inputs,
     );
 
+    const transition = options?.pieceSourceTransition;
+    const candidateRef = this.#runtime.patternManager.getArtifactEntryRef(
+      pattern,
+    );
+    const sourceUpdate = transition?.baseline.kind === "retain" && candidateRef
+      ? await this.#runtime.patternManager.prepareSourceUpdate(
+        resultCell.space,
+        transition.expected.pattern.identity,
+        candidateRef.identity,
+      )
+      : undefined;
+
     // Run the pattern.
     //
     // If the result cell has a transaction attached, and it is still open,
@@ -6027,6 +6054,11 @@ export class Runner {
       }
     };
     if (givenTx) {
+      if (sourceUpdate !== undefined) {
+        throw new Error(
+          "source update authority requires an owned setup transaction",
+        );
+      }
       // If tx is given, i.e. result cell was part of a tx that is still open,
       // caller manages retries
       assertExpectedPatternIdentity(resultCell.withTx(givenTx));
@@ -6043,44 +6075,52 @@ export class Runner {
         },
       );
     } else {
-      const outcome = await this.#runtime.editWithRetry((tx) => {
-        // Asked here rather than only at the entry point, because a seal
-        // destination can be installed while the synchronization above is in
-        // flight, and because `editWithRetry` builds a fresh transaction per
-        // retry. The receipt describes THIS transaction, so the condition
-        // that decides whether it can describe one has to hold for the
-        // transaction, not for the moment the call started.
-        if (requireCommit && this.#runtime.sealDestinationInstalled) {
-          throw new Error(SEALING_RECEIPT_REFUSAL);
-        }
-        // runSynced's own setup tx (async surface, e.g. compileAndRun's
-        // continuation on a served run): no scheduler run around it;
-        // bookkeeping per serving-loop.md §3d.
-        //
-        // The kind also decides where this transaction lands. Under
-        // experimental server execution a derivation or event-handler run is
-        // diverted into the speculation overlay, whose acceptance is a seal
-        // that a later withdrawal can undo; bookkeeping commits to storage.
-        // A receipt minted from an overlay seal would claim durability it
-        // does not have, so re-stamping this one is not a naming change.
-        this.#runtime.stampServerRun(tx, {
-          actionId: `piece-run-synced/${resultCell.sourceURI}`,
-          kind: "bookkeeping",
-        });
-        assertExpectedPatternIdentity(resultCell.withTx(tx));
-        return this.#setupInternal(
-          tx,
-          pattern,
-          inputs,
-          resultCell.withTx(tx),
-          {
-            patternRepository: options?.patternRepository,
-            pieceSourceTransition: options?.pieceSourceTransition,
-            validateCurrentArgument: options?.validateCurrentArgument,
-            validateArgumentLinks: options?.validateArgumentLinks,
-          },
-        );
-      });
+      const outcome = await this.#runtime.editWithRetry(
+        (tx) => {
+          // Asked here rather than only at the entry point, because a seal
+          // destination can be installed while the synchronization above is in
+          // flight, and because `editWithRetry` builds a fresh transaction per
+          // retry. The receipt describes THIS transaction, so the condition
+          // that decides whether it can describe one has to hold for the
+          // transaction, not for the moment the call started.
+          if (
+            (requireCommit || sourceUpdate !== undefined) &&
+            this.#runtime.sealDestinationInstalled
+          ) {
+            throw new Error(SEALING_RECEIPT_REFUSAL);
+          }
+          // runSynced's own setup tx (async surface, e.g. compileAndRun's
+          // continuation on a served run): no scheduler run around it;
+          // bookkeeping per serving-loop.md §3d.
+          //
+          // The kind also decides where this transaction lands. Under
+          // experimental server execution a derivation or event-handler run is
+          // diverted into the speculation overlay, whose acceptance is a seal
+          // that a later withdrawal can undo; bookkeeping commits to storage.
+          // A receipt minted from an overlay seal would claim durability it
+          // does not have, so re-stamping this one is not a naming change.
+          this.#runtime.stampServerRun(tx, {
+            actionId: `piece-run-synced/${resultCell.sourceURI}`,
+            kind: "bookkeeping",
+          });
+          assertExpectedPatternIdentity(resultCell.withTx(tx));
+          return this.#setupInternal(
+            tx,
+            pattern,
+            inputs,
+            resultCell.withTx(tx),
+            {
+              patternRepository: options?.patternRepository,
+              pieceSourceTransition: options?.pieceSourceTransition,
+              sourceUpdate,
+              validateCurrentArgument: options?.validateCurrentArgument,
+              validateArgumentLinks: options?.validateArgumentLinks,
+            },
+          );
+        },
+        undefined,
+        { sourceUpdate },
+      );
       if (outcome.error) {
         const error = outcome.error;
         if (

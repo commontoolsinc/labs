@@ -125,13 +125,14 @@ describe("module identity delegation", () => {
   });
 
   it("rejects an update when the predecessor source closure is unavailable", async () => {
-    const manager = runtime.patternManager.accessForTestingOnly;
-
     await expect(
-      manager.loadPreviousSourceClosure(space, "missing-predecessor"),
+      runtime.patternManager.prepareSourceUpdate(
+        space,
+        "missing-predecessor",
+        "candidate",
+      ),
     ).rejects.toThrow(
-      "cannot authorize module update from missing-predecessor: " +
-        "verified source closure is unavailable",
+      "cannot authorize source update without verified source closures",
     );
   });
 

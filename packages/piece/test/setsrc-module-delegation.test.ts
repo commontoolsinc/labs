@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
@@ -78,6 +79,172 @@ describe("setsrc module delegation", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("keeps a preview and a rejected setup from publishing successor authority", async () => {
+    const piece = await pieces.create(authorizedWriterProgram("v1"), {
+      input: {},
+    });
+    const previous = getPatternIdentityRef(piece.getCell())!;
+    const next = authorizedWriterProgram("v2");
+    const report = await piece.checkPattern(next);
+    expect(report.compatible).toBe(true);
+    const delegated = () => {
+      const tx = runtime.edit();
+      try {
+        return tx.getCfcState().moduleDelegations.get(pieces.getSpace())
+          ?.get(report.candidate.identity) ?? [];
+      } finally {
+        tx.abort();
+      }
+    };
+    expect(delegated()).not.toContain(previous.identity);
+
+    const prepare = runtime.prepareTxForCommit.bind(runtime);
+    let refusedSetup = false;
+    {
+      using _rejectSetup = stub(runtime, "prepareTxForCommit", (tx) => {
+        const staged = getPatternIdentityRef(piece.getCell().withTx(tx));
+        if (staged?.identity === report.candidate.identity) {
+          refusedSetup = true;
+          expect(
+            tx.getCfcState().moduleDelegations.get(pieces.getSpace())
+              ?.get(report.candidate.identity),
+          ).toContain(previous.identity);
+          expect(delegated()).not.toContain(previous.identity);
+          tx.abort("injected setup refusal");
+          throw new Error("injected setup refusal");
+        }
+        prepare(tx);
+      });
+      await expect(piece.setPattern(next)).rejects.toThrow(
+        "injected setup refusal",
+      );
+    }
+    expect(refusedSetup).toBe(true);
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(previous);
+    expect(delegated()).not.toContain(previous.identity);
+    const tx = runtime.edit();
+    try {
+      const closure = await loadVerifiedSourceClosure(
+        runtime,
+        pieces.getSpace(),
+        report.candidate.identity,
+        tx,
+      );
+      expect(
+        closure?.get(report.candidate.identity)?.delegatedModuleIdentities ??
+          [],
+      )
+        .not.toContain(previous.identity);
+    } finally {
+      tx.abort();
+    }
+    expect(delegated()).not.toContain(previous.identity);
+
+    await piece.setPattern(next);
+    expect(delegated()).toContain(previous.identity);
+    const result = await piece.result.getCell();
+    result.key("setName").send({ name: "accepted" });
+    await result.pull();
+    expect(await piece.result.get(["name"])).toBe("v2:accepted");
+  });
+
+  it("publishes authority only after an incompatible source change is confirmed", async () => {
+    const program = (version: string, seedType: string): RuntimeProgram => ({
+      main: "/api/patterns/confirm-authority.tsx",
+      files: [{
+        name: "/api/patterns/confirm-authority.tsx",
+        contents: `/// <cts-enable />
+import { handler, pattern, Writable, WriteAuthorizedBy } from "commonfabric";
+const setName = handler<{name: string}, {name: Writable<string>}>(
+  (event, state) => state.name.set(${
+          JSON.stringify(version)
+        } + ":" + event.name)
+);
+export default pattern<{seed?: ${seedType}}>(() => {
+  const name = new Writable<WriteAuthorizedBy<string, typeof setName>>("initial").for("name");
+  return {name, setName: setName({name})};
+});`,
+      }],
+    });
+    const piece = await pieces.create(program("old", "string"), { input: {} });
+    const previous = getPatternIdentityRef(piece.getCell())!;
+    const candidate = program("confirmed", "number");
+    using _fetch = stub(globalThis, "fetch", () =>
+      Promise.resolve(
+        new Response(candidate.files[0].contents, {
+          headers: { "content-type": "text/typescript-jsx" },
+        }),
+      ));
+    const action = {
+      kind: "repoint" as const,
+      url: "system:confirm-authority.tsx",
+    };
+    const warning = await piece.changeSource(action);
+    expect(warning.status).toBe("incompatible");
+    if (warning.status !== "incompatible") {
+      throw new Error("expected compatibility confirmation");
+    }
+    const delegated = () => {
+      const tx = runtime.edit();
+      try {
+        return tx.getCfcState().moduleDelegations.get(pieces.getSpace())
+          ?.get(warning.prepared.candidate.identity) ?? [];
+      } finally {
+        tx.abort();
+      }
+    };
+    expect(delegated()).not.toContain(previous.identity);
+    expect(
+      (await piece.changeSource(action, { confirmedChange: warning.prepared }))
+        .status,
+    )
+      .toBe("applied");
+    expect(delegated()).toContain(previous.identity);
+    const result = await piece.result.getCell();
+    result.key("setName").send({ name: "accepted" });
+    await result.pull();
+    expect(await piece.result.get(["name"])).toBe("confirmed:accepted");
+  });
+
+  it("preserves both predecessor chains when concurrent updates share a successor", async () => {
+    const first = await pieces.create(authorizedWriterProgram("a"), {
+      input: {},
+    });
+    const second = await pieces.create(authorizedWriterProgram("b"), {
+      input: {},
+    });
+    const predecessors = [first, second].map((piece) =>
+      getPatternIdentityRef(piece.getCell())!.identity
+    );
+    await Promise.all([
+      first.setPattern(authorizedWriterProgram("shared")),
+      second.setPattern(authorizedWriterProgram("shared")),
+    ]);
+    const successor = getPatternIdentityRef(first.getCell())!;
+    expect(getPatternIdentityRef(second.getCell())).toEqual(successor);
+    const tx = runtime.edit();
+    try {
+      const source = await loadVerifiedSourceClosure(
+        runtime,
+        pieces.getSpace(),
+        successor.identity,
+        tx,
+      );
+      for (const predecessor of predecessors) {
+        expect(source?.get(successor.identity)?.delegatedModuleIdentities)
+          .toContain(predecessor);
+      }
+    } finally {
+      tx.abort();
+    }
+    for (const piece of [first, second]) {
+      const result = await piece.result.getCell();
+      result.key("setName").send({ name: "accepted" });
+      await result.pull();
+      expect(await piece.result.get(["name"])).toBe("shared:accepted");
+    }
   });
 
   it("merges predecessor chains into an already-stored successor closure", async () => {
