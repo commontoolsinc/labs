@@ -4082,7 +4082,12 @@ export class Runner {
             }
             const named = this.#syncCellsForRunningPattern(resultCell, live)
               .then(() => {
-                if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
+                // A pointer that moved again while the sync was in flight
+                // has its own swap on the way; this one is stale.
+                if (
+                  !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+                  currentPatternKey !== newKey
+                ) {
                   return;
                 }
                 swapToPattern(live, newRef);
@@ -4257,7 +4262,10 @@ export class Runner {
               // too; named before the swap as on the live path.
               return this.#syncCellsForRunningPattern(resultCell, loaded).then(
                 () => {
-                  if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
+                  if (
+                    !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+                    currentPatternKey !== newKey
+                  ) {
                     return;
                   }
                   swapToPattern(loaded, newRef);
@@ -5115,15 +5123,23 @@ export class Runner {
     // targets those links resolve into — a coordinator's element link is a
     // chain of redirects, and setup reads each hop. Bounded by depth, by a
     // document being probed once, and by the probe budget.
+    // Presence is a fact about a document, probed once; what a link reaches
+    // depends on its path, so two links into one document at different
+    // paths are each walked.
     const probed = new Set<string>();
+    const walked = new Set<string>();
     const linksAbsent = (value: unknown, depth: number): boolean => {
       const link = parseLink(value, resultCell);
       if (link !== undefined) {
         const probeKey = `${link.space}/${link.scope}/${link.id}`;
-        if (probed.has(probeKey)) return false;
-        probed.add(probeKey);
-        if (!present(link)) return true;
+        if (!probed.has(probeKey)) {
+          probed.add(probeKey);
+          if (!present(link)) return true;
+        }
         if (depth === 0) return false;
+        const walkKey = `${probeKey}/${link.path.join("/")}`;
+        if (walked.has(walkKey)) return false;
+        walked.add(walkKey);
         return linksAbsent(
           readTx.readOrThrow(
             {
