@@ -246,7 +246,7 @@ describe("value-tags", () => {
     });
 
     it("returns `null` for a reported tag outside the primitive subset", () => {
-      // `Error` is a tag, but not one a primitive may report; a primitive
+      // `JsError` is a tag, but not one a primitive may report; a primitive
       // reporting it would otherwise be rebuilt as an error by conversion.
 
       expect(tagFromFabricPrimitiveElseNull(new NonPrimitiveTagProbe()))

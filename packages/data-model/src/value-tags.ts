@@ -206,7 +206,7 @@ export function tagFromNativeBuiltinClassElseNull(
       return VALUE_TAGS.Array;
     }
 
-    // `Error` and standard subclasses all map to the `Error` tag.
+    // `Error` and standard subclasses all map to the `JsError` tag.
     case Error:
     case TypeError:
     case RangeError:
