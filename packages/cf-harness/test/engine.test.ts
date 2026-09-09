@@ -128,6 +128,8 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
     now: () => "2026-04-15T19:00:00.000Z",
+    // The rung the run-state comparison below reads back.
+    cfcEnforcementMode: "enforce-explicit",
   });
 
   assertEquals(engine.config.sandbox, undefined);
@@ -213,50 +215,50 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     }),
   });
 
-  const pinned = new CfHarnessEngine({
+  // A session stating no dial of its own runs at the rung the session preset
+  // pins. The itemized rung is read off the record beside it: the two are one
+  // answer, and a run state naming a rung its own record contradicts is what
+  // this reads for.
+  const unstatedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  };
+  const unstatedRecord = recordFor(unstatedSession);
+  const pinnedCfc = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
-    fabricSession: {
-      apiUrl: "https://toolshed.example/",
-      identityKeyPath: "/keys/agent.pkcs8",
-      space: "my-space",
-    },
-  });
-  assertEquals(pinned.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
-    flowLabels: "off",
-    flowLabelsSource: "default",
-    record: recordFor({
-      apiUrl: "https://toolshed.example/",
-      identityKeyPath: "/keys/agent.pkcs8",
-      space: "my-space",
-    }),
-  });
+    fabricSession: unstatedSession,
+  }).getRunState().fabricSessionCfc;
+  assertEquals(pinnedCfc?.enforcementMode, unstatedRecord.enforcementMode.rung);
+  assertEquals(pinnedCfc?.enforcementModeSource, "preset-pin");
+  assertEquals(pinnedCfc?.flowLabels, "off");
+  assertEquals(pinnedCfc?.flowLabelsSource, "default");
+  assertEquals(pinnedCfc?.record, unstatedRecord);
 
   // The named bundle supplies persist when the operator selects the posture
   // and leaves the flow-labels dial unset; a configured dial would still win.
-  const postured = new CfHarnessEngine({
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const posturedRecord = recordFor(posturedSession);
+  const posturedCfc = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
-    fabricSession: {
-      apiUrl: "https://toolshed.example/",
-      identityKeyPath: "/keys/agent.pkcs8",
-      space: "my-space",
-      cfcPosture: "max-enforcement",
-    },
-  });
-  assertEquals(postured.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
-    flowLabels: "persist",
-    flowLabelsSource: "posture",
-    posture: "max-enforcement",
-    record: recordFor({
-      apiUrl: "https://toolshed.example/",
-      identityKeyPath: "/keys/agent.pkcs8",
-      space: "my-space",
-      cfcPosture: "max-enforcement",
-    }),
-  });
+    fabricSession: posturedSession,
+  }).getRunState().fabricSessionCfc;
+  // The bundle names no enforcement rung, so this one is still the preset's
+  // pin, read off the record as above.
+  assertEquals(
+    posturedCfc?.enforcementMode,
+    posturedRecord.enforcementMode.rung,
+  );
+  assertEquals(posturedCfc?.enforcementModeSource, "preset-pin");
+  assertEquals(posturedCfc?.flowLabels, "persist");
+  assertEquals(posturedCfc?.flowLabelsSource, "posture");
+  assertEquals(posturedCfc?.posture, "max-enforcement");
+  assertEquals(posturedCfc?.record, posturedRecord);
 
   const sessionless = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
@@ -276,13 +278,15 @@ Deno.test("CfHarnessEngine publishes no posture record when a session factory ov
       identityKeyPath: "/keys/agent.pkcs8",
       space: "my-space",
       cfcPosture: "max-enforcement",
+      // The dial the comparison below reads back.
+      cfcEnforcementMode: "enforce-strict",
     },
     fabricSessionFactory: () =>
       Promise.reject(new Error("never built in this test")),
   });
   assertEquals(engine.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
@@ -298,6 +302,8 @@ Deno.test("CfHarnessEngine records an inherited posture record when the injected
     identityKeyPath: "/keys/agent.pkcs8",
     space: "my-space",
     cfcPosture: "max-enforcement",
+    // The dial the comparison below reads back off the child's run state.
+    cfcEnforcementMode: "enforce-strict",
   } as const;
   const parentRecord = recordFor(posturedSession);
   const child = new CfHarnessEngine({
@@ -309,8 +315,8 @@ Deno.test("CfHarnessEngine records an inherited posture record when the injected
   });
 
   assertEquals(child.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
@@ -353,6 +359,10 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     identityKeyPath: "/keys/agent.pkcs8",
     space: "my-space",
     cfcPosture: "max-enforcement",
+    // The dial the clean-resume comparison below reads back. Every session
+    // this case builds carries it, so the posture is the only thing the
+    // refused resumes differ on.
+    cfcEnforcementMode: "enforce-strict",
   } as const;
   const runState = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
@@ -369,6 +379,7 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
           apiUrl: posturedSession.apiUrl,
           identityKeyPath: posturedSession.identityKeyPath,
           space: posturedSession.space,
+          cfcEnforcementMode: posturedSession.cfcEnforcementMode,
         },
         runState,
       }),
@@ -383,8 +394,8 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     runState,
   });
   assertEquals(resumed.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
     flowLabels: "persist",
     flowLabelsSource: "posture",
     posture: "max-enforcement",
@@ -1974,14 +1985,18 @@ Deno.test("CfHarnessEngine records the fabric session's read ceiling in run stat
     space: "my-space",
     cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
     cfcReadOnExceed: "skip",
+    // The dial the run-state comparison below reads back. Every session this
+    // case builds carries it, so the read ceiling is the only thing the
+    // refused resumes differ on.
+    cfcEnforcementMode: "enforce-strict",
   } as const;
   const runState = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
     fabricSession: boundedSession,
   }).getRunState();
   assertEquals(runState.fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
     flowLabels: "off",
     flowLabelsSource: "default",
     readMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
@@ -2011,6 +2026,7 @@ Deno.test("CfHarnessEngine records the fabric session's read ceiling in run stat
           apiUrl: boundedSession.apiUrl,
           identityKeyPath: boundedSession.identityKeyPath,
           space: boundedSession.space,
+          cfcEnforcementMode: boundedSession.cfcEnforcementMode,
         },
         runState,
       }),

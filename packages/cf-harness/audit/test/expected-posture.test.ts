@@ -39,6 +39,18 @@ const FLEET_RECORD = harnessFabricSessionPosture({
   space: "did:key:spec",
 });
 
+/**
+ * A session below the `max-enforcement` profile on both kinds of field it
+ * carries. It states `off` for flow labels, where the profile expects
+ * `persist`, and it selects no bundle, so nothing gives its sinks a ceiling.
+ */
+const BELOW_PROFILE_RECORD = harnessFabricSessionPosture({
+  apiUrl: "https://fabric.test/",
+  identityKeyPath: "/dev/null",
+  space: "did:key:spec",
+  cfcFlowLabels: "off",
+});
+
 describe("the expected-posture spec", () => {
   describe("what it refuses", () => {
     it("refuses a spec that asserts nothing", () => {
@@ -80,6 +92,16 @@ describe("the expected-posture spec", () => {
       expect(() => parseExpectedPosture({ flowLabels: 3 })).toThrow(
         "must be a non-empty string",
       );
+    });
+
+    it("refuses a rung name that is not on that dial's ladder", () => {
+      // A rung off the ladder is compared against every record and matches
+      // none of them, so it reads as a deployment permanently at fault.
+      expect(() => parseExpectedPosture({ flowLabels: "enforce" })).toThrow(
+        "not one of off, observe, persist",
+      );
+      expect(() => parseExpectedPosture({ enforcementMode: "enforce" }))
+        .toThrow("not one of disabled, observe, enforce-explicit");
     });
 
     it("refuses a boolean field that is not a boolean", () => {
@@ -146,17 +168,27 @@ describe("the expected-posture spec", () => {
       expect(postureMismatches(spec, MAX_ENFORCEMENT_RECORD)).toEqual([]);
     });
 
-    it("names every field the fleet posture misses against that profile", async () => {
+    it("names every field a posture below that profile misses", async () => {
       const spec = await loadExpectedPosture(
         join(PROFILES_DIR, "max-enforcement.json"),
       );
-      const mismatches = postureMismatches(spec, FLEET_RECORD);
+      const mismatches = postureMismatches(spec, BELOW_PROFILE_RECORD);
       expect(mismatches.map((mismatch) => mismatch.field)).toContain(
         "flowLabels",
       );
       expect(mismatches.map((mismatch) => mismatch.field)).toContain(
         "ceilingedSinks[fetchText]",
       );
+    });
+
+    it("finds nothing wrong with a record stricter than the rung a spec names", () => {
+      // A rung field is a floor, so the bundle's `persist` satisfies a spec
+      // naming `observe`, and a record below the floor is what fails.
+      const spec = parseExpectedPosture({ flowLabels: "observe" });
+      expect(postureMismatches(spec, MAX_ENFORCEMENT_RECORD)).toEqual([]);
+      expect(postureMismatches(spec, BELOW_PROFILE_RECORD)).toEqual([
+        { field: "flowLabels", expected: "observe or stricter", found: "off" },
+      ]);
     });
 
     it("names a policy digest the record does not carry", () => {

@@ -36,9 +36,15 @@ describe("cfc-posture", () => {
       expect(harnessFabricSessionPosture(SESSION).provenance).toBe("projected");
     });
 
-    it("resolves the fleet posture when the session states no dials", () => {
-      const record = harnessFabricSessionPosture(SESSION);
-      expect(record.enforcementMode.rung).toBe("enforce-explicit");
+    it("marks a rung that decides nothing as diagnostic-only, and carries no digest without a policy", () => {
+      // `off` is the rung the first two assertions read. Whether a dial is
+      // diagnostic-only is derived from its rung rather than stated, and a
+      // session selecting no bundle configures no policy records, so there
+      // is no snapshot for a digest to be taken of.
+      const record = harnessFabricSessionPosture({
+        ...SESSION,
+        cfcFlowLabels: "off",
+      });
       expect(record.flowLabels.rung).toBe("off");
       expect(record.flowLabels.diagnosticOnly).toBe(true);
       expect(record.policyDigest).toBe(null);

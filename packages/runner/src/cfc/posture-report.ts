@@ -328,7 +328,14 @@ type ToggleDial = {
  * words, and a check driven from it accepts a rung the moment the ladder
  * gains one.
  */
-const DIAL_LADDERS = {
+/**
+ * Every ladder dial's rungs, weakest first, each named with what it decides.
+ *
+ * The key order is the ladder itself: a rung later in one dial's table decides
+ * everything an earlier one decides and more. A reader ordering two rungs of
+ * one dial orders them by their position here.
+ */
+export const CFC_DIAL_LADDERS = {
   cfcEnforcementMode: ENFORCEMENT_MODE_DECIDES,
   cfcFlowLabels: FLOW_LABELS_DECIDES,
   cfcWriteFloor: WRITE_FLOOR_DECIDES,
@@ -351,7 +358,7 @@ const resolveRung = <K extends LadderDial>(
   dialName: K,
   stated: ResolvedCfcDials[K] | undefined,
 ): ResolvedCfcDials[K] => {
-  const rungs = Object.keys(DIAL_LADDERS[dialName]);
+  const rungs = Object.keys(CFC_DIAL_LADDERS[dialName]);
   const value = stated === undefined
     ? RUNTIME_CFC_DIAL_DEFAULTS[dialName]
     : stated;
