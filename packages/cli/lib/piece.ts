@@ -41,6 +41,7 @@ import {
 import {
   Cell,
   type ConsoleHandler,
+  decodeJsonPointer,
   decomposeSchema,
   deepEqual,
   encodeJsonPointer,
@@ -2428,8 +2429,19 @@ const VERB_PROPERTY_KEYS: readonly string[] = [
   "deprecated",
 ];
 
-/** The prefix of a reference into a document's own `$defs`. */
-const LOCAL_DEFINITION_PREFIX = "#/$defs/";
+/**
+ * The `$defs` key a reference into the document's own definitions names, or
+ * `undefined` for anything else — a reference elsewhere, or deeper than one
+ * definition. A reference is a JSON Pointer, so the key is its second
+ * segment decoded: `Topic~1Author` names the definition `Topic/Author`.
+ */
+function localDefinitionName(ref: unknown): string | undefined {
+  if (typeof ref !== "string" || !ref.startsWith("#/")) return undefined;
+  const [, root, name, ...rest] = decodeJsonPointer(ref.slice(1));
+  return root === "$defs" && name !== undefined && rest.length === 0
+    ? name
+    : undefined;
+}
 
 /**
  * The names of the local definitions `schema` references at any depth,
@@ -2441,10 +2453,8 @@ function localDefinitionRefs(
   into: Set<string> = new Set(),
 ): Set<string> {
   if (!isObjectOrArray(schema)) return into;
-  const ref = schema.$ref;
-  if (typeof ref === "string" && ref.startsWith(LOCAL_DEFINITION_PREFIX)) {
-    into.add(ref.slice(LOCAL_DEFINITION_PREFIX.length));
-  }
+  const name = localDefinitionName(schema.$ref);
+  if (name !== undefined) into.add(name);
   mapSubschemas(
     schema as Parameters<typeof mapSubschemas>[0],
     (child) => {

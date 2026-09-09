@@ -322,7 +322,14 @@ describe("listPieceCallables", () => {
   it("reads a result type declared as a named definition", async () => {
     // A created piece's result is the named type its author declared, so the
     // properties live in the definition the root references — and the
-    // definition may carry references of its own.
+    // definition may carry references of its own. The event served is cut to
+    // the definitions it reaches, named as the `$defs` map names them: a
+    // reference is a JSON Pointer, so a key holding `/` or `~` arrives
+    // escaped and must still find its definition.
+    const author: JSONSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    };
     const listing = await listPattern(compiledPattern({
       resultSchema: {
         $ref: "#/$defs/TopicOutput",
@@ -337,7 +344,16 @@ describe("listPieceCallables", () => {
               body: { type: "string" },
             },
           },
-          AddCommentEvent: RESULT_SIDE_EVENT,
+          AddCommentEvent: {
+            type: "object",
+            properties: {
+              note: { type: "string" },
+              author: { $ref: "#/$defs/Topic~1Author" },
+            },
+            required: ["note"],
+          },
+          "Topic/Author": author,
+          Unreached: { type: "number" },
         },
       },
     }));
@@ -346,7 +362,15 @@ describe("listPieceCallables", () => {
       name: "addComment",
       kind: "handler",
       on: "result",
-      inputSchema: RESULT_SIDE_EVENT,
+      inputSchema: {
+        type: "object",
+        properties: {
+          note: { type: "string" },
+          author: { $ref: "#/$defs/Topic~1Author" },
+        },
+        required: ["note"],
+        $defs: { "Topic/Author": author },
+      },
     }]);
   });
 

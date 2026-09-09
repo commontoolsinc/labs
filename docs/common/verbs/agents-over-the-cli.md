@@ -64,8 +64,8 @@ as `cf cell get`, so a survey can be narrowed on the way out.
 it names the deployed pattern and lists every callable verb with its prose and
 the schemas a payload is judged against, which is what a caller needs to act.
 Each of the reads below is its own cold CLI process. `verbs` and `describe` load
-the compiled pattern without starting the piece or reading its data; they are
-still not a preflight to run together, so reach for the others when
+the compiled pattern without starting the piece or loading its result tree;
+they are still not a preflight to run together, so reach for the others when
 the question they answer comes up. `cf piece describe` prints the piece's man
 page — what it is, what it holds, what a caller supplies, and what it can do —
 with every sentence compiled from the pattern's own doc comments:

@@ -743,7 +743,7 @@ without reading pattern source. The pieces exist:
   (handler/tool), which cell it lives on, and its input schema (tools also
   carry their output schema) — read off the compiled pattern the piece is
   pinned to: its declared result type, its result graph, and its declared
-  argument type, with no read of the piece's data. FUSE independently
+  argument type, without loading the piece's result tree. FUSE independently
   classifies the same entries (`classifyCallableEntry`,
   `packages/fuse/callables.ts`) into `.handler` / `.tool` files plus a
   `.handlers` listing — flagged on the board as neither universal nor

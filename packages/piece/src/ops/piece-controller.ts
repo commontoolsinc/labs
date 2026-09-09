@@ -3746,12 +3746,6 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
-   * in the session that set it up — the runner's session-side pointer (the
-   * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
-   * nothing durably; a fresh session correctly finds neither).
-   */
-  /**
    * Helper for the meta reads below, which is the piece cell with no schema.
    * A meta read registers a load of the document under the reading cell's
    * schema, and this cell's is the pattern's result schema, so a read
@@ -3763,6 +3757,12 @@ export class PieceController<T = unknown> {
     return this.#cell.asSchema(undefined);
   }
 
+  /**
+   * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
+   * in the session that set it up — the runner's session-side pointer (the
+   * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
+   * nothing durably; a fresh session correctly finds neither).
+   */
   #patternPointer(): { identity: string; symbol: string } | undefined {
     return getPatternIdentityRef(this.#metaView()) ??
       this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);

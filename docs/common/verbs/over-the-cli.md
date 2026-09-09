@@ -106,13 +106,13 @@ the two apart without calling.
 
 The listing is read from the compiled pattern the piece is pinned to: its
 declared result type, the result graph it wires, and its declared argument
-type. Nothing the piece stores is read, so listing a board's verbs costs the
-same whatever the board holds. That also settles what gets named: a pattern
-whose result type is its argument schema reused still returns the streams and
-tools it wired, and those are listed off the graph — a handler by the node
-that drives it, a tool by the tool value itself — so a verb the declared type
-omits is as listed as any other, while a data field is never offered as
-callable, whatever the pattern hangs at that name.
+type. Nothing below the piece's own document is read, so listing a board's
+verbs costs the same whatever the board holds. That also settles what gets
+named: a pattern whose result type is its argument schema reused still returns
+the streams and tools it wired, and those are listed off the graph — a handler
+by the node that drives it, a tool by the tool value itself — so a verb the
+declared type omits is as listed as any other, while a data field is never
+offered as callable, whatever the pattern hangs at that name.
 
 Every row says where it lives: the row's `on` names the cell `cf piece call`
 will reach it on. Result shadows input there exactly as it does in
