@@ -99,7 +99,11 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
+import {
+  isRawBuiltinResult,
+  type RawBuiltinReturnType,
+  type RawNodeCause,
+} from "./module.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import {
   resolveScopeKey,
@@ -10395,7 +10399,7 @@ export class Runner {
               },
             }
             : {}),
-        },
+        } satisfies RawNodeCause,
         resultCell,
         this.#runtime,
         outputBinding,
