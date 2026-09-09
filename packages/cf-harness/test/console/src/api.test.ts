@@ -5,10 +5,19 @@ import { cancelTurn } from "../../../console/src/api.ts";
 const realFetch = globalThis.fetch;
 
 /** Answers every request with one response, and remembers what was asked. */
-const answerWith = (response: Response): { calls: number } => {
-  const record = { calls: 0 };
-  globalThis.fetch = () => {
+const answerWith = (
+  response: Response,
+): { calls: number; paths: string[] } => {
+  const record = { calls: 0, paths: [] as string[] };
+  globalThis.fetch = (input) => {
     record.calls += 1;
+    if (typeof input === "string") {
+      record.paths.push(input);
+    } else if (input instanceof Request) {
+      record.paths.push(new URL(input.url).pathname);
+    } else {
+      record.paths.push(input.pathname);
+    }
     return Promise.resolve(response);
   };
   return record;
@@ -26,6 +35,16 @@ describe("console/src/api", () => {
       await cancelTurn("session-a", "turn-a");
 
       expect(asked.calls).toBe(1);
+    });
+
+    it("asks under the page's mount, which is the root outside a page", () => {
+      // Every path goes through console/src/mount.ts; with no location (a
+      // test), the mount is the console's own root and the path is as it was.
+      const asked = answerWith(Response.json({ sessionId: "session-a" }));
+
+      return cancelTurn("session-a", "turn-a").then(() => {
+        expect(asked.paths).toEqual(["/api/cancel"]);
+      });
     });
 
     it("rejects with the reason a refused cancel reported", async () => {

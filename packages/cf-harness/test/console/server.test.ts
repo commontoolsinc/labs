@@ -1696,6 +1696,28 @@ describe("console/server", () => {
       expect(response.status).toBe(404);
       expect(response.headers.get("set-cookie")).toBeNull();
     });
+
+    it("sends the trailing-slash live address to its canonical form, relatively", async () => {
+      // The pane's stylesheet and script are `../styles/...` and
+      // `../scripts/...`; from `/live/session-1/` they would resolve one level
+      // too deep. The Location is relative so it lands under whatever prefix
+      // a host fronts the console at, with no rewriting on the host's side.
+      const response = await server.handle(getRequest("/live/session-1/"));
+      await response.body?.cancel();
+
+      expect(response.status).toBe(308);
+      expect(response.headers.get("location")).toBe("../session-1");
+      expect(response.headers.get("set-cookie")).toBeNull();
+    });
+
+    it("still refuses the trailing-slash live address naming another host", async () => {
+      const response = await server.handle(
+        getRequest("/live/session-1/", { host: "evil.test:8100" }),
+      );
+      await response.body?.cancel();
+
+      expect(response.status).toBe(403);
+    });
   });
 
   describe("request authorization", () => {

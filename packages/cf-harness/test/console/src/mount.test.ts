@@ -1,0 +1,78 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import {
+  consoleMount,
+  consolePath,
+  liveCanonicalRedirect,
+  pageMount,
+} from "../../../console/src/mount.ts";
+
+describe("console/src/mount", () => {
+  describe("consoleMount()", () => {
+    it("is the root for the console's own page at its own origin", () => {
+      expect(consoleMount("/")).toBe("");
+    });
+
+    it("is the root for a live pane at the console's own origin", () => {
+      expect(consoleMount("/live/session-1")).toBe("");
+      expect(consoleMount("/live/session-1/")).toBe("");
+    });
+
+    it("is the host's prefix for the console's page served under one", () => {
+      // loom's daemon fronts the console at /harness-console on its origin.
+      expect(consoleMount("/harness-console/")).toBe("/harness-console");
+      expect(consoleMount("/harness-console")).toBe("/harness-console");
+    });
+
+    it("is the host's prefix for a live pane served under one", () => {
+      expect(consoleMount("/harness-console/live/session-1")).toBe(
+        "/harness-console",
+      );
+      expect(consoleMount("/harness-console/live/session%2F1/")).toBe(
+        "/harness-console",
+      );
+    });
+
+    it("keeps a deeper prefix whole", () => {
+      expect(consoleMount("/a/b/live/session-1")).toBe("/a/b");
+      expect(consoleMount("/a/b/")).toBe("/a/b");
+    });
+  });
+
+  describe("consolePath()", () => {
+    it("addresses a console path under the mount", () => {
+      expect(consolePath("", "/api/events?sessionId=s")).toBe(
+        "/api/events?sessionId=s",
+      );
+      expect(consolePath("/harness-console", "/api/task")).toBe(
+        "/harness-console/api/task",
+      );
+    });
+  });
+
+  describe("pageMount()", () => {
+    it("is the root outside a page, where there is no address", () => {
+      // Deno runs these tests without a location; every path stays as it was
+      // before mounts existed.
+      expect(pageMount()).toBe("");
+    });
+  });
+
+  describe("liveCanonicalRedirect()", () => {
+    it("sends the trailing-slash live address one level up, relatively", () => {
+      // Relative so it resolves under any mount on the client: from
+      // <mount>/live/session-1/ to <mount>/live/session-1.
+      expect(liveCanonicalRedirect("/live/session-1/")).toBe("../session-1");
+      expect(liveCanonicalRedirect("/live/session%2F1/")).toBe(
+        "../session%2F1",
+      );
+    });
+
+    it("leaves every other address alone", () => {
+      expect(liveCanonicalRedirect("/live/session-1")).toBeUndefined();
+      expect(liveCanonicalRedirect("/live/")).toBeUndefined();
+      expect(liveCanonicalRedirect("/")).toBeUndefined();
+      expect(liveCanonicalRedirect("/live/session-1/turn-1")).toBeUndefined();
+    });
+  });
+});

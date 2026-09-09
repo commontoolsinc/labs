@@ -19,6 +19,7 @@
  * otherwise a feed.
  */
 
+import { consolePath, pageMount } from "./mount.ts";
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   type ConsoleChatEventEnvelope,
@@ -178,7 +179,9 @@ export const consoleLiveAddress = (
 ): ConsoleLiveAddress => {
   // The segment holds at least one character and decoding never gives back
   // fewer, so a match always names a session.
-  const match = /^\/live\/([^/]+)\/?$/.exec(pathname);
+  // Anchored at the end and not the start: a host may front the console
+  // under a prefix (`./mount.ts`), and the session is still the last segment.
+  const match = /\/live\/([^/]+)\/?$/.exec(pathname);
   let sessionId: string | undefined;
   if (match !== null) {
     try {
@@ -626,9 +629,12 @@ export class ConsoleLive extends LitElement {
   #subscribe(sessionId: string): void {
     this.#stream?.close();
     const stream = new EventSource(
-      `/api/events?sessionId=${
-        encodeURIComponent(sessionId)
-      }&afterSequence=${this.#lastSequence}`,
+      consolePath(
+        pageMount(),
+        `/api/events?sessionId=${
+          encodeURIComponent(sessionId)
+        }&afterSequence=${this.#lastSequence}`,
+      ),
     );
     this.#stream = stream;
     stream.addEventListener("chat", (message) => {

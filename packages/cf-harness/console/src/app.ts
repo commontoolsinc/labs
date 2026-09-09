@@ -9,6 +9,7 @@
  * its own.
  */
 
+import { consolePath, pageMount } from "./mount.ts";
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   cancelTurn,
@@ -250,9 +251,12 @@ export class ConsoleApp extends LitElement {
   #subscribe(): void {
     this.#stream?.close();
     const stream = new EventSource(
-      `/api/events?sessionId=${
-        encodeURIComponent(this.sessionId ?? "")
-      }&afterSequence=${this.#lastSequence}`,
+      consolePath(
+        pageMount(),
+        `/api/events?sessionId=${
+          encodeURIComponent(this.sessionId ?? "")
+        }&afterSequence=${this.#lastSequence}`,
+      ),
     );
     this.#stream = stream;
     stream.addEventListener("chat", (message) => {
