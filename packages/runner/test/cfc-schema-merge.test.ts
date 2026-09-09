@@ -1541,3 +1541,37 @@ describe("schema comparison over a fabric-valued default", () => {
     expect(properties.a.default).toBeInstanceOf(FabricBytes);
   });
 });
+
+describe("schema comparison over a link-valued default", () => {
+  // `stripWriterIdentityStamp` runs over the whole schema before two are
+  // compared, and it rebuilds every record it visits. A link is a reference
+  // rather than a record of the writer's, so it is carried whole; rebuilding
+  // one would strip nothing and erase the difference between two schemas that
+  // point at different documents.
+
+  const linkTo = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+  const withLink = (id: string) =>
+    ({
+      type: "object",
+      properties: { a: { type: "object", default: linkTo(id) as never } },
+    }) as const;
+
+  it("does not judge differing link defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withLink("of:sp-one"),
+        withLink("of:sp-two"),
+      ),
+    ).toBe(false);
+  });
+
+  it("still judges equal link defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withLink("of:sp-one"),
+        withLink("of:sp-one"),
+      ),
+    ).toBe(true);
+  });
+});
