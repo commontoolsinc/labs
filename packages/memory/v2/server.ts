@@ -51,6 +51,7 @@ import {
   type OperationFieldQueryRequest,
   type OperationFieldQueryResult,
   parseMemoryProtocolFlags,
+  ProtocolError,
   resolveScopeKey,
   type ResponseMessage,
   type ScopeKey,
@@ -96,6 +97,7 @@ import * as Engine from "./engine.ts";
 import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
+  createDocumentSnapshotReader,
   createQueryEvaluationCache,
   extendTrackedGraph,
   fromDirtyKey,
@@ -114,6 +116,7 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
+import type { PreparedRepairSync } from "./repair-coverage.ts";
 import {
   executionLeaseHolder,
   liveExecutionLeaseHolder,
@@ -810,6 +813,7 @@ class Connection {
     timing.time(schemaStart, "memory", "response", "prepareSchemas");
     const sendStart = performance.now();
     this.#sendRaw(prepared);
+    this.#server.commitDeliveredRepair(message);
     timing.time(sendStart, "memory", "response", "sendRaw");
   }
 
@@ -1234,13 +1238,14 @@ class Connection {
           return;
         }
         {
-          const response = await this.#server.watchSet(parsed);
-          this.#sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
-            response,
-          );
+          await this.#server.watchSet(parsed, (response) => {
+            this.#sendSessionResponse(
+              parsed.space,
+              parsed.sessionId,
+              parsed.requestId,
+              response,
+            );
+          });
         }
         return;
       case "session.watch.add":
@@ -1254,13 +1259,14 @@ class Connection {
           return;
         }
         {
-          const response = await this.#server.watchAdd(parsed);
-          this.#sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
-            response,
-          );
+          await this.#server.watchAdd(parsed, (response) => {
+            this.#sendSessionResponse(
+              parsed.space,
+              parsed.sessionId,
+              parsed.requestId,
+              response,
+            );
+          });
         }
         return;
       case "session.ack":
@@ -1443,6 +1449,10 @@ export type EngineOpener = (
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
+  readonly #preparedRepairSyncs = new WeakMap<
+    SessionSync,
+    PreparedRepairSync
+  >();
 
   /** Whole-evaluation caches, one per space (see QueryEvaluationCache in
    * query.ts for the sharing, purity, and seq-rotation rules), held for at
@@ -1742,6 +1752,45 @@ export class Server {
    * exactly them and no other server's. */
   #pushPriorityStatsProvider = () => this.pushPriorityStats();
   #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
+
+  /** Commits repair delivery only after the connection's send succeeds. */
+  commitDeliveredRepair(message: ServerMessage): void {
+    const sync = message.type === "session/effect"
+      ? message.effect
+      : message.type === "response" && isObjectNotArray(message.ok)
+      ? message.ok.sync
+      : undefined;
+    if (!isObjectNotArray(sync)) return;
+    const prepared = this.#preparedRepairSyncs.get(sync as SessionSync);
+    if (prepared === undefined) return;
+    prepared.commit();
+    this.#preparedRepairSyncs.delete(prepared.sync);
+  }
+
+  /** Composes independent repair delivery without changing graph provenance. */
+  #composeRepairSync(
+    space: string,
+    session: SessionState,
+    engine: Engine.Engine,
+    sync: SessionSync,
+    graphEntries = session.entities,
+  ): SessionSync {
+    if (session.repairs === undefined || !session.repairs.needsSync()) {
+      return sync;
+    }
+    const prepared = session.repairs.prepare(
+      createDocumentSnapshotReader(
+        space,
+        engine,
+        this.#sessionScopeIdentity(session),
+      ),
+      sync,
+      graphEntries,
+      session.leaseHolderReads === true,
+    );
+    this.#preparedRepairSyncs.set(prepared.sync, prepared);
+    return prepared.sync;
+  }
 
   /** Every open engine's document-cache counters, keyed by space. A peek:
    * nothing is opened by asking. */
@@ -3310,6 +3359,30 @@ export class Server {
   async ackSession(
     message: SessionAckRequest,
   ): Promise<ResponseMessage<SessionAckResult>> {
+    if (message.releaseRepairs !== undefined) {
+      if (
+        this.#sessions.get(message.space, message.sessionId)?.repairs ===
+          undefined
+      ) {
+        return respondTypedError<SessionAckResult>(
+          message.requestId,
+          toError(
+            "ProtocolError",
+            "Transaction repair is not enabled for this session",
+          ),
+        );
+      }
+      return await this.#withSpacePublicationLock(
+        message.space,
+        () => this.#ackSession(message),
+      );
+    }
+    return await this.#ackSession(message);
+  }
+
+  async #ackSession(
+    message: SessionAckRequest,
+  ): Promise<ResponseMessage<SessionAckResult>> {
     const session = this.#sessions.updateSeenSeq(
       message.space,
       message.sessionId,
@@ -3323,6 +3396,16 @@ export class Server {
     }
     try {
       const engine = await this.#openEngine(message.space);
+      if (message.releaseRepairs !== undefined) {
+        if (this.#sessions.get(message.space, message.sessionId) !== session) {
+          throw new ProtocolError("Session changed during repair release");
+        }
+        const count = session.repairs!.size;
+        for (const localSeq of message.releaseRepairs) {
+          session.repairs!.release(localSeq);
+        }
+        if (session.repairs!.size !== count) this.markSpaceDirty(message.space);
+      }
       return {
         type: "response",
         requestId: message.requestId,
@@ -4011,6 +4094,15 @@ export class Server {
             );
             const engine = await this.#openEngine(message.space);
             retryAfterSeq = Engine.serverSeq(engine);
+            try {
+              session.repairs?.register(message.commit, retryAfterSeq);
+            } catch (repairError) {
+              if (!(repairError instanceof ProtocolError)) throw repairError;
+              return respondTypedError<Engine.AppliedCommit>(
+                message.requestId,
+                toError(repairError.name, repairError.message),
+              );
+            }
           }
           const messageText = error instanceof Error
             ? error.message
@@ -4046,6 +4138,9 @@ export class Server {
           );
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
+            if (session.repairs !== undefined) {
+              responseError.repair = { localSeq: message.commit.localSeq };
+            }
           }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
@@ -4374,6 +4469,21 @@ export class Server {
 
   async watchSet(
     message: WatchSetRequest,
+    publish?: (response: ResponseMessage<WatchSetResult>) => void,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    const run = async () => {
+      const response = await this.#watchSet(message);
+      publish?.(response);
+      return response;
+    };
+    return this.#sessions.get(message.space, message.sessionId)?.repairs ===
+        undefined
+      ? await run()
+      : await this.#withSpacePublicationLock(message.space, run);
+  }
+
+  async #watchSet(
+    message: WatchSetRequest,
   ): Promise<ResponseMessage<WatchSetResult>> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
@@ -4437,6 +4547,9 @@ export class Server {
 
     try {
       const nextOperationCursors = new Map<string, OpCursor>();
+      const repairEngine = session.repairs === undefined
+        ? undefined
+        : aclEngine ?? await this.#openEngine(message.space);
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
@@ -4486,6 +4599,15 @@ export class Server {
         message.watches,
         nextOperationCursors,
       );
+      const deliveredSync = repairEngine === undefined
+        ? sync
+        : this.#composeRepairSync(
+          message.space,
+          session,
+          repairEngine,
+          sync,
+          entities,
+        );
       session.watches = message.watches;
       session.operationCursors = nextOperationCursors;
       session.graphs = graphs;
@@ -4503,7 +4625,7 @@ export class Server {
         requestId: message.requestId,
         ok: {
           serverSeq,
-          sync,
+          sync: deliveredSync,
         },
       };
     } catch (error) {
@@ -4524,10 +4646,19 @@ export class Server {
   /** Add session watches, timing admission through the handler's completion. */
   async watchAdd(
     message: WatchAddRequest,
+    publish?: (response: ResponseMessage<WatchAddResult>) => void,
   ): Promise<ResponseMessage<WatchAddResult>> {
     const startedAt = performance.now();
+    const run = async () => {
+      const response = await this.#watchAdd(message);
+      publish?.(response);
+      return response;
+    };
     try {
-      return await this.#watchAdd(message);
+      return this.#sessions.get(message.space, message.sessionId)?.repairs ===
+          undefined
+        ? await run()
+        : await this.#withSpacePublicationLock(message.space, run);
     } finally {
       timing.time(startedAt, "memory", "watchAdd", "total");
     }
@@ -4781,6 +4912,12 @@ export class Server {
           upserts: upserts.length,
           ...attribution,
         },
+      );
+      response.ok!.sync = this.#composeRepairSync(
+        message.space,
+        session,
+        engine,
+        response.ok!.sync,
       );
       return response;
     } catch (error) {
@@ -5146,7 +5283,72 @@ export class Server {
     }
   }
 
-  syncSessionForConnection(
+  async syncSessionForConnection(
+    space: string,
+    sessionId: string,
+    dirtyIds?: ReadonlySet<string>,
+    dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+  ): Promise<SessionEffectMessage | null> {
+    const session = this.#sessions.get(space, sessionId);
+    if (session?.repairs === undefined || !session.repairs.needsSync()) {
+      return await this.#syncGraphSessionForConnection(
+        space,
+        sessionId,
+        dirtyIds,
+        dirtyOrigins,
+      );
+    }
+    // The caller holds the publication lock through evaluation and send.
+    const engine = await this.#openEngine(space);
+    const graph = await this.#syncGraphSessionForConnection(
+      space,
+      sessionId,
+      dirtyIds,
+      dirtyOrigins,
+    );
+    if (this.#sessions.get(space, sessionId) !== session) return null;
+    if (graph === null && !session.repairs.needsSync(dirtyIds)) return null;
+    try {
+      const sync = this.#composeRepairSync(
+        space,
+        session,
+        engine,
+        graph?.effect ?? {
+          type: "sync",
+          fromSeq: session.lastSyncedSeq,
+          toSeq: Engine.serverSeq(engine),
+          upserts: [],
+          removes: [],
+        },
+      );
+      if (isEmptySync(sync) && sync.caughtUpLocalSeq === undefined) {
+        this.#preparedRepairSyncs.get(sync)?.commit();
+        this.#preparedRepairSyncs.delete(sync);
+        return null;
+      }
+      const effect: SessionEffectMessage = {
+        type: "session/effect",
+        space,
+        sessionId,
+        effect: sync,
+      };
+      // Rollback belongs to graph delivery only; a failed repair send leaves
+      // its independent prepared state uncommitted and therefore replayable.
+      this.#deliveredFrameEntries.set(
+        effect,
+        graph === null
+          ? { upserts: [], removes: [] }
+          : this.#deliveredFrameEntries.get(graph) ??
+            { upserts: [], removes: [] },
+      );
+      return effect;
+    } catch (error) {
+      if (graph !== null) this.rollbackUndeliveredSync(space, sessionId, graph);
+      throw error;
+    }
+  }
+
+  #syncGraphSessionForConnection(
     space: string,
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
@@ -7442,12 +7644,22 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     typeof parsed.seenSeq === "number"
   ) {
+    if (
+      parsed.releaseRepairs !== undefined &&
+      (!Array.isArray(parsed.releaseRepairs) ||
+        !parsed.releaseRepairs.every((seq) =>
+          Number.isSafeInteger(seq) && seq >= 0
+        ))
+    ) return null;
     return {
       type: "session.ack",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
       seenSeq: parsed.seenSeq,
+      ...(parsed.releaseRepairs === undefined
+        ? {}
+        : { releaseRepairs: parsed.releaseRepairs as number[] }),
     };
   }
 

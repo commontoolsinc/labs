@@ -37,6 +37,7 @@ import {
   type GraphQuery,
   type GraphQueryRoot,
   isScopeKey,
+  ProtocolError,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -1242,6 +1243,115 @@ const assembleSchemaDocClosures = (
     }
   }
   return { trackerAdds, additions };
+};
+
+/** Direct document snapshots and the additional schemas needed to decode them. */
+export type DocumentSnapshotBatch = {
+  documents: EntitySnapshot[];
+  schemas: EntitySnapshot[];
+};
+
+/** A reusable reader pinned to one store cut and one authenticated identity. */
+export type DocumentSnapshotReader = {
+  readonly space: string;
+  readonly identity: Readonly<ScopeKeyIdentity>;
+  readonly atSeq: number;
+  read(
+    addresses: readonly Pick<EntitySnapshot, "branch" | "id" | "scope">[],
+  ): DocumentSnapshotBatch;
+};
+
+/**
+ * Assembles raw document bases and verified schema closures without traversing
+ * value links or metadata families. Reads share managers within the batch and
+ * stay pinned to the captured server cut. Callers authorize the space before
+ * creating the reader and keep publication ordered through frame assembly.
+ */
+export const createDocumentSnapshotReader = (
+  space: string,
+  engine: Engine.Engine,
+  identity: ScopeKeyIdentity,
+): DocumentSnapshotReader => {
+  const atSeq = Engine.serverSeq(engine);
+  const principal = identity.principal;
+  const sessionId = identity.sessionId;
+  const branches = new Map(
+    Engine.listBranches(engine).map((branch) => [branch.name, branch.headSeq]),
+  );
+  const managers = new Map<string, EngineObjectManager>();
+  const snapshots = new Map<string, Map<QueryDocKey, EntitySnapshot>>();
+  const scans = new Map<string, SchemaRefScans>();
+  return {
+    space,
+    identity: Object.freeze({ principal, sessionId }),
+    atSeq,
+    read(addresses) {
+      const grouped = new Map<string, Map<QueryDocKey, EntitySnapshot>>();
+      for (const address of addresses) {
+        if (!branches.has(address.branch)) {
+          throw new ProtocolError("Snapshot requires an unreadable branch");
+        }
+        const key = toDocKey(
+          space,
+          address.id,
+          address.scope ?? DEFAULT_SCOPE,
+          { principal, sessionId },
+        );
+        let manager = managers.get(address.branch);
+        if (manager === undefined) {
+          manager = new EngineObjectManager(
+            engine,
+            address.branch,
+            principal,
+            sessionId,
+            branches.get(address.branch)!,
+          );
+          managers.set(address.branch, manager);
+        }
+        let cached = snapshots.get(address.branch);
+        if (cached === undefined) {
+          cached = new Map();
+          snapshots.set(address.branch, cached);
+        }
+        let snapshot = cached.get(key);
+        if (snapshot === undefined) {
+          snapshot = snapshotForDocKey(space, manager, address.branch, key) ??
+            undefined;
+          if (snapshot === undefined) {
+            throw new ProtocolError("Invalid document address");
+          }
+          cached.set(key, snapshot);
+        }
+        let documents = grouped.get(address.branch);
+        if (documents === undefined) {
+          documents = new Map();
+          grouped.set(address.branch, documents);
+        }
+        documents.set(key, snapshot);
+      }
+      const result: DocumentSnapshotBatch = { documents: [], schemas: [] };
+      for (const [branch, documents] of grouped) {
+        let branchScans = scans.get(branch);
+        if (branchScans === undefined) {
+          branchScans = new Map();
+          scans.set(branch, branchScans);
+        }
+        const closure = assembleSchemaDocClosures(
+          space,
+          engine,
+          managers.get(branch)!,
+          branch,
+          new MapSetStringToPathSelectors(true),
+          documents,
+          branchScans,
+          createQueryTraversalStats(),
+        );
+        result.documents.push(...documents.values());
+        result.schemas.push(...closure.additions.values());
+      }
+      return result;
+    },
+  };
 };
 
 /**

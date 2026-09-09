@@ -54,7 +54,9 @@ export const sameSnapshot = (
 
 export const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0 &&
-  (sync.operationFields?.length ?? 0) === 0;
+  (sync.operationFields?.length ?? 0) === 0 &&
+  (sync.repairs?.length ?? 0) === 0 &&
+  (sync.repairFailures?.length ?? 0) === 0;
 
 /**
  * Build a session cache entry for one tracked instance. The instance key

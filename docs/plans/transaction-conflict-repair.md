@@ -1,6 +1,6 @@
 # Transaction conflict repair
 
-Status: proposed design; implementation pending.
+Status: implementation in progress; protocol activation pending.
 
 ## Decision
 
@@ -43,9 +43,10 @@ Holding a document does not by itself make that document application demand.
 
 These distinctions have concrete implementation consequences:
 
-- `SessionState.entities` can remain the delivery diff base for the union of
-  graph and repair coverage. Execution demand must then be derived from graph
-  provenance rather than from every entry in that delivery map.
+- `SessionState.entities` remains the graph delivery diff base and graph
+  provenance. `RepairCoverage` keeps a separate delivery map for retained repair
+  documents. The frame composer unions their delivery at the boundary; execution
+  demand continues to derive from the graph state alone.
 - A document remains covered while either an ordinary watch or any active
   recovery owns it. Removing one owner cannot evict another owner's basis.
 - `session.watch.set` replaces ordinary watches only. A request prepared before
@@ -153,8 +154,9 @@ silently discard an owned basis.
 
 ## 4. Protocol changes
 
-Use a negotiated capability, provisionally `transactionRepairV1`. The names
-below are proposed wire fields, not existing exports.
+Use a negotiated capability, provisionally `transactionRepairV1`. The receipt,
+failure, conflict identity, and release types are defined; session admission
+does not enable them yet. The reconnect declaration remains to be implemented.
 
 | Surface           | Proposed addition | Meaning                                                                                                                                                       |
 | ----------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -443,12 +445,18 @@ capability inactive; do not enable a partial lifecycle in deployed clients.
        [transaction-repair.ts](../../packages/memory/v2/transaction-repair.ts)
        and
        [its unit tests](../../packages/memory/test/v2-transaction-repair.test.ts).
-       Server conflict staging uses that builder; it still repairs through graph
-       watches until the following stages supply independent coverage.
-2. [ ] Implement the server repair component and shared snapshot/schema
-       assembly. Compose it into incremental/full/no-watch sync paths and
-       separate execution demand from delivery holdings. Verify a direct
-       memory-client conflict on an unwatched document.
+       Server conflict staging uses that builder. Ordinary sessions retain
+       graph-watch recovery until the complete lifecycle can be negotiated.
+2. [ ] Finish the server lifecycle around the implemented
+       [repair component](../../packages/memory/v2/repair-coverage.ts) and
+       shared raw snapshot/schema assembly. Push fan-out, watch
+       replacement/addition, send failure, and explicit release compose repair
+       delivery independently of graph demand. The
+       [server transport tests](../../packages/memory/test/v2-server-repair.test.ts)
+       install coverage through the internal session registry and verify an
+       unwatched scoped conflict, successful fresh retry, and cleanup.
+       Negotiated admission, complete reconnect declarations, authorization
+       lifecycle tests, and resource bounds remain before activation.
 3. [ ] Implement receipt validation, explicit release, and reconnect
        declarations in the memory client and runner replica. Exercise lost
        frames, unknown verdicts, changed logical identity, and unchanged
@@ -470,7 +478,7 @@ Principal implementation seams:
 | File                                                                                                                                                                                                                                           | Responsibility                                                                                                          |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | [memory/v2.ts](../../packages/memory/v2.ts) and [memory/interface.ts](../../packages/memory/interface.ts)                                                                                                                                      | Protocol shapes, scope vocabulary, rejection/recovery interface.                                                        |
-| [memory/v2/session-registry.ts](../../packages/memory/v2/session-registry.ts)                                                                                                                                                                  | Per-session repair ownership and restoration.                                                                           |
+| [memory/v2/repair-coverage.ts](../../packages/memory/v2/repair-coverage.ts) and [session-registry.ts](../../packages/memory/v2/session-registry.ts)                                                                                            | Per-session repair ownership and restoration.                                                                           |
 | [memory/v2/server.ts](../../packages/memory/v2/server.ts)                                                                                                                                                                                      | Rejection staging, publication ordering, coverage composition, release, authorization, and execution-demand provenance. |
 | [memory/v2/query.ts](../../packages/memory/v2/query.ts) and [server-sync.ts](../../packages/memory/v2/server-sync.ts)                                                                                                                          | Shared snapshot/schema assembly and union delivery differences.                                                         |
 | [memory/v2/client.ts](../../packages/memory/v2/client.ts)                                                                                                                                                                                      | Recovery handles, receipts, release batching, and reconnect declarations.                                               |

@@ -53,6 +53,9 @@ entity's value hashes to a specific value.
   tracking, watch sets, and catch-up sync.
 - `v2/transaction-repair.ts` — document dependencies of a rejected commit,
   preserving branch and scope for conflict recovery.
+- `v2/repair-coverage.ts` — independent repair ownership and frame composition;
+  integrated server paths remain inactive until session admission negotiates the
+  complete repair lifecycle.
 - `v2/client.ts` — the client half: session open and resume, optimistic commits,
   and watch subscriptions.
 - `v2/message-compression.ts` — the negotiated binary gzip envelope used by

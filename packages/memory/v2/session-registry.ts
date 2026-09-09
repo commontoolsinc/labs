@@ -5,6 +5,7 @@ import type {
   WatchSpec,
 } from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
+import type { RepairCoverage } from "./repair-coverage.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
 
@@ -18,6 +19,10 @@ export type SessionState = {
   operationCursors: Map<string, OpCursor>;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
+
+  /** Independently owned repair delivery; never part of graph demand. */
+  repairs?: RepairCoverage;
+
   trackedIds: Set<string>;
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
@@ -149,6 +154,7 @@ export class SessionRegistry {
       operationCursors: existing?.operationCursors ?? new Map(),
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
+      ...(existing?.repairs === undefined ? {} : { repairs: existing.repairs }),
       trackedIds: existing?.trackedIds ??
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,

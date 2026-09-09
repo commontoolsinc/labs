@@ -8,6 +8,7 @@ import {
   type BranchName,
   type CellScope,
   type ClientCommit,
+  type CommitRepairAddress,
   DEFAULT_BRANCH,
   type EntityId,
   ProtocolError,
@@ -16,12 +17,7 @@ import {
   type ScopeKeyIdentity,
 } from "../v2.ts";
 
-/** A document in a transaction's space, before resolving its scope instance. */
-export type CommitRepairAddress = {
-  readonly branch: BranchName;
-  readonly id: EntityId;
-  readonly scope: CellScope;
-};
+export type { CommitRepairAddress } from "../v2.ts";
 
 /** A repair address resolved under the transaction's authenticated identity. */
 export type ResolvedCommitRepairAddress = CommitRepairAddress & {
