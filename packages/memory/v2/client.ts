@@ -1509,10 +1509,14 @@ export class SpaceSession {
   }
 
   /**
-   * Helper for watch mutations, which orders request issue and response
-   * application. Concurrent mode overlaps round trips; `sendAfter: apply`
-   * waits for preceding responses to be applied before `send()` reads session
-   * state to construct its request.
+   * Serialize a watch mutation (`watch.set` / `watch.add`). `send` issues the
+   * request; `apply` mutates the session view (`#watchSpecs` / `#watchView`)
+   * from the response. Splitting them lets concurrent mode overlap the request
+   * round trips while keeping application ordered. A mutation whose request is
+   * derived from session state (`watchRemoveSync`) passes `sendAfter: "apply"`,
+   * which also holds `send` until every preceding response has been applied;
+   * it still claims its place in issue order, so later mutations wait behind
+   * it.
    */
   async #runWatchMutation<R, T>(
     send: () => Promise<R>,

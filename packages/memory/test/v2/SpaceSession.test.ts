@@ -174,13 +174,37 @@ describe("SpaceSession", () => {
                 })),
               });
               await server.flushSessions([space]);
-              const next = await updates.next();
-              expect(next.done).toBe(false);
+              // Name the arrival (docs/development/waiting-in-tests.md): a
+              // second write to the root that stayed watched throughout marks
+              // the end of the fan-out. Frames deliver in order, so once the
+              // marker lands every frame the first flush owed has landed too,
+              // and a root the removal dropped is missing rather than late.
+              const marker = retained[0];
+              await writer.transact({
+                localSeq: 2,
+                reads: { confirmed: [], pending: [] },
+                operations: [{
+                  op: "set" as const,
+                  id: marker,
+                  value: { value: { n: 2 } },
+                }],
+              });
+              await server.flushSessions([space]);
+              const nOf = (id: string) =>
+                (view.entities.find((entity) => entity.id === id)?.document as
+                  | { value?: { n?: number } }
+                  | undefined)?.value?.n;
+              while (nOf(marker) !== 2) {
+                const next = await updates.next();
+                expect(next.done).toBe(false);
+              }
               expect(view.entities.map(({ id }) => id).sort()).toEqual(
                 [...retained].sort(),
               );
               for (const entity of view.entities) {
-                expect(entity.document).toEqual({ value: { n: 1 } });
+                expect(entity.document).toEqual({
+                  value: { n: entity.id === marker ? 2 : 1 },
+                });
               }
 
               const lastRequests = control.requests.slice(-3);
