@@ -49,6 +49,7 @@ import {
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -1637,24 +1638,29 @@ export async function executeResolvedCallable(
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
-    const tx = await new Promise<IExtendedStorageTransaction>(
-      (resolve, reject) => {
-        try {
-          if (invocation !== undefined) {
-            resolved.callableCell.send(dispatchInput, resolve, {
-              // The id and the session that chose it travel together: an id
-              // is the caller's own word, and only the pair decides which
-              // receipt this handling files under.
-              eventId: invocation.id,
-              session: invocation.session,
-            });
-          } else {
-            resolved.callableCell.send(dispatchInput, resolve);
+    // The span runs from the send to the handling's final commit callback:
+    // the dispatch-to-commit time the `--verbose` phases report, beside the
+    // readback spans below.
+    const tx = await timeCliPhase(
+      "executeCallable.dispatch",
+      () =>
+        new Promise<IExtendedStorageTransaction>((resolve, reject) => {
+          try {
+            if (invocation !== undefined) {
+              resolved.callableCell.send(dispatchInput, resolve, {
+                // The id and the session that chose it travel together: an
+                // id is the caller's own word, and only the pair decides
+                // which receipt this handling files under.
+                eventId: invocation.id,
+                session: invocation.session,
+              });
+            } else {
+              resolved.callableCell.send(dispatchInput, resolve);
+            }
+          } catch (error) {
+            reject(error);
           }
-        } catch (error) {
-          reject(error);
-        }
-      },
+        }),
     );
     // Acknowledgment is transaction-local (verb contract, Settlement): the
     // commit callback above fires on THIS handling's final commit. Awaiting
@@ -1723,7 +1729,10 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
-      const value = await receipt.pull();
+      const value = await timeCliPhase(
+        "executeCallable.receipt.pull",
+        () => receipt.pull(),
+      );
       // A value-less verb's receipt is an empty record — existence-only.
       // Presence is decided on the receipt's STORED value, never on the
       // materialized one: a `FabricInstance` crossing the cell read arrives
@@ -1746,11 +1755,9 @@ export async function executeResolvedCallable(
         // nothing, and that omission is the distinction the empty receipt
         // exists to draw.
         if (deps.selection !== undefined) {
-          result = await selectCallResult(
-            resolved,
-            receipt,
-            deps.selection,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.select",
+            () => selectCallResult(resolved, receipt, deps.selection!, deps),
           );
         }
         // Whatever the value in hand came from — the whole receipt, or the
@@ -1762,13 +1769,17 @@ export async function executeResolvedCallable(
         // has, and the bound below engages only where one does not.
         const cycle = circularResultPath(result);
         if (cycle !== undefined) {
-          result = await boundCyclicResult(
-            resolved,
-            receipt,
-            result,
-            cycle,
-            link.id,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.boundCyclic",
+            () =>
+              boundCyclicResult(
+                resolved,
+                receipt,
+                result,
+                cycle,
+                link.id,
+                deps,
+              ),
           );
         }
       }

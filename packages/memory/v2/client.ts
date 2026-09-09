@@ -45,6 +45,8 @@ import type { AppliedCommit } from "./engine.ts";
 import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import { logIncomingFrame, logOutgoingFrame } from "./frame-log.ts";
+import { memoryMessageFrameBytes } from "./message-compression.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 const logger = getLogger("memory.v2.client", {
@@ -344,7 +346,9 @@ export class Client {
     // observes the rejection.
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.#transport.send(encodeMemoryBoundary(message));
+    const encoded = encodeMemoryBoundary(message);
+    logOutgoingFrame(message, memoryMessageFrameBytes(encoded));
+    await this.#transport.send(encoded);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -478,18 +482,18 @@ export class Client {
     this.#helloPending = ack;
     const expectedFlags = getMemoryProtocolFlags();
     try {
-      await Promise.all([
-        this.#transport.send(encodeMemoryBoundary({
-          type: "hello",
-          protocol: MEMORY_PROTOCOL,
-          flags: {
-            ...expectedFlags,
-            messageCompressionV1: expectedFlags.messageCompressionV1 &&
-              this.#transport.supportsMessageCompression === true,
-          },
-        })),
-        ack.promise,
-      ]);
+      const hello = {
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: {
+          ...expectedFlags,
+          messageCompressionV1: expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true,
+        },
+      };
+      const encoded = encodeMemoryBoundary(hello);
+      logOutgoingFrame(hello, memoryMessageFrameBytes(encoded));
+      await Promise.all([this.#transport.send(encoded), ack.promise]);
       this.#connected = true;
       this.#noteStateChange();
     } finally {
@@ -503,6 +507,7 @@ export class Client {
       const decodeStart = performance.now();
       message = decodeMemoryBoundary(payload);
       logger.time(decodeStart, "receive", "decodeBoundary");
+      logIncomingFrame(message, memoryMessageFrameBytes(payload));
       // A frame whose raw text lacks every reserved reference prefix cannot
       // carry a schema reference (strings serialize verbatim — see the note
       // on encodeMemoryBoundary), so the expansion walk over its upserts is
