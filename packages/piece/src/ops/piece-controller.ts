@@ -3804,13 +3804,25 @@ export class PieceController<T = unknown> {
   }
 
   /**
+   * Helper for the meta reads below, which is the piece cell with no schema.
+   * A meta read registers a load of the document under the reading cell's
+   * schema, and this cell's is the pattern's result schema, so a read
+   * through it asks storage for every document the result reaches — a
+   * board's whole index — to answer one meta field. The schema-less view
+   * loads the document alone.
+   */
+  #metaView(): Cell<T> {
+    return this.#cell.asSchema(undefined);
+  }
+
+  /**
    * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
    * in the session that set it up — the runner's session-side pointer (the
    * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
    * nothing durably; a fresh session correctly finds neither).
    */
   #patternPointer(): { identity: string; symbol: string } | undefined {
-    return getPatternIdentityRef(this.#cell) ??
+    return getPatternIdentityRef(this.#metaView()) ??
       this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);
   }
 
@@ -3824,9 +3836,9 @@ export class PieceController<T = unknown> {
         ref: { kind: "uri", scheme: "pattern", hash: ref.identity },
       }),
     };
-    const repository = getPatternRepository(this.#cell);
+    const repository = getPatternRepository(this.#metaView());
     if (repository !== undefined) source.repository = repository;
-    const trackedSource = getPatternSource(this.#cell);
+    const trackedSource = getPatternSource(this.#metaView());
     if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
