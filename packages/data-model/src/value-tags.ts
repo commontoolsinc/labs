@@ -277,20 +277,12 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
 
   if (proto === Object.prototype) {
     return VALUE_TAGS.Object;
-  }
-
-  // A `null` prototype settles the value here, both ways it can go. It names
-  // no class, so the lookup below could recognize none; and `instanceof`
-  // walks a chain that is empty, so the fabric tests below cannot claim it
-  // either. What is left is an error whose prototype was severed, which
-  // `Error.isError()` still sees, or a bare record, tagged `Object` so that
-  // the object rule decides it by name.
-  if (proto === null) {
-    return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
-  }
-
-  if (Error.isError(value)) {
+  } else if (Error.isError(value)) {
     return VALUE_TAGS.Error;
+  } else if (proto === null) {
+    // After the `isError()` check above, the only recognized possibility of a
+    // null-proto object is a plain object.
+    return VALUE_TAGS.Object;
   } else if (value instanceof FabricPrimitive) {
     return tagFromFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
