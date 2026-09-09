@@ -69,13 +69,14 @@ drop it in as a JSX tag or run it standalone.
 
 `ledger-month-transactions.tsx` and `mailbox-month-headers.tsx` read a loom
 connector store instead of a caller's own cell. Their input is a `SqliteDb`
-handle, which only whoever wires the input can supply, so neither runs
-standalone and neither is in the `demo/` host; their tests are Deno tests at
-`packages/cf-harness/test/primitives-connector-reads.test.ts`, where a handle
-can be minted. Between them they carry the two tombstone conventions a connector
-store uses — the integer `deleted = 0` flag on a connector ledger,
-`deleted_at IS NULL` on the mail store — which is the thing a session reading
-one of these databases has no other way to learn.
+handle, so neither is in the `demo/` host: a host that embeds one has to hand it
+a database. Their pattern tests build one with `sqliteDatabase()` and drive the
+atom's reactive `month` input, which is what re-runs a query the atom declares
+no `reactOn` for; `packages/cf-harness/test/primitives-connector-reads.test.ts`
+states what only an injected handle can. Between them they carry the two
+tombstone conventions a connector store uses — the integer `deleted = 0` flag on
+a connector ledger, `deleted_at IS NULL` on the mail store — which is the thing
+a session reading one of these databases has no other way to learn.
 
 Their adopter is the pattern index: they are published to it as composable
 parts, and their descriptions are derived from their doc comments by

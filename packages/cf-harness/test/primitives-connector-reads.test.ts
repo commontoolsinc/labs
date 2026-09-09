@@ -1,14 +1,21 @@
 /**
  * The two index atoms that read a loom connector store —
  * `packages/patterns/primitives/ledger-month-transactions.tsx` and
- * `mailbox-month-headers.tsx` — against databases carrying both tombstone
- * spellings the two stores use.
+ * `mailbox-month-headers.tsx` — reached the way a harness session reaches
+ * them: through `run_pattern` over an injected `SqliteDb` handle.
  *
- * The atoms are pattern sources, but their input is a `SqliteDb` handle and a
- * pattern test has no way to mint one: a database reaches a pattern only from
- * whoever wired the input. So they are exercised the way a harness session
- * reaches them, through `run_pattern` over a handle cell this file seeds, and
- * the test lives beside that machinery rather than beside the atoms.
+ * What is stated here is what only this route can state. A pattern test builds
+ * its database with `sqliteDatabase()`, which is a cell-derived database in
+ * the pattern's own space; a session is instead handed a handle cell naming a
+ * store it did not create, and the query it issues is bound to that. The
+ * tombstone rule, the month window, the row ceiling and the views are stated
+ * in the pattern tests beside each atom, which is also where they earn
+ * authored-pattern coverage.
+ *
+ * A database with rows already in it is the other thing this route has: the
+ * handle is seeded before the atom is built, so the read that settles is the
+ * atom's first one, and the month it resolves for a caller that names none is
+ * whatever month the clock is in.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -327,31 +334,6 @@ describe("connector-reading primitives", () => {
       >;
       expect(headers[0].subject).toBe("Your bill is ready");
       expect(headers[0].sender).toBe("Pacific Gas");
-    });
-
-    it("returns no more headers than `limit` asks for", async () => {
-      const mail = await seedDatabase(MAILBOX_TABLES, [
-        {
-          sql: PARTICIPANT_INSERT,
-          params: [1, "Pacific Gas", "billing@pge.example"],
-        },
-        messageRow(1, "First", "2026-03-01T09:00:00Z", null),
-        messageRow(2, "Second", "2026-03-02T09:00:00Z", null),
-        messageRow(3, "Third", "2026-03-03T09:00:00Z", null),
-      ]);
-
-      const result = await runAtom(
-        await atomSource("mailbox-month-headers.tsx"),
-        { mail, month: "2026-03", limit: 2 },
-      );
-
-      expect(result.errorMessage).toBe("");
-      expect(result.headerCount).toBe(2);
-      const headers = result.headers as Array<{ subject: string }>;
-      expect(headers.map((header) => header.subject)).toEqual([
-        "Third",
-        "Second",
-      ]);
     });
   });
 });

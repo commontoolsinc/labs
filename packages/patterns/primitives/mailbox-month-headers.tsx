@@ -7,7 +7,7 @@
  * flag a connector ledger such as Plaid's uses, so the two cannot be filtered
  * the same way. `month` picks the window as `YYYY-MM` and defaults to the
  * calendar month the database's own clock is in; `limit` caps the rows at 200
- * unless the caller says otherwise.
+ * unless the caller says otherwise, and never above 500 whatever it says.
  *
  * @hashtags gmail, email, mail, messages, headers, inbox, month
  * @keywords email headers, subject line, sender, this month's mail, bills in
@@ -40,7 +40,10 @@ export interface MailboxMonthHeadersInput {
   /** The month to read, as `YYYY-MM`. Empty means the current month. */
   month?: string | Default<"">;
 
-  /** How many headers to return, newest first. */
+  /**
+   * How many headers to return, newest first. Held between 1 and 500, so a
+   * caller cannot widen the read past what the atom will answer for.
+   */
   limit?: number | Default<200>;
 }
 
@@ -58,6 +61,12 @@ export interface MailboxMonthHeadersOutput {
   /** Why the read failed, empty while it has not. */
   errorMessage: string;
 }
+
+/** Headers returned for a caller that names no limit. */
+const DEFAULT_LIMIT = 200;
+
+/** The most headers one read may return, whatever the caller asks for. */
+const MAX_LIMIT = 500;
 
 /**
  * The month the caller asked for, else the one the database's clock is in.
@@ -79,7 +88,14 @@ const monthSql = (): string => `SELECT ${resolvedMonthSql()} AS month`;
 const receivedSql = (): string =>
   "COALESCE(m.received_at, m.sent_at, m.internal_date)";
 
-/** Headers only: no body column is projected, and none is joined for. */
+/**
+ * Headers only: no body column is projected, and none is joined for.
+ *
+ * The ceiling is the atom's, not the caller's. `LIMIT ?` alone would be no
+ * bound at all — SQLite reads a negative limit as unlimited and accepts any
+ * positive one — and a query that writes a row document per result row is one
+ * a caller must not be able to widen without bound.
+ */
 const headersSql = (): string =>
   [
     `WITH bounds AS (SELECT ${resolvedMonthSql()} || '-01' AS start)`,
@@ -92,7 +108,7 @@ const headersSql = (): string =>
     `  AND ${receivedSql()} >= bounds.start`,
     `  AND ${receivedSql()} < date(bounds.start, '+1 month')`,
     "ORDER BY received_at DESC",
-    "LIMIT ?",
+    `LIMIT max(1, min(COALESCE(?, ${DEFAULT_LIMIT}), ${MAX_LIMIT}))`,
   ].join("\n");
 
 /** What a query reports about a failure, empty when it has not failed. */
@@ -121,9 +137,14 @@ export const MailboxMonthHeaders = pattern<
   const headerCount = computed(() => (headersRead.result ?? []).length);
   const pending = computed(() => headersRead.pending === true);
   const errorMessage = computed(() => errorText(headersRead.error));
-  const hasError = computed(() => errorMessage !== "");
+  // Each of these reads the envelope rather than the cells above it: `!` and
+  // `!==` applied to a computed act on the cell object, which is always
+  // truthy and never equal to a string, so a view gated on one would be
+  // gated on nothing.
+  const hasError = computed(() => errorText(headersRead.error) !== "");
   const isEmpty = computed(() =>
-    !pending && !hasError && (headersRead.result ?? []).length === 0
+    headersRead.pending !== true && errorText(headersRead.error) === "" &&
+    (headersRead.result ?? []).length === 0
   );
 
   const listRows = headers.map((header: MailboxHeader) => (

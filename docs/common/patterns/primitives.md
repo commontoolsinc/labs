@@ -58,9 +58,15 @@ guesses, and a wrong guess returns zero rows over a full table rather than an
 error. The primitive is where that knowledge is written down once, in code that
 is tested against both spellings.
 
-Such a primitive cannot run standalone — only whoever wires the input can
-supply a handle — so it is left out of the `demo/` host, and its tests go where
-a handle can be minted rather than beside the pattern.
+Such a primitive is left out of the `demo/` host, since a host that embeds one
+has to hand it a database. Its pattern test builds one with `sqliteDatabase()`
+and seeds it through a handler. Two things about that test are worth knowing
+before writing another. A query the primitive declares no `reactOn` for does
+not re-run after the seed, so the test drives one of the primitive's own
+reactive inputs — the month — and that is what reads the seeded rows. And
+reading `[UI]` stores links to the session-scoped query results in the vnode
+tree, which the runtime warns about; the test carries
+`allowConsoleWarnings: true` and says why.
 
 That's the whole surface. In particular, do **not** add string-addressed
 ("ByText"/"ByTitle") mutation layers "for agents": LLM tool-calls round-trip
