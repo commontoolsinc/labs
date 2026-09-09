@@ -66,8 +66,8 @@ smaller document to hold in context, and it is complete for calling. Use
 `describe` when you need the piece-wide purpose, state, or input documentation.
 Use `deno task cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only
 after choosing a verb and when its generated flags or standalone help are
-useful; help is served through the dispatch path, which also starts the space
-root, so it is the most expensive of the three. Each command is an independent
+useful; help is served through the dispatch path, which starts the addressed
+piece, so it is the most expensive of the three. Each command is an independent
 cold CLI process, so do not run all three by default.
 
 The deployment can be well behind the checkout the CLI runs from, and that gap
