@@ -84,6 +84,51 @@
  * `isFabricObjectOrArray()` for the same reason.
  */
 
+/** Standard type meaning constructor function, a/k/a "class object." */
+export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
+
+/** Helper type to recursively add `readonly` properties to type `T`. */
+export type Immutable<T> = T extends ReadonlyArray<infer U>
+  ? ReadonlyArray<Immutable<U>>
+  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
+  : T;
+
+/** Helper type to recursively remove `readonly` properties from type `T`. */
+export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
+
+/** The union of all primitive JavaScript types. */
+export type Primitive =
+  | bigint
+  | boolean
+  | null
+  | number
+  | string
+  | symbol
+  | undefined;
+
+/**
+ * A record whose string keys can be read but not assigned through this type.
+ */
+export type ReadonlyRecord = Readonly<Record<string, unknown>>;
+
+// TODO(danfuzz): The wire formats accept a plain object with any keys, that
+// being the rule a cross-language format has to hold to. This implementation
+// refuses these names instead. Closing that gap means carrying such records
+// rather than refusing them, and code that does will read this list too, to
+// know which names need the care. `unsafeObjectKeyIn()` below states what
+// makes each name awkward.
+//
+// `then` is deliberately absent, and belongs here less than it looks. A
+// callable `then` is adopted by promise resolution, and a layer that answers a
+// property with a function can make a data key callable -- which is why the
+// value proxies in `runner` guard the name. But JSON Schema uses `if` / `then`
+// / `else`, and this system's schemas are themselves `FabricValue`s, so
+// reserving the name would stop an ordinary schema being one. The hazard is
+// real and is handled where a property becomes callable, not here.
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
+
 /**
  * Indicates whether a value is a non-`null` value whose `typeof` is `"object"`.
  * This is the loosest of the object-shape questions: an array passes, as does
@@ -101,11 +146,6 @@ export function isObjectOrArray(
 ): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-
-/**
- * A record whose string keys can be read but not assigned through this type.
- */
-export type ReadonlyRecord = Readonly<Record<string, unknown>>;
 
 /**
  * The `isObjectOrArray()` question asked on behalf of a caller that only reads:
@@ -268,35 +308,16 @@ export function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
 }
 
-/** Helper type to recursively remove `readonly` properties from type `T`. */
-export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
-  : T;
-
-/** Helper type to recursively add `readonly` properties to type `T`. */
-export type Immutable<T> = T extends ReadonlyArray<infer U>
-  ? ReadonlyArray<Immutable<U>>
-  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
-  : T;
-
-/** Standard type meaning constructor function, a/k/a "class object." */
-export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
-
-// TODO(danfuzz): The wire formats accept a plain object with any keys, that
-// being the rule a cross-language format has to hold to. This implementation
-// refuses these names instead. Closing that gap means carrying such records
-// rather than refusing them, and code that does will read this list too, to
-// know which names need the care. `unsafeObjectKeyIn()` below states what
-// makes each name awkward.
-//
-// `then` is deliberately absent, and belongs here less than it looks. A
-// callable `then` is adopted by promise resolution, and a layer that answers a
-// property with a function can make a data key callable -- which is why the
-// value proxies in `runner` guard the name. But JSON Schema uses `if` / `then`
-// / `else`, and this system's schemas are themselves `FabricValue`s, so
-// reserving the name would stop an ordinary schema being one. The hazard is
-// real and is handled where a property becomes callable, not here.
-const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
+/**
+ * Indicates whether a value is a `Primitive`: anything whose `typeof` is
+ * neither `object` nor `function`, plus `null`, which `typeof` files under
+ * `object`. This is an exact test, so its `false` branch holds every object,
+ * array, and function and nothing else.
+ */
+export function isPrimitive(value: unknown): value is Primitive {
+  const type = typeof value;
+  return value === null || (type !== "object" && type !== "function");
+}
 
 /**
  * Indicates whether `key` is one this implementation refuses to copy onto an

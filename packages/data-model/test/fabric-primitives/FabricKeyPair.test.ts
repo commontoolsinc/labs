@@ -19,7 +19,7 @@ import { JSON_CODEC, REALM_CODEC } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
-import { isValidFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
 import { hashStringOf } from "@/value-hash.ts";
 
 /** Fixed public-key bytes for deterministic tests. */
