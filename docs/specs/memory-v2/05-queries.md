@@ -238,9 +238,11 @@ This mirrors the `followPointer` function from `traverse.ts`.
 #### Metadata / Provenance Resolution
 
 In addition to schema-directed references, traversal MUST load provenance and
-runtime metadata documents via top-level metadata links on an entity document.
+runtime metadata documents via top-level metadata links on the documents a
+query names and on the documents those links reach.
 
-When the server loads any document during query evaluation, it MUST inspect the
+When the server loads a document a query NAMES as a root, or one reached
+through such a document's metadata or manifest links, it MUST inspect the
 top-level document object for metadata links and manifest links such as:
 
 ```json
@@ -275,27 +277,26 @@ document's ROLE in the query:
   that intends to load and run what it named relies on, and the role is
   persistent: a refresh that re-evaluates a named document — including an
   absent root's first evaluation after it is created — owes it the same
-  full family.
+  full family, and so does one that re-evaluates a document delivered as a
+  member of that family, so a member whose metadata link moves delivers
+  the new target.
 
 - A document the evaluation merely reaches — loaded mid-walk through a link
-  crossing — is owed its computed surface, not its whole family. The server
-  MUST resolve and load its `result` metadata link, and MUST register every
-  internal manifest link's target in the watch tracking state WITHOUT
-  loading or delivering it: the subscription stays reactive to each
-  registered document, and the next commit that leaves one with a live,
-  deliverable snapshot PROMOTES it — delivered whole with that refresh's
-  updates, tracked from then on, its own internal manifest links
-  registered in turn. A deletion does not promote: the registration
-  stays, and the recreation promotes it. The `pattern`,
-  `argument`, and `cfc` links of a crossing-reached document are not
-  chased. A refresh that re-evaluates a crossing-reached document applies
-  these same rules, so a subscription's delivered shape does not depend on
-  the order in which documents changed.
+  crossing — is owed what the selector that reached it selects, and the
+  schema document its `cfc` metadata names: a reader of a labeled document
+  checks what it may read against that schema, so the server MUST resolve
+  and load it, and track it so an absent one arrives when it is written.
+  The server MUST NOT chase the document's other metadata links or its
+  internal manifest links: none of that family is loaded, delivered, or
+  tracked. A subscriber that wants a document's family names the document.
+  A refresh that re-evaluates a crossing-reached document applies the same
+  rule, so a subscription's delivered shape does not depend on the order in
+  which documents changed.
 
 A metadata family is a same-space structure: a metadata or manifest link
 that resolves to another space selects nothing — the evaluating space's
 engine cannot read it, and its refresh could never deliver it — and the
-server MUST ignore such an entry rather than register or chase it.
+server MUST ignore such an entry rather than chase it.
 
 A later query naming a document the evaluation had only reached does not
 count as covered by existing watch state until that document's full family
@@ -303,11 +304,10 @@ has been chased: naming, not reachability, is what entitles a caller to the
 family.
 
 This behavior is not optional provenance decoration. It is part of the query
-result shape, mirroring `loadMetaLinkedDocs()` and its lazy registration
-sink in `traverse.ts` and `graph-query.ts`, and it is what lets a
-subscriber both reconstruct the full lineage of a result document it named
-and stay subscribed to the computed cells of every piece it can see without
-receiving every derived cell of every one of them.
+result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts` and
+`graph-query.ts`, and it is what lets a subscriber reconstruct the full
+lineage of a result document it named without receiving the family of every
+document its walk merely passes through.
 
 Content-addressed schema documents ride the same mechanism
 (`docs/specs/content-addressed-schemas.md`): a link or selector schema
