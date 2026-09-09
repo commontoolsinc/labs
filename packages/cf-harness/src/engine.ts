@@ -824,6 +824,9 @@ export class CfHarnessEngine {
     // Both are needed before the sandbox exists: the family's output
     // directory is a mount the sandbox is built with, not a directory found
     // inside one it already has.
+    // The resumed run's own record first: a child resumed from state keys its
+    // family by the root it belonged to, not by its own id, or it would come
+    // back as a family of one and read none of its parent's evidence.
     const constructionLineage = options.runState?.lineage ?? options.lineage;
     const familyRunId = constructionLineage?.rootRunId ?? runId;
     const artifactRootHostPath = this.config.artifactRoot ??
@@ -874,10 +877,6 @@ export class CfHarnessEngine {
     this.workspaceMountPath = normalizeSandboxRoot(
       sandboxConfig?.workspaceMountPath ?? sandbox.defaultWorkingDirectory(),
     );
-    // The resumed run's own record first: a child resumed from state keys its
-    // family by the root it belonged to, not by its own id, or it would come
-    // back as a family of one and read none of its parent's evidence.
-    const lineage = options.runState?.lineage ?? options.lineage;
     this.#familyRunId = familyRunId;
     this.#sandboxOutputRootHostPath = sandboxOutputRootHost;
     // Every invocation carries the output directory, so a workload names it

@@ -246,7 +246,7 @@ describe("CFC sidecar transport isolation", () => {
     }
   });
 
-  it("refuses a relative result directory from the environment", async () => {
+  it("refuses a relative result directory from the environment", () => {
     // The flag is validated at the CLI, but the environment fallback reaches
     // the resolver directly — and everything below it walks the path apart,
     // which a relative path has no root to walk to.
