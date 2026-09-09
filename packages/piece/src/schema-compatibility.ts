@@ -1,5 +1,4 @@
 import {
-  deepEqual,
   extractDefaultValues,
   type JSONSchema,
   type Pattern,
@@ -24,7 +23,7 @@ import {
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "@commonfabric/runner/schema-walk";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+import { fabricAwareEqual } from "@commonfabric/data-model";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -195,14 +194,6 @@ const SUBSCHEMA_MAP_KEYS: ReadonlySet<string> = new Set<string>([
 const holdsSubschemas = (key: string): boolean =>
   SUBSCHEMA_KEYS.has(key) || SUBSCHEMA_LIST_KEYS.has(key) ||
   SUBSCHEMA_MAP_KEYS.has(key);
-
-const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return valueEqual(left as FabricValue, right as FabricValue);
-  } catch {
-    return deepEqual(left, right);
-  }
-};
 
 /**
  * The keys inside a `writeAuthorizedBy` writer claim's `__ctWriterIdentityOf`

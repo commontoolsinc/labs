@@ -6,7 +6,9 @@ import {
   hashStringOf,
   isDeepFrozen,
   isKeyableObjectOrArray,
+  isWalkableObjectOrArray,
   nativeFromFabricValue,
+  refuseFabricInstance,
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
@@ -74,7 +76,6 @@ import {
 } from "./cfc.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
 import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
 import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
@@ -570,7 +571,11 @@ const recordOutputSchemaPolicyInputs = (
     );
   }
 
-  if (isObjectOrArray(outputBinding) && !isCellLink(outputBinding)) {
+  // The refusal above has already returned for every `FabricInstance`, so this
+  // walk never reaches one and the link test decides nothing a `FabricLink`
+  // reaches. The two sibling walks below carry no such refusal, and ask the
+  // keyable question instead.
+  if (!isCellLink(outputBinding) && isWalkableObjectOrArray(outputBinding)) {
     for (const [key, child] of Object.entries(outputBinding)) {
       recordOutputSchemaPolicyInputs(
         tx,
@@ -645,11 +650,11 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
     return;
   }
 
-  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above:
-  // `isObjectOrArray` admits a `FabricSpecialObject`, whose empty entries end the
-  // descent, so a link inside a `FabricInstance`'s codec contents records no
-  // policy input. Fails closed, as there.
-  if (isObjectOrArray(outputBinding) && !isCellLink(outputBinding)) {
+  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above: the
+  // descent stops at a `FabricSpecialObject`, so a link inside a
+  // `FabricInstance`'s codec contents records no policy input. Fails closed,
+  // as there.
+  if (!isCellLink(outputBinding) && isKeyableObjectOrArray(outputBinding)) {
     for (const child of Object.values(outputBinding)) {
       recordRawBuiltinBindingSchemaPolicyInputs(
         tx,
@@ -803,12 +808,11 @@ export function firstResolvedOutputRedirect(
     }
     return undefined;
   }
-  // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose empty
-  // entries end the descent, so a write-redirect link inside a
-  // `FabricInstance`'s codec contents is invisible here. The caller then
-  // sees no redirect and silently skips the sub-pattern's owned-cell
-  // pre-sync keyed off it.
-  if (isObjectOrArray(binding) && !isCellLink(binding)) {
+  // TODO(danfuzz): the descent stops at a `FabricSpecialObject`, so a
+  // write-redirect link inside a `FabricInstance`'s codec contents is
+  // invisible here. The caller then sees no redirect and silently skips the
+  // sub-pattern's owned-cell pre-sync keyed off it.
+  if (!isCellLink(binding) && isKeyableObjectOrArray(binding)) {
     for (const child of Object.values(binding)) {
       const found = firstResolvedOutputRedirect(
         runtime,
@@ -6403,11 +6407,10 @@ export class Runner {
 
       if (link) {
         promises.add(this.#runtime.getCellFromLink(link).sync());
-      } else if (isObjectOrArray(value)) {
-        // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
-        // `for..in` sees none of its state, so a link nested in a
-        // `FabricInstance`'s codec contents is never synced here — the cold
-        // target this pre-sync exists to warm.
+      } else if (isKeyableObjectOrArray(value)) {
+        // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a link
+        // nested in a `FabricInstance`'s codec contents is never synced here
+        // — the cold target this pre-sync exists to warm.
         for (const key in value) syncAllMentionedCells(value[key]);
       }
     };
@@ -6736,13 +6739,12 @@ export class Runner {
           );
           return;
         }
-        if (!isObjectOrArray(value)) return;
+        if (!isKeyableObjectOrArray(value)) return;
         if (!declared) {
-          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`,
-          // and `for..in` sees none of its state, so a link inside a
-          // `FabricInstance` held in a raw argument value is never pre-synced
-          // — a cold target can then enter the commit basis, the exact
-          // failure this walk exists to prevent.
+          // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a
+          // link inside a `FabricInstance` held in a raw argument value is
+          // never pre-synced — a cold target can then enter the commit basis,
+          // the exact failure this walk exists to prevent.
           for (const key in value) {
             // The undeclared scan keeps the remaining share of the overall
             // two-hop budget; the clamp states that transition explicitly.
