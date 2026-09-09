@@ -277,6 +277,25 @@ describe(() => {
 });
 `;
 
+// A file whose leaves carry no name of their own, so each is named
+// after its body. One body has a name and the other has none, and the
+// runner reports the second under a chain whose last element is empty.
+const BODY_NAMED_LEAF_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("outer", () => {
+  it(function kept() {});
+  it(() => {});
+});
+`;
+
+// A file whose leaf is given an empty name of its own. That name stands
+// in place of the body's, so the runner reports the leaf with an empty
+// last element and the body's name reaches nothing.
+const EMPTY_NAME_LEAF_FILE = `import { describe, it } from "@std/testing/bdd";
+describe("emptied", () => {
+  it({ name: "", fn: function unused() {} });
+});
+`;
+
 // Two modules that register a suite for whoever calls them, one
 // declaring itself machinery and one not. What each leaf's file comes
 // out as is the whole of what the declaration does.
@@ -529,6 +548,36 @@ describe("preload", () => {
     }
   });
 
+  it("names a leaf whose call carries no name after its body", async () => {
+    const fixture = await makeFixture({
+      "leaf.test.ts": BODY_NAMED_LEAF_FILE,
+      "empty.test.ts": EMPTY_NAME_LEAF_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, ["leaf.test.ts", "empty.test.ts"]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("outer > kept")).toEqual("leaf.test.ts");
+      // A body with no name of its own leaves the last element of the
+      // chain empty, and so does an empty name the call carries.
+      expect(names.get("outer > ")).toEqual("leaf.test.ts");
+      expect(names.get("emptied > ")).toEqual("empty.test.ts");
+      expect(names.get("emptied > unused")).toBeUndefined();
+
+      // The names the runner reports, which the map has to agree with
+      // for a skip list to reach any of these leaves.
+      const reported = await outcomes(fixture);
+      expect([...reported.keys()].sort()).toEqual([
+        "emptied > ",
+        "outer > ",
+        "outer > kept",
+      ]);
+      for (const outcome of reported.values()) expect(outcome).toEqual("pass");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
   it("says so when the bdd re-export loaded before it", async () => {
     // Loading the re-export first is what makes it hand back the real
     // `describe` and `it`, and every leaf then reaches the report
@@ -720,6 +769,21 @@ describe("preload", () => {
       const reported = await outcomes(fixture);
       expect(reported.get("outer > kept")).toEqual("pass");
       expect(reported.get("outer > dropped")).toEqual("skip");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("skips a leaf whose name is the empty one its body gave it", async () => {
+    const fixture = await makeFixture({ "leaf.test.ts": BODY_NAMED_LEAF_FILE });
+    try {
+      const run = await runFixture(fixture, ["leaf.test.ts"], {
+        "leaf.test.ts": ["outer > "],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("outer > ")).toEqual("skip");
+      expect(reported.get("outer > kept")).toEqual("pass");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });
     }

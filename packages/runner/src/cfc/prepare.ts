@@ -25,6 +25,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -1951,16 +1952,43 @@ const isMetaSeamPath = (
 ): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
 
 /**
+ * Whether `id` names a document of one of the two id classes no schema can
+ * declare a store policy on.
+ *
+ * A computed cell holds a derivation's result, under its own URI scheme
+ * (`computed:fid1:<hash>`; see `entity-kind.ts` and
+ * `docs/specs/computed-cell-identity.md`). A stream's entries document holds
+ * that stream's durable event entries and the marks recording which have been
+ * handled, at an id derived from the stream's link so that every party — the
+ * firing client, the serving space's drain, another space's outbox delivery —
+ * addresses the same document with no coordination (`STREAM_ENTRIES_DOC_PREFIX`
+ * in `@commonfabric/memory/v2`).
+ *
+ * This is an enumeration of two id classes rather than a rule about documents
+ * the runtime mints. The runtime mints many more, and route 2 (§8.12.5) is
+ * what most of them take: the document anchoring splits out of a value has an
+ * id derived from its parent's, which no author named either, and it is
+ * measured. Adding a class here means arguing that case on its own.
+ *
+ * The entries document's half is a prefix inside the `of:` scheme rather than
+ * a scheme of its own, so the id shape alone does not say who wrote it. Two
+ * gates compose over one instead: this one skips the ceiling, and the memory
+ * server owns the shape — an authored write reaches a document under that
+ * prefix only as a declared tail append, and only under
+ * `EXPERIMENTAL_SERVER_EXECUTION` (events.md §1, §4).
+ */
+const isUndeclarableIdClass = (id: string): boolean =>
+  entityKindOfIdString(id) === "computed" ||
+  id.startsWith(STREAM_ENTRIES_DOC_PREFIX);
+
+/**
  * Whether a schema could have declared a store policy for a write at `path`
  * on `id` — the surfaces the §8.12.4 writer-fit measurement quantifies over.
  *
- * Two are outside it. The raw meta seam is one, per {@link isMetaSeamPath}:
- * no value schema describes the document-root siblings of `value`. A computed
- * cell is the other: the derived internal cell the runtime materializes to
- * hold a derivation's result, addressed under its own URI scheme
- * (`computed:fid1:<hash>`; see `entity-kind.ts` and
- * `docs/specs/computed-cell-identity.md`). A pattern declares policy on the
- * data it names, and it names neither.
+ * Two things are outside it. The raw meta seam is one, per {@link
+ * isMetaSeamPath}: no value schema describes the document-root siblings of
+ * `value`. The two id classes of {@link isUndeclarableIdClass} are the other.
+ * A pattern declares policy on the data it names, and it names none of them.
  *
  * Both stay flow stamp targets: the join lands on them as the `derived`
  * component, so a later read of one is tainted and a later egress of one is
@@ -1976,7 +2004,7 @@ const isDeclarablePolicyPath = (
   metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
   path: readonly string[],
 ): boolean =>
-  (entityKindOfIdString(id) !== "computed" || !joinIsLocal) &&
+  (!isUndeclarableIdClass(id) || !joinIsLocal) &&
   !isMetaSeamPath(metaOnlyByPath, path);
 
 // S16 flow labels (default transition): one conservative confidentiality join
@@ -7245,7 +7273,7 @@ export const prepareBoundaryCommit = (
         }
       }
       // Writer-fit measures the surfaces a schema could have declared a
-      // policy at, which leaves out the raw meta seam and computed cells
+      // policy at, which leaves out the raw meta seam and two id classes
       // alike (`isDeclarablePolicyPath`). The measurement is skipped on both
       // at every rung, so neither raises a strict reject nor a
       // persist-and-flag diagnostic.

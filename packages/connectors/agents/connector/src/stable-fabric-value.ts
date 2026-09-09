@@ -4,6 +4,7 @@ import {
   FabricInstance,
   type FabricPlainObject,
   type FabricValue,
+  JS_TYPE_VALUE_TAGS,
   tagFromNativeValueElseNull,
   VALUE_TAGS,
 } from "@commonfabric/data-model";
@@ -103,7 +104,7 @@ function replaceCellsWithLinks(
   if (
     nativeTag !== null &&
     nativeTag !== VALUE_TAGS.Object &&
-    nativeTag !== VALUE_TAGS.Primitive
+    !Object.hasOwn(JS_TYPE_VALUE_TAGS, nativeTag)
   ) {
     return value;
   }

@@ -1,4 +1,5 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   internPathSelector,
   internSchemaAsTaggedHashString,
@@ -83,7 +84,22 @@ export type TrackedGraphState = {
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
+
+  /** Per-version scans of this state's delivered documents for embedded
+   * schema refs (`docKey -> { seq, refs }`): the record the closure's
+   * re-validation over the established set is answered from on every
+   * refresh. One entry per delivered version, the schema documents the
+   * closure itself delivered included; reused by document key and sequence;
+   * every scope, since the state is one identity's; the state's lifetime.
+   * The engine-wide cache of space-scoped scans only seeds it. */
+  schemaRefs: SchemaRefScans;
 };
+
+/** See TrackedGraphState.schemaRefs. */
+export type SchemaRefScans = Map<
+  QueryDocKey,
+  { seq: number; refs: ReadonlySet<string> }
+>;
 
 /**
  * The costliest single root of one query evaluation.
@@ -158,6 +174,14 @@ const walkStatsDelta = (
 export type QueryTraversalStats = GraphQueryWalkStats & {
   managerReads: number;
 
+  /** Documents whose value this evaluation scanned for embedded schema
+   * refs while assembling the delivered set's schema-document closure. A
+   * version scanned before — by this state, or by any session that
+   * delivered the same space-scoped version — costs no scan, so on a
+   * refresh this counts the documents that actually changed, not the
+   * established set the closure was re-validated over. */
+  schemaRefScans: number;
+
   /** Roots this evaluation visited. A cache hit visits none. */
   rootsVisited: number;
 
@@ -175,6 +199,7 @@ export type QueryTraversalStats = GraphQueryWalkStats & {
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
+  schemaRefScans: 0,
   rootsVisited: 0,
   rootsElapsedMs: 0,
   ...createGraphQueryWalkStats(),
@@ -851,6 +876,7 @@ export const cloneTrackedGraphState = (
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
+    schemaRefs: new Map(state.schemaRefs),
   };
 };
 
@@ -924,13 +950,15 @@ const entitiesFromTracker = (
   return entities;
 };
 
-// Per-version cache of document scans for embedded schema refs, so a
-// version delivered again — by another session, query, or refresh — is
-// not rescanned. Only canonical `"space"`-scoped snapshots are cached: a
+// Engine-wide per-version cache of document scans for embedded schema
+// refs, so a version delivered again by ANOTHER session or query is not
+// rescanned. Only canonical `"space"`-scoped snapshots are cached: a
 // user- or session-scoped doc key names different content per principal,
 // and sharing scans across principals could hand one principal's refs to
 // another. Bounded; on overflow the cache clears and repopulates from
-// live deliveries.
+// live deliveries. A refresh does not depend on it: the established set
+// is answered from the graph state's own record
+// (`TrackedGraphState.schemaRefs`), which this cache only seeds.
 const SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES = 4096;
 const schemaRefScanCaches = new WeakMap<
   Engine.Engine,
@@ -962,7 +990,15 @@ const scanSnapshotSchemaRefs = (
   engine: Engine.Engine,
   key: QueryDocKey,
   snapshot: EntitySnapshot,
+  scans: SchemaRefScans,
+  stats: QueryTraversalStats,
 ): ReadonlySet<string> => {
+  // The state's own record first: it covers every scope, and on a refresh
+  // it is where the whole established set is answered from.
+  const own = scans.get(key);
+  if (own !== undefined && own.seq === snapshot.seq) {
+    return own.refs;
+  }
   const cacheable = (snapshot.scope ?? DEFAULT_SCOPE) === DEFAULT_SCOPE;
   let cache = schemaRefScanCaches.get(engine);
   if (cache === undefined) {
@@ -972,9 +1008,11 @@ const scanSnapshotSchemaRefs = (
   if (cacheable) {
     const cached = cache.get(key);
     if (cached !== undefined && cached.seq === snapshot.seq) {
+      scans.set(key, cached);
       return cached.refs;
     }
   }
+  stats.schemaRefScans += 1;
   const refs = new Set<string>();
   const doc = snapshot.document;
   if (isObjectNotArray(doc)) {
@@ -1007,11 +1045,32 @@ const scanSnapshotSchemaRefs = (
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
-  if (cacheable) {
-    if (cache.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) cache.clear();
-    cache.set(key, { seq: snapshot.seq, refs: result });
-  }
+  recordSchemaRefScan(engine, key, snapshot, result, scans);
   return result;
+};
+
+/**
+ * Records what a scan of `snapshot` finds — in the state's own record
+ * always, and in the engine-wide cache when the version is space-scoped, so
+ * another session delivering it is spared the scan.
+ */
+const recordSchemaRefScan = (
+  engine: Engine.Engine,
+  key: QueryDocKey,
+  snapshot: EntitySnapshot,
+  refs: ReadonlySet<string>,
+  scans: SchemaRefScans,
+): void => {
+  const entry = { seq: snapshot.seq, refs };
+  scans.set(key, entry);
+  if ((snapshot.scope ?? DEFAULT_SCOPE) !== DEFAULT_SCOPE) return;
+  let cache = schemaRefScanCaches.get(engine);
+  if (cache === undefined) {
+    cache = new Map();
+    schemaRefScanCaches.set(engine, cache);
+  }
+  if (cache.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) cache.clear();
+  cache.set(key, entry);
 };
 
 /**
@@ -1064,6 +1123,8 @@ const assembleSchemaDocClosures = (
   branch: string,
   tracker: MapSetStringToPathSelectors,
   delivered: ReadonlyMap<QueryDocKey, EntitySnapshot>,
+  scans: SchemaRefScans,
+  stats: QueryTraversalStats,
   established?: ReadonlyMap<QueryDocKey, EntitySnapshot>,
 ): {
   trackerAdds: QueryDocKey[];
@@ -1078,14 +1139,24 @@ const assembleSchemaDocClosures = (
     }
   };
   for (const [key, snapshot] of delivered) {
-    for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+    for (
+      const hash of scanSnapshotSchemaRefs(engine, key, snapshot, scans, stats)
+    ) {
       enqueue(hash);
     }
   }
   if (established !== undefined) {
     for (const [key, snapshot] of established) {
       if (delivered.has(key)) continue;
-      for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+      for (
+        const hash of scanSnapshotSchemaRefs(
+          engine,
+          key,
+          snapshot,
+          scans,
+          stats,
+        )
+      ) {
         enqueue(hash);
       }
     }
@@ -1131,6 +1202,11 @@ const assembleSchemaDocClosures = (
       if (verified.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) verified.clear();
       verified.set(key, snapshot.seq);
     }
+    // The document just verified is the schema document its id names,
+    // which is all a scan of it finds: its own hash. Recording that here
+    // keeps the state's record at one entry per delivered version, so a
+    // later refresh answers the closure's documents without scanning them.
+    recordSchemaRefScan(engine, key, snapshot, new Set([hash]), scans);
     for (const dep of collectExternalSchemaRefHashes(registered)) {
       enqueue(dep);
     }
@@ -1433,6 +1509,7 @@ export const trackGraph = (
   }
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
+  const schemaRefs: SchemaRefScans = new Map();
   const staged = assembleSchemaDocClosures(
     space,
     engine,
@@ -1440,6 +1517,8 @@ export const trackGraph = (
     branch,
     schemaTracker,
     entities,
+    schemaRefs,
+    stats,
   );
   for (const key of staged.trackerAdds) {
     schemaTracker.add(key, REJECTING_SELECTOR);
@@ -1458,6 +1537,7 @@ export const trackGraph = (
     entities,
     memo: sharedMemo,
     manager,
+    schemaRefs,
   };
   if (
     cache !== undefined && cacheKeys !== undefined &&
@@ -1565,6 +1645,8 @@ export const extendTrackedGraph = (
     state.branch,
     state.tracker,
     updates,
+    state.schemaRefs,
+    stats,
   );
   for (const key of staged.trackerAdds) {
     state.tracker.add(key, REJECTING_SELECTOR);
@@ -1629,6 +1711,50 @@ export const queryGraph = (
   };
 };
 
+// The refresh's own phase rows (`memory/refresh/walk/<phase>` on the
+// health route's timing stats, beside the server's `memory/refresh/phase/*`
+// rows): one row per phase of one graph's incremental re-evaluation, so a
+// slow pass can be read as "the closure scan" or "the re-walk" rather than
+// as one number. Recorded whether or not the logger prints.
+const refreshTiming = getLogger("memory", { enabled: false });
+
+/**
+ * The phase clock of one graph's incremental re-evaluation. `enter(name)`
+ * closes the phase in progress, if any, and opens `name`; `close()` closes
+ * the phase in progress and records the whole as `total`, once. The
+ * evaluation closes the clock in a `finally`, so one that throws still
+ * records the phase it was in and its total — an expensive failure is the
+ * one most worth attributing, and it is skipped and requeued by its caller
+ * rather than surfaced anywhere else.
+ */
+const walkPhaseClock = (): {
+  enter(name: string): void;
+  close(): void;
+} => {
+  const startedAt = performance.now();
+  let phaseAt = startedAt;
+  let current: string | undefined;
+  let closed = false;
+  const record = (name: string, now: number) =>
+    refreshTiming.time(phaseAt, now, "memory", "refresh", "walk", name);
+  return {
+    enter(name) {
+      const now = performance.now();
+      if (current !== undefined) record(current, now);
+      current = name;
+      phaseAt = now;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      const now = performance.now();
+      if (current !== undefined) record(current, now);
+      current = undefined;
+      refreshTiming.time(startedAt, now, "memory", "refresh", "walk", "total");
+    },
+  };
+};
+
 export const refreshTrackedGraph = (
   space: string,
   engine: Engine.Engine,
@@ -1646,184 +1772,197 @@ export const refreshTrackedGraph = (
   const affectedMisses = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   const invalidations = new Map<CellScope, Set<string>>();
   const identity = identityOf(state.manager);
-  for (const dirtyId of dirtyIds) {
-    // Dirtiness arrives keyed by scope INSTANCE (M4, stage F): the dirty
-    // key's scope_key segment IS the tracked doc key's middle segment, so
-    // the affected-tracker lookup is a direct join — no session-identity
-    // re-resolution, and another principal's instance simply never
-    // matches this state's tracker.
-    const { id, scopeKey, scope } = fromDirtyKey(dirtyId);
-    // The manager's read cache keys by (scope name, id) under its ONE
-    // bound identity, so invalidate only dirtiness aimed at THIS
-    // identity's own instance — a foreign instance was never cached here.
-    if (
-      canResolveScopeKey(scope, identity) &&
-      resolveScopeKey(scope, identity) === scopeKey
-    ) {
-      let scopedIds = invalidations.get(scope);
-      if (scopedIds === undefined) {
-        scopedIds = new Set();
-        invalidations.set(scope, scopedIds);
+  const phases = walkPhaseClock();
+  try {
+    phases.enter("select");
+    for (const dirtyId of dirtyIds) {
+      // Dirtiness arrives keyed by scope INSTANCE (M4, stage F): the dirty
+      // key's scope_key segment IS the tracked doc key's middle segment, so
+      // the affected-tracker lookup is a direct join — no session-identity
+      // re-resolution, and another principal's instance simply never
+      // matches this state's tracker.
+      const { id, scopeKey, scope } = fromDirtyKey(dirtyId);
+      // The manager's read cache keys by (scope name, id) under its ONE
+      // bound identity, so invalidate only dirtiness aimed at THIS
+      // identity's own instance — a foreign instance was never cached here.
+      if (
+        canResolveScopeKey(scope, identity) &&
+        resolveScopeKey(scope, identity) === scopeKey
+      ) {
+        let scopedIds = invalidations.get(scope);
+        if (scopedIds === undefined) {
+          scopedIds = new Set();
+          invalidations.set(scope, scopedIds);
+        }
+        scopedIds.add(id);
       }
-      scopedIds.add(id);
+      const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
+      const selectors = state.tracker.get(key);
+      if (selectors !== undefined && selectors.size > 0) {
+        affectedDocs.set(key, new Set(selectors));
+      }
+      // A dirty doc the query's walks MISSED (read as absent) re-fires the
+      // query exactly like a tracked one: this is the arrival half of the
+      // dead-end read contract — the write that creates the document is the
+      // event that heals every read that dead-ended on it. Without this, a
+      // first-hydration miss on a quiet space starves for the session's
+      // life (OW45 arm B).
+      const missedSelectors = state.missed.get(key);
+      if (missedSelectors !== undefined && missedSelectors.size > 0) {
+        affectedMisses.set(key, new Set(missedSelectors));
+      }
     }
-    const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
-    const selectors = state.tracker.get(key);
-    if (selectors !== undefined && selectors.size > 0) {
-      affectedDocs.set(key, new Set(selectors));
+    if (affectedDocs.size === 0 && affectedMisses.size === 0) {
+      return null;
     }
-    // A dirty doc the query's walks MISSED (read as absent) re-fires the
-    // query exactly like a tracked one: this is the arrival half of the
-    // dead-end read contract — the write that creates the document is the
-    // event that heals every read that dead-ended on it. Without this, a
-    // first-hydration miss on a quiet space starves for the session's
-    // life (OW45 arm B).
-    const missedSelectors = state.missed.get(key);
-    if (missedSelectors !== undefined && missedSelectors.size > 0) {
-      affectedMisses.set(key, new Set(missedSelectors));
+    phases.enter("rewalk");
+
+    const manager = new EngineObjectManager(
+      engine,
+      state.branch,
+      state.manager.principal,
+      state.manager.sessionId,
+    );
+    const sharedMemo = createSchemaMemo();
+    const stats = createQueryTraversalStats();
+    const readCountBefore = manager.readCount;
+
+    const recorder = missRecorderFor(state);
+    for (const key of affectedDocs.keys()) {
+      state.tracker.delete(key);
+      // The re-walk below re-records this referrer's still-live misses;
+      // attributions from its PREVIOUS walk no longer stand, so a link
+      // edited away retires its miss instead of leaving a stale wake.
+      releaseReferrerMisses(state, key);
     }
-  }
-  if (affectedDocs.size === 0 && affectedMisses.size === 0) {
-    return null;
-  }
 
-  const manager = new EngineObjectManager(
-    engine,
-    state.branch,
-    state.manager.principal,
-    state.manager.sessionId,
-  );
-  const sharedMemo = createSchemaMemo();
-  const stats = createQueryTraversalStats();
-  const readCountBefore = manager.readCount;
+    for (const [key, selectors] of affectedDocs) {
+      const { id, scope, scopeKey } = fromDocKey(key);
+      for (const selector of selectors) {
+        evaluateTrackedDocument(
+          space,
+          manager,
+          { id, scope, scopeKey },
+          selector,
+          state.tracker,
+          recorder,
+          sharedMemo,
+          stats,
+        );
+      }
+    }
+    phases.enter("misses");
+    // Re-evaluate the dirtied misses. A BORN target is visited — it enters
+    // the tracker (and the update assembly below delivers it) — and its
+    // miss retires; a still-absent one keeps its miss and attributions
+    // untouched (the throwaway sink swallows the absent re-registration:
+    // a miss never migrates into the tracker, whose entries reach the
+    // wire).
+    const stillAbsent = new MapSetStringToPathSelectors(true);
+    for (const [key, selectors] of affectedMisses) {
+      const { id, scope, scopeKey } = fromDocKey(key);
+      for (const selector of selectors) {
+        evaluateTrackedDocument(
+          space,
+          manager,
+          { id, scope, scopeKey },
+          selector,
+          state.tracker,
+          recorder,
+          sharedMemo,
+          stats,
+          stillAbsent,
+        );
+      }
+      // Retirement is decided by THIS evaluation's own outcome — the
+      // throwaway sink received the key iff the doc was still absent. The
+      // tracker is no witness here: the same key can be an absent watch
+      // ROOT whose re-evaluation just re-added its seq-0 marker, and
+      // retiring the miss on that would lose the link-derived selector's
+      // closure when the doc is finally born.
+      if (!stillAbsent.has(key)) {
+        retireMiss(state, key);
+      }
+    }
 
-  const recorder = missRecorderFor(state);
-  for (const key of affectedDocs.keys()) {
-    state.tracker.delete(key);
-    // The re-walk below re-records this referrer's still-live misses;
-    // attributions from its PREVIOUS walk no longer stand, so a link
-    // edited away retires its miss instead of leaving a stale wake.
-    releaseReferrerMisses(state, key);
-  }
-
-  for (const [key, selectors] of affectedDocs) {
-    const { id, scope, scopeKey } = fromDocKey(key);
-    for (const selector of selectors) {
-      evaluateTrackedDocument(
+    phases.enter("loaded");
+    const touched = new Set<QueryDocKey>(affectedDocs.keys());
+    for (const key of affectedMisses.keys()) touched.add(key);
+    for (const address of manager.loadedAddresses()) {
+      const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
+      const previous = state.entities.get(key);
+      const detail = manager.detail({
+        id: address.id,
+        scope: address.scope,
+        scopeKey: address.scopeKey,
+      });
+      if (previous !== undefined && detail?.seq === previous.seq) {
+        continue;
+      }
+      touched.add(key);
+    }
+    phases.enter("snapshot");
+    const updates = new Map<QueryDocKey, EntitySnapshot>();
+    for (const key of touched) {
+      if (!state.tracker.has(key)) {
+        continue;
+      }
+      const snapshot = snapshotForDocKey(
         space,
         manager,
-        { id, scope, scopeKey },
-        selector,
-        state.tracker,
-        recorder,
-        sharedMemo,
-        stats,
+        state.branch,
+        key,
       );
+      if (snapshot === null) {
+        continue;
+      }
+      updates.set(key, snapshot);
     }
-  }
-  // Re-evaluate the dirtied misses. A BORN target is visited — it enters
-  // the tracker (and the update assembly below delivers it) — and its
-  // miss retires; a still-absent one keeps its miss and attributions
-  // untouched (the throwaway sink swallows the absent re-registration:
-  // a miss never migrates into the tracker, whose entries reach the
-  // wire).
-  const stillAbsent = new MapSetStringToPathSelectors(true);
-  for (const [key, selectors] of affectedMisses) {
-    const { id, scope, scopeKey } = fromDocKey(key);
-    for (const selector of selectors) {
-      evaluateTrackedDocument(
-        space,
-        manager,
-        { id, scope, scopeKey },
-        selector,
-        state.tracker,
-        recorder,
-        sharedMemo,
-        stats,
-        stillAbsent,
-      );
-    }
-    // Retirement is decided by THIS evaluation's own outcome — the
-    // throwaway sink received the key iff the doc was still absent. The
-    // tracker is no witness here: the same key can be an absent watch
-    // ROOT whose re-evaluation just re-added its seq-0 marker, and
-    // retiring the miss on that would lose the link-derived selector's
-    // closure when the doc is finally born.
-    if (!stillAbsent.has(key)) {
-      retireMiss(state, key);
-    }
-  }
 
-  const touched = new Set<QueryDocKey>(affectedDocs.keys());
-  for (const key of affectedMisses.keys()) touched.add(key);
-  for (const address of manager.loadedAddresses()) {
-    const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
-    const previous = state.entities.get(key);
-    const detail = manager.detail({
-      id: address.id,
-      scope: address.scope,
-      scopeKey: address.scopeKey,
-    });
-    if (previous !== undefined && detail?.seq === previous.seq) {
-      continue;
-    }
-    touched.add(key);
-  }
-
-  const updates = new Map<QueryDocKey, EntitySnapshot>();
-  for (const key of touched) {
-    if (!state.tracker.has(key)) {
-      continue;
-    }
-    const snapshot = snapshotForDocKey(
+    // `established` extends validation over the whole previously delivered
+    // state, so a corrupted dependency fails the refresh even when its
+    // referrer did not change. A throw here can leave this graph's tracker
+    // partially advanced; the caller marks the session for a full
+    // re-evaluation, which re-diffs everything on the next successful pass
+    // rather than trusting increments computed over the failure.
+    phases.enter("closure");
+    const staged = assembleSchemaDocClosures(
       space,
+      engine,
       manager,
       state.branch,
-      key,
+      state.tracker,
+      updates,
+      state.schemaRefs,
+      stats,
+      state.entities,
     );
-    if (snapshot === null) {
-      continue;
+    phases.enter("merge");
+    for (const key of staged.trackerAdds) {
+      state.tracker.add(key, REJECTING_SELECTOR);
     }
-    updates.set(key, snapshot);
-  }
+    for (const [key, snapshot] of staged.additions) {
+      updates.set(key, snapshot);
+    }
 
-  // `established` extends validation over the whole previously delivered
-  // state, so a corrupted dependency fails the refresh even when its
-  // referrer did not change. A throw here can leave this graph's tracker
-  // partially advanced; the caller marks the session for a full
-  // re-evaluation, which re-diffs everything on the next successful pass
-  // rather than trusting increments computed over the failure.
-  const staged = assembleSchemaDocClosures(
-    space,
-    engine,
-    manager,
-    state.branch,
-    state.tracker,
-    updates,
-    state.entities,
-  );
-  for (const key of staged.trackerAdds) {
-    state.tracker.add(key, REJECTING_SELECTOR);
-  }
-  for (const [key, snapshot] of staged.additions) {
-    updates.set(key, snapshot);
-  }
+    for (const [key, snapshot] of updates) {
+      state.entities.set(key, snapshot);
+    }
+    for (const [scope, ids] of invalidations) {
+      state.manager.invalidateIds(ids, scope);
+    }
+    state.manager.mergeFrom(manager);
 
-  for (const [key, snapshot] of updates) {
-    state.entities.set(key, snapshot);
-  }
-  for (const [scope, ids] of invalidations) {
-    state.manager.invalidateIds(ids, scope);
-  }
-  state.manager.mergeFrom(manager);
+    stats.managerReads = manager.readCount - readCountBefore;
 
-  stats.managerReads = manager.readCount - readCountBefore;
-
-  return {
-    serverSeq: Engine.serverSeq(engine),
-    updates,
-    stats,
-  };
+    return {
+      serverSeq: Engine.serverSeq(engine),
+      updates,
+      stats,
+    };
+  } finally {
+    phases.close();
+  }
 };
 
 const evaluateTrackedDocument = (

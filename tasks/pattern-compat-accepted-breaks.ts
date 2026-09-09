@@ -253,19 +253,19 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // The lunch poll's identity moved from display names to profile cells
     // (see docs/history/lunch-poll-identity-break.md). The proof reports two
     // paths here: the published name-keyed admin result went away, and the
-    // visit array's nested defaults changed when legacy roster links were
-    // replaced by optional profile links. The latter cannot be proven stable
-    // under default insertion even though the vintage replay preserves the
-    // stored visit rows.
+    // visit array's legacy roster links were replaced by optional profile
+    // links. Cell metadata is stable under default insertion, so the proof
+    // identifies the incompatible link at `loggedBy`. The
+    // vintage replay still preserves the stored visit rows.
     pattern: "lunch-poll/main.tsx",
     baselines: ["20260729T022742Z-5bjUubcOZ-gpvz7F"],
-    paths: ["argument.visits[]", "result.adminName"],
+    paths: ["argument.visits[].loggedBy", "result.adminName"],
     reason: "Lunch-poll identity moved from display names to profile cells. " +
       "The published `adminName` result cannot survive the removal of " +
-      "name-keyed identity; `argument.visits[]` is the proof's summary path " +
-      "for nested default changes introduced while legacy roster links became " +
-      "optional profile links. The vintage replay preserves those rows, but " +
-      "the root argument contract cannot be updated in place.",
+      "name-keyed identity; `argument.visits[].loggedBy` identifies the " +
+      "legacy roster link that became an optional profile link. The vintage " +
+      "replay preserves those rows, but the root argument contract cannot " +
+      "be updated in place.",
     record: "docs/history/lunch-poll-identity-break.md",
   },
   {
@@ -398,9 +398,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     ],
     // The one spelling seen from the two roles a contract has: an optional
     // property carries no default, so the demand's defaults move, and the
-    // published row stops requiring the name.
+    // published row stops requiring the name. Stable cell metadata lets the
+    // proof identify the incompatible type at `shortName`.
     paths: [
-      "argument.items[]",
+      "argument.items[].shortName",
       "result.index[].shortName",
     ],
     reason:

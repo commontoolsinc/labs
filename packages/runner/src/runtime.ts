@@ -2609,13 +2609,20 @@ export class Runtime {
   }
 
   /**
-   * Creates a storage transaction that can be used to read / write data into
-   * locally replicated memory spaces. Transaction allows reading from many
-   * multiple spaces but writing only to one space.
+   * Runs `fn` in a storage transaction over locally replicated memory spaces.
+   * The transaction can read from multiple spaces but write to only one.
    *
-   * If the transaction fails with a RETRYABLE commit rejection, it will be
-   * retried up to maxRetries times. Retryability is decided by the shared
-   * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
+   * After `fn` returns, while retry budget remains, the runtime may load
+   * documents read as absent that the replica has not examined. If any exist,
+   * it aborts the staged attempt and invokes `fn` with a fresh transaction
+   * before sending a commit. These reconciliation re-runs and retries after
+   * commit rejection share one `maxRetries` budget, in addition to the initial
+   * invocation. With no budget left, reconciliation is skipped and the current
+   * transaction proceeds to ordinary commit validation.
+   *
+   * A retryable commit rejection also re-runs `fn` while budget remains.
+   * Retryability is decided by the shared rejection vocabulary
+   * (`isRetryableCommitRejection`, `storage/rejection.ts`),
    * which is an allow-list: a stale basis (server conflict or the local
    * inconsistency guard), a liveness failure the memory client heals on its own
    * (a transport failure, an undecodable frame), a discarded attempt
@@ -2625,10 +2632,10 @@ export class Runtime {
    * authorization denial, a precondition failure, a commit-rule violation, a
    * CFC boundary refusal (`CfcCommitRefusalError`, a deterministic verdict on
    * the transaction's own reads and writes), a `SessionError` (nothing on this
-   * path remounts the session, so
-   * every attempt reuses the handle the server just refused) — is returned on
-   * the FIRST attempt, because re-running cannot change the outcome and each
-   * doomed attempt costs a round-trip plus a subscriber revert notification.
+   * path remounts the session, so every attempt reuses the handle the server
+   * just refused) — is returned without another retry, because re-running
+   * cannot change the outcome and each doomed attempt costs a round-trip plus
+   * a subscriber revert notification.
    *
    * Every retry invokes `fn` again with a fresh transaction. Aborting an
    * attempt discards only the operations staged in that transaction; an effect
@@ -2645,7 +2652,8 @@ export class Runtime {
    * stages nothing before it declines.
    *
    * @param fn - Function to execute with the transaction.
-   * @param maxRetries - Maximum number of retries.
+   * @param maxRetries - Maximum combined number of reconciliation re-runs and
+   *   commit-rejection retries after the initial invocation.
    * @returns `{ ok }` once the transaction commits, carrying whatever `fn`
    *   returned, or `{ error }` when it does not commit: a rejection that is not
    *   retryable, a retryable one whose retries are spent, or `fn` itself
