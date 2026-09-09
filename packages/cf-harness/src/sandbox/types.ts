@@ -38,19 +38,28 @@ export type DockerRunscAdditionalMountConfig =
   | DockerRunscFabricAdditionalMountConfig
   | DockerRunscHostBindAdditionalMountConfig;
 
+/**
+ * A mount as the launch will make it.
+ *
+ * `readonly` throughout, for the reason the transport directories below carry
+ * it: the containment check runs when the config is resolved, and the launch
+ * reads these again. A field that could move between those two reads is one
+ * the check does not cover, and moving one is how a transport directory ends
+ * up inside a bind the workload can write.
+ */
 export interface DockerRunscFabricAdditionalMount {
-  kind: "fabric-fuse";
-  hostPath: string;
-  sandboxPath: string;
-  readOnly: boolean;
+  readonly kind: "fabric-fuse";
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+  readonly readOnly: boolean;
 }
 
 export interface DockerRunscHostBindAdditionalMount {
-  kind: "host-bind";
-  name: string;
-  hostPath: string;
-  sandboxPath: string;
-  readOnly: boolean;
+  readonly kind: "host-bind";
+  readonly name: string;
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+  readonly readOnly: boolean;
 }
 
 export type DockerRunscAdditionalMount =
@@ -62,11 +71,13 @@ export interface DockerRunscSandboxConfig {
   runtimeName: string;
   image: string;
   containerUser?: string;
-  workspaceHostPath: string;
+  // The paths the containment check compared, held where the launch reads
+  // them, for the same reason the transport directories below are readonly.
+  readonly workspaceHostPath: string;
   workspaceMountPath: string;
   shellPath: string;
   dockerNetworkMode: DockerNetworkMode;
-  additionalMounts: readonly DockerRunscAdditionalMount[];
+  readonly additionalMounts: readonly DockerRunscAdditionalMount[];
   extraDockerArgs: readonly string[];
   // Read once per sandbox and then memoized, so a verdict outlives the read
   // that produced it. `readonly` keeps the directory it was read against from
