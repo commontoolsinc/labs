@@ -350,6 +350,15 @@ Anything else wraps its command:
 deno task run-recorded <kind> <scope> <name> -- <command...>
 ```
 
+A wrapped command in a workflow step also has its identity registered in
+the test topology. A lane runs what a suite enumerates, so the topology
+is what keeps the command running once a lane takes over the job. `deno
+task check-test-topology` reads every such step and fails on one no suite
+claims, which settles it on the pull request that adds the step. A
+command with no suite to register it under is one to leave unwrapped:
+"Recording" above says that a check no lane can be asked to run is not
+recorded.
+
 A harness that is also a library — one this repository's own tests drive
 over fixture files — takes the decision to record from its caller, not
 from the environment alone. Its entry point asks for records; a test

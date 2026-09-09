@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { parse as parseYaml } from "@std/yaml";
 import { getBinary } from "@astral/astral";
+import { commandWords, withoutComments } from "./ci-workflow.ts";
 import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
@@ -130,26 +131,10 @@ function stepNames(contents: string): string[] {
   return [...contents.matchAll(/^ *- name: (.+)$/gm)].map((match) => match[1]);
 }
 
-// Drops YAML comments. A `#` after whitespace ends a plain scalar, so what is
-// left on a line is the value the workflow actually carries. Applied before
-// looking for commands, so that a comment naming a command is not read as one
-// and a comment after a command is not read as part of it.
-function withoutComments(contents: string): string {
-  return contents.replaceAll(/(^|\s)#.*$/gm, "$1");
-}
-
 function deployInvocations(contents: string): string[] {
   return [...contents.matchAll(/^ +script: (\/opt\/cf\/deploy\.sh.*)$/gm)].map(
     (match) => match[1],
   );
-}
-
-// Splits a command the way a shell would count its words, except that a
-// `${{ ... }}` workflow expression holds spaces and still stands for one word.
-// The expression is matched to its first `}}` so that one containing a brace,
-// as `${{ format('{0}', github.sha) }}` does, still comes out as one word.
-function commandWords(command: string): string[] {
-  return [...command.matchAll(/\$\{\{.*?\}\}|\S+/g)].map((match) => match[0]);
 }
 
 function workflowTriggers(contents: string): string {
