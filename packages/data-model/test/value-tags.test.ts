@@ -48,6 +48,7 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   JS_TYPE_VALUE_TAGS,
+  jsTypeTag,
   type JsTypeValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
@@ -201,6 +202,28 @@ describe("value-tags", () => {
       expect(new Set(JS_TYPE_TAGS.map(([, , tag]) => tag))).toEqual(
         new Set(Object.values(JS_TYPE_VALUE_TAGS)),
       );
+    });
+  });
+
+  describe("jsTypeTag()", () => {
+    for (const [label, value, tag] of JS_TYPE_TAGS) {
+      it(`returns \`${tag}\` for ${label}`, () => {
+        expect(jsTypeTag(value)).toBe(tag);
+      });
+    }
+
+    it("returns `object` for an object of any kind", () => {
+      // The value `null` has a tag and every other object has none, whatever
+      // its class; a plain object, an array, and both kinds of fabric class
+      // are the same to this.
+
+      expect(jsTypeTag({})).toBe("object");
+      expect(jsTypeTag([])).toBe("object");
+      expect(jsTypeTag(new Date())).toBe("object");
+      expect(jsTypeTag(new FabricHash(new Uint8Array(32), "fid1")))
+        .toBe("object");
+      expect(jsTypeTag(FabricError.fromNativeError(new Error("x"))))
+        .toBe("object");
     });
   });
 
