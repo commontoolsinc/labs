@@ -197,8 +197,12 @@ evaluated the transaction's own reads and writes and refused them before
 storage saw them — and did so on EVERY recorded reason. A refusal is terminal
 only when every reason is a verdict; a reason is a verdict only when its
 producer tags it as one (`cfc/verdict-reason.ts`), so anything untagged — an
-unavailable input, a failed resolution, a prepared state a caller disturbed —
-stays retryable. It carries both channels: `reasons`, the prose one per rule
+input the transaction does not have, a failed resolution, a prepared state a
+caller disturbed — stays retryable. A verdict covers the input a re-run cannot
+change as well as the data policy refused: an input absent from stored state
+the transaction already holds reads the same on every attempt, and its
+producer leaves the run depending on the state whose arrival would decide
+otherwise. It carries both channels: `reasons`, the prose one per rule
 that refused, and `refusals`, the structured descriptions
 (`cfc/refusal-detail.ts`) naming the boundary, the offending label atoms, and
 the reads that carried them — which is what lets a consumer state a remedy
