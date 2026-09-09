@@ -13,6 +13,7 @@ export type BuiltinToolId =
   | "delegate_task"
   | "run_pattern"
   | "assign_slug"
+  | "ingest_sandbox_file"
   | "describe_handle"
   | "search_patterns"
   | "record_feedback"
@@ -40,7 +41,12 @@ export const DEFAULT_PARENT_TOOL_IDS = [
  * present-but-failing, even when an explicit allowlist names it.
  */
 const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["run_pattern", "assign_slug", "acquire_skill"] as const,
+  [
+    "run_pattern",
+    "assign_slug",
+    "ingest_sandbox_file",
+    "acquire_skill",
+  ] as const,
 );
 
 /**

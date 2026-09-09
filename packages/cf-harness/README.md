@@ -54,11 +54,12 @@ piece a person can open rather than a paragraph in a transcript.
 Read the rest of this document through those two. Delegation gives a child a
 fresh context seeded with handles. `describe_handle` answers what a reference is
 shaped like without reading it. `assign_slug` names a piece the caller holds a
-handle to. Sealed positions in a structured result cross as their own addresses.
-The browser's `valueHandle` lets an action spend a value the model never held —
-though a page that receives one can hand it back to whatever reads that page
-next, which the browser section covers. None of these is a separate mechanism;
-each is the same two ideas reaching a new surface.
+handle to. `ingest_sandbox_file` returns a handle to work that left for the
+sandbox and came back labelled. Sealed positions in a structured result cross as
+their own addresses. The browser's `valueHandle` lets an action spend a value
+the model never held — though a page that receives one can hand it back to
+whatever reads that page next, which the browser section covers. None of these
+is a separate mechanism; each is the same two ideas reaching a new surface.
 
 **This is not a confidentiality feature.** It would be a mistake to read the
 handle machinery as special handling for secrets, switched on when data is
@@ -241,7 +242,9 @@ network confinement model.
   `--fabric-space` together) that compiles and runs a pattern against a deployed
   Fabric space from the trusted host side and returns a live result cell
   reference; `assign_slug` names and lists a piece afterwards, so a person can
-  open it; see
+  open it, and `ingest_sandbox_file` brings a file the sandbox produced back
+  into a cell under the confidentiality runsc reported for the run's sandbox
+  work; see
   [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space)
 
 What is not done yet:

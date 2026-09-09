@@ -11,10 +11,13 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import {
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
+  type IFCLabel,
   inheritedCfcPostureReport,
 } from "@commonfabric/runner/cfc";
 
@@ -146,6 +149,7 @@ import {
   type HarnessRunState,
   type HarnessRunTerminalReason,
   isTerminalHarnessRunStatus,
+  joinHarnessCfcSandboxTaint,
   patchHarnessRunState,
   setHarnessRunStatus,
   setHarnessSubagentRun,
@@ -227,6 +231,10 @@ import {
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
 import {
+  type IngestSandboxFileToolInput,
+  type IngestSandboxFileToolOutput,
+} from "./tools/ingest-sandbox-file.ts";
+import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
@@ -244,6 +252,7 @@ export interface BuiltinToolInputMap {
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
   assign_slug: AssignSlugToolInput;
+  ingest_sandbox_file: IngestSandboxFileToolInput;
   describe_handle: DescribeHandleToolInput;
   search_patterns: SearchPatternsToolInput;
   record_feedback: RecordFeedbackToolInput;
@@ -268,6 +277,7 @@ export interface BuiltinToolOutputMap {
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
   assign_slug: AssignSlugToolOutput;
+  ingest_sandbox_file: IngestSandboxFileToolOutput;
   describe_handle: DescribeHandleToolOutput;
   search_patterns: SearchPatternsToolOutput;
   record_feedback: RecordFeedbackToolOutput;
@@ -278,6 +288,28 @@ export interface BuiltinToolOutputMap {
   loom_inspect: LoomAuthoringToolOutput;
   loom_authoring_context: LoomAuthoringToolOutput;
 }
+
+/**
+ * The container taint runsc reported for a tool's sandbox invocation, or
+ * `undefined` when the output carries no sandbox CFC result. Every branch of
+ * `cfcResultFromRunscSidecar` puts the same label on all three observations,
+ * so `stdout` answers for the invocation.
+ */
+const cfcSandboxTaintOfToolOutput = (
+  output: unknown,
+): IFCLabel | undefined => {
+  if (!isObjectNotArray(output) || !("cfcResult" in output)) {
+    return undefined;
+  }
+  const cfcResult = output.cfcResult;
+  if (!isObjectNotArray(cfcResult) || cfcResult.version !== 1) {
+    return undefined;
+  }
+  const stdout = cfcResult.stdout;
+  return isObjectNotArray(stdout) && isObjectNotArray(stdout.label)
+    ? stdout.label as IFCLabel
+    : undefined;
+};
 
 interface ToolOutputWithId {
   outputId: string;
@@ -1319,6 +1351,24 @@ export class CfHarnessEngine {
   }
 
   /**
+   * Joins one sandbox invocation's container taint into the run's
+   * accumulated sandbox taint, which `ingest_sandbox_file` mints from. The
+   * prompt loop calls this for every tool output carrying a sandbox CFC
+   * result, whichever policy that result took: an opaque stream is precisely
+   * the case where a taint exists, so recording only the observed ones would
+   * accumulate nothing on the runs that have something to accumulate.
+   */
+  async recordCfcSandboxTaint(label: IFCLabel): Promise<HarnessRunState> {
+    this.#runState = joinHarnessCfcSandboxTaint(
+      this.#runState,
+      label,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /**
    * The run's session-local handle table, or `undefined` while none has been
    * recorded. A defensive copy, like `getRunState()`.
    */
@@ -1905,6 +1955,15 @@ export class CfHarnessEngine {
     if (!isToolOutputWithId(output)) {
       throw new Error(`builtin tool did not return an outputId: ${toolId}`);
     }
+    // Both tool-invocation paths reach here, so this is where the run learns
+    // what runsc said about the container. It is recorded whichever policy
+    // the result took: an opaque stream is precisely the case where a taint
+    // exists, so accumulating only from the observed ones would accumulate
+    // nothing on the runs that have something to accumulate.
+    const sandboxTaint = cfcSandboxTaintOfToolOutput(output);
+    if (sandboxTaint !== undefined) {
+      await this.recordCfcSandboxTaint(sandboxTaint);
+    }
     const artifactPath = await this.artifactStore?.persistToolOutput(
       toolId,
       output.outputId as ToolOutputId,
@@ -2223,6 +2282,9 @@ export class CfHarnessEngine {
       browserAccess: this.config.browserAccess,
       handleValueOrigins: this.config.handleValueOrigins,
       handleTable: this.handleTable,
+      ...(this.#runState.cfcSandboxTaint !== undefined
+        ? { cfcSandboxTaint: structuredClone(this.#runState.cfcSandboxTaint) }
+        : {}),
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),

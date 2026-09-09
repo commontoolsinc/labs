@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-08", sha: "04e66f818 + Loom authoring" };
+    const SNAPSHOT = { date: "2026-09-09", sha: "04e66f818e" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2059,13 +2059,14 @@
       },
       g_obs: {
         body:
-          `<p>Sandbox output crosses back through a sidecar that marks it <code>observed</code>, <code>opaque</code> or <code>denied</code> from runsc's xattr taint. The harness renders the verdict and never decides.</p>`,
+          `<p>Sandbox output crosses back through a sidecar that marks it <code>observed</code>, <code>opaque</code> or <code>denied</code> from runsc's xattr taint. The harness renders the verdict and never decides.</p><p>The same sidecar taint has a second destination: <code>ingest_sandbox_file</code> writes a workspace file into a cell carrying the confidentiality this run's sandbox invocations accumulated, so an <code>opaque</code> result is a value the model cannot read and the fabric can still keep. The label is the run's, not the file's — gVisor labels output per file in a <code>trusted.cfc.contentLabel</code> xattr, but that xattr does not cross the gofer, and every channel that could carry it out is one the sandboxed workload writes.</p>`,
         why:
-          "The sandbox's taint store and the runner's label store are two different systems that do not yet speak.",
+          "The sandbox's taint store and the runner's label store are two different systems that speak only through this sidecar.",
         close: [
           "Real sidecar evidence for every exposed observation, so Loom and Pattern Factory can leave <code>observe</code> mode (deviation 2).",
           "The mediation depends on how the operator registered <code>runsc-cfc</code>: without <code>--cfc-invocation-context-dir</code> the harness writes invocation contexts nothing reads and input labels drop silently, while the guard only checks that the directories are named (CT-2105).",
           "Reserve the artifact root from the sandbox (CT-2117).",
+          "Per-file precision on the way back needs an out-of-band channel from <code>runsc-cfc</code> — the result sidecar naming the output paths and their labels — since nothing read from inside the container can be trusted to lower a label.",
         ],
         threats: ["t5", "t12"],
       },

@@ -11,6 +11,7 @@ import { browserTool } from "./browser.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
 import { describeHandleTool } from "./describe-handle.ts";
 import { editFileTool } from "./edit-file.ts";
+import { ingestSandboxFileTool } from "./ingest-sandbox-file.ts";
 import { queryDocsTool } from "./query-docs.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
@@ -37,6 +38,7 @@ export const BUILTIN_TOOLS = [
   delegateTaskTool,
   runPatternTool,
   assignSlugTool,
+  ingestSandboxFileTool,
   describeHandleTool,
   searchPatternsTool,
   recordFeedbackTool,

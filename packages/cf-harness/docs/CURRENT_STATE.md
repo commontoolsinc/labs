@@ -206,37 +206,50 @@ The current package provides:
   identifiers;
 - content-addressed snapshots for in-run `view_image` observations, while
   run-start images remain source-integrity-locked;
-- opt-in fabric-session tools — `run_pattern` and `assign_slug`
-  (`--fabric-api-url`, `--fabric-identity`, and `--fabric-space` configured
-  together, or their `CF_HARNESS_FABRIC_*` environment fallbacks).
-  `run_pattern`: compiles and runs an inline `sourceText` pattern (capped at 256
-  KiB) against a deployed Fabric space from the trusted host side over a lazy
-  per-run session that caches only a healthy, authorized construction; passes
-  whole-string LLM-friendly link inputs as live cells, refusing links into
-  another space, inputs the compiled pattern declares no argument for, input
-  values that carry a sealed opaque link anywhere within them, and values that
-  mismatch the compiled argument schema whether a live cell or plain JSON
-  supplies them, all before any piece exists; honors the run's abort signal by
-  stopping the created piece and returning a structured `cancelled` error;
-  scrubs bare fabric identifiers from model-facing diagnostics; reports a result
-  that settles to empty or schema-failing as an error when the invocation's
-  settle window observed a cause — an action error attributed to the piece, or a
-  convergence-budget episode whose deferred actions name this pattern — and
-  otherwise still reports ok, since an empty result with no observed cause is
-  not evidence of failure; returns the result cell's canonical reference plus an
-  optionally schema-sanitized value, and leaves the piece detached (no recorded
-  origin) and out of the space's registered piece list, with run→piece
-  provenance carried by the run's persisted artifacts. `assign_slug` names a
-  piece afterwards, from any handle token referring to one: it validates the
-  slug, fails closed on an availability question the space cannot answer,
-  refuses a slug already naming another piece (one already naming the same piece
-  answers ok), refuses a token that names a position inside a piece, another
-  space, or a document with no pattern identity, and otherwise registers the
-  piece in the space's piece list and points the slug at it, returning the slug
-  and, when composable without a bare fabric identifier, an openable URL.
-  Without the session configuration both tools are absent from the tool surface,
-  for a `default`- or `pattern-author`-profile subagent as much as for the
-  parent — a child shares the one session the parent built;
+- opt-in fabric-session tools — `run_pattern`, `assign_slug`, and
+  `ingest_sandbox_file` (`--fabric-api-url`, `--fabric-identity`, and
+  `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
+  environment fallbacks). `run_pattern`: compiles and runs an inline
+  `sourceText` pattern (capped at 256 KiB) against a deployed Fabric space from
+  the trusted host side over a lazy per-run session that caches only a healthy,
+  authorized construction; passes whole-string LLM-friendly link inputs as live
+  cells, refusing links into another space, inputs the compiled pattern declares
+  no argument for, input values that carry a sealed opaque link anywhere within
+  them, and values that mismatch the compiled argument schema whether a live
+  cell or plain JSON supplies them, all before any piece exists; honors the
+  run's abort signal by stopping the created piece and returning a structured
+  `cancelled` error; scrubs bare fabric identifiers from model-facing
+  diagnostics; reports a result that settles to empty or schema-failing as an
+  error when the invocation's settle window observed a cause — an action error
+  attributed to the piece, or a convergence-budget episode whose deferred
+  actions name this pattern — and otherwise still reports ok, since an empty
+  result with no observed cause is not evidence of failure; returns the result
+  cell's canonical reference plus an optionally schema-sanitized value, and
+  leaves the piece detached (no recorded origin) and out of the space's
+  registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts. `assign_slug` names a piece afterwards, from any handle
+  token referring to one: it validates the slug, fails closed on an availability
+  question the space cannot answer, refuses a slug already naming another piece
+  (one already naming the same piece answers ok), refuses a token that names a
+  position inside a piece, another space, or a document with no pattern
+  identity, and otherwise registers the piece in the space's piece list and
+  points the slug at it, returning the slug and, when composable without a bare
+  fabric identifier, an openable URL. `ingest_sandbox_file` brings sandbox
+  output back: it writes a file in the sandbox workspace into a new cell in the
+  session's space and returns a reference to it, never the bytes, applying the
+  confidentiality the run's sandbox invocations have accumulated. That label is
+  the RUN's rather than the file's, and it comes from one place — the container
+  taint runsc reports in the result sidecar it writes where the sandboxed
+  workload cannot reach it. gVisor does label sandbox output per file, in a
+  `trusted.cfc.contentLabel` xattr, but that xattr does not cross the gofer, and
+  every channel that could carry it out of the container is one the workload
+  writes; per-file precision therefore waits on an out-of-band channel from
+  `runsc-cfc` itself. The tool takes a path and nothing else: a label has no
+  property in its schema to arrive in, and a file ingested by a run whose
+  sandbox reported no taint yields a cell with no label, which the tool reports.
+  Without the session configuration all three tools are absent from the tool
+  surface, for a `default`- or `pattern-author`-profile subagent as much as for
+  the parent — a child shares the one session the parent built;
   `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
   `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
   set the session runtime's CFC dials, so with labels persisted a

@@ -1,6 +1,7 @@
 import type {
   CfcEnforcementMode,
   CfcLabelView,
+  IFCLabel,
 } from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcInvocationContext,
@@ -57,6 +58,15 @@ export interface HarnessToolContext {
    * addresses by the prompt loop; restricted tokens remain opaque.
    */
   handleTable?: HarnessHandleTable;
+
+  /**
+   * The confidentiality this run's sandbox invocations have accumulated so
+   * far, joined from the container taints runsc reported for them.
+   * `ingest_sandbox_file` mints a cell's label from this and from nothing
+   * else. Undefined until a sandbox invocation reports a non-empty taint,
+   * and an undefined taint mints an unlabeled cell.
+   */
+  cfcSandboxTaint?: IFCLabel;
 
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
