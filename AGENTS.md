@@ -175,7 +175,8 @@ If you are developing runtime code, start with:
   poll is the honest tool
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime
   coverage and transformer-based pattern coverage), which CI job collects which,
-  and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
+  and why only one of the two pattern integration arms collects authored-pattern
+  coverage
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
 - `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required

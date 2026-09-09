@@ -13,6 +13,7 @@
 
 import {
   SERVER_EXECUTION_ON_SKIPS,
+  type ServerExecutionOnSkip,
   type ServerExecutionSuite,
 } from "../server-execution-on-skips.ts";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
@@ -59,6 +60,8 @@ async function integrationFiles(
 export async function loadPackageIntegrationSuites(
   root: string,
   defaultEnabled = serverExecutionCiLane("default").enabled,
+  skips: Record<ServerExecutionSuite, readonly ServerExecutionOnSkip[]> =
+    SERVER_EXECUTION_ON_SKIPS,
 ): Promise<Suite[]> {
   const defaults: FilePart[] = [];
   const opposites: FilePart[] = [];
@@ -68,11 +71,14 @@ export async function loadPackageIntegrationSuites(
     const packageDir = `packages/${scope}`;
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
-    const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
-    const on = unavailableFrom(
-      SERVER_EXECUTION_ON_SKIPS[scope],
-      packageDir,
-    );
+    // `LOG_LEVEL` is what each package's own `integration` task runs
+    // these with, and running them at the default level is running them
+    // differently from the way they are meant to run.
+    const env: Record<string, string> = {
+      LOG_LEVEL: "warn",
+      ...(headless ? { HEADLESS: "1" } : {}),
+    };
+    const on = unavailableFrom(skips[scope], packageDir);
     defaults.push({
       packageDir,
       flags: ["-A"],
@@ -135,7 +141,10 @@ export async function loadPackageIntegrationSuites(
   return [
     fileSuite({
       id: "package-integration",
-      needs: ["deno", "toolshed", "browser"],
+      // The baked server rather than one run from source: the shell's
+      // tests drive a browser at it, and the shell is a bundle inside
+      // the binary.
+      needs: ["deno", "toolshed-baked", "browser"],
       parts: defaults,
     }),
     fileSuite({

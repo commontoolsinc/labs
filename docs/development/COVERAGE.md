@@ -15,8 +15,9 @@ directly, so Deno's built-in V8 coverage can record which of their lines ran. A
 CI job turns this on by setting the `DENO_COVERAGE_DIR` environment variable.
 After the tests finish, `tasks/write-coverage-lcov.ts` converts the raw V8
 profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
-artifact. Most test jobs set `DENO_COVERAGE_DIR`, including both pattern
-integration jobs.
+artifact. Most test jobs set `DENO_COVERAGE_DIR`. The pattern and package
+integration jobs do; the two that run the opposite server-execution arm do
+not.
 
 A focused `*.browser.test.ts` file run through `deno-web-test` executes its
 application module inside Chrome. That browser execution proves DOM behavior,
@@ -953,6 +954,13 @@ The pattern unit job runs each `packages/patterns/**/*.test.tsx` file through
 `cf test` in-process. The two integration jobs run browser-driven `deno test`
 files against a running Toolshed server. Both kinds of authored-pattern coverage
 feed the same gated metric.
+
+The pattern integration job runs in two server-execution arms, and only the
+arm with the flag off collects authored-pattern coverage. The instrumentation
+records what the browser's runtime worker compiles, which is the whole of what
+ran only where that worker is the sole compiler; the arm with server execution
+on has a second compiler on the server. The arm with it off measures the same
+pattern files, so nothing goes unmeasured.
 
 The compile byte cache is available to `cf test` through
 `CF_COMPILE_CACHE_FILE`. Coverage and non-coverage compiles use different cache
