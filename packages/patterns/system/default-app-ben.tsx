@@ -2,6 +2,7 @@ import {
   computed,
   equals,
   handler,
+  ifElse,
   NAME,
   navigateTo,
   pattern,
@@ -363,16 +364,24 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               Notes ▾
             </cf-button>
 
-            {/* Backdrop to close menu when clicking outside */}
-            <div
-              onClick={closeMenu({ menuOpen })}
-              style={{
-                display: computed(() => (menuOpen.get() ? "block" : "none")),
-                position: "fixed",
-                inset: "0",
-                zIndex: "999",
-              }}
-            />
+            {
+              /* Backdrop to close menu when clicking outside. It exists only
+                while the menu is open: a full-screen layer whose visibility
+                waits on a value still arriving would cover the page until
+                then. */
+            }
+            {ifElse(
+              menuOpen,
+              <div
+                onClick={closeMenu({ menuOpen })}
+                style={{
+                  position: "fixed",
+                  inset: "0",
+                  zIndex: "999",
+                }}
+              />,
+              null,
+            )}
 
             {/* Dropdown Menu */}
             <cf-vstack
