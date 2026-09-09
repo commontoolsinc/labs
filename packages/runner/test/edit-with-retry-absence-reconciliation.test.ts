@@ -412,20 +412,9 @@ describe("editWithRetry absence reconciliation", () => {
       await runtime.dispose({ closeStorage: false });
       disposed = true;
 
-      const timeout = Symbol("retry readiness timeout");
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const outcome = await Promise.race([
-        editing,
-        new Promise<typeof timeout>((resolve) => {
-          timer = setTimeout(() => resolve(timeout), 250);
-        }),
-      ]);
-      if (timer !== undefined) clearTimeout(timer);
-      expect(outcome).not.toBe(timeout);
-      if (outcome !== timeout) {
-        expect(outcome.error?.name).toBe("StorageTransactionAborted");
-        expect(outcome.error?.message).toContain("runtime is disposing");
-      }
+      const outcome = await editing;
+      expect(outcome.error?.name).toBe("StorageTransactionAborted");
+      expect(outcome.error?.message).toContain("runtime is disposing");
     } finally {
       readiness.resolve();
       await editing?.catch(() => undefined);
