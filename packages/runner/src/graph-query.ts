@@ -29,6 +29,7 @@ import {
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
+  loadLabelSchemaDoc,
   loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
@@ -197,14 +198,15 @@ export class GraphQueryWalk {
       undefined,
       undefined,
       // A document this walk loads through a link crossing is delivered
-      // under the selector that reached it, without its metadata family.
-      // The family belongs to the documents a query names: `visit()`
-      // chases every rail for its named document, which is what a caller
-      // that intends to load and run one — a piece resume, a setsrc
-      // staging read — relies on. Chasing it at every crossing instead
-      // multiplies a wide walk by each visited piece's whole doc set
-      // (pattern, argument, internal, cfc and their recursion) for
-      // documents nothing asked to run.
+      // under the selector that reached it, without its metadata family
+      // beyond the schema document its `cfc` envelope names, which a
+      // reader of a labeled document checks its reads against. The family
+      // belongs to the documents a query names: `visit()` chases every
+      // rail for its named document, which is what a caller that intends
+      // to load and run one — a piece resume, a setsrc staging read —
+      // relies on. Chasing it at every crossing instead multiplies a wide
+      // walk by each visited piece's whole doc set (pattern, argument,
+      // internal and their recursion) for documents nothing asked to run.
       false,
     );
     this.#memo = options.memo ?? createSchemaMemo();
@@ -321,16 +323,16 @@ export class GraphQueryWalk {
     // covered this document before a root named it, and coverage proves
     // reach, not family. What a caller names, it may intend to load; what
     // a walk merely reaches, it does not, so a crossing-role visit chases
-    // nothing. The chase dedupes through `metaDocsVisited`.
+    // nothing beyond the schema document its `cfc` envelope names. The
+    // family chase dedupes through `metaDocsVisited`.
+    const loaded = {
+      address: { ...document.address, space: this.#space },
+      value: document.value,
+    };
     if (role === "root") {
-      loadMetaLinkedDocs(
-        tx,
-        {
-          address: { ...document.address, space: this.#space },
-          value: document.value,
-        },
-        this.#context,
-      );
+      loadMetaLinkedDocs(tx, loaded, this.#context);
+    } else {
+      loadLabelSchemaDoc(tx, loaded, this.#context);
     }
   }
 

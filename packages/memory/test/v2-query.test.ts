@@ -2374,6 +2374,22 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
   };
   const idsOf = (result: { entities: { id: string }[] }) =>
     new Set(result.entities.map((entity) => entity.id));
+  // The schema the crossing document's labels are stated against, held as
+  // a content-addressed document its `cfc` envelope names by hash.
+  const labelSchema = {
+    type: "object",
+    properties: { name: { type: "string" } },
+  } as const;
+  const labelSchemaId = `cid:${internSchemaAsTaggedHashString(labelSchema)}`;
+  // The schema a later version of the crossing document restates its
+  // labels against.
+  const relabeledSchema = {
+    type: "object",
+    properties: { name: { type: "string" }, renamed: { type: "boolean" } },
+  } as const;
+  const relabeledSchemaId = `cid:${
+    internSchemaAsTaggedHashString(relabeledSchema)
+  }`;
 
   try {
     applyCommit(engine, {
@@ -2384,6 +2400,10 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
         localSeq: 1,
         reads: { confirmed: [], pending: [] },
         operations: [{
+          op: "set",
+          id: labelSchemaId,
+          value: { value: labelSchema },
+        }, {
           op: "set",
           id: "of:root-family",
           value: { value: { kind: "root pattern" } },
@@ -2404,6 +2424,11 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           id: "of:crossing-target",
           value: {
             value: { name: "target" },
+            cfc: {
+              version: 1,
+              schemaHash: labelSchemaId.slice("cid:".length),
+              labelMap: { version: 1, entries: [] },
+            },
             pattern: link("of:target-family"),
             result: link("of:target-result"),
             internal: [{ link: link("of:target-cell") }, {
@@ -2426,13 +2451,15 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     // the walk reaches through the `child` crossing arrives under the
     // selector that reached it and with none of its family — not the
     // pattern that serves loading it, not the result and derived cell its
-    // computations write.
+    // computations write — beyond the schema document its labels are
+    // checked against.
     const rooted = idsOf(
       queryGraph(space, engine, rootQuery, undefined, identity),
     );
     assert(rooted.has("of:meta-root"));
     assert(rooted.has("of:crossing-target"));
     assert(rooted.has("of:root-family"));
+    assert(rooted.has(labelSchemaId));
     assert(!rooted.has("of:target-family"));
     assert(!rooted.has("of:target-result"));
     assert(!rooted.has("of:target-cell"));
@@ -2443,6 +2470,7 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
       queryGraph(space, engine, targetQuery, undefined, identity),
     );
     assert(targetRooted.has("of:crossing-target"));
+    assert(targetRooted.has(labelSchemaId));
     assert(targetRooted.has("of:target-family"));
     assert(targetRooted.has("of:target-result"));
     assert(targetRooted.has("of:target-cell"));
@@ -2517,7 +2545,9 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     // A dirty crossing keeps its crossing shape: updating the crossed
     // document re-walks it WITHOUT promoting it to a named root's
     // family, so what a subscriber holds does not depend on update
-    // history.
+    // history — and the re-walk delivers the schema document the new
+    // version's labels are checked against, exactly as the first reach
+    // delivered the old one.
     applyCommit(engine, {
       sessionId: "session:writer",
       invocation: invocationFor(3),
@@ -2527,9 +2557,18 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
+          id: relabeledSchemaId,
+          value: { value: relabeledSchema },
+        }, {
+          op: "set",
           id: "of:crossing-target",
           value: {
             value: { name: "target, renamed" },
+            cfc: {
+              version: 1,
+              schemaHash: relabeledSchemaId.slice("cid:".length),
+              labelMap: { version: 1, entries: [] },
+            },
             pattern: link("of:target-family"),
             result: link("of:target-result"),
             internal: [{ link: link("of:target-cell") }],
@@ -2546,6 +2585,12 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     assertExists(crossingRefreshed);
     assertExists(
       crossingRefreshed.updates.get(`${space}/space/of:crossing-target`),
+    );
+    assertExists(
+      crossingRefreshed.updates.get(`${space}/space/${relabeledSchemaId}`),
+    );
+    assert(
+      crossingTracked.state.entities.has(`${space}/space/${relabeledSchemaId}`),
     );
     for (
       const id of ["of:target-family", "of:target-result", "of:target-cell"]

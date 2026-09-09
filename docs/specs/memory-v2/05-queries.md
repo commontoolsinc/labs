@@ -280,13 +280,16 @@ document's ROLE in the query:
   the new target.
 
 - A document the evaluation merely reaches — loaded mid-walk through a link
-  crossing — is owed nothing beyond what the selector that reached it
-  selects. The server MUST NOT chase its metadata links or its internal
-  manifest links: none of that family is loaded, delivered, or tracked. A
-  subscriber that wants a document's family names the document. A refresh
-  that re-evaluates a crossing-reached document applies the same rule, so
-  a subscription's delivered shape does not depend on the order in which
-  documents changed.
+  crossing — is owed what the selector that reached it selects, and the
+  schema document its `cfc` metadata names: a reader of a labeled document
+  checks what it may read against that schema, so the server MUST resolve
+  and load it, and track it so an absent one arrives when it is written.
+  The server MUST NOT chase the document's other metadata links or its
+  internal manifest links: none of that family is loaded, delivered, or
+  tracked. A subscriber that wants a document's family names the document.
+  A refresh that re-evaluates a crossing-reached document applies the same
+  rule, so a subscription's delivered shape does not depend on the order in
+  which documents changed.
 
 A metadata family is a same-space structure: a metadata or manifest link
 that resolves to another space selects nothing — the evaluating space's

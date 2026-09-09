@@ -1294,8 +1294,10 @@ export type TraversalContext = {
    * default: a runtime traversal that loads a document generally intends
    * to interpret it. The memory server's graph-query walk turns it off,
    * because a document reached through a crossing is owed only what the
-   * selector that reached it selects; a family belongs to the documents a
-   * query names, and the walk chases it for each named root itself.
+   * selector that reached it selects, plus the schema document its `cfc`
+   * envelope names (`loadLabelSchemaDoc`), which a reader of a labeled
+   * document checks its reads against; a family belongs to the documents
+   * a query names, and the walk chases it for each named root itself.
    * Consulted only where `includeMeta` already gates the chase; it does
    * not affect `traverseCells`, which `includeMeta` also carries.
    */
@@ -2612,23 +2614,25 @@ function trackVisitedDoc(
     );
   }
   // Load the metadata-linked docs recursively unless the address holds no
-  // value, where the context grants a mid-walk load its family
-  // (`chaseLoadedMeta`).
-  if (context.includeMeta && context.chaseLoadedMeta) {
+  // value: the whole family where the context grants a mid-walk load one
+  // (`chaseLoadedMeta`), and otherwise only the schema document the
+  // loaded document's `cfc` envelope names.
+  if (context.includeMeta) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(
       { ...target, path: [] },
       { meta: ignoreReadForScheduling },
     );
     if (fullDoc) {
-      loadMetaLinkedDocs(
-        tx,
-        {
-          address: { ...fullDoc.address, space: target.space },
-          value: fullDoc.value,
-        },
-        context,
-      );
+      const loaded = {
+        address: { ...fullDoc.address, space: target.space },
+        value: fullDoc.value,
+      };
+      if (context.chaseLoadedMeta) {
+        loadMetaLinkedDocs(tx, loaded, context);
+      } else {
+        loadLabelSchemaDoc(tx, loaded, context);
+      }
     }
   }
 }
@@ -2932,6 +2936,29 @@ export function loadMetaLinkedDocs(
       }
     }
   }
+}
+
+/**
+ * Loads the schema document a document's `cfc` envelope names, and nothing
+ * else of its metadata family, into the traversal. A reader of a labeled
+ * document checks what it may read against that schema, so the document
+ * is owed it wherever a walk reaches it, named or not. The target enters
+ * the schema tracker exactly as a named root's `cfc` rail enters it, so an
+ * absent one arrives when it is written. A document without an envelope
+ * loads nothing.
+ */
+export function loadLabelSchemaDoc(
+  tx: IExtendedStorageTransaction,
+  valueEntry: IMemorySpaceAttestation,
+  context: TraversalContext,
+): void {
+  loadMetaLinkedDoc(
+    tx,
+    valueEntry,
+    "cfc",
+    context.schemaTracker,
+    context.scopeKeyIdentity,
+  );
 }
 
 // With unified traversal code, we don't need to worry about the server
