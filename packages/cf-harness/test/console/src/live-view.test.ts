@@ -70,6 +70,7 @@ describe("console/src/live-view", () => {
     kind: "turn_completed",
     turnId: "turn-1",
     result: {
+      looms: [],
       pieces: [{
         slug: "reading-list",
         url: "http://localhost:8000/my-space/reading-list",
@@ -81,6 +82,7 @@ describe("console/src/live-view", () => {
 
   /** The result a completed turn carries when it named no piece. */
   const EMPTY_RESULT = {
+    looms: [],
     pieces: [],
     spaceName: "console-test",
     finalText: "",
@@ -331,6 +333,7 @@ describe("console/src/live-view", () => {
         turnId: "turn-1",
         finalText: "built it",
         result: {
+          looms: [],
           pieces: [{ slug: "reading-list", url: "http://localhost:8000/s/r" }],
           spaceName: "s",
           finalText: "built it",
@@ -1336,6 +1339,7 @@ describe("console/src/live-view", () => {
           kind: "turn_completed",
           turnId: "turn-1",
           result: {
+            looms: [],
             pieces: [{
               slug: "reading-list",
               url: "http://localhost:8000/s/reading-list",

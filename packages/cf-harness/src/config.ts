@@ -1,4 +1,8 @@
 import {
+  type HarnessLoomAuthoringConfig,
+  validateLoomAuthoringConfig,
+} from "./loom-authoring.ts";
+import {
   type CfcConfClause,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
@@ -212,6 +216,9 @@ interface HarnessCommonConfig {
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
   fabricSession?: HarnessFabricSessionConfig;
+  /** Explicit host command backing; never inferred from a model input. */
+  loomAuthoring?: HarnessLoomAuthoringConfig;
+
   patternIndex?: HarnessPatternIndexConfig;
   skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
@@ -284,6 +291,9 @@ export interface ResolveHarnessConfigOptions {
   fabricSession?:
     | HarnessFabricSessionConfig
     | ResolvedHarnessFabricSessionConfig;
+  /** Explicit host command backing; never inferred from a model input. */
+  loomAuthoring?: HarnessLoomAuthoringConfig;
+
   patternIndex?: HarnessPatternIndexConfig;
   skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
@@ -572,6 +582,9 @@ export const resolveFabricSessionConfig = (
 export const resolveHarnessConfig = (
   options: ResolveHarnessConfigOptions = {},
 ): ResolvedHarnessConfig => {
+  if (options.loomAuthoring !== undefined) {
+    validateLoomAuthoringConfig(options.loomAuthoring);
+  }
   const modelProvider = options.modelProvider ?? "openai-compatible-gateway";
   if (
     options.credentialOwner !== undefined &&
@@ -667,6 +680,9 @@ export const resolveHarnessConfig = (
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
+    ...(options.loomAuthoring !== undefined
+      ? { loomAuthoring: structuredClone(options.loomAuthoring) }
+      : {}),
     ...(options.patternIndex !== undefined
       ? { patternIndex: options.patternIndex }
       : {}),

@@ -39,6 +39,67 @@ const writeTranscript = async (
 };
 
 describe("console/turn-result", () => {
+  it("returns only this turn's verified Loom receipts and preserves replay versions", async () => {
+    const artifactRoot = await Deno.makeTempDir();
+    const receipt = {
+      loom_id: "loom-1111111111111111",
+      request_id: "collection-one",
+      version: 2,
+      created: true,
+      component_ids: ["c-1"],
+      operation_ids: ["op-1", "op-2"],
+      displaced: [],
+    };
+    const output = {
+      status: "ok",
+      kind: "loom-authored",
+      receipt,
+      replayed: true,
+      current_version: 4,
+    };
+    const message = (
+      toolName: string,
+      value: unknown,
+    ): HarnessTranscriptMessage => ({
+      role: "tool",
+      toolName,
+      toolCallId: crypto.randomUUID(),
+      content: JSON.stringify(value),
+    });
+    try {
+      await writeTranscript(artifactRoot, "turn-looms", [
+        message("loom_compose", {
+          ...output,
+          receipt: { ...receipt, request_id: "old" },
+        }),
+        { role: "user", content: "Continue" },
+        message("loom_authoring_context", output),
+        message("loom_inspect", output),
+        { role: "assistant", content: JSON.stringify(output) },
+        message("loom_compose", {
+          ...output,
+          receipt: { ...receipt, operation_ids: [] },
+        }),
+        message("loom_compose", output),
+      ], 2);
+      const result = await readConsoleTurnResult({
+        artifactRoot,
+        turnId: "turn-looms",
+        spaceName: "test-space",
+        originLoomId: "loom-2222222222222222",
+      });
+      expect(result?.looms).toEqual([{
+        receipt,
+        replayed: true,
+        current_version: 4,
+      }]);
+      expect(result?.originLoomId).toBe("loom-2222222222222222");
+      expect(result?.pieces).toEqual([]);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
   it("returns successful `assign_slug` values exactly as the model received them", async () => {
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-console-result-",
@@ -65,6 +126,7 @@ describe("console/turn-result", () => {
         turnId: "turn-with-piece",
         spaceName: "console-test",
       })).resolves.toEqual({
+        looms: [],
         pieces: [{
           slug: "reading-list",
           url: "http://localhost:8000/console-test/reading-list",
@@ -101,6 +163,7 @@ describe("console/turn-result", () => {
         turnId: "turn-without-piece",
         spaceName: "console-test",
       })).resolves.toEqual({
+        looms: [],
         pieces: [],
         spaceName: "console-test",
         finalText: "The total is 42.",
@@ -142,6 +205,7 @@ describe("console/turn-result", () => {
         turnId: "follow-up-turn",
         spaceName: "console-test",
       })).resolves.toEqual({
+        looms: [],
         pieces: [],
         spaceName: "console-test",
         finalText: "",
@@ -171,6 +235,7 @@ describe("console/turn-result", () => {
         turnId,
         spaceName: "console-test",
       })).resolves.toEqual({
+        looms: [],
         pieces: [],
         spaceName: "console-test",
         finalText: "The total is 42.",
@@ -304,6 +369,7 @@ describe("console/turn-result", () => {
         turnId,
         spaceName: "console-test",
       })).resolves.toEqual({
+        looms: [],
         pieces: [],
         spaceName: "console-test",
         finalText: "I could not name it.",

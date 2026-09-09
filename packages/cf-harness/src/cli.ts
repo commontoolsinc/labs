@@ -1,3 +1,4 @@
+import { readLoomAuthoringConfig } from "./loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import {
   basename,
@@ -202,6 +203,7 @@ const CLI_STRING_FLAGS = [
   "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
+  "loom-authoring-config",
   "fabric-api-url",
   "fabric-identity",
   "fabric-space",
@@ -540,6 +542,7 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --loom-authoring-config <path> Absolute host-owned JSON file backing Loom tools
   --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug)
   --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
   --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
@@ -586,6 +589,7 @@ Environment:
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_SKILLS_REGISTRY_URL Default value for --skills-registry-url
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_LOOM_AUTHORING_CONFIG Default host authoring configuration file
   CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
@@ -1558,6 +1562,12 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const loomAuthoring = await readLoomAuthoringConfig(
+    typeof args["loom-authoring-config"] === "string"
+      ? args["loom-authoring-config"]
+      : env.CF_HARNESS_LOOM_AUTHORING_CONFIG,
+    readTextFile,
+  );
   const inputCells = parseInputCells(
     args["input-cell"] as string | readonly string[] | undefined,
   );
@@ -1974,6 +1984,7 @@ export const parseCfHarnessCliArgs = async (
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
     ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(patternIndex !== undefined ? { patternIndex } : {}),
     ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,
@@ -3219,6 +3230,7 @@ export const runCfHarnessCli = async (
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
     const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
     let runManifest = await readRunManifest(

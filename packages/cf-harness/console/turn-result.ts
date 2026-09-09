@@ -6,6 +6,10 @@
  * mistaken for a completed contract.
  */
 
+import {
+  isLoomAuthoredObservation,
+  type LoomAuthoredObservation,
+} from "../src/loom-authoring.ts";
 import { join } from "@std/path";
 
 import type {
@@ -25,6 +29,15 @@ export interface ConsoleTurnResultPiece {
 
 /** The stable result an external console caller reads for a completed turn. */
 export interface ConsoleTurnResult {
+  /** Verified compositions from this turn only, including explicit replays. */
+  looms: readonly Pick<
+    LoomAuthoredObservation,
+    "receipt" | "replayed" | "current_version"
+  >[];
+
+  /** Originating Loom captured at submission, independent of later UI focus. */
+  originLoomId?: string;
+
   /** Successful named-piece outputs, in transcript order. */
   pieces: readonly ConsoleTurnResultPiece[];
 
@@ -58,6 +71,9 @@ export type ConsoleChatEventEnvelope =
 
 /** Inputs which identify one turn's durable result. */
 export interface ReadConsoleTurnResultOptions {
+  /** Originating Loom from the durable turn input. */
+  originLoomId?: string;
+
   /** Root holding one artifact directory per turn. */
   artifactRoot: string;
 
@@ -224,6 +240,27 @@ export const readConsoleTurnResult = async (
     return undefined;
   }
   return {
+    ...(options.originLoomId !== undefined
+      ? { originLoomId: options.originLoomId }
+      : {}),
+    looms: artifacts.transcript.flatMap((message, index) => {
+      if (
+        !artifacts.currentTranscriptIndexes.has(index) ||
+        message.role !== "tool" || message.toolName !== "loom_compose"
+      ) return [];
+      try {
+        const output: unknown = JSON.parse(message.content);
+        return isLoomAuthoredObservation(output)
+          ? [{
+            receipt: output.receipt,
+            replayed: output.replayed,
+            current_version: output.current_version,
+          }]
+          : [];
+      } catch {
+        return [];
+      }
+    }),
     pieces: artifacts.transcript.flatMap((message, index) => {
       if (!artifacts.currentTranscriptIndexes.has(index)) {
         return [];

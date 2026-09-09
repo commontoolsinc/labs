@@ -136,10 +136,22 @@ const READONLY_INTERACTIVE_CHAT_TOOL_ID_SET = new Set<BuiltinToolId>(
 export const resolveHarnessChatPolicy = (
   policy: HarnessChatPolicy = DEFAULT_HARNESS_CHAT_POLICY,
   context?: HarnessChatContext,
+  allowCommentLoomAuthoring = false,
 ): HarnessChatPolicy => {
   if (context?.type === "comment-thread") {
     return {
       ...COMMENT_THREAD_HARNESS_CHAT_POLICY,
+      ...(allowCommentLoomAuthoring
+        ? {
+          allowedToolIds: [
+            ...READONLY_INTERACTIVE_CHAT_TOOL_IDS,
+            ...policy.allowedToolIds.filter((id) =>
+              ["loom_compose", "loom_inspect", "loom_authoring_context"]
+                .includes(id)
+            ),
+          ],
+        }
+        : {}),
       ...(policy.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: policy.cfcEnforcementMode }
         : {}),
@@ -163,6 +175,9 @@ export const resolveHarnessChatPolicy = (
 
 export interface HarnessChatTurnInput {
   text: string;
+
+  /** Originating Loom supplied by the caller, persisted with this turn only. */
+  loomId?: string;
   imageAttachments?: readonly HarnessImageAttachment[];
 }
 

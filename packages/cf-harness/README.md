@@ -112,6 +112,8 @@ What works today:
   from the sibling `gvisor` repo:
   - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
   - override per run with `--sandbox-image` or `CF_HARNESS_SANDBOX_IMAGE`
+- durable Loom collections through an explicitly configured host transport; see
+  [Durable Loom authoring](docs/LOOM_AUTHORING.md);
 - built-in tools:
   - `bash`
   - `browser` (structured host browser control for the browser subagent profile
@@ -144,6 +146,9 @@ What works today:
     registry and a Fabric session are configured; resolves a discovery id to a
     full GitHub commit, checks the complete recursive tree, and returns a handle
     or a first-class refusal, never skill text)
+  - `loom_compose`, `loom_inspect`, and `loom_authoring_context` (present only
+    with `--loom-authoring-config`; collections and verified commit receipts,
+    separate from Pattern Instance deployment)
   - `query_docs` (present when the run resolves a documentation corpus; asks one
     question of operator-provisioned reference material and returns a bounded
     answer plus inert citations, never the documents; see

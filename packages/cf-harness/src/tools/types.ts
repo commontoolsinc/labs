@@ -28,6 +28,7 @@ import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
 import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
+import type { HarnessLoomAuthoringConfig } from "../loom-authoring.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
 import type { SandboxRuntime } from "../sandbox/types.ts";
 
@@ -157,6 +158,9 @@ export interface HarnessToolContext {
 
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
+
+  /** Host-owned Loom command routing, absent when the run has no grant. */
+  loomAuthoring?: HarnessLoomAuthoringConfig;
   currentDir: string;
   workspaceHostPath?: string;
   resolvePath(path: string): string;

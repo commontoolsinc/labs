@@ -1,3 +1,8 @@
+import type {
+  LoomAuthoringToolOutput,
+  LoomComposeToolInput,
+  LoomReadToolInput,
+} from "./tools/loom-authoring.ts";
 import {
   dirname,
   join as joinHostPath,
@@ -245,6 +250,9 @@ export interface BuiltinToolInputMap {
   search_skills: SearchSkillsToolInput;
   acquire_skill: AcquireSkillToolInput;
   query_docs: QueryDocsToolInput;
+  loom_compose: LoomComposeToolInput;
+  loom_inspect: LoomReadToolInput;
+  loom_authoring_context: LoomReadToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -266,6 +274,9 @@ export interface BuiltinToolOutputMap {
   search_skills: SearchSkillsToolOutput;
   acquire_skill: AcquireSkillToolOutput;
   query_docs: QueryDocsToolOutput;
+  loom_compose: LoomAuthoringToolOutput;
+  loom_inspect: LoomAuthoringToolOutput;
+  loom_authoring_context: LoomAuthoringToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -2247,6 +2258,7 @@ export class CfHarnessEngine {
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
+      loomAuthoring: this.config.loomAuthoring,
       resolvePath: (path: string) =>
         this.sandbox.resolvePath(path, this.#runState.currentDir),
       resolveHostPath: (path: string) => this.#resolveHostPath(path),
