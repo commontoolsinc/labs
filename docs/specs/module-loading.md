@@ -536,8 +536,15 @@ every document.
 
 Source and compiled documents share the base shape
 `{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`.
-A source document may additionally carry the runtime fingerprint used for its
-identity. Their link sets are different. A source document stores internal
+`code` is a sigil link to the content-addressed code document holding the
+module's text, `cid:<taggedHash>` over the string alone, so identical text is
+one document per space however many records or runtime versions name it
+([code documents](content-addressed-schemas.md#code-documents)). A read
+under the document schema resolves the link to the string, and the loader
+checks that the string hashes to the id the link names. A document written
+before code documents existed holds the string inline, and readers accept
+both. A source document may additionally carry the runtime fingerprint used
+for its identity. Their link sets are different. A source document stores internal
 authored-import links, including links to authored declarations. It omits fabric
 edges so one program's source closure does not absorb another program.
 Synthetic retention links may keep other source roots alive, but they are

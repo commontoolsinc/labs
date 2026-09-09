@@ -22,11 +22,13 @@ loud server error for a selector reference nothing backs. The
 connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
-reference at rest never needs transport compression.
+reference at rest never needs transport compression. Code documents
+(§ Code documents) share the namespace and its rules: the compile cache
+stores each module's text as one, and its records link to them.
 
 ## Last Updated
 
-2026-08-15
+2026-09-09
 
 ## Motivation
 
@@ -105,6 +107,49 @@ A schema document is a `cid:` document whose value is a JSON Schema:
   store — delivery, traversal, and commit validation — resolve `cid:`
   documents at space scope. (Direct-registry reuse across spaces is
   hash-verified, so a divergent copy could never enter it.)
+
+### Code documents
+
+A code document is a `cid:` document whose value is a string: the authored
+source of one module, or its compiled output. It is the second kind of
+content the `cid:` namespace holds, and the larger.
+
+- **Id**: `cid:<taggedHash>` where the hash is `taggedHashStringOf(code)`,
+  the general `fid1` content hash of the string itself. Nothing but the
+  string enters the hash, so two modules with identical text share one
+  document however many records name it.
+- **Content**: `{ "value": "<code>" }` and nothing else. No filename,
+  identity, imports, or source map travels inside it; those stay on the
+  record that links to it, and the document says nothing about where its
+  text came from.
+- **Write**: the same idempotent blind write as a schema document, through
+  the transaction's `stageCodeDocument`, which derives the id from the
+  content it is handed, so a code document can never be installed under a
+  hash its content does not produce. The record that links to it is written
+  in the same transaction.
+- **Verification**: the commit boundary re-hashes a string-valued `cid:`
+  set against its id and refuses a mismatch, beside the check it already
+  runs on schema-shaped content. A reader re-hashes the string it resolves
+  against the id the record's link names, so a document that reached a
+  replica by another route holding other content is refused at load.
+- **Per space, by rule**: as for a schema document, it exists in every space
+  that references it, and a reference resolves only in the space it sits
+  in. A space can be unavailable, so a piece's code loads from the space
+  the piece lives in and never from another.
+- **No envelope**: a code document carries no `cfc` metadata. It is a
+  runtime surface outside labeling, like a schema document: immutable,
+  named by its content, and excluded from schema write policy and the flow
+  join. A link written into a labeled record that names a `cid:` document
+  records no link-write policy input, since the document can carry nothing
+  a label would describe. Provenance stays on the record: the compile
+  cache's runtime-minted integrity atom labels the record, whose link and
+  map it covers, while the hash covers the bytes.
+- **Retention**: permanent, as for every `cid:` document. Every code
+  version ever compiled into a space stays there.
+
+A record written before code documents existed holds its code inline as a
+string, and readers accept both forms. Nothing rewrites an existing record;
+only new writes use a code document.
 
 ### Decomposition
 

@@ -1,6 +1,7 @@
 import { normalize } from "@std/path/posix";
 
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import type {
   BuilderSourceSitesV1,
   PatternCoverageSpan,
@@ -16,6 +17,7 @@ import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
+import { createSigilLinkFromParsedLink, parseLink } from "../link-utils.ts";
 import { snapshotQueryResult } from "../query-result-proxy.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
@@ -28,6 +30,7 @@ import {
   deriveModuleRecordFields,
   SOURCE_ROOT_SPECIFIER,
 } from "../sandbox/module-record-compiler.ts";
+import type { SigilLink } from "../sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -49,11 +52,15 @@ const logger = getLogger("cell-cache");
  *  - **Compiled set** `compileCache:<runtimeVersion>/<identity>` — verified
  *    compiled JS, keyed by `(runtimeVersion, identity)`.
  *
- * Each document records its `code`, authored `filename`, and the resolved
- * internal `imports` (`{ specifier, identity }`) — the identity is what the
- * document's sigil link points at (`sourceDocKey`/`compiledDocKey` of the
- * dependency). This module owns the pure key/identity/verification logic; the
- * cell read/write + link wiring layer builds on it.
+ * Each document records its authored `filename` and the resolved internal
+ * `imports` (`{ specifier, identity }`) — the identity is what the document's
+ * sigil link points at (`sourceDocKey`/`compiledDocKey` of the dependency) —
+ * and its `code` as a link to the content-addressed `cid:` document holding
+ * the string, so identical module text is one document however many records
+ * name it. A record may instead hold the string inline, and reads accept
+ * both. This module owns the pure
+ * key/identity/verification logic; the cell read/write + link wiring layer
+ * builds on it.
  */
 
 /** A resolved internal import edge of a cached module. */
@@ -688,12 +695,14 @@ export function verifySourceDocs(
  * carries a sigil **link** to the dependency's cell (so the storage layer
  * follows it and loads the closure), plus the module's own `identity` for
  * read-side keying. The stored identity is not trusted — {@link verifySourceDocs}
- * recomputes it.
+ * recomputes it. `code` is stored as a link to the code document and read
+ * back through the schema as the string that document holds; a record may
+ * instead store the string itself.
  */
 interface StoredSourceDoc {
   kind: "source";
   identity: string;
-  code: string;
+  code: string | SigilLink;
   filename: string;
   imports: { specifier: string; link: unknown }[];
   delegatedModuleIdentities?: string[];
@@ -744,7 +753,10 @@ export const SOURCE_DOC_SCHEMA = {
  * Flat source-document write schema. Only delegation metadata receives the
  * runtime-minted compiler attestation: source code/imports remain
  * self-verifying through their content identity, while annotations remain
- * independently mutable.
+ * independently mutable. `code` is admitted as whatever is stored — the link
+ * to the code document — since a write schema is also the value condition
+ * CFC prepare checks the written record against; the read schema is the one
+ * that declares the string a read resolves the link to.
  */
 function sourceDocWriteSchema(): JSONSchema {
   return {
@@ -752,7 +764,7 @@ function sourceDocWriteSchema(): JSONSchema {
     properties: {
       kind: { type: "string" },
       identity: { type: "string" },
-      code: { type: "string" },
+      code: true,
       filename: { type: "string" },
       imports: {
         type: "array",
@@ -772,6 +784,38 @@ function sourceDocWriteSchema(): JSONSchema {
       annotations: { type: "object" },
     },
   };
+}
+
+/**
+ * Stages the code document holding `code` in `space` and returns the link a
+ * record stores in its `code` field. The document is installed in the same
+ * transaction as the record, so a committed record never names a document
+ * the space does not hold.
+ */
+function codeLink(
+  space: MemorySpace,
+  code: string,
+  tx: IExtendedStorageTransaction,
+): SigilLink {
+  const id = tx.stageCodeDocument(space, code);
+  return createSigilLinkFromParsedLink({ id, path: [], space });
+}
+
+/**
+ * Whether a record's `code` reads as the string its storage names. A string
+ * stored inline is itself; a link verifies only when the code document it
+ * names is the one the string hashes to, so a document that reached this
+ * replica holding other content is refused. A reading that is not a string
+ * — the code document absent from the replica — verifies nothing.
+ */
+export function codeFieldVerifies(
+  cell: Cell<unknown>,
+  code: unknown,
+): code is string {
+  if (typeof code !== "string") return false;
+  const stored = (cell.getRaw() as { code?: unknown } | undefined)?.code;
+  if (typeof stored === "string") return stored === code;
+  return parseLink(stored, cell)?.id === `cid:${taggedHashStringOf(code)}`;
 }
 
 /** Attribute cache-document writes to the trusted compiler builtin. */
@@ -887,7 +931,7 @@ export function writeSourceDocs(
       cell.set({
         kind: "source",
         identity,
-        code: doc.code,
+        code: codeLink(space, doc.code, tx),
         filename: doc.filename,
         imports: doc.imports.map((imp) => ({
           specifier: imp.specifier,
@@ -966,6 +1010,10 @@ export function readLoadedSourceClosure(
   while (queue.length > 0) {
     const { doc, cell } = queue.shift()!;
     if (out.has(doc.identity)) continue;
+    // A document whose code does not verify is left out, and the closure
+    // then fails its identity verification exactly as a missing document
+    // does, so the caller recompiles.
+    if (!codeFieldVerifies(cell, doc.code)) continue;
     const imports: ModuleImportRef[] = [];
     const childDocs: { doc: StoredSourceDoc; cell: Cell<unknown> }[] = [];
     for (const imp of doc.imports ?? []) {
@@ -1120,10 +1168,16 @@ export async function loadVerifiedSourceClosure(
 // Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC
 //
 
+// The write-side property set. `code` is admitted as whatever is stored —
+// the link to the code document — because the write schema doubles as the
+// value condition CFC prepare checks the written record against before it
+// persists the root integrity label; a `string` condition would fail on the
+// link and drop the label. The read schema below declares the string a read
+// resolves the link to.
 const compiledDocProperties = {
   kind: { type: "string" },
   identity: { type: "string" },
-  code: { type: "string" },
+  code: true,
   filename: { type: "string" },
   sourceMap: {},
   exportNames: { type: "array", items: { type: "string" } },
@@ -1211,7 +1265,10 @@ export function compiledDocWriteSchema(): JSONSchema {
 interface StoredCompiledDoc {
   kind: "compiled" | "data";
   identity: string;
-  code: string;
+
+  /** A link to the code document, or the string itself. */
+  code: string | SigilLink;
+
   filename: string;
   sourceMap?: unknown;
   exportNames?: readonly string[];
@@ -1223,6 +1280,9 @@ interface StoredCompiledDoc {
   delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
 }
+
+/** A stored compiled document whose `code` has been read and verified. */
+type VerifiedCompiledDoc = Omit<StoredCompiledDoc, "code"> & { code: string };
 
 /**
  * The coverage spans stored as scalar JSON on a compiled document, parsed and
@@ -1453,7 +1513,7 @@ export function writeCompiledDocs(
       cell.set({
         kind: module.isData ? "data" : "compiled",
         identity: module.identity,
-        code: module.js,
+        code: codeLink(space, module.js, tx),
         filename: module.filename,
         ...(derived === undefined ? {} : {
           exportNames: derived.exportNames,
@@ -1688,10 +1748,12 @@ export async function loadCompiledClosure(
   // single sync (below) has already transitively loaded the whole closure.
   const verifiedDoc = (
     cell: Cell<unknown>,
-  ): StoredCompiledDoc | undefined => {
+  ): VerifiedCompiledDoc | undefined => {
     if (!cellCarriesIntegrity(cell, atom, tx)) return undefined;
     const doc = cell.get() as StoredCompiledDoc | undefined;
     if (!doc || typeof doc.identity !== "string") return undefined;
+    if (!codeFieldVerifies(cell, doc.code)) return undefined;
+    const code = doc.code;
     const policyManifests: unknown[] = [];
     try {
       for (const input of doc.policyManifests ?? []) {
@@ -1731,13 +1793,14 @@ export async function loadCompiledClosure(
       return undefined;
     }
     if (doc.policyManifests === undefined && sourceMap === undefined) {
-      return doc;
+      return { ...doc, code };
     }
     if (doc.policyManifests !== undefined) {
       runtime.registerCfcPolicyManifests(undefined, policyManifests);
     }
     return {
       ...doc,
+      code,
       ...(sourceMap === undefined ? {} : { sourceMap }),
       ...(doc.policyManifests === undefined ? {} : { policyManifests }),
     };
@@ -1754,7 +1817,7 @@ export async function loadCompiledClosure(
   const entryDoc = verifiedDoc(entryCell);
   if (entryDoc === undefined) return out;
 
-  const queue: { doc: StoredCompiledDoc }[] = [{ doc: entryDoc }];
+  const queue: { doc: VerifiedCompiledDoc }[] = [{ doc: entryDoc }];
   while (queue.length > 0) {
     const { doc } = queue.shift()!;
     if (visited.has(doc.identity)) continue;

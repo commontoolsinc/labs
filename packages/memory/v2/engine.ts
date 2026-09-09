@@ -1,6 +1,10 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { hashStringOf, valueEqual } from "@commonfabric/data-model";
+import {
+  hashStringOf,
+  taggedHashStringOf,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
@@ -5386,13 +5390,25 @@ const applyCommitTransaction = (
         `memory v2 commit cannot write content-addressed document ${operation.id} at ${operation.scope} scope`,
       );
     }
-    // A `cid:` set that IS a schema document (by content-addressed
-    // identity — `cid:` also holds blobs) contributes its own refs;
-    // anything else is scanned like an ordinary document. Schema content
-    // is never link-scanned: keywords such as `default` may carry
-    // link-shaped DATA.
+    // A `cid:` set holding a bare string is a code document, its id the
+    // general content hash of the string, checked here so a string that
+    // does not hash to its id never lands; a string carries no link and
+    // no schema, so there is nothing else to scan. A `cid:` set that IS
+    // a schema document (by content-addressed identity) contributes its
+    // own refs; anything else is scanned like an ordinary document.
+    // Schema content is never link-scanned: keywords such as `default`
+    // may carry link-shaped DATA.
     const installedInner = (operation.value as { value?: unknown })?.value;
-    if (
+    if (typeof installedInner === "string") {
+      if (
+        taggedHashStringOf(installedInner) !==
+          operation.id.slice("cid:".length)
+      ) {
+        throw new ProtocolError(
+          `memory v2 commit installs content-addressed document ${operation.id} whose string content does not hash to its id`,
+        );
+      }
+    } else if (
       isSubschema(installedInner) &&
       internSchemaAsTaggedHashString(installedInner as JSONSchema) ===
         operation.id.slice("cid:".length)

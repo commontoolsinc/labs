@@ -230,8 +230,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Whether SPACE's replica holds server-confirmed verified content for
-   * `cid:<hash>` — the write-side elision seam for schema-document
-   * staging. Confirmed only: a pending local write is not evidence the
+   * `cid:<hash>` — the write-side elision seam for content-addressed
+   * document staging, schema and code documents alike. Confirmed only: a
+   * pending local write is not evidence the
    * server holds the document. Consults an already-open replica and
    * answers false otherwise; false stages, which is always the safe
    * direction.
@@ -1619,6 +1620,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
+
+  /**
+   * Stages the content-addressed document holding `code` into this
+   * transaction and returns its id: `cid:` plus the general content hash
+   * of the string. The document is the string and nothing else, so no
+   * closure follows it; the write is blind and idempotent, deduped per
+   * transaction, and elided when the space's server already holds the
+   * document. Required for the same reason as `stageSchemaDocClosure`:
+   * the dedupe and the elision cannot be bypassed by a caller writing
+   * the document itself.
+   */
+  stageCodeDocument(space: MemorySpace, code: string): URI;
 
   tx: IStorageTransaction;
 

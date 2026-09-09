@@ -5,6 +5,7 @@ import {
   type FabricValue,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
@@ -2192,6 +2193,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #ensuredSchemaDocs = new Set<string>();
 
   /**
+   * `"<space>|<hash>"` pairs of code documents this transaction has
+   * already staged, kept apart from the schema-document set because the
+   * two namespaces never share a hash but do share the reason for the
+   * dedupe: a repeat write would invalidate a prepared CFC digest.
+   */
+  #stagedCodeDocs = new Set<string>();
+
+  /**
    * The write-side delivery guarantee of content-addressed schemas
    * (`docs/specs/content-addressed-schemas.md`): every schema document a
    * written link references travels in the same transaction, into the same
@@ -2312,6 +2321,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       });
       pending.push(...collectExternalSchemaRefHashes(document));
     }
+  }
+
+  /**
+   * Like {@link stageSchemaDocClosure}, except the document is a bare
+   * string with no closure behind it and the caller supplies the content
+   * rather than a hash: the id is derived here, so a code document can
+   * never be installed under a hash its content does not produce. Elision
+   * is server-confirmed only, for the reason the schema staging gives.
+   */
+  stageCodeDocument(space: MemorySpace, code: string): URI {
+    const hash = taggedHashStringOf(code);
+    const id = `cid:${hash}` as URI;
+    const key = `${space}|${hash}`;
+    if (this.#stagedCodeDocs.has(key)) return id;
+    this.#stagedCodeDocs.add(key);
+    if (this.tx.isSchemaDocPersisted?.(space, hash) === true) return id;
+    this.#runPrivilegedSystemWrite(() => {
+      this.writeOrThrow(
+        { space, id, type: "application/json", path: [] },
+        { value: code },
+      );
+    });
+    return id;
   }
 
   /**
@@ -3436,6 +3468,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
     this.#wrapped.stageSchemaDocClosure(space, rootHash);
+  }
+
+  stageCodeDocument(space: MemorySpace, code: string): URI {
+    return this.#wrapped.stageCodeDocument(space, code);
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {

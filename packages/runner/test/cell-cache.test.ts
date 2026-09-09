@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -14,6 +15,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 import {
   buildSourceDocs,
+  codeFieldVerifies,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
   compiledDocWriteSchema,
@@ -28,6 +30,8 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { parseLink } from "../src/link-utils.ts";
+import type { URI } from "../src/sigil-types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
@@ -593,6 +597,90 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
   });
 
+  it("stores a module's code as a link to the document holding it", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    const codeId = `cid:${taggedHashStringOf(entry.source)}` as URI;
+    const record = runtime.getCell(
+      spaceA,
+      sourceDocKey(entryIdentity),
+      undefined,
+      tx,
+    );
+    const stored = record.getRaw() as { code?: unknown };
+    expect(parseLink(stored.code, record)?.id).toBe(codeId);
+    expect(
+      tx.readOrThrow({
+        space: spaceA,
+        id: codeId,
+        type: "application/json",
+        path: [],
+      }),
+    ).toEqual({ value: entry.source });
+    const loaded = (await loadSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    ))!;
+    expect(loaded.get(entryIdentity)?.code).toBe(entry.source);
+  });
+
+  it("loads a record that stores its code inline", async () => {
+    const identity = "source-inline-code";
+    const code = "export const value = 1;";
+    const tx = runtime.edit();
+    runtime.getCell(spaceA, sourceDocKey(identity), undefined, tx).set({
+      kind: "source",
+      identity,
+      code,
+      filename: "/inline.ts",
+      imports: [],
+    });
+
+    const loaded = await loadSourceClosure(runtime, spaceA, identity, tx);
+
+    expect(loaded?.get(identity)?.code).toBe(code);
+  });
+
+  it("verifies a record's code against the document its link names", () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    const record = runtime.getCell(
+      spaceA,
+      sourceDocKey(entryIdentity),
+      undefined,
+      tx,
+    );
+
+    expect(codeFieldVerifies(record, entry.source)).toBe(true);
+    // A string the link's document does not hash to, and no string at all.
+    expect(codeFieldVerifies(record, `${entry.source}\n`)).toBe(false);
+    expect(codeFieldVerifies(record, undefined)).toBe(false);
+
+    const inlineIdentity = "source-inline-verify";
+    const inline = runtime.getCell(
+      spaceA,
+      sourceDocKey(inlineIdentity),
+      undefined,
+      tx,
+    );
+    inline.set({
+      kind: "source",
+      identity: inlineIdentity,
+      code: "inline",
+      filename: "/inline.ts",
+      imports: [],
+    });
+    expect(codeFieldVerifies(inline, "inline")).toBe(true);
+    expect(codeFieldVerifies(inline, "other")).toBe(false);
+  });
+
   it("loads duplicate source import links once", async () => {
     const entryIdentity = "source-entry-with-duplicate-imports";
     const childIdentity = "source-duplicate-child";
@@ -893,6 +981,74 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
       new Set(["/main.tsx", "/util.ts", "/types.ts"]),
     );
+  });
+
+  it("links records with byte-identical code to one code document", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    writeCompiledDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      { runtimeVersion: "rt-test-2" },
+      wtx,
+    );
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const codeIdOf = (version: string) => {
+      const record = runtime.getCell(
+        spaceA,
+        compiledDocKey(version, entryIdentity),
+        undefined,
+        rtx,
+      );
+      const stored = record.getRaw() as { code?: unknown };
+      return parseLink(stored.code, record)?.id;
+    };
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    expect(codeIdOf(RTVER)).toBe(`cid:${taggedHashStringOf(entry.js)}`);
+    expect(codeIdOf("rt-test-2")).toBe(codeIdOf(RTVER));
+    rtx.abort?.();
+  });
+
+  it("loads a compiled record that stores its code inline", async () => {
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    const wtx = runtime.edit();
+    const prior = wtx.getCfcState().implementationIdentity;
+    wtx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    runtime.getCell(
+      spaceA,
+      compiledDocKey(RTVER, utilIdentity),
+      compiledDocWriteSchema(),
+      wtx,
+    ).set({
+      kind: "compiled",
+      identity: utilIdentity,
+      code: "/* inline */",
+      filename: "/util.ts",
+      imports: [],
+    });
+    wtx.setCfcImplementationIdentity(prior);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      utilIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+    expect(loaded.get(utilIdentity)?.code).toBe("/* inline */");
   });
 
   it("round-trips JSON coverage spans and rejects unsupported stored spans", async () => {

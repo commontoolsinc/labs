@@ -11,6 +11,7 @@ import { toFileUrl } from "@std/path";
 import { applyCommit, close, type Engine, open, read } from "../v2/engine.ts";
 import { encodeMemoryBoundary, ProtocolError } from "../v2.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 const withEngine = async (
@@ -206,6 +207,35 @@ Deno.test("compares content-addressed sets by content inside special objects", a
         }),
       ProtocolError,
       "cannot change content-addressed document",
+    );
+  });
+});
+
+Deno.test("accepts a string content-addressed document whose string hashes to its id", async () => {
+  await withEngine((engine) => {
+    const code = "export const answer = 42;";
+    const id = `cid:${taggedHashStringOf(code)}`;
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp(id, code)] }),
+    });
+    assertEquals(read(engine, { id, branch: "" }), { value: code });
+  });
+});
+
+Deno.test("rejects a string content-addressed document whose string does not hash to its id", async () => {
+  await withEngine((engine) => {
+    const id = `cid:${taggedHashStringOf("export const answer = 42;")}`;
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [setOp(id, "export const answer = 43;")],
+          }),
+        }),
+      ProtocolError,
+      "whose string content does not hash to its id",
     );
   });
 });

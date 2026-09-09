@@ -3,6 +3,7 @@ import {
   cloneIfNecessary,
   hashStringOf,
   isKeyableObjectOrArray,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
@@ -6920,6 +6921,9 @@ export class SpaceReplica
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
+    // A code document is a bare string whose id is its own content hash;
+    // a schema document verifies through the schema hash instead.
+    if (typeof value === "string") return taggedHashStringOf(value) === hash;
     return isSubschema(value) &&
       internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
