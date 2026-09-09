@@ -22,7 +22,9 @@
  */
 
 import type { IFCLabel } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { mergeConfidentialityOnlyLabels } from "./contracts/cfc-model-context.ts";
+import { isRepresentableIfcLabel } from "./ifc-label-shape.ts";
 
 export type HarnessWorkspaceTaint =
   | {
@@ -36,6 +38,31 @@ export type HarnessWorkspaceTaint =
     readonly kind: "unknown";
     readonly reason: string;
   };
+
+/**
+ * Whether a taint is a shape this can carry, checked before anything reads
+ * one that came from outside this process.
+ *
+ * The family's record is a file. Whatever wrote it last — an earlier run, a
+ * hand, a partial write this could not detect — is not this process, so its
+ * contents are data rather than state. A `kind` outside the two defined, or a
+ * label with a shape the merge would refuse or a serializer would raise on,
+ * is not a family that saw nothing; it is a record this cannot read.
+ */
+const isRepresentableTaint = (
+  value: unknown,
+): value is HarnessWorkspaceTaint => {
+  if (!isObjectNotArray(value)) {
+    return false;
+  }
+  if (value.kind === "unknown") {
+    return typeof value.reason === "string";
+  }
+  if (value.kind !== "known") {
+    return false;
+  }
+  return value.label === undefined || isRepresentableIfcLabel(value.label);
+};
 
 const taints = new Map<string, HarnessWorkspaceTaint>();
 
@@ -117,6 +144,9 @@ export const useWorkspaceTaintRecord = (
     persistRecord(familyRunId);
     return { found: false, taint: workspaceTaint(familyRunId) };
   }
+  // A record that exists and cannot be read is FOUND: it is this family's
+  // record, and the seed below poisons on it. Reporting it as absent would
+  // send the caller to its own run state, which describes a different thing.
   return { found: true, taint: seedWorkspaceTaint(familyRunId, stored.taint) };
 };
 
@@ -139,6 +169,15 @@ export const joinWorkspaceTaint = (
   const current = workspaceTaint(familyRunId);
   if (current.kind === "unknown") {
     return current;
+  }
+  // A label the merge would refuse, or that would raise on the way through
+  // it, is not evidence of a public container. Callers validate before they
+  // get here; this makes the function total for the ones that do not.
+  if (!isRepresentableIfcLabel(label)) {
+    return poisonWorkspaceTaint(
+      familyRunId,
+      "a sandbox invocation reported a taint whose shape cannot be read",
+    );
   }
   const merged = mergeConfidentialityOnlyLabels([current.label, label]);
   const next: HarnessWorkspaceTaint = merged === undefined
@@ -190,6 +229,14 @@ export const seedWorkspaceTaint = (
       familyRunId,
       "this run was resumed from a record that says nothing about what its " +
         "earlier sandbox invocations were exposed to",
+    );
+  }
+  if (!isRepresentableTaint(persisted)) {
+    return poisonWorkspaceTaint(
+      familyRunId,
+      "the record this run's family state was read from does not describe a " +
+        "state this build can read, so what its earlier invocations were " +
+        "exposed to cannot be established",
     );
   }
   if (persisted.kind === "unknown") {
