@@ -23,62 +23,8 @@
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
 
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
-import { tagFromNativeBuiltinClass } from "./tagFromNativeBuiltinClass.ts";
-import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
-import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricInstance } from "./interface.ts";
-
-/**
- * Maps a constructor to its tag. Returns the tag string if the constructor is a
- * recognized type (JS builtins or system-defined `FabricPrimitive`s), or `null`
- * otherwise.
- *
- * The builtins are asked first, by `tagFromNativeBuiltinClass()`. Order decides
- * nothing between the two -- a class is in one list or the other, never both --
- * so what it is chosen for is cost: a `switch` on object identity compares in
- * order, and plain objects and arrays outnumber everything else this is asked
- * about by a wide margin.
- */
-export function tagFromNativeClass(
-  constructorFn: { prototype: unknown },
-): ValueTag | null {
-  const builtin = tagFromNativeBuiltinClass(constructorFn);
-  if (builtin !== null) return builtin;
-
-  switch (constructorFn) {
-    case FabricBytes: {
-      return VALUE_TAGS.FabricBytes;
-    }
-
-    case FabricEpochNsec: {
-      return VALUE_TAGS.EpochNsec;
-    }
-
-    case FabricEpochDay: {
-      return VALUE_TAGS.EpochDay;
-    }
-
-    case FabricHash: {
-      return VALUE_TAGS.Hash;
-    }
-
-    case FabricKeyPair: {
-      return VALUE_TAGS.FabricKeyPair;
-    }
-
-    case FabricRegExp: {
-      return VALUE_TAGS.FabricRegExp;
-    }
-
-    default: {
-      return null;
-    }
-  }
-}
+import { tagFromNativeBuiltinClass, tagFromFabricPrimitiveElseNull } from "./tag-from.ts";
+import { FabricInstance, FabricPrimitive } from "./interface.ts";
 
 /**
  * Maps a JS value to its native-instance tag. Returns the tag string if the
@@ -104,19 +50,20 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // Arrays first, and unconditionally: see above.
   if (Array.isArray(value)) {
     return VALUE_TAGS.Array;
+  } else if (Error.isError(value)) {
+    return VALUE_TAGS.Error;
+  } else if (value instanceof FabricPrimitive) {
+    return tagFromFabricPrimitiveElseNull(value);
+  } else if (value instanceof FabricInstance) {
+    return VALUE_TAGS.FabricInstance;
   }
 
   const proto = Object.getPrototypeOf(value);
 
-  // A `null` prototype settles the value here, both ways it can go. It names
-  // no class, so nothing below could recognize one; and `instanceof` walks a
-  // chain that is empty, so the `FabricInstance` test below cannot claim it
-  // either. What is left is an `Error` whose prototype was severed -- still an
-  // error, and `Error.isError()` is what sees it -- or a bare record, which is
-  // tagged `Object` so the object rule decides it by name, the same way an
-  // indirect array is decided by the array rule.
+  // We treat a `null` prototype as type `Object`, because due to the checks
+  // above, it can't be a cross-realm type of any sort we attempt to recognize.
   if (proto === null) {
-    return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
+    return VALUE_TAGS.Object;
   }
 
   // The class is read from the PROTOTYPE, not from the value. What is being
@@ -127,20 +74,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // `Error` and silently rebuilt as one.
   const ctor = constructorOfPrototype(proto);
 
-  if (ctor !== undefined) {
-    const tag = tagFromNativeClass(ctor);
-    if (tag !== null) return tag;
-  }
-
-  // Fallbacks for values whose constructor wasn't recognized.
-
-  // `Error`s with no reachable constructor -- e.g. one from another realm. An
-  // ordinary subclass (including `DOMException`) never gets here:
-  // `tagFromNativeClass()` matches it via `prototype instanceof Error`.
-  if (Error.isError(value)) return VALUE_TAGS.Error;
-
-  // `FabricInstance` values (object-like protocol types).
-  if (value instanceof FabricInstance) return VALUE_TAGS.FabricInstance;
-
-  return null;
+  return (ctor === undefined)
+    ? null
+    : tagFromNativeBuiltinClass(ctor);
 }

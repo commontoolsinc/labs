@@ -35,16 +35,19 @@ export {
 } from "./value-clone.ts";
 
 export {
-  assertValidFabricValueLayer,
   isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+} from "./type-check.ts";
+
+export {
+  assertValidFabricValueLayer,
   isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
-} from "./type-check.ts";
+} from "./validity-check.ts";
 
 export {
   fabricFromNativeValue,
@@ -64,7 +67,7 @@ export {
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
 
-export { tagFromNativeClass, tagFromNativeValue } from "./native-type-tags.ts";
+export { tagFromNativeValue } from "./native-type-tags.ts";
 
 export {
   toCompactDebugString,
@@ -76,3 +79,10 @@ export {
 export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
 export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
+
+export {
+  tagFromFabricPrimitive,
+  tagFromFabricPrimitiveElseNull,
+  tagFromFabricValue,
+  tagFromFabricValueElseNull,
+} from "./tag-from.ts";

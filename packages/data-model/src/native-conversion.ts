@@ -51,7 +51,7 @@ import { tagFromNativeValue } from "./native-type-tags.ts";
 import {
   assertValidFabricValueLayer,
   isValidFabricNativeObject,
-} from "./type-check.ts";
+} from "./validity-check.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
