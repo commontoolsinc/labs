@@ -1,11 +1,10 @@
 # Choosing which tests a pull request runs
 
-Status: in progress. Part one is built apart from the one-off bootstrap
-dispatch; part two is built apart from its continuous-integration
-configuration and the coverage work; part three has the reporter and
-nothing else. [The work](#the-work) carries the detail. The record store
-this plan consumes is live and holds the data the design needs; the gaps
-it does not yet hold are listed under [What the store is
+Status: in progress. Part one is built. Part two is built apart from its
+continuous-integration configuration and the coverage work; part three has
+the reporter and nothing else. [The work](#the-work) carries the detail.
+The record store this plan consumes is live and holds the data the design
+needs; the gaps it does not yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
 work.
 
@@ -2958,10 +2957,14 @@ should have, which the full run on `main` catches. That bounds the whole
 attack surface, and it is why the manifest is allowed to be an ordinary
 public object rather than a signed artifact.
 
-Write access to the manifest prefix is one service account reachable only
-through a Workload Identity provider pinned to one workflow file on
-`main`, exactly as the relay is. Nothing else in the organization can
-write there, and the account cannot read, list, overwrite, or delete.
+The publisher is the only workflow-scoped writer to the manifest prefix. Its
+service account is reachable through a Workload Identity provider pinned to one
+workflow file on `main`, exactly as the relay is. Its identity-specific
+`objectCreator` grant cannot overwrite or delete, while the dataset's public
+`objectViewer` grant separately lets it read and list objects like any other
+public reader. A bucket administrator can still write anywhere in the
+bucket. That is a risk the infrastructure has to contain, rather than a
+second way to publish a manifest.
 
 The lane runner treats the manifest as untrusted input and validates it
 whole. The only field that reaches a shell is a suite identifier, which is
@@ -3230,7 +3233,18 @@ answers somewhere people can see them.
       rollup of the shared area cannot say a day is accounted for and
       take that day's local submissions with it. Local records stay on
       their raw path until they have rollups of their own.
-- [ ] The one-off bootstrap dispatch.
+- [x] The one-off bootstrap dispatch. On 2026-09-06, [run
+      34020738350](https://github.com/commontoolsinc/labs/actions/runs/34020738350)
+      on `main` folded 12 rollup days and 67,463,235 executions, then created
+      `manifest-2026-09-06T08:02:32.080Z-01M1TWYZZV2PXG5Y5VG3MCY91Q.json.gz`
+      and the matching state object. The public listing shows both, and later
+      incremental runs succeeded from that state. As a later check, scheduled
+      [run
+      34274701451](https://github.com/commontoolsinc/labs/actions/runs/34274701451)
+      on 2026-09-08 folded 1,321,563 executions into 19,904 identities and
+      created
+      `manifest-2026-09-08T20:25:40.387Z-01M21B6E8PQV8ZPP0E21CMR4G3.json.gz`
+      with its matching state object.
 - [x] Repeat the record census after `main` emitted server-execution
       variant records, and replace the plan's projection inputs.
 - [x] Dashboard tiles: the flake list, what the newest manifest would

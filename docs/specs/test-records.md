@@ -243,10 +243,11 @@ the partition where their report was produced, not where it was uploaded.
 A trailing window can make late arrivals likely to be found, but cannot
 make discovery exact; what listing does and does not settle is described
 below. The whole dataset is readable by `allUsers`. Writers hold
-`roles/storage.objectCreator` pinned to their own folder, which cannot
-read, list, overwrite, or delete; nothing already stored can be modified
-by any append credential. An incompatible schema writes under `v2/` and
-readers migrate at their own pace.
+`roles/storage.objectCreator` pinned to their own folder. That
+identity-specific writer grant cannot overwrite or delete, while the public
+reader grant separately lets every principal read and list. Nothing already
+stored can be modified by any append credential. An incompatible schema writes
+under `v2/` and readers migrate at their own pace.
 
 Four writer principals exist, three of them recording. The **relay** —
 the only one that writes what CI produced — holds create on
