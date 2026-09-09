@@ -111,6 +111,11 @@ export function addressesToPathByEntity(
  * nothing on a `FabricMap`. Answering `false` would make an instance
  * indistinguishable from a leaf, and a read below one would then stop
  * triggering when the instance is deleted or replaced by a scalar.
+ *
+ * TODO(danfuzz): remove this once `isWalkableObjectOrArray()` stops throwing
+ * for a `FabricInstance`. The descent it gains at that point is the one this
+ * function already performs, so the two answers converge and the call sites
+ * below name the shared predicate directly.
  */
 function isKeyable(value: unknown): boolean {
   return value instanceof FabricInstance || isWalkableObjectOrArray(value);
