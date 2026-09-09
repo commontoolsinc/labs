@@ -164,30 +164,23 @@ export interface RawModuleOptions {
 }
 
 /**
- * What the runner hands a raw builtin as its `cause`: the coordinates naming
- * the node it runs as. A builtin that mints a store of its own (`ownedCell`)
- * keys the store on some of these, and the key must not move: the store's id
- * is what every runtime sharing the piece writes into the node's output spot,
- * so two runtimes that derive two ids for one node rewrite that spot against
- * each other for as long as both run.
+ * The inputs, owner, and output coordinates supplied to a raw builtin.
  *
- * `outputSpot` is the coordinate to key on: the write redirect the node's
- * output binding resolves to, position-derived, the same across pattern edits
- * and runtime vintages (CT-1623; the list builtins key their container on
- * it). `inputs` is not: it is the inputs document, content-addressed on the
- * serialized inputs, so its id moves with a branch literal, with a bound
- * link's schema form, and with the serialization itself from one vintage to
- * the next.
+ * `outputSpot` identifies the write redirect the output binding resolves to.
+ * A result store keyed on the owner and these coordinates keeps its identity
+ * while the output spot is unchanged. Renaming or reordering nodes can change
+ * their output coordinates and therefore their result-store identities.
  *
- * `raw()` still declares the parameter `any`: most builtins declare it
- * `Cell<any>[]`, which it has never been, and typing the seam is a change of
- * its own.
+ * `inputs` is content-addressed on the serialized inputs, so its identity can
+ * change with branch literals, link schemas, or runtime serialization.
  */
 export interface RawNodeCause {
-  /** The node's immutable inputs document (`Runtime.getImmutableCell`). */
+  /** The node's immutable inputs document. */
   inputs: Cell<any>;
+
   /** The piece's result cell, which owns every store the node mints. */
   parents: Cell<any>["entityId"];
+
   /**
    * The node's output spot, scope and schema dropped. Absent only for a node
    * whose output binding reaches no write redirect.

@@ -1,20 +1,14 @@
-// The result store an expression builtin (`ifElse`, `when`, `unless`) mints
-// is named by the spot it fills, not by what fills it. The store's id is what
-// every runtime sharing the piece writes into the node's output spot, so an
-// id that moved with the inputs' serialization was a store two runtimes could
-// disagree on — and two runtimes disagreeing on one shared spot rewrite it
-// against each other for as long as both run. That storm ran on the Topics
-// board's profile badge across the 2026-09-03 deploy: the badge is an `ifElse`
-// over a per-user condition, and clients on the two vintages serialized the
-// node's inputs differently.
-//
-// A pattern edit that changes only a branch literal stands in for that
-// vintage change here: the inputs document moves, the output spot does not.
+/**
+ * Expression result-store identity across branch-literal edits at a fixed
+ * output spot, with condition-scoped storage and a required output binding.
+ */
 
-import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { assertThrows } from "@std/assert";
+
 import type { NodeFactory } from "../src/builder/types.ts";
 import { ownedResultCause } from "../src/builtins/scope-policy.ts";
 import { type Cell, createCell } from "../src/cell.ts";
@@ -109,88 +103,88 @@ async function acrossEdit(
   }
 }
 
-Deno.test("ifElse keeps its result store across an edit of its branches", async () => {
-  const { before, after } = await acrossEdit(
-    "ifElse",
-    true,
-    ({ ifElse, pattern }) => ({
-      first: pattern<{ condition: boolean }>(({ condition }) => ({
-        value: ifElse(condition, "left-1", "right-1"),
-      })),
-      second: pattern<{ condition: boolean }>(({ condition }) => ({
-        value: ifElse(condition, "left-2", "right-2"),
-      })),
-    }),
-  );
-  assertEquals(before.value, "left-1");
-  assertEquals(after.value, "left-2");
-  // The store follows the condition's scope (scoped-cell-instances.md) …
-  assertEquals(before.scope, "user");
-  assertEquals(after.scope, "user");
-  // … and the shared spot names the same store before and after the edit.
-  assertEquals(after.id, before.id);
-});
-
-Deno.test("when keeps its result store across an edit of its value", async () => {
-  const { before, after } = await acrossEdit(
-    "when",
-    true,
-    ({ when, pattern }) => ({
-      first: pattern<{ condition: boolean }>(({ condition }) => ({
-        value: when(condition, "value-1"),
-      })),
-      second: pattern<{ condition: boolean }>(({ condition }) => ({
-        value: when(condition, "value-2"),
-      })),
-    }),
-  );
-  assertEquals(before.value, "value-1");
-  assertEquals(after.value, "value-2");
-  assertEquals(before.scope, "user");
-  assertEquals(after.id, before.id);
-});
-
-Deno.test("unless keeps its result store across an edit of its fallback", async () => {
-  const { before, after } = await acrossEdit(
-    "unless",
-    false,
-    ({ unless, pattern }) => ({
-      first: pattern<{ condition: boolean }>(({ condition }) => ({
-        value: unless(condition, "fallback-1"),
-      })),
-      second: pattern<{ condition: boolean }>(({ condition }) => ({
-        value: unless(condition, "fallback-2"),
-      })),
-    }),
-  );
-  assertEquals(before.value, "fallback-1");
-  assertEquals(after.value, "fallback-2");
-  assertEquals(before.scope, "user");
-  assertEquals(after.id, before.id);
-});
-
-Deno.test("an expression builtin with no output spot has no store to name", async () => {
-  const storageManager = StorageManager.emulate({ as: signer });
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
+describe("expression-builtin-result-identity", () => {
+  it("keeps the `ifElse()` result store when branch literals change", async () => {
+    const { before, after } = await acrossEdit(
+      "ifElse",
+      true,
+      ({ ifElse, pattern }) => ({
+        first: pattern<{ condition: boolean }>(({ condition }) => ({
+          value: ifElse(condition, "left-1", "right-1"),
+        })),
+        second: pattern<{ condition: boolean }>(({ condition }) => ({
+          value: ifElse(condition, "left-2", "right-2"),
+        })),
+      }),
+    );
+    expect(before.value).toBe("left-1");
+    expect(after.value).toBe("left-2");
+    // The store follows the condition's scope (scoped-cell-instances.md).
+    expect(before.scope).toBe("user");
+    expect(after.scope).toBe("user");
+    expect(after.id).toBe(before.id);
   });
-  try {
-    const piece = runtime.getCell(space, "no output spot");
-    const inputs = runtime.getImmutableCell(space, { condition: true });
-    // A node whose output binding reaches no write redirect: nothing reads
-    // the spot, so nothing can name the store every runtime must share.
-    assertThrows(
-      () =>
+
+  it("keeps the `when()` result store when its value literal changes", async () => {
+    const { before, after } = await acrossEdit(
+      "when",
+      true,
+      ({ when, pattern }) => ({
+        first: pattern<{ condition: boolean }>(({ condition }) => ({
+          value: when(condition, "value-1"),
+        })),
+        second: pattern<{ condition: boolean }>(({ condition }) => ({
+          value: when(condition, "value-2"),
+        })),
+      }),
+    );
+    expect(before.value).toBe("value-1");
+    expect(after.value).toBe("value-2");
+    expect(before.scope).toBe("user");
+    expect(after.id).toBe(before.id);
+  });
+
+  it("keeps the `unless()` result store when its fallback literal changes", async () => {
+    const { before, after } = await acrossEdit(
+      "unless",
+      false,
+      ({ unless, pattern }) => ({
+        first: pattern<{ condition: boolean }>(({ condition }) => ({
+          value: unless(condition, "fallback-1"),
+        })),
+        second: pattern<{ condition: boolean }>(({ condition }) => ({
+          value: unless(condition, "fallback-2"),
+        })),
+      }),
+    );
+    expect(before.value).toBe("fallback-1");
+    expect(after.value).toBe("fallback-2");
+    expect(before.scope).toBe("user");
+    expect(after.id).toBe(before.id);
+  });
+
+  it("throws when the output binding has no write redirect", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const piece = runtime.getCell(space, "no output spot");
+      const inputs = runtime.getImmutableCell(space, { condition: true });
+      // A node whose output binding reaches no write redirect: nothing reads
+      // the spot, so nothing can name the store every runtime must share.
+      expect(() =>
         ownedResultCause("ifElse", {
           inputs,
           parents: piece.entityId,
-        }, piece),
-      Error,
-      "ifElse: result store requires a write-redirect output binding",
-    );
-  } finally {
-    await runtime.dispose();
-    await storageManager.close();
-  }
+        }, piece)
+      ).toThrow(
+        "ifElse: result store requires a write-redirect output binding",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

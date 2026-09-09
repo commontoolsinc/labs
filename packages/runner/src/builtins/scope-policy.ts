@@ -55,18 +55,12 @@ export function outputSpotFromBinding(
 }
 
 /**
- * The cause an expression builtin (`ifElse`, `when`, `unless`) mints its
- * result store under: the piece that owns it and the output spot it fills —
- * the coordinates the list builtins key their container on — and nothing
- * else. Left out on purpose is the node's inputs document (`cause.inputs`):
- * its id is content-addressed on the serialized inputs, so it moves with a
- * branch literal, with a bound link's schema form, and with the runtime's own
- * serialization from one vintage to the next. The store's id is what every
- * runtime sharing the piece writes into the spot, so an id that moves is a
- * store two runtimes disagree on, and two runtimes disagreeing on one shared
- * spot rewrite it against each other, one commit per round trip each, for as
- * long as both run. The Topics board's profile badge — an `ifElse` over a
- * per-user condition — ran that storm across the 2026-09-03 deploy.
+ * Returns an expression builtin's result-store cause from its operation,
+ * owning piece, and output coordinates. The cause stays equal across changes
+ * to the serialized inputs while the owning piece and output spot are
+ * unchanged.
+ *
+ * Throws if the node's output binding has no write redirect.
  */
 export function ownedResultCause(
   op: "ifElse" | "when" | "unless",
