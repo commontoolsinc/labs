@@ -93,8 +93,9 @@ export type TrackedGraphState = {
   roots: Set<string>;
 
   /** Doc keys whose metadata family this state has chased: every named
-   * root a walk has visited, and every document loaded as a member of
-   * such a family, whose own family the chase followed in turn. A
+   * root a walk has visited, every document loaded as a member of such a
+   * family, whose own family the chase followed in turn, and every absent
+   * target a family link named, owed its family when it arrives. A
    * refresh re-walk of a key here chases the family again, so a member
    * whose metadata link moved delivers the new target. Keys are never
    * released: the tracker keeps a delivered document for the state's

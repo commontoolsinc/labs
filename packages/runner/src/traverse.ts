@@ -1303,7 +1303,12 @@ export type TraversalContext = {
    */
   chaseLoadedMeta: boolean;
 
-  /** Tracker keys whose metadata family this traversal has chased. */
+  /**
+   * Tracker keys whose metadata family this traversal has chased, and the
+   * absent family targets it tracked along the way: an absent target is
+   * owed its own family when it arrives, exactly as a loaded member was
+   * owed one on the visit.
+   */
   metaDocsVisited: Set<string>;
 
   /**
@@ -2638,12 +2643,16 @@ function trackVisitedDoc(
 }
 
 // These meta links don't have full link chains. We only follow the first link.
+// `owed` receives the tracker key of each target the rail names that is
+// absent from the store: tracked, so its arrival re-runs the load, and
+// recorded so the arrival is walked as a family member.
 function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   meta: MetaRail,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   identity: ScopeKeyIdentity,
+  owed?: Set<string>,
 ): IMemorySpaceAttestation[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
@@ -2672,6 +2681,7 @@ function loadMetaLinkedDoc(
           schemaTracker,
           identity,
           manifestEntry.link,
+          owed,
         );
         if (item !== undefined) {
           loaded.push(item);
@@ -2698,6 +2708,7 @@ function loadMetaLinkedDoc(
       schemaTracker,
       identity,
       linkObj,
+      owed,
     );
     if (item !== undefined) {
       loaded.push(item);
@@ -2712,6 +2723,7 @@ function loadMetaLinkedDocFromLink(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   identity: ScopeKeyIdentity,
   linkObj: SigilLink,
+  owed?: Set<string>,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
   // A metadata family is a same-space structure (05-queries.md): a link
@@ -2747,7 +2759,8 @@ function loadMetaLinkedDocFromLink(
   const docKey = getTrackerKey(address, identity);
   schemaTracker.add(docKey, REJECTING_SELECTOR);
   const result = tx.read(address, { meta: ignoreReadForScheduling });
-  if (result.error) {
+  if (result.error || result.ok.value === undefined) {
+    owed?.add(docKey);
     return undefined;
   }
   return { address, value: result.ok.value };
@@ -2920,6 +2933,7 @@ export function loadMetaLinkedDocs(
         meta,
         context.schemaTracker,
         context.scopeKeyIdentity,
+        context.metaDocsVisited,
       );
       for (const linkedDoc of linkedDocs) {
         // Don't recurse into invalid docs or cid docs

@@ -238,9 +238,11 @@ This mirrors the `followPointer` function from `traverse.ts`.
 #### Metadata / Provenance Resolution
 
 In addition to schema-directed references, traversal MUST load provenance and
-runtime metadata documents via top-level metadata links on an entity document.
+runtime metadata documents via top-level metadata links on the documents a
+query names and on the documents those links reach.
 
-When the server loads any document during query evaluation, it MUST inspect the
+When the server loads a document a query NAMES as a root, or one reached
+through such a document's metadata or manifest links, it MUST inspect the
 top-level document object for metadata links and manifest links such as:
 
 ```json

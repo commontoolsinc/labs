@@ -2687,6 +2687,73 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     assert(
       lateTracked.state.tracker.has(`${space}/space/of:late-family-source`),
     );
+
+    // A family link naming a document that does not exist yet still
+    // entitles that document to its own family: the absent target is
+    // tracked so its arrival re-fires the query, and its arrival is walked
+    // as a family member — its own links chased — not as a crossing.
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(6),
+      authorization,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:parent-root",
+          value: {
+            value: { name: "parent" },
+            result: link("of:absent-member"),
+          },
+        }],
+      },
+    });
+    const parentTracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:parent-root",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          },
+        },
+      }],
+    });
+    const absentMemberKey = `${space}/space/of:absent-member`;
+    assert(parentTracked.state.tracker.has(absentMemberKey));
+    assert(parentTracked.state.chased.has(absentMemberKey));
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(7),
+      authorization,
+      commit: {
+        localSeq: 7,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:member-family",
+          value: { value: { kind: "member pattern" } },
+        }, {
+          op: "set",
+          id: "of:absent-member",
+          value: {
+            value: { name: "born member" },
+            pattern: link("of:member-family"),
+          },
+        }],
+      },
+    });
+    const bornMember = refreshTrackedGraph(
+      space,
+      engine,
+      parentTracked.state,
+      new Set([toDirtyKey("of:absent-member"), toDirtyKey("of:member-family")]),
+    );
+    assertExists(bornMember);
+    assertExists(bornMember.updates.get(`${space}/space/of:member-family`));
+    assert(parentTracked.state.tracker.has(`${space}/space/of:member-family`));
   } finally {
     close(engine);
     await Deno.remove(path);
