@@ -11,6 +11,7 @@ import {
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
+import { reportUnresolvedDefault } from "../default-diagnostics.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -18,7 +19,7 @@ import {
   extractDefaultBrandPayloadValue,
   getArrayElementInfo,
   getPropertyNameText,
-  isEmptyRecordType,
+  isEmptyObjectDefaultType,
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
@@ -311,7 +312,11 @@ export class CommonFabricFormatter implements TypeFormatter {
               : { default: defaultValue }) as MutableJSONSchemaObj;
           }
           (valueSchema as Record<string, unknown>).default = defaultValue;
+        } else {
+          reportUnresolvedDefault(context);
         }
+      } else {
+        reportUnresolvedDefault(context);
       }
 
       return valueSchema;
@@ -990,6 +995,8 @@ export class CommonFabricFormatter implements TypeFormatter {
           : { default: defaultValue }) as MutableJSONSchemaObj;
       }
       (valueSchema as any).default = defaultValue;
+    } else {
+      reportUnresolvedDefault(context, defaultTypeNode);
     }
 
     return valueSchema;
@@ -1906,8 +1913,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       return undefined;
     }
 
-    // Mapped records have type declarations but no `.valueDeclaration`.
-    if (isEmptyRecordType(type, context.typeChecker)) {
+    // Empty type literals and mapped records need no value declaration.
+    if (isEmptyObjectDefaultType(type, context.typeChecker)) {
       return {};
     }
 

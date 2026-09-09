@@ -6,6 +6,7 @@ import { hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
+import { reportUnresolvedDefault } from "../default-diagnostics.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -14,8 +15,9 @@ import {
   extractDefaultValueFromBrandedMembers,
   getNativeTypeSchema,
   getPropertyNameText,
+  hasDefaultMarker,
   isDefaultBrandedMember,
-  isEmptyRecordType,
+  isEmptyObjectDefaultType,
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -263,9 +265,8 @@ export class UnionFormatter implements TypeFormatter {
    * Authored-node handling stays primary: tryFormatDefaultUnion runs first
    * and also covers non-literal V forms (e.g. `typeof CONST`) via
    * declaration reads. This fallback fires only when the alias node is
-   * unavailable, and bails (returning undefined) when the union carries no
-   * brand, more than one brand, or a payload that is not literal-shaped —
-   * preserving prior behavior exactly in those cases.
+   * unavailable. An actual Default brand with an unextractable or conflicting
+   * payload produces a warning before falling back to ordinary union formatting.
    */
   #tryFormatExpandedDefaultViaBrandPayload(
     members: readonly ts.Type[],
@@ -281,7 +282,12 @@ export class UnionFormatter implements TypeFormatter {
     // all carrying the same payload — extract the agreed value across all of
     // them, and exclude all of them from the formatted remainder.
     const extracted = extractDefaultValueFromBrandedMembers(branded, checker);
-    if (!extracted) return undefined;
+    if (!extracted) {
+      if (branded.some((member) => hasDefaultMarker(member, checker))) {
+        reportUnresolvedDefault(context);
+      }
+      return undefined;
+    }
 
     let rest = members.filter((m) => !isDefaultBrandedMember(m, checker));
     // Degenerate empty-array members (the empty tuple `[]` / `never[]`) ride
@@ -387,6 +393,10 @@ export class UnionFormatter implements TypeFormatter {
       schemas.push(
         this.#formatTypeNodeMember(defaultEntry.entry.valueTypeNode, context),
       );
+    }
+
+    if (defaultEntry.entry.defaultValue === undefined) {
+      reportUnresolvedDefault(context, defaultEntry.entry.defaultTypeNode);
     }
 
     return this.#applySchemaDefault(
@@ -900,7 +910,7 @@ export class UnionFormatter implements TypeFormatter {
       return undefined;
     }
 
-    if (isEmptyRecordType(type, context.typeChecker)) {
+    if (isEmptyObjectDefaultType(type, context.typeChecker)) {
       return {};
     }
 

@@ -3,9 +3,13 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import {
+  type TransformationDiagnostic,
+  transformCfDirective,
+} from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { parseModule, patternSchemas } from "./transformed-ast.ts";
-import { transformSource } from "./utils.ts";
+import { transformFiles, transformSource } from "./utils.ts";
 
 describe("default-empty-record-schema", () => {
   for (const form of ["union member", "two arguments"]) {
@@ -15,6 +19,7 @@ describe("default-empty-record-schema", () => {
         stringKeys: "Record<string, never>",
         propertyKeys: "Record<PropertyKey, never>",
         alias: "EmptyRecord",
+        literalAlias: "EmptyObject",
       };
       const properties = Object.entries(defaults).map(([name, value]) => {
         const type = form === "union member"
@@ -22,19 +27,27 @@ describe("default-empty-record-schema", () => {
           : `Default<Record<string, unknown>, ${value}>`;
         return `${name}: Writable<${type}>;`;
       }).join("\n");
+      const diagnostics: TransformationDiagnostic[] = [];
       const output = await transformSource(
         `/// <cts-enable />
         import { Default, pattern, Writable } from "commonfabric";
         type EmptyRecord = Record<string, never>;
+        type Empty = {};
+        type EmptyObject = Empty;
         interface Input { ${properties} }
         export default pattern<Input>((state) => ({
           literal: state.literal,
           stringKeys: state.stringKeys,
           propertyKeys: state.propertyKeys,
           alias: state.alias,
+          literalAlias: state.literalAlias,
         }));
         `,
-        { types: COMMONFABRIC_TYPES, typeCheck: true },
+        {
+          types: COMMONFABRIC_TYPES,
+          typeCheck: true,
+          pipelineDiagnostics: diagnostics,
+        },
       );
       const { input } = patternSchemas(parseModule(output));
       const schemas = input.properties as Record<
@@ -53,12 +66,14 @@ describe("default-empty-record-schema", () => {
       )).toEqual(Object.fromEntries(
         Object.keys(defaults).map((name) => [name, {}]),
       ));
+      expect(diagnostics).toEqual([]);
     });
   }
 
   it("omits the default for never-valued types that are not empty records", async () => {
     // Named properties disqualify arrays and finite-key records from
     // representing empty-object defaults, even when their value type is `never`.
+    const diagnostics: TransformationDiagnostic[] = [];
     const output = await transformSource(
       `/// <cts-enable />
       import { Default, pattern, Writable } from "commonfabric";
@@ -73,7 +88,11 @@ describe("default-empty-record-schema", () => {
         unionNamedNever: state.unionNamedNever,
       }));
       `,
-      { types: COMMONFABRIC_TYPES, typeCheck: true },
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
     );
     const { input } = patternSchemas(parseModule(output));
     const schemas = input.properties as Record<string, Record<string, unknown>>;
@@ -82,5 +101,49 @@ describe("default-empty-record-schema", () => {
       expect(schemas[name]).toMatchObject({ type: "object", asCell: ["cell"] });
       expect(schemas[name]).not.toHaveProperty("default");
     }
+    const warnings = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "schema-default:unresolved"
+    );
+    expect(warnings).toHaveLength(3);
+    expect(warnings.map((warning) => warning.line)).toEqual([5, 6, 7]);
+    expect(warnings.every((warning) => warning.severity === "warning")).toBe(
+      true,
+    );
+  });
+
+  it("locates imported unresolved defaults at the schema use", async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const source = `/// <cts-enable />
+        import { pattern } from "commonfabric";
+        import type { Input } from "./types.ts";
+        export default pattern<Input>((state) => ({ value: state.value }));
+      `;
+    await transformFiles({
+      "/types.ts": `
+        import type { Default, Writable } from "commonfabric";
+        export interface Input { value: Writable<Default<string>>; }
+      `,
+      "/test.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+      typeCheck: true,
+      pipelineDiagnostics: diagnostics,
+    });
+
+    const warnings = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "schema-default:unresolved"
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({
+      fileName: "/test.tsx",
+      severity: "warning",
+    });
+    const warning = warnings[0]!;
+    expect(
+      transformCfDirective(source).slice(
+        warning.start,
+        warning.start + warning.length,
+      ),
+    ).toContain("pattern<Input>");
   });
 });
