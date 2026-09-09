@@ -173,6 +173,16 @@ second workflow running those tests on that commit would give each of
 them two entries in its history. The exemption covers tests rather than
 jobs: a test that runs only in such a job is recorded there.
 
+`run-recorded` records the command it wraps, as one line carrying the
+identity the wrapper was given. It is therefore for a command that is
+itself the check — a formatter, a linter, a gate. A command whose own
+tests are the checks is not wrapped: its tests record through their own
+runner, and the wrapper's line would summarize an invocation beside
+them rather than record one execution of one test. The wrapper passes
+recording through to what it runs either way, so wrapping such a
+command adds that summary without changing what the tests below it
+record.
+
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the
 spool under the per-user spool root (`CF_TEST_RECORDS_SPOOL_ROOT`, or the
@@ -341,7 +351,9 @@ make if a closed partition is ever shown to have lost something.
 
 ## CI movement
 
-Test jobs hold no credentials. Each job spools records (and its JUnit
+Test jobs hold no credentials. Each recording job — which is every job
+running tests that "Recording" above does not exempt — spools records
+(and its JUnit
 XML: leaf cases become records, container cases — one per describe level,
 with overlapping times — are dropped by a name-prefix rule) and uploads
 one credential-free `test-records-<job>-a<attempt>` artifact,

@@ -699,16 +699,17 @@ Deno.test("the CFC Property Suite workflow records no tests", async () => {
 
   // Both of the job's steps fall outside what a record is for, and for the
   // two different reasons `docs/specs/test-records.md` gives under
-  // "Recording". Each test file the suite step runs is a unit of
-  // `workspace-unit`, so CI runs and records them against the same commit,
-  // and a wrapper around the invocation as a whole summarizes it rather
-  // than recording one test execution. The audit step reads the corpus the
-  // step before it wrote, so no lane can be asked to run it. The workflow
-  // therefore takes no part in test records at either end: it spools
-  // nothing, and the relay does not follow it. Spooling again without the
-  // relay produces a run whose records are gathered and never shipped, and
-  // the relay assertion is what keeps its follow list honest about which
-  // workflows record.
+  // "Recording". The suite step runs `deno test` directly, with no
+  // `--junit-path` to ingest and no registration preload, so nothing under
+  // it records; a wrapper passes recording through to what it runs, so one
+  // here would file a line summarizing the invocation and nothing else.
+  // Those tests are units of `workspace-unit` and record when CI runs
+  // them. The audit step reads the corpus the step before it wrote, so no
+  // lane can be asked to run it. The workflow therefore takes no part in
+  // test records at either end: it spools nothing, and the relay does not
+  // follow it. Spooling again without the relay produces a run whose
+  // records are gathered and never shipped, and the relay assertion is
+  // what keeps its follow list honest about which workflows record.
   assert(
     !suite.includes("CF_TEST_RECORDS_DIR"),
     "the workflow spools test records",
