@@ -32,6 +32,26 @@ import {
   isSchemaScope,
 } from "./scope.ts";
 
+/**
+ * Whether a merged result is equivalent to the value it was built from, for
+ * the four decisions in this file that return the original value when it is.
+ *
+ * A value this cannot read compares unequal, so the merged snapshot is kept.
+ * `mergeSchemaDefaults()` walks values that are only partly materialized: a
+ * retained descendant may be a getter that throws rather than answering, and
+ * the walk `fabricAwareEqual()` falls back to reads by property. The
+ * comparison is an optimization -- it decides whether to hand back the
+ * original object rather than the copy -- so a value it cannot read costs a
+ * copy rather than an answer.
+ */
+function mergedValueEquals(left: unknown, right: unknown): boolean {
+  try {
+    return fabricAwareEqual(left, right);
+  } catch {
+    return false;
+  }
+}
+
 type ActiveDefaultMergePairs = WeakMap<
   object,
   WeakMap<object, WeakSet<object>>
@@ -332,7 +352,7 @@ function extractDefaultValuesInternal(
       ).map((candidate) => candidate.value);
       return validCandidates.length > 0 &&
           validCandidates.every((candidate) =>
-            fabricAwareEqual(candidate, validCandidates[0])
+            mergedValueEquals(candidate, validCandidates[0])
           )
         ? validCandidates[0]
         : NO_SCHEMA_DEFAULT;
@@ -721,7 +741,7 @@ function mergeSchemaDefaultsUncached(
       if (
         acceptedCandidates.length > 0 &&
         acceptedCandidates.every((candidate) =>
-          fabricAwareEqual(candidate, acceptedCandidates[0])
+          mergedValueEquals(candidate, acceptedCandidates[0])
         )
       ) {
         return acceptedCandidates[0];
@@ -812,7 +832,7 @@ function mergeSchemaDefaultsUncached(
           context,
         );
       }
-      return fabricAwareEqual(result, value) ? value : result;
+      return mergedValueEquals(result, value) ? value : result;
     }
 
     const objectSchema = typeof resolved === "object" && resolved !== null &&
@@ -898,7 +918,7 @@ function mergeSchemaDefaultsUncached(
         });
       }
     }
-    return valuePresent && fabricAwareEqual(result, value) ? value : result;
+    return valuePresent && mergedValueEquals(result, value) ? value : result;
   } finally {
     if (trackedSchema !== undefined) activeSchemas?.delete(trackedSchema);
   }
