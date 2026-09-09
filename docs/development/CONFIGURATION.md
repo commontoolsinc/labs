@@ -378,13 +378,13 @@ states the invariants.
 | Var | Default | Notes |
 |---|---|---|
 | `CF_HARNESS_PRINCIPAL` | _(generated)_ | Declares the label naming this machine. Generated on first use and kept in `$CF_HARNESS_HOME/principal` otherwise. |
-| `CF_HARNESS_INTEGRATION` | _(unset)_ | Set to `1` by the package's `test:integration` task. Gates the environment-dependent integration tests, and marks the invoker as `integration-test`. |
+| `CF_HARNESS_INTEGRATION` | _(unset)_ | Set to `1` to report the invoker as `integration-test`. Nothing else reads it. |
 
-The invoker is read from the environment rather than declared:
-`CF_HARNESS_INTEGRATION` marks the integration suite, `ENV=test` the unit
-suite, `GITHUB_ACTIONS` or `CI` a continuous-integration run,
-`OTEL_SERVICE_NAME` a service, and a Loom run manifest a Loom dispatch. A test
-run keeps no principal, so it never writes to the harness home.
+The invoker is read from the environment rather than declared: `ENV=test`
+marks the unit suite, `GITHUB_ACTIONS` or `CI` a continuous-integration run,
+`OTEL_SERVICE_NAME` a service, and a Loom run manifest a Loom dispatch.
+`CF_HARNESS_INTEGRATION` is the exception, declared by hand. A test run keeps
+no principal, so it never writes to the harness home.
 
 The harness also reads variables it does not define: `OTEL_SERVICE_NAME` for
 the service that launched it, `ENV=test` to recognize the unit suite,

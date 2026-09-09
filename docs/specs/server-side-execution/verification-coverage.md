@@ -3355,7 +3355,7 @@ personally; the soak starts at ITS merge.** What it carries:
   exit — RED-FIRST with a forced-OFF service env (posture line "OFF"
   vs expected "ON").
   (2) cf-harness — had NO toolshed-backed lane (its integration suite
-  is CF_HARNESS_INTEGRATION-gated); the same job runs
+  was CF_HARNESS_INTEGRATION-gated); the same job runs
   `createHarnessFabricSessionFactory` (PKCS#8 from disk →
   `PiecesController.initialize` → deployed-client adoption), asserts
   the session's runtime resolved ON with nothing declared, and serves

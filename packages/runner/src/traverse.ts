@@ -44,6 +44,7 @@ import {
   isBoolean,
   isObjectNotArray,
   isObjectOrArray,
+  isPrimitive,
   isString,
 } from "../../utils/src/types.ts";
 import {
@@ -3493,13 +3494,6 @@ function elementAt<T>(array: T[], path: string): T | undefined {
   return isArrayIndexPropertyName(path)
     ? (array as unknown as Record<string, T>)[path]
     : undefined;
-}
-
-type Primitive = string | number | boolean | null | undefined | symbol | bigint;
-
-export function isPrimitive(val: unknown): val is Primitive {
-  const type = typeof val;
-  return val === null || (type !== "object" && type !== "function");
 }
 
 type TraverseFailure = Readonly<{
