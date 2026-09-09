@@ -45,6 +45,7 @@ import {
   isObjectNotArray,
   isObjectOrArray,
   isString,
+  type Primitive,
 } from "../../utils/src/types.ts";
 import {
   collectExternalSchemaRefHashes,
@@ -3594,8 +3595,6 @@ function elementAt<T>(array: T[], path: string): T | undefined {
     ? (array as unknown as Record<string, T>)[path]
     : undefined;
 }
-
-type Primitive = string | number | boolean | null | undefined | symbol | bigint;
 
 export function isPrimitive(val: unknown): val is Primitive {
   const type = typeof val;
