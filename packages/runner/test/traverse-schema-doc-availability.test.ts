@@ -73,7 +73,7 @@ const contextWith = (
     new MapSetStringToPathSelectors(true),
     TEST_SCOPE_IDENTITY,
     false,
-    new Map(),
+    new Set(),
     onMissingLinkTarget,
   );
 

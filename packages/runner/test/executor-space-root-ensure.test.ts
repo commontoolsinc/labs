@@ -32,7 +32,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import type { Signer, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -41,11 +41,13 @@ import {
   type SessionSync,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { SessionFactory, SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
+import { collectExternalSchemaRefHashes } from "../src/schema-decompose.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -97,11 +99,14 @@ function rootSource(marker: string): string {
  * A loopback session factory whose frames reach the client with every `cid:`
  * upsert dropped, the absorb defect placed at the wire: the replica applies
  * exactly the frames a defective client would hand it. Counts what it
- * dropped and records the `computed:` documents it let through.
+ * dropped and records the ids of the documents it let through whose link
+ * schemas reference a `cid:` schema document — the delivery obligation the
+ * replica's arrival validation holds each one to, which the dropped
+ * schema leaves unmet.
  */
 class CidDroppingSessionFactory implements SessionFactory {
   droppedCids = 0;
-  readonly computedSeen = new Set<string>();
+  readonly cidMentioningIds = new Set<string>();
   readonly #getServer: () => MemoryV2Server.Server;
 
   constructor(getServer: () => MemoryV2Server.Server) {
@@ -176,10 +181,19 @@ class CidDroppingSessionFactory implements SessionFactory {
 
   #filterSync(sync: SessionSync): SessionSync {
     const kept = sync.upserts.filter((upsert) => {
-      if (upsert.id.startsWith("computed:")) this.computedSeen.add(upsert.id);
       if (upsert.id.startsWith("cid:")) {
         this.droppedCids += 1;
         return false;
+      }
+      if (upsert.doc !== undefined && upsert.doc !== null) {
+        // The validator's own predicate: a `cid:` reference in a link-schema
+        // position is an obligation; one in plain data is not.
+        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
+          if (collectExternalSchemaRefHashes(schema as JSONSchema).size > 0) {
+            this.cidMentioningIds.add(upsert.id);
+          }
+          return schema;
+        });
       }
       return true;
     });
@@ -488,7 +502,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     });
     const replica = readerManager.open(space).replica as SpaceReplica;
     const droppedCids = () => dropping.droppedCids;
-    const computedSeen = dropping.computedSeen;
+    const cidMentioningIds = dropping.cidMentioningIds;
 
     // Subscribe FIRST (this starts the background consumer), activate
     // SECOND: everything the ensure materializes reaches this replica
@@ -505,12 +519,14 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await liveness.sync();
     expect(await created.activate()).toBe(true);
 
-    // Producer sanity: the ensure's computed cells DID ride the plain
-    // subscription as pushes, and the simulated defect DID drop cid
-    // deliveries — without both, this pin is vacuously green.
+    // Producer sanity: a document mentioning a cid DID ride the plain
+    // subscription as a push, and the simulated defect DID drop cid
+    // deliveries — without both, this pin is vacuously green. Which
+    // documents ride is the query walk's policy, not this pin's: it needs
+    // one that mentions a cid, whichever that is.
     await waitUntil(
-      () => computedSeen.size > 0,
-      "the ensured root's computed cell riding the plain subscription",
+      () => cidMentioningIds.size > 0,
+      "a cid-mentioning document riding the plain subscription",
     );
     await waitUntil(
       () => droppedCids() > 0,
@@ -523,17 +539,17 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
 
     // THE PIN, half one — the consumer SURVIVED the violating push
     // frames (pre-containment: unhandled rejection in consumeUpdates,
-    // nothing after this point runs) and the mention-carrying computed
-    // doc is QUARANTINED, not applied: fail-closed for the doc.
+    // nothing after this point runs) and a mention-carrying doc is
+    // QUARANTINED, not applied: fail-closed for the doc.
     let quarantinedId: string | undefined;
     await waitUntil(
       () => {
-        quarantinedId = [...computedSeen].find((id) =>
+        quarantinedId = [...cidMentioningIds].find((id) =>
           replica.getDocument(id as URI) === undefined
         );
         return quarantinedId !== undefined;
       },
-      "a cid-mentioning computed doc held in quarantine (not applied)",
+      "a cid-mentioning doc held in quarantine (not applied)",
     );
 
     // Half two — the CONSUMER LOOP IS ALIVE, proven by delivery: a
@@ -778,7 +794,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // report): production spaces always get a default pattern, but
     // tests may switch the tenure's ensure OFF — the CI ON lanes'
     // fixture clients hold space-cell subscriptions that receive the
-    // ensured root's computed cells with unverified cid: schema refs
+    // ensured root's documents, unverified cid: schema refs included
     // (the broken-schema-ref uncaught class that redded the board).
     // OFF must mean fully inert: nothing armed, nothing skipped,
     // nothing counted — and the ACL-arrival re-arm must not resurrect

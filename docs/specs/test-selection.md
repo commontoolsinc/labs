@@ -178,10 +178,27 @@ Two rules force a test in.
   data and that a renamed test is an unknown identity until an alias line
   lands.
 - **What the change touches must run.** A changed test file's identities
-  are mandatory. A unit that is not a file, such as a type-check group or
-  a binary, is one its suite maps the change onto, because only the suite
-  knows what its unit covers. Nothing else about a changed source file
-  forces a test in. Which tests run for it is what the score decides.
+  are mandatory. Everything else a change forces in goes through one
+  rule, and there is no second rule beside it: a declaration names the
+  paths a change reaches something by, and what a change reaches is what
+  it forces. That is how a unit which is not a file — a type-check group,
+  a repository gate, a binary — is reached at all, because only its suite
+  knows what its unit covers. Anything else that has to answer "which
+  parts of this repository did the change touch" answers from the same
+  declarations, including a consumer deciding not which tests to run but
+  which packages to measure. A second mechanism for the same question is
+  a second thing to be wrong about, and the two would disagree.
+
+  A declaration is bounded rather than exhaustive, so that what a change
+  runs stays mostly what the score chose. No one unit may be reached by a
+  significant share of the tree, and no one file may reach a significant
+  share of the units. Something whose input is a large part of the
+  repository declares the small and specific part of it, or declares
+  nothing and is reached by the score alone. Declaring too little costs
+  only that; declaring too much places the unit in every lane by
+  declaration rather than by what it has caught. Nothing about a changed
+  source file forces a test in except through a declaration that reaches
+  it. Which tests run for it otherwise is what the score decides.
 
 ## The manifest
 

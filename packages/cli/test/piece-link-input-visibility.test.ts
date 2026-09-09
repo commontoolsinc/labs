@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
-import { isLink, Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import {
+  type Cell,
+  isLink,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -160,9 +165,10 @@ describe("piece-link-input-visibility", () => {
         deps,
       );
     // Seed persisted state authored by clients that did not check input visibility.
-    const seedLegacyLink = async () => {
+    const seedLegacyLink = async (sourceCell?: Cell<unknown>) => {
       const input = await target.input.getCell();
-      const output = (await source.result.getCell()).key("namesTable");
+      const output = sourceCell ??
+        (await source.result.getCell()).key("namesTable");
       const result = await runtime.editWithRetry((tx) => {
         input.withTx(tx).key("boardNames").setRawUntyped(output.getAsLink({
           base: input,
@@ -298,15 +304,58 @@ describe("piece-link-input-visibility", () => {
     });
   });
 
-  it("accepts a fresh source check over a legacy link without changing stored arguments", async () => {
-    const { target, seedLegacyLink } = await createPair();
-    await seedLegacyLink();
+  for (
+    const sourceKind of [
+      "result",
+      "argument",
+      "user-scoped argument",
+      "session-scoped argument",
+    ] as const
+  ) {
+    it(`accepts a fresh source check over a legacy producer ${sourceKind} link without changing stored arguments`, async () => {
+      const { source, target, seedLegacyLink } = await createPair();
+      let sourceCell = sourceKind === "result"
+        ? (await source.result.getCell()).key("namesTable")
+        : (await source.input.getCell()).key("names");
+      if (
+        sourceKind === "user-scoped argument" ||
+        sourceKind === "session-scoped argument"
+      ) {
+        // Scoped redirects store a value in their own partition while the
+        // producer's argument contract belongs to its base partition.
+        sourceCell = runtime.getCellFromLink({
+          ...sourceCell.getAsNormalizedFullLink(),
+          scope: sourceKind === "user-scoped argument" ? "user" : "session",
+        });
+        const write = await runtime.editWithRetry((tx) => {
+          sourceCell.withTx(tx).setRawUntyped(["Ada"]);
+        });
+        if (write.error) throw write.error;
+      }
+      await seedLegacyLink(sourceCell);
+      await withFreshPiece(target.id, async (reader) => {
+        const rawBefore = (await reader.input.getCell()).getRaw();
+        const after = await reader.checkPattern(newProgram);
+        expect(after.issues).toEqual({});
+        expect(after.compatible).toBe(true);
+        expect((await reader.input.getCell()).getRaw()).toEqual(rawBefore);
+      });
+    });
+  }
+
+  it("refuses a forged carried schema when the fresh producer contract is incompatible", async () => {
+    const { source, target, seedLegacyLink } = await createPair();
+    const argument = await source.input.getCell();
+    await seedLegacyLink(
+      argument.asSchema({ type: "array", items: { type: "string" } }),
+    );
     await withFreshPiece(target.id, async (reader) => {
-      const rawBefore = (await reader.input.getCell()).getRaw();
-      const after = await reader.checkPattern(newProgram);
-      expect(after.issues).toEqual({});
-      expect(after.compatible).toBe(true);
-      expect((await reader.input.getCell()).getRaw()).toEqual(rawBefore);
+      const before = (await reader.input.getCell()).getRaw();
+      const report = await reader.checkPattern(newProgram);
+      expect(report.compatible).toBe(false);
+      expect(report.issues.retainedLinks).toContain("boardNames");
+      expect(report.issues.retainedLinks).not.toContain("unconstrained schema");
+      expect((await reader.input.getCell()).getRaw()).toEqual(before);
     });
   });
 

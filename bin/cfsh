@@ -9,9 +9,8 @@
 # vendored labs, symlinks walked by hand because `readlink -f` is not on a
 # stock macOS -- and it would drift.
 #
-# Two ways to pick this up, the same two `cf` has:
-#   - mise users get it automatically (`_.path` in mise.toml)
-#   - everyone else: `deno task install-cf`, which installs this beside `cf`
+# Pick it up the way `cf` is picked up: `deno task install-cf` installs this
+# beside `cf`.
 #
 # Being a forward is also what lets a copy of this file work anywhere: it finds
 # `cf` by name, so it depends on PATH and on nothing about where it sits.
@@ -20,8 +19,7 @@ set -e
 
 if ! command -v cf >/dev/null 2>&1; then
   echo "cfsh: no \`cf\` on PATH, and \`cf sh\` is what this runs." >&2
-  echo "    Put one there with 'deno task install-cf' from a labs checkout," >&2
-  echo "    or let mise do it (it adds each checkout's bin/ to PATH)." >&2
+  echo "    Put one there with 'deno task install-cf' from a labs checkout." >&2
   exit 127
 fi
 

@@ -88,7 +88,11 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
-import { PieceController } from "./piece-controller.ts";
+import {
+  assertSuppliedLinkSchemasCompatible,
+  assertWritablePiecePath,
+  PieceController,
+} from "./piece-controller.ts";
 import {
   assertPieceInputPath,
   PieceInputPathError,
@@ -1731,6 +1735,11 @@ export class PiecesController<T = unknown> {
    * `targetPath`. A target piece must declare the path in its current input
    * schema; raw cell targets accept paths without a piece-schema check.
    *
+   * Piece inputs validate the binding against durable producer metadata in
+   * the write transaction. Sources without that metadata remain dynamic
+   * bindings without a static producer-contract proof. Binding a Stream
+   * stores its handle; it does not send an event.
+   *
    * @throws {PieceInputPathError} If the target piece's input schema does not
    * expose the path. Update its source with `cf piece setsrc` to declare the
    * input before linking it.
@@ -1747,7 +1756,7 @@ export class PiecesController<T = unknown> {
     },
   ): Promise<void> {
     const start = options?.start ?? true;
-    let linkCell = this.runtime.getCellFromEntityId(
+    const linkCell = this.runtime.getCellFromEntityId(
       this.#space,
       entityIdFrom(linkPieceId),
       [],
@@ -1756,8 +1765,6 @@ export class PiecesController<T = unknown> {
       options?.sourceScope,
     );
     await linkCell.sync();
-    linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
-    linkCell = linkCell.key(...linkPath);
     // Keep Piece result links anchored at the public result projection. Its
     // durable, monotonically narrowing result schema is the producer contract;
     // resolving through an alias here would discard that contract and point at
@@ -1769,10 +1776,13 @@ export class PiecesController<T = unknown> {
         this,
         targetPieceId,
         "Target",
-        options,
+        { ...options, start: false },
       );
 
     const result = await this.runtime.editWithRetry((tx) => {
+      // Recover the producer view in the transaction that commits the binding,
+      // so a concurrent contract change invalidates the transaction's reads.
+      const source = linkCell.withTx(tx).asSchemaFromLinks().key(...linkPath);
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
         // For pieces, target fields are in the result cell's argument
@@ -1793,10 +1803,25 @@ export class PiecesController<T = unknown> {
           tx,
         );
         assertPieceInputPath(targetInputCell, targetPath);
+        const targetSchema = targetArgumentLink.schema ?? true;
+        assertWritablePiecePath(
+          targetSchema,
+          targetPath,
+          true,
+          false,
+          targetInputCell,
+        );
+        assertSuppliedLinkSchemasCompatible(
+          [{ path: targetPath, value: source }],
+          targetSchema,
+          targetInputCell,
+          this,
+          { allowUnprovenSource: true },
+        );
       }
 
       targetInputCell.key(...targetPath).setRawUntyped(
-        linkCell.getAsLink({
+        source.getAsLink({
           base: targetInputCell,
           includeSchema: true,
           keepAsCell: KeepAsCell.OnlyStream,
@@ -1810,10 +1835,16 @@ export class PiecesController<T = unknown> {
       ) {
         throw result.error.reason;
       }
-      throw result.error;
+      throw new Error(
+        `Cannot link ${linkPieceId}/${linkPath.join("/")} to ${targetPieceId}/${
+          targetPath.join("/")
+        }: ${result.error.message}`,
+        { cause: result.error },
+      );
     }
 
     if (targetIsPiece && start) {
+      await this.runtime.start(targetCell);
       await this.getResult(targetCell).pull();
     }
     await this.synced();

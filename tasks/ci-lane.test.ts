@@ -5,6 +5,7 @@ import {
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
+import type { CapabilityId } from "./ci-capabilities.ts";
 import { loadTopology } from "./test-topology.ts";
 
 import {
@@ -1649,6 +1650,74 @@ describe("what a lane does with the batches it was given", () => {
 
   it("passes when every batch passed", async () => {
     expect(await run([Deno.execPath(), "eval", "0"])).toBe(true);
+  });
+
+  it("gives each batch the environment its own suite asked for", async () => {
+    // `cf` exports the root it puts its command line under, and `deno`
+    // exports nothing. A lane opens the union of what its batches asked
+    // for, so both suites here run in a lane that opened `cf`, and only
+    // the one that asked for it may see what it exports.
+    const dir = await Deno.makeTempDir({ prefix: "lane-env-" });
+    const reporting = (id: string, needs: readonly CapabilityId[]) =>
+      suite({
+        id,
+        needs,
+        units: [`packages/bakery/${id}.test.ts`],
+        command: (_units, context) =>
+          Promise.resolve([{
+            command: [
+              Deno.execPath(),
+              "eval",
+              `Deno.writeTextFileSync(${
+                JSON.stringify(`${dir}/${id}`)
+              }, Deno.env.get("CF_LABS_ROOT") ?? "");`,
+            ],
+            cwd: context.root,
+          }]),
+      });
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: () =>
+            Promise.resolve({
+              manifest: manifestOf([
+                {
+                  test: { k: "unit", s: "bakery", n: "asked > runs" },
+                  suite: "asked",
+                  unit: "packages/bakery/asked.test.ts",
+                },
+                {
+                  test: { k: "unit", s: "bakery", n: "did-not > runs" },
+                  suite: "did-not",
+                  unit: "packages/bakery/did-not.test.ts",
+                },
+              ]),
+              objectName: "manifest-fixture.json.gz",
+            }),
+          topology: () =>
+            Promise.resolve([
+              reporting("asked", ["deno", "cf"]),
+              reporting("did-not", ["deno"]),
+            ]),
+        },
+      );
+      expect(await Deno.readTextFile(`${dir}/asked`)).toBe(REPOSITORY);
+      expect(await Deno.readTextFile(`${dir}/did-not`)).toBe("");
+    } finally {
+      console.log = log;
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+    }
   });
 
   it("fails when a batch failed, having run it", async () => {

@@ -46,7 +46,11 @@ caller keeps them, walks them under a schema, and records what it reached.
   from the acting identity. The walk builds the read-only transaction the
   traverser reads through, carries the pointer-cycle tracker that stops a
   link loop, and follows the metadata documents a reader needs in order to
-  interpret what it found.
+  interpret what it found: the whole metadata family of each document a
+  query names, and of a document reached through a link only the schema
+  document its labels are stated against. The rest of a reached document's
+  family belongs to whoever names it (`../specs/memory-v2/05-queries.md`,
+  "Metadata / Provenance Resolution").
 - `schemaTrackerKey(space, id, scope, identity)` is the key a walk records
   under: one entry per scope INSTANCE, the middle segment the shared
   `scope_key` vocabulary resolved from the scope and the acting identity
