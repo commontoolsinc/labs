@@ -349,8 +349,9 @@ Mike's call, after S4.
       general mechanism for adding a property to existing data exists.
    3. Update each topic to a pattern whose input schema selects `boardNames`.
       Backfill, then bind `namesTable` onto each topic `addTopic` did not wire.
-      Use `--allow-non-existing` for a declared input that has no value or
-      default yet; the flag cannot override a topic's input schema (#6965).
+      The topic's `boardNames` default materializes `[]`, so this bind needs no
+      `--allow-non-existing` flag. The flag only overrides missing endpoint
+      values or pieces; it cannot override a topic's input schema (#6965).
       Run it from a host: laptop runs died 4-6 minutes in during the
       2026-08-28 migration.
    4. Verify by reading both the board's index and the member addresses. In
