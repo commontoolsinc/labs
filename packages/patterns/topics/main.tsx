@@ -101,13 +101,11 @@ export interface TopicDemand extends TopicSummary {
    * constraint the proof cannot show stable under default insertion, while an
    * optional one simply tolerates a topic that publishes none.
    *
-   * The spelling is not what makes the demand deployable, and no spelling is.
-   * Adding any property to a per-member demand is refused over a board holding
-   * members that do not publish it, because the schema recorded on the link to
-   * each member is unconstrained at every path that schema does not name, and
-   * narrowing an unconstrained schema is what
-   * `packages/piece/src/schema-compatibility.ts` refuses. That bound belongs to
-   * the checker rather than to this property. A topic whose
+   * A member's open producer contract allows any value at an undeclared
+   * property. Demanding a string there narrows that contract even when the
+   * property is optional, so `setsrc` requires an accepted compatibility
+   * break until the producer guarantees the string type. An optional
+   * `unknown` demand imposes no such restriction. A topic whose
    * lookup has produced no value — one filed a moment ago, or one from before
    * the board numbered anything — is absent here rather than blank, and every
    * consumer treats the two the same. */

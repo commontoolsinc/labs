@@ -904,6 +904,28 @@ function followAliasToWrapperNode(
 }
 
 /**
+ * Returns whether a record has no named properties and only `never`-valued
+ * index signatures, so its default can be represented by `{}`.
+ */
+export function isEmptyRecordType(
+  type: ts.Type,
+  typeChecker: ts.TypeChecker,
+): boolean {
+  if (
+    (type.flags & (ts.TypeFlags.Object | ts.TypeFlags.Intersection)) === 0 ||
+    type.isIntersection() &&
+      type.types.some((member) => (member.flags & ts.TypeFlags.Object) === 0) ||
+    typeChecker.getPropertiesOfType(type).length !== 0 ||
+    type.getCallSignatures().length !== 0 ||
+    type.getConstructSignatures().length !== 0
+  ) return false;
+
+  const indexes = typeChecker.getIndexInfosOfType(type);
+  return indexes.length > 0 &&
+    indexes.every((index) => (index.type.flags & ts.TypeFlags.Never) !== 0);
+}
+
+/**
  * Convert a purely literal-shaped Type to its JSON value: string/number/
  * boolean literals, null, literal tuples, and object-literal types whose
  * members are themselves literal-shaped. Returns the value wrapped (so a

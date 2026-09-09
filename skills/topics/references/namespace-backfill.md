@@ -20,18 +20,17 @@ that before deciding anything this procedure says needs deciding.
 
 1. **The board's source first**, and it needs
    `--dangerously-allow-incompatible-schema`. `setsrc --check` refuses it over a
-   board holding Topics filed before the namespace:
+   board holding Topics filed before the namespace, because the typed
+   `topics.0.shortName` demand constrains an unconstrained producer.
 
-   ```
-   input link at topics.0.shortName: an unconstrained schema is no longer accepted
-   ```
-
-   That is not about `shortName` and not about the property's spelling. The
-   schema recorded on a member's retained link is unconstrained at every path
-   that recorded schema does not name, so a property only the CANDIDATE demand
-   names is a narrowing of `true` — which is what
-   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
-   per-member demand property generally; the record has the probes.
+   An open producer contract permits any value at an undeclared property. A new
+   string demand narrows that contract even when optional: absence is allowed,
+   but a present non-string value is not. An optional `unknown` demand adds no
+   value restriction and is compatible. The retained link proof uses
+   producer-owned durable metadata; a schema carried by the alias is not a
+   producer guarantee. The checker is
+   `packages/piece/src/schema-compatibility.ts`, and the snapshot evidence is
+   `docs/history/development/issue-6969-upgrade-gates-2026-09-09.md`.
 
    `deno task pattern-compat` and `deno task pattern-vintage` do not see this.
    `tasks/pattern-vintage.ts` says what each proves: a pattern's declared

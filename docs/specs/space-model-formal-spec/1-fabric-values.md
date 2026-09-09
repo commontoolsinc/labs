@@ -3835,13 +3835,15 @@ export function fabricFromNativeValue(
 > **Implementation: tag-based type dispatch.** The conversion functions
 > classify a value through `tagFromNativeValueElseNull()` (in
 > `packages/data-model/src/value-tags.ts`), which returns a tag string from the
-> `VALUE_TAGS` vocabulary -- `"Array"`, `"Object"`, `"JsError"`, `"JsMap"`,
-> `"JsSet"`, `"JsDate"`, `"JsUint8Array"`, `"JsRegExp"`, the primitive tags of
+> `VALUE_TAGS` vocabulary -- the JS type tags of `JS_TYPE_VALUE_TAGS` (the
+> `typeof` name of each primitive and of a function, plus `"null"`),
+> `"Array"`, `"Object"`, `"JsError"`, `"JsMap"`, `"JsSet"`, `"JsDate"`,
+> `"JsUint8Array"`, `"JsRegExp"`, the primitive tags of
 > `FABRIC_PRIMITIVE_VALUE_TAGS` (one reported by each `FabricPrimitive` class,
-> under a `Fabric` prefix), `"FabricInstance"`, and `"Primitive"` -- or `null`
-> for a value it does not recognize. The conversion function then switches on
-> the tag to route to the appropriate wrapping logic. The dispatch asks its
-> questions in a fixed order.
+> under a `Fabric` prefix), and `"FabricInstance"` -- or `null` for an object
+> it does not recognize. The conversion function then switches on the tag to
+> route to the appropriate wrapping logic. The dispatch asks its questions in
+> a fixed order.
 > An array is tagged first, by `Array.isArray()`, so a subclass instance, a
 > severed-prototype array, and a cross-realm array all reach array handling and
 > are handled by the array rule of Section 1.5, rather than being rejected as
