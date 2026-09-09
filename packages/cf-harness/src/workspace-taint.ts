@@ -39,6 +39,87 @@ export type HarnessWorkspaceTaint =
 
 const taints = new Map<string, HarnessWorkspaceTaint>();
 
+/** Where a family's record is kept, once one has been established. */
+const recordPaths = new Map<string, string>();
+
+const encoder = new TextEncoder();
+
+/**
+ * Writes the family's state where every engine in the family can read it,
+ * replacing the file in one step.
+ *
+ * A run record cannot carry this on its own. The engine that learns something
+ * is whichever one ran the container, and it writes only ITS record; a child
+ * that saw a label leaves its parent's record — the one a later resume reads
+ * — saying the family was clean. Worse, the parent may never persist again.
+ * One file per family, rewritten on every join, is what makes the answer
+ * independent of which engine wrote last, or at all.
+ *
+ * Written to a neighbouring name and renamed over, so a reader never sees a
+ * half-written file: a truncated record would parse as absent, and absent is
+ * the one answer that must never be reached by accident.
+ */
+const persistRecord = (familyRunId: string): void => {
+  const path = recordPaths.get(familyRunId);
+  if (path === undefined) {
+    return;
+  }
+  const taint = taints.get(familyRunId);
+  if (taint === undefined) {
+    return;
+  }
+  const pending = `${path}.${crypto.randomUUID()}.pending`;
+  try {
+    Deno.writeFileSync(
+      pending,
+      encoder.encode(JSON.stringify({
+        type: "cf-harness.family-taint",
+        version: 1,
+        familyRunId,
+        taint,
+      })),
+    );
+    Deno.renameSync(pending, path);
+  } catch {
+    // A family whose record cannot be written still holds its state in this
+    // process. What is lost is the next process's ability to read it, and
+    // that reader treats a record it cannot read as `unknown`.
+    try {
+      Deno.removeSync(pending);
+    } catch {
+      // Nothing to clean up.
+    }
+  }
+};
+
+/**
+ * Names the file this family's state is kept in, and seeds the family from it
+ * when one is already there.
+ *
+ * Called by every engine in the family, so the first one establishes the file
+ * and the rest join it. Seeding is monotone in both directions the state can
+ * move, so an engine arriving late cannot lower what an earlier one recorded.
+ */
+export const useWorkspaceTaintRecord = (
+  familyRunId: string,
+  path: string,
+): { readonly found: boolean; readonly taint: HarnessWorkspaceTaint } => {
+  recordPaths.set(familyRunId, path);
+  let stored: { taint?: HarnessWorkspaceTaint } | undefined;
+  try {
+    stored = JSON.parse(Deno.readTextFileSync(path)) as {
+      taint?: HarnessWorkspaceTaint;
+    };
+  } catch {
+    stored = undefined;
+  }
+  if (stored?.taint === undefined) {
+    persistRecord(familyRunId);
+    return { found: false, taint: workspaceTaint(familyRunId) };
+  }
+  return { found: true, taint: seedWorkspaceTaint(familyRunId, stored.taint) };
+};
+
 /** What is known about `familyRunId`'s sandbox work. */
 export const workspaceTaint = (
   familyRunId: string,
@@ -64,6 +145,7 @@ export const joinWorkspaceTaint = (
     ? { kind: "known" }
     : { kind: "known", label: merged };
   taints.set(familyRunId, next);
+  persistRecord(familyRunId);
   return next;
 };
 
@@ -82,6 +164,7 @@ export const poisonWorkspaceTaint = (
   }
   const next: HarnessWorkspaceTaint = { kind: "unknown", reason };
   taints.set(familyRunId, next);
+  persistRecord(familyRunId);
   return next;
 };
 
@@ -98,7 +181,7 @@ export const poisonWorkspaceTaint = (
  * and a run state written before this field existed cannot say whether they
  * were clean; that is the same absence of evidence a lost sidecar leaves.
  */
-export const seedWorkspaceTaintFromRunState = (
+export const seedWorkspaceTaint = (
   familyRunId: string,
   persisted: HarnessWorkspaceTaint | undefined,
 ): HarnessWorkspaceTaint => {
@@ -123,4 +206,5 @@ export const seedWorkspaceTaintFromRunState = (
  */
 export const forgetWorkspaceTaintForTesting = (familyRunId: string): void => {
   taints.delete(familyRunId);
+  recordPaths.delete(familyRunId);
 };

@@ -1669,6 +1669,11 @@ Deno.test("DockerRunscSandboxRuntime treats an unreadable taint as synthetic, no
       { xattrJSON: { integrity: 7 } },
       { xattrJSON: { provenance: ["somewhere"] } },
       { xattrJSON: "finance" },
+      // Only a rendered string, which `runscTaintLabel` reads nothing out of.
+      // A non-empty one names atoms this cannot parse, so calling it public
+      // would report a container carrying a requirement as one carrying none.
+      { string: "finance" },
+      { string: '{conf: "finance", integ: \u2205}' },
     ]
   ) {
     const cfcResultDir = await Deno.makeTempDir();

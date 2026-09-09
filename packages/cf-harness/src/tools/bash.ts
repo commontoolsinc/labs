@@ -58,8 +58,11 @@ const CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 const observedCfcStdout = (
   cfcResult: CfcSandboxResult | undefined,
 ): string | undefined =>
-  cfcResult?.stdout.policy === "observed"
-    ? cfcResult.stdout.segments.map((segment) => segment.text).join("")
+  // Optional at every step: a result whose shape the runtime could not
+  // produce properly is one this must not crash on, and the taint reader
+  // already treats such a result as establishing nothing.
+  cfcResult?.stdout?.policy === "observed"
+    ? (cfcResult.stdout.segments ?? []).map((segment) => segment.text).join("")
     : undefined;
 
 export const bashToolDescriptor: HarnessToolDescriptor = {

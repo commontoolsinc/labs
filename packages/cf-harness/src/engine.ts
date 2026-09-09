@@ -16,7 +16,10 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import { familySandboxRuntime } from "./sandbox/family-sandbox.ts";
 import {
   createSandboxOutputRoot,
+  familyDirBesideWorkspace,
+  familyDirUnderArtifactRoot,
   type HarnessSandboxOutputRoot,
+  readSandboxOutputRootFromDisk,
   restoreSandboxOutputRoot,
   SANDBOX_OUTPUT_DIR_ENV,
   SANDBOX_OUTPUT_MOUNT_NAME,
@@ -27,7 +30,8 @@ import {
   type HarnessWorkspaceTaint,
   joinWorkspaceTaint,
   poisonWorkspaceTaint,
-  seedWorkspaceTaintFromRunState,
+  seedWorkspaceTaint,
+  useWorkspaceTaintRecord,
   workspaceTaint,
 } from "./workspace-taint.ts";
 
@@ -175,6 +179,7 @@ import {
 import {
   assertDockerRunscCfcTransportForMode,
   DockerRunscSandboxRuntime,
+  isHostDirWithinMount,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
 import {
@@ -308,18 +313,26 @@ export interface BuiltinToolOutputMap {
   loom_authoring_context: LoomAuthoringToolOutput;
 }
 
+const CFC_OBSERVATION_POLICIES = new Set(["observed", "opaque", "denied"]);
+
+/** Whether two labels state the same requirement. */
+const sameLabel = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
+
 /**
  * The container taint a sandbox invocation reported, or `undefined` when it
  * established none.
  *
- * Only a result runsc itself reported counts. One the runtime synthesized
- * because it could not read the sidecar is rendered as a `denied` observation
- * with an EMPTY label, which is shaped exactly like a public container; taking
- * it as evidence would let an unreadable sidecar mint an unlabeled cell. The
- * origin is what tells them apart, and its absence is read as synthetic.
- *
- * Every branch of `cfcResultFromRunscSidecar` puts the same label on all three
- * observations, so `stdout` answers for the invocation.
+ * Only a COMPLETE result runsc itself reported counts, and every part of it
+ * is checked rather than the one field the label is read from. A result the
+ * runtime synthesized because it could not read the sidecar is rendered as a
+ * `denied` observation with an EMPTY label, shaped exactly like a public
+ * container; the origin is what tells them apart, and its absence is read as
+ * synthetic. Beyond that, a result missing an observation, carrying a policy
+ * or channel that is not one of the ones defined, or whose three observations
+ * disagree about the container's label, is not a reading of one container —
+ * it is a shape this cannot interpret, and interpreting it anyway is how an
+ * empty label gets minted from a tainted run.
  */
 const cfcSandboxTaintOfResult = (
   result: SandboxCommandResult | undefined,
@@ -331,10 +344,36 @@ const cfcSandboxTaintOfResult = (
   if (!isObjectNotArray(cfcResult) || cfcResult.version !== 1) {
     return undefined;
   }
-  const stdout = cfcResult.stdout;
-  return isObjectNotArray(stdout) && isObjectNotArray(stdout.label)
-    ? stdout.label as IFCLabel
-    : undefined;
+  const { stdout, stderr, exitCode } = cfcResult;
+  if (
+    !isObjectNotArray(stdout) || !isObjectNotArray(stderr) ||
+    !isObjectNotArray(exitCode)
+  ) {
+    return undefined;
+  }
+  if (
+    stdout.channel !== "stdout" || stderr.channel !== "stderr" ||
+    !CFC_OBSERVATION_POLICIES.has(stdout.policy as string) ||
+    !CFC_OBSERVATION_POLICIES.has(stderr.policy as string) ||
+    !CFC_OBSERVATION_POLICIES.has(exitCode.policy as string)
+  ) {
+    return undefined;
+  }
+  if (
+    !isObjectNotArray(stdout.label) || !isObjectNotArray(stderr.label) ||
+    !isObjectNotArray(exitCode.label)
+  ) {
+    return undefined;
+  }
+  // One container has one taint, and `cfcResultFromRunscSidecar` puts it on
+  // all three observations. Three that disagree describe no container.
+  if (
+    !sameLabel(stdout.label, stderr.label) ||
+    !sameLabel(stdout.label, exitCode.label)
+  ) {
+    return undefined;
+  }
+  return stdout.label as IFCLabel;
 };
 
 interface ToolOutputWithId {
@@ -811,16 +850,6 @@ export class CfHarnessEngine {
     this.#inputCells = options.inputCells ?? [];
     this.#patternRefs = options.patternRefs ?? [];
     this.#spaceDbPath = options.spaceDbPath;
-    const sandboxConfig = options.sandboxRuntime === undefined
-      ? resolveSandboxConfig(this.config, {
-        workspaceHostPath: options.workspaceHostPath,
-        sandboxImage: options.sandboxImage,
-        sandboxDockerRuntime: options.sandboxDockerRuntime,
-        additionalMounts: options.additionalMounts,
-        cfcResultDir: options.cfcResultDir,
-        cfcInvocationContextDir: options.cfcInvocationContextDir,
-      })
-      : this.config.sandbox;
     // Both are needed before the sandbox exists: the family's output
     // directory is a mount the sandbox is built with, not a directory found
     // inside one it already has.
@@ -833,9 +862,63 @@ export class CfHarnessEngine {
       (options.runState?.artifactRoot !== undefined
         ? dirname(options.runState.artifactRoot)
         : undefined);
-    const sandboxOutputRootHost = artifactRootHostPath === undefined
+    // The mount's SOURCE must be somewhere the sandbox cannot reach by
+    // another route. Mounting a directory twice does not stop the workload
+    // writing it through the first mount, and the CLI's default artifact root
+    // sits under the working directory, which is also the default workspace —
+    // so the ordinary configuration is exactly the one the artifact root
+    // cannot serve. A sibling of the workspace is used instead, and a host
+    // that offers neither gets no output directory and no ingest.
+    const writableMountHostPaths = [
+      ...(options.workspaceHostPath !== undefined
+        ? [options.workspaceHostPath]
+        : []),
+      ...(options.additionalMounts ?? [])
+        .filter((mount) => !mount.readOnly)
+        .map((mount) => mount.hostPath),
+    ].filter((path): path is string => path !== undefined);
+    const outsideEveryWritableMount = (candidate: string): boolean =>
+      !writableMountHostPaths.some((mount) =>
+        isHostDirWithinMount(candidate, mount)
+      );
+    // One directory per family, chosen where the sandbox cannot reach it.
+    // Its `out` child is what gets mounted; everything else the harness keeps
+    // for the family — the taint record among them — sits beside that child
+    // and is therefore out of reach even though its sibling is bound in.
+    const familyDirHostPath = [
+      ...(artifactRootHostPath === undefined ? [] : [
+        familyDirUnderArtifactRoot(artifactRootHostPath, familyRunId),
+      ]),
+      ...(options.workspaceHostPath === undefined ? [] : [
+        familyDirBesideWorkspace(options.workspaceHostPath, familyRunId),
+      ]),
+    ].find(outsideEveryWritableMount);
+    const sandboxOutputRootHost = familyDirHostPath === undefined
       ? undefined
-      : sandboxOutputRootHostPath(artifactRootHostPath, familyRunId);
+      : sandboxOutputRootHostPath(familyDirHostPath);
+    const sandboxConfig = options.sandboxRuntime === undefined
+      ? resolveSandboxConfig(this.config, {
+        workspaceHostPath: options.workspaceHostPath,
+        sandboxImage: options.sandboxImage,
+        sandboxDockerRuntime: options.sandboxDockerRuntime,
+        additionalMounts: sandboxOutputRootHost === undefined
+          ? options.additionalMounts
+          : [
+            ...(options.additionalMounts ?? []),
+            {
+              kind: "host-bind" as const,
+              name: SANDBOX_OUTPUT_MOUNT_NAME,
+              hostPath: sandboxOutputRootHost,
+              sandboxPath: SANDBOX_OUTPUT_MOUNT_PATH,
+              readOnly: false,
+            },
+          ],
+        cfcResultDir: options.cfcResultDir,
+        cfcInvocationContextDir: options.cfcInvocationContextDir,
+        ...(artifactRootHostPath !== undefined ? { artifactRootHostPath } : {}),
+      })
+      : this.config.sandbox;
+
     // Capture the engine-owned docker-runsc config so we can refuse to *run*
     // enforce-mode sandbox work — capability probes or tools — whose sandbox
     // lacks the CFC sidecar transports (the check fires at run start, not
@@ -848,30 +931,8 @@ export class CfHarnessEngine {
       ? sandboxConfig
       : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
-    // The output directory enters the sandbox as its own read-write mount.
-    // A delegated child is handed its parent's runtime, which already carries
-    // it, and computes the same paths from the same family id.
-    const sandboxConfigWithOutput = sandboxConfig === undefined ||
-        sandboxOutputRootHost === undefined
-      ? sandboxConfig
-      : {
-        ...sandboxConfig,
-        additionalMounts: [
-          ...sandboxConfig.additionalMounts,
-          {
-            kind: "host-bind" as const,
-            name: SANDBOX_OUTPUT_MOUNT_NAME,
-            hostPath: sandboxOutputRootHost,
-            sandboxPath: SANDBOX_OUTPUT_MOUNT_PATH,
-            readOnly: false,
-          },
-        ],
-      };
     const sandbox = options.sandboxRuntime ??
-      new DockerRunscSandboxRuntime(
-        sandboxConfigWithOutput!,
-        options.processRunner,
-      );
+      new DockerRunscSandboxRuntime(sandboxConfig!, options.processRunner);
     this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
       options.workspaceHostPath;
     this.workspaceMountPath = normalizeSandboxRoot(
@@ -882,13 +943,21 @@ export class CfHarnessEngine {
     // Every invocation carries the output directory, so a workload names it
     // the same way the ingest does and neither spells it out — and every one
     // reports what it left, so no tool can lose the family's evidence.
-    if (options.runState !== undefined) {
-      // Resumed. The in-process map knows nothing about what this family's
-      // earlier invocations saw, and an empty entry reads as clean.
-      seedWorkspaceTaintFromRunState(
+    // One record per family, wherever the family's own directory is, so what
+    // a child learns reaches its parent's export and the next process's
+    // resume without depending on which engine happened to write last.
+    const familyRecord = familyDirHostPath === undefined
+      ? undefined
+      : useWorkspaceTaintRecord(
         this.#familyRunId,
-        options.runState.cfcWorkspaceTaint,
+        joinHostPath(familyDirHostPath, "family-taint.json"),
       );
+    if (options.runState !== undefined && familyRecord?.found !== true) {
+      // Resumed with no family record to read — one written before the
+      // family kept its own, or a family whose directory is gone. This run's
+      // own record is then all there is, and an entry this process has never
+      // seen reads as clean unless that record says otherwise.
+      seedWorkspaceTaint(this.#familyRunId, options.runState.cfcWorkspaceTaint);
     }
     this.#sandboxForDelegation = sandbox;
     this.sandbox = familySandboxRuntime(
@@ -1593,7 +1662,7 @@ export class CfHarnessEngine {
         ? await restoreSandboxOutputRoot(
           await this.#familyRootFromDisk(hostPath),
         )
-        : await createSandboxOutputRoot(hostPath);
+        : await createSandboxOutputRoot(hostPath, this.#familyRunId);
     } catch (error) {
       this.#sandboxOutputRootFailure = error instanceof Error
         ? error.message
@@ -1620,14 +1689,16 @@ export class CfHarnessEngine {
   async #familyRootFromDisk(
     hostPath: string,
   ): Promise<HarnessSandboxOutputRoot> {
-    const stat = await Deno.stat(hostPath).catch(() => undefined);
-    if (stat?.isDirectory !== true || stat.dev === null || stat.ino === null) {
+    const found = await readSandboxOutputRootFromDisk(hostPath).catch(() =>
+      undefined
+    );
+    if (found === undefined) {
       throw new Error(
         "the run family's output directory is missing, so this child cannot " +
           `write where its parent reads: ${hostPath}`,
       );
     }
-    return { hostPath, dev: stat.dev, ino: stat.ino };
+    return found;
   }
 
   /** Why this family cannot ingest, or `undefined` while it can. */

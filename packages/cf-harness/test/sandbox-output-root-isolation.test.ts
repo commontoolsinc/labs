@@ -13,7 +13,11 @@ import { runCfHarnessCli } from "../src/cli.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
-import { sandboxOutputRootHostPath } from "../src/sandbox/output-root.ts";
+import {
+  familyDirBesideWorkspace,
+  familyDirUnderArtifactRoot,
+  sandboxOutputRootHostPath,
+} from "../src/sandbox/output-root.ts";
 import { forgetWorkspaceTaintForTesting } from "../src/workspace-taint.ts";
 import type {
   SandboxCommandRequest,
@@ -85,7 +89,9 @@ describe("the run family's output directory", () => {
         loop.runPrompt({ prompt: "Say hi.", signal: AbortSignal.abort() }),
       ).rejects.toThrow();
 
-      const root = sandboxOutputRootHostPath(artifactRoot, runId);
+      const root = sandboxOutputRootHostPath(
+        familyDirUnderArtifactRoot(artifactRoot, runId),
+      );
       expect((await Deno.stat(root)).isDirectory).toBe(true);
       expect(engine.getRunState().sandboxOutputRoot?.hostPath).toBe(root);
     } finally {
@@ -127,7 +133,9 @@ describe("the run family's output directory", () => {
       await child.ensureSandboxOutputRoot();
 
       expect(child.getRunState().sandboxOutputRoot?.hostPath).toBe(
-        sandboxOutputRootHostPath(artifactRoot, runId),
+        sandboxOutputRootHostPath(
+          familyDirUnderArtifactRoot(artifactRoot, runId),
+        ),
       );
       expect(child.sandboxOutputRootFailure).toBeUndefined();
     } finally {
@@ -230,6 +238,56 @@ describe("CFC sidecar transport isolation", () => {
     expect(errors.join("\n")).toContain("requires a non-empty path");
   });
 
+  it("refuses a result directory inside the run's output mount", async () => {
+    // The output directory is bound read-write into the sandbox, so a
+    // transport directory there is one the workload can rewrite — and it
+    // carries the evidence that directory's contents are labelled from.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
+    try {
+      const outputRoot = sandboxOutputRootHostPath(
+        familyDirUnderArtifactRoot(artifactRoot, "family-1"),
+      );
+      expect(() =>
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: workspace,
+          additionalMounts: [{
+            kind: "host-bind",
+            name: "cf-harness-out",
+            hostPath: outputRoot,
+            sandboxPath: "/cf-harness/out",
+            readOnly: false,
+          }],
+          cfcResultDir: join(outputRoot, "sidecars"),
+        })
+      ).toThrow(/must not be inside a directory the sandbox can write/);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("refuses an invocation-context directory inside the artifact root", async () => {
+    // Not a mount, but it holds the record a run writes about itself; the
+    // evidence that record is labelled from does not belong there.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
+    try {
+      expect(() =>
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: workspace,
+          artifactRootHostPath: artifactRoot,
+          cfcInvocationContextDir: join(artifactRoot, "invocation-context"),
+        })
+      ).toThrow(/must not be inside a directory the sandbox can write/);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
   it("admits a transport directory outside every writable mount", async () => {
     const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
     const sidecars = await Deno.makeTempDir({ prefix: "cf-harness-iso-side-" });
@@ -292,5 +350,70 @@ describe("CFC sidecar transport isolation", () => {
 
     expect(exitCode).not.toBe(0);
     expect(errors.join("\n")).toContain("requires an absolute path");
+  });
+});
+
+describe("where the run family's output directory is placed", () => {
+  // The mount's SOURCE has to be somewhere the sandbox cannot reach by
+  // another route. Mounting a directory twice does not stop the workload
+  // writing it through the first mount.
+
+  it("keeps it out of the workspace when the artifact root is inside one", async () => {
+    // The CLI's default: the artifact root sits under the working directory,
+    // which is also the default workspace. That is the ordinary
+    // configuration, and the one the artifact root cannot serve.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-place-" });
+    const artifactRoot = join(workspace, "artifacts");
+    const runId = `place-${crypto.randomUUID()}`;
+    try {
+      await Deno.mkdir(artifactRoot);
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new SilentSandbox(),
+        runId,
+        workspaceHostPath: workspace,
+        artifactRoot,
+      });
+      await engine.ensureSandboxOutputRoot();
+
+      const root = engine.getRunState().sandboxOutputRoot?.hostPath;
+      expect(root).toBeDefined();
+      expect(root!.startsWith(`${workspace}/`)).toBe(false);
+      expect(root).toBe(
+        sandboxOutputRootHostPath(familyDirBesideWorkspace(workspace, runId)),
+      );
+      expect(engine.sandboxOutputRootFailure).toBeUndefined();
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(familyDirBesideWorkspace(workspace, runId), {
+        recursive: true,
+      }).catch(() => {});
+    }
+  });
+
+  it("uses the artifact root when that is outside every writable mount", async () => {
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-place-" });
+    const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
+    const runId = `place-${crypto.randomUUID()}`;
+    try {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new SilentSandbox(),
+        runId,
+        workspaceHostPath: workspace,
+        artifactRoot,
+      });
+      await engine.ensureSandboxOutputRoot();
+
+      expect(engine.getRunState().sandboxOutputRoot?.hostPath).toBe(
+        sandboxOutputRootHostPath(
+          familyDirUnderArtifactRoot(artifactRoot, runId),
+        ),
+      );
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
   });
 });

@@ -14,13 +14,16 @@ import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { expect } from "@std/expect";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import { describe, it } from "@std/testing/bdd";
 
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import {
+  createSandboxOutputRoot,
+  familyDirBesideWorkspace,
+  familyDirUnderArtifactRoot,
   SANDBOX_OUTPUT_DIR_ENV,
   SANDBOX_OUTPUT_MOUNT_PATH,
   sandboxOutputRootHostPath,
@@ -209,7 +212,9 @@ const withRun = async (
     // The invocation that earns the taint, and that establishes the family's
     // output directory before anything writes into it.
     await engine.invokeBuiltinTool("bash", { command: "sqlite3 …" });
-    const outputRoot = sandboxOutputRootHostPath(artifactRoot, runId);
+    const outputRoot = sandboxOutputRootHostPath(
+      familyDirUnderArtifactRoot(artifactRoot, runId),
+    );
     for (const [name, content] of Object.entries(options.outputFiles ?? {})) {
       const path = join(outputRoot, name);
       await (typeof content === "string"
@@ -280,7 +285,12 @@ const unitContext = (
     runId: "ingest-sandbox-file-unit",
     workspaceTaint: { kind: "known" },
     sandboxOutputMountPath: SANDBOX_OUTPUT_MOUNT_PATH,
-    sandboxOutputRoot: { hostPath: "/host/out/unit", dev: 1, ino: 1 },
+    sandboxOutputRoot: {
+      hostPath: "/host/out/unit",
+      dev: 1,
+      ino: 1,
+      nonce: "unit-nonce",
+    },
     nextOutputId: () =>
       createToolOutputId("ingest-sandbox-file-unit", "ingest_sandbox_file", 1),
     resolvePath: (path: string) => path,
@@ -288,10 +298,27 @@ const unitContext = (
     ...overrides,
   }) as unknown as HarnessToolContext;
 
-/** The recorded identity of an existing directory, for a unit context. */
-const rootOf = async (hostPath: string) => {
-  const stat = await Deno.stat(hostPath);
-  return { hostPath, dev: stat.dev!, ino: stat.ino! };
+/**
+ * A real output directory holding one file, for the cases that drive the tool
+ * directly. Built the way the engine builds one, so the identity the tool
+ * checks is an identity that exists.
+ */
+const withOutputRootHolding = async (
+  content: string,
+  body: (
+    root: Awaited<ReturnType<typeof createSandboxOutputRoot>>,
+    filePath: string,
+  ) => Promise<void>,
+): Promise<void> => {
+  const parent = await Deno.makeTempDir({ prefix: "cf-harness-unit-" });
+  try {
+    const root = await createSandboxOutputRoot(join(parent, "out"), "family-1");
+    const filePath = join(root.hostPath, "total.txt");
+    await Deno.writeTextFile(filePath, content);
+    await body(root, filePath);
+  } finally {
+    await Deno.remove(parent, { recursive: true });
+  }
 };
 
 /** A session whose commit answers however the case under test needs it to. */
@@ -496,7 +523,9 @@ describe("ingest_sandbox_file", () => {
     const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
     const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
     try {
-      const outputRoot = sandboxOutputRootHostPath(artifactRoot, runId);
+      const outputRoot = sandboxOutputRootHostPath(
+        familyDirUnderArtifactRoot(artifactRoot, runId),
+      );
       await Deno.mkdir(outputRoot, { recursive: true });
       await Deno.writeTextFile(join(outputRoot, "planted.txt"), "not ours");
       const engine = new CfHarnessEngine({
@@ -643,14 +672,18 @@ describe("ingest_sandbox_file", () => {
   });
 
   it("reports a directory it could not create for a reason other than reuse", async () => {
+    // A FILE where the family's directory would go, rather than a permission
+    // bit: root ignores permission bits, so a test resting on them passes
+    // vacuously wherever the suite runs as root — which is how this one read
+    // green on macOS and proved nothing in a Linux container. What the kernel
+    // calls the condition differs between the two, so both wordings are
+    // admitted.
+
     const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
     const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
     const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
     try {
-      // The parent exists and admits no children, so the leaf fails for a
-      // reason that is not "one is already there".
-      await Deno.mkdir(join(artifactRoot, runId), { recursive: true });
-      await Deno.chmod(join(artifactRoot, runId), 0o500);
+      await Deno.writeTextFile(join(artifactRoot, runId), "not a directory");
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandbox(sandboxResult({})),
         runId,
@@ -660,12 +693,11 @@ describe("ingest_sandbox_file", () => {
 
       await engine.ensureSandboxOutputRoot();
 
-      expect(engine.sandboxOutputRootFailure).toMatch(/[Pp]ermission denied/);
+      expect(engine.sandboxOutputRootFailure).toMatch(
+        /[Nn]ot a directory|File exists/,
+      );
     } finally {
       forgetWorkspaceTaintForTesting(runId);
-      await Deno.chmod(join(artifactRoot, "sandbox-out"), 0o700).catch(
-        () => {},
-      );
       await Deno.remove(workspace, { recursive: true });
       await Deno.remove(artifactRoot, { recursive: true });
     }
@@ -876,7 +908,12 @@ describe("ingest_sandbox_file", () => {
 
       // A record written before this field existed says nothing about what
       // its invocations saw, which is the same absence a lost sidecar leaves.
+      // The family's own record has to be gone as well: it is what a resume
+      // reads first, and while it stands there is no absence to test.
       forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(
+        join(familyDirBesideWorkspace(workspace, runId), "family-taint.json"),
+      );
       const { cfcWorkspaceTaint: _dropped, ...silent } = persisted;
       const fromSilentRecord = new CfHarnessEngine({
         sandboxRuntime: new FakeSandbox(sandboxResult({})),
@@ -888,6 +925,9 @@ describe("ingest_sandbox_file", () => {
     } finally {
       forgetWorkspaceTaintForTesting(runId);
       await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(familyDirBesideWorkspace(workspace, runId), {
+        recursive: true,
+      }).catch(() => {});
     }
   });
 
@@ -1017,8 +1057,47 @@ describe("ingest_sandbox_file", () => {
       { taint: {}, outputFiles: { "total.txt": TOTAL_TEXT } },
       async ({ engine, workspace, artifactRoot, outputRoot }) => {
         const persisted = engine.getRunState();
+        // The replacement is made BEFORE the original is removed, so the two
+        // cannot share an inode. Removing first and remaking would be this
+        // test on macOS and a different one on ext4 and tmpfs, where a
+        // directory remade at the same path frequently gets its inode back.
+        const replacement = join(artifactRoot, "replacement");
+        await Deno.mkdir(replacement);
         await Deno.remove(outputRoot, { recursive: true });
-        await Deno.mkdir(outputRoot, { recursive: true });
+        await Deno.rename(replacement, outputRoot);
+
+        const resumed = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandbox(sandboxResult({})),
+          runState: persisted,
+          workspaceHostPath: workspace,
+          artifactRoot,
+        });
+        await resumed.ensureSandboxOutputRoot();
+
+        expect(resumed.sandboxOutputRootFailure).toMatch(
+          /carries no marker this run can check it by/,
+        );
+      },
+    );
+  });
+
+  it("refuses to restore a directory whose marker is not the recorded one", async () => {
+    // The case device and inode cannot answer, and the reason the marker
+    // exists: a directory that IS the same inode, because a filesystem handed
+    // it back, but was made by something else. Written as the same directory
+    // carrying a different nonce, which is what that looks like from the
+    // resume's side and what no filesystem's behaviour can make go away.
+
+    await withRun(
+      { taint: {}, outputFiles: { "total.txt": TOTAL_TEXT } },
+      async ({ engine, workspace, artifactRoot, outputRoot }) => {
+        const persisted = engine.getRunState();
+        const marker = join(outputRoot, ".cf-harness-output-root.json");
+        const original = JSON.parse(await Deno.readTextFile(marker));
+        await Deno.writeTextFile(
+          marker,
+          JSON.stringify({ ...original, nonce: crypto.randomUUID() }),
+        );
 
         const resumed = new CfHarnessEngine({
           sandboxRuntime: new FakeSandbox(sandboxResult({})),
@@ -1128,6 +1207,103 @@ describe("ingest_sandbox_file", () => {
     );
   });
 
+  it("poisons the family when a runsc result is incomplete or self-inconsistent", async () => {
+    // One container has one taint, and the sidecar reader puts it on all
+    // three observations. A result missing one, naming a policy or channel
+    // that is not defined, or whose three observations disagree describes no
+    // container — and reading its `stdout` anyway is how an empty label gets
+    // minted from a tainted run.
+
+    const complete = sandboxResult(FINANCE_LABEL);
+    for (
+      const malformed of [
+        { ...complete, stdout: undefined },
+        { ...complete, stderr: undefined },
+        { ...complete, exitCode: undefined },
+        { ...complete, stdout: { ...complete.stdout, channel: "stderr" } },
+        { ...complete, stdout: { ...complete.stdout, policy: "elsewhere" } },
+        { ...complete, exitCode: { ...complete.exitCode, policy: "nope" } },
+        { ...complete, stdout: { ...complete.stdout, label: "finance" } },
+        {
+          ...complete,
+          stderr: { ...complete.stderr, label: { confidentiality: ["other"] } },
+        },
+        {
+          ...complete,
+          exitCode: { ...complete.exitCode, label: {} },
+        },
+      ]
+    ) {
+      const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+      const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ing-" });
+      const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-a-" });
+      try {
+        const engine = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandbox(
+            malformed as unknown as CfcSandboxResult,
+            "runsc-taint",
+          ),
+          runId,
+          workspaceHostPath: workspace,
+          artifactRoot,
+        });
+
+        await engine.invokeBuiltinTool("bash", { command: "x" });
+
+        expect(engine.workspaceTaint.kind).toBe("unknown");
+      } finally {
+        forgetWorkspaceTaintForTesting(runId);
+        await Deno.remove(workspace, { recursive: true });
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    }
+  });
+
+  it("keeps the family's taint where a crashed parent's own record cannot lose it", async () => {
+    // The parent never persists again after the child runs, which is what a
+    // crash looks like from the family's side. A later process reads the
+    // family's own record, not the parent's.
+
+    await withRun(
+      { taint: FINANCE_LABEL, outputFiles: { "total.txt": TOTAL_TEXT } },
+      async ({ engine, workspace, artifactRoot, runId }) => {
+        const child = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandbox(
+            sandboxResult({ confidentiality: ["health"] }),
+          ),
+          runId: `${runId}.subagent.1`,
+          lineage: {
+            role: "subagent",
+            rootRunId: runId,
+            parentRunId: runId,
+            parentToolCallId: "call-1",
+            depth: 1,
+          },
+          workspaceHostPath: workspace,
+          artifactRoot,
+        });
+        await child.invokeBuiltinTool("bash", { command: "sqlite3 …" });
+
+        // The parent's record as it stood BEFORE the child ran: the state a
+        // crash would have left behind on disk.
+        const stale = { ...engine.getRunState(), cfcWorkspaceTaint: undefined };
+        forgetWorkspaceTaintForTesting(runId);
+
+        const resumed = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandbox(sandboxResult({})),
+          runState: stale,
+          workspaceHostPath: workspace,
+          artifactRoot,
+        });
+
+        expect(resumed.workspaceTaint).toEqual({
+          kind: "known",
+          label: { confidentiality: ["finance", "health"] },
+        });
+      },
+    );
+  });
+
   it("declares an input schema with no property a label could arrive in", () => {
     expect(ingestSandboxFileToolDescriptor.inputSchema).toEqual({
       type: "object",
@@ -1201,9 +1377,7 @@ describe("ingest_sandbox_file", () => {
     // the shape a run under enforcement meets. Nothing is returned to pass
     // on, because nothing landed.
 
-    const file = await Deno.makeTempFile();
-    try {
-      await Deno.writeTextFile(file, TOTAL_TEXT);
+    await withOutputRootHolding(TOTAL_TEXT, async (root, filePath) => {
       const output = await ingestSandboxFileTool.invoke(
         unitContext({
           getFabricSession: () =>
@@ -1212,40 +1386,34 @@ describe("ingest_sandbox_file", () => {
                 Promise.resolve({ error: new Error("commit refused") })
               ),
             ),
-          sandboxOutputRoot: await rootOf(dirname(file)),
-          resolveHostPath: () => file,
+          sandboxOutputRoot: root,
+          resolveHostPath: () => filePath,
         }),
-        { path: file },
+        { path: filePath },
       );
 
       expect(failure(output).message).toBe(
         "ingest_sandbox_file could not write the cell: commit refused",
       );
-    } finally {
-      await Deno.remove(file);
-    }
+    });
   });
 
   it("reports a session that could not be established", async () => {
-    const file = await Deno.makeTempFile();
-    try {
-      await Deno.writeTextFile(file, TOTAL_TEXT);
+    await withOutputRootHolding(TOTAL_TEXT, async (root, filePath) => {
       const output = await ingestSandboxFileTool.invoke(
         unitContext({
           getFabricSession: () =>
             Promise.reject(new Error("no space reachable")),
-          sandboxOutputRoot: await rootOf(dirname(file)),
-          resolveHostPath: () => file,
+          sandboxOutputRoot: root,
+          resolveHostPath: () => filePath,
         }),
-        { path: file },
+        { path: filePath },
       );
 
       expect(failure(output).message).toBe(
         "ingest_sandbox_file failed: no space reachable",
       );
-    } finally {
-      await Deno.remove(file);
-    }
+    });
   });
 
   it("reports a path it could not resolve", async () => {

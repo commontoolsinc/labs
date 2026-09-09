@@ -277,40 +277,62 @@ const resolveCfcInvocationContextDir = (
  *
  * @throws Error naming the directory and the mount it sits under.
  */
+/**
+ * A path resolved as far down as it exists, with what does not exist joined
+ * back on.
+ *
+ * A directory that is not there yet still has to be compared against one that
+ * is — these are made on first write — and resolving neither side would
+ * compare a real path against a literal one, which on a host whose temporary
+ * root is itself a symlink (macOS's `/var` is `/private/var`) reports every
+ * directory as outside every mount.
+ */
+const realHostPathOrNearest = (path: string): string => {
+  const normalized = normalizeHostPath(path);
+  const { root } = parseHostPath(normalized);
+  const tail: string[] = [];
+  let head = normalized;
+  // Every step drops a segment, so the walk is finite; it never has to test
+  // the root inside the loop, because the root is where it ends and is
+  // resolved once below.
+  while (head !== root) {
+    try {
+      return joinHostPath(Deno.realPathSync(head), ...[...tail].reverse());
+    } catch {
+      tail.push(basenameHostPath(head));
+      head = dirnameHostPath(head);
+    }
+  }
+  return joinHostPath(Deno.realPathSync(root), ...[...tail].reverse());
+};
+
+/**
+ * Whether `dir` resolves inside `mountHostPath`, comparing REAL paths and
+ * resolving as far down each as exists. A directory that is not there yet
+ * still has to be compared against one that is; resolving neither would
+ * compare a real path against a literal one, which on a host whose temporary
+ * root is itself a symlink — macOS's `/var` is `/private/var` — reports every
+ * directory as outside every mount.
+ */
+export const isHostDirWithinMount = (
+  dir: string,
+  mountHostPath: string,
+): boolean => {
+  const step = relativeHostPath(
+    realHostPathOrNearest(mountHostPath),
+    realHostPathOrNearest(dir),
+  );
+  return step !== ".." && !step.startsWith(`..${hostSeparator}`);
+};
+
 const refuseSandboxVisibleTransportDir = (
   dir: string,
   label: string,
   mounts: readonly { hostPath: string; sandboxLabel: string }[],
 ): void => {
-  // A directory that does not exist yet still has to be compared against one
-  // that does, and these are usually created on first write. Resolving only
-  // what exists and re-joining the rest is what makes the two comparable:
-  // resolving neither would compare a real path against a literal one, which
-  // on a host where the temporary root is itself a symlink — macOS's `/var`
-  // is `/private/var` — reports every directory as outside every mount.
-  const realOf = (path: string): string => {
-    const normalized = normalizeHostPath(path);
-    const { root } = parseHostPath(normalized);
-    const tail: string[] = [];
-    let head = normalized;
-    // Down to the deepest ancestor that exists, re-joining what does not.
-    // The walk is finite because every step drops a segment, and it never has
-    // to test the root inside the loop: the root is where it ends, and it is
-    // resolved once below.
-    while (head !== root) {
-      try {
-        return joinHostPath(Deno.realPathSync(head), ...[...tail].reverse());
-      } catch {
-        tail.push(basenameHostPath(head));
-        head = dirnameHostPath(head);
-      }
-    }
-    return joinHostPath(Deno.realPathSync(root), ...[...tail].reverse());
-  };
-
-  const realDir = realOf(dir);
+  const realDir = realHostPathOrNearest(dir);
   for (const mount of mounts) {
-    const realMount = realOf(mount.hostPath);
+    const realMount = realHostPathOrNearest(mount.hostPath);
     const step = relativeHostPath(realMount, realDir);
     if (step !== ".." && !step.startsWith(`..${hostSeparator}`)) {
       throw new Error(
@@ -350,6 +372,10 @@ export const resolveDockerRunscSandboxConfig = (
   const cfcInvocationContextDir = resolveCfcInvocationContextDir(options);
   // Every host directory this sandbox mounts read-write, including the
   // workspace that holds the run family's output directory.
+  // Every host directory this sandbox mounts read-write — the workspace, the
+  // run family's output directory, and anything else the operator bound —
+  // plus the artifact root, which is not mounted but holds the run's own
+  // record and must not hold the evidence that record is labelled from.
   const writableMounts = [
     ...(options.workspaceHostPath !== undefined
       ? [{
@@ -363,6 +389,12 @@ export const resolveDockerRunscSandboxConfig = (
         hostPath: mount.hostPath!,
         sandboxLabel: `the mount at ${mount.sandboxPath}`,
       })),
+    ...(options.artifactRootHostPath !== undefined
+      ? [{
+        hostPath: options.artifactRootHostPath,
+        sandboxLabel: "the run's artifact root",
+      }]
+      : []),
   ];
   if (cfcResultDir !== undefined) {
     refuseSandboxVisibleTransportDir(
@@ -753,31 +785,6 @@ const hasNonEmptyXattrValue = (value: unknown): boolean => {
   return value !== undefined && value !== null;
 };
 
-/**
- * Whether the sidecar's raw taint is a shape this can represent.
- *
- * `runscTaintLabel` keeps a clause only when it is an array, so a taint whose
- * `confidentiality` is a string — or anything else that is not a list of
- * atoms — would be silently reduced to the empty label while
- * `isPublicRunscTaint` still reported it as non-public. The result would be a
- * container carrying a requirement, rendered as one carrying none. A shape
- * this cannot read is not evidence about the container; it is a sidecar this
- * build does not understand.
- */
-const isRepresentableRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
-  if (taint.xattrJSON === undefined) {
-    return typeof taint.string === "string" || taint.string === undefined;
-  }
-  if (!isObjectNotArray(taint.xattrJSON)) {
-    return false;
-  }
-  return Object.entries(taint.xattrJSON).every(([clause, value]) =>
-    (clause === "confidentiality" || clause === "integrity")
-      ? Array.isArray(value)
-      : !hasNonEmptyXattrValue(value)
-  );
-};
-
 const runscTaintLabel = (taint: RunscCfcLabelSidecar): IFCLabel => {
   const xattr = isObjectNotArray(taint.xattrJSON) ? taint.xattrJSON : {};
   return {
@@ -796,6 +803,35 @@ const isPublicRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
     ? taint.string.trim()
     : "";
   return stringValue.length === 0 || stringValue === "{}";
+};
+
+/**
+ * Whether the sidecar's raw taint is a shape this can represent.
+ *
+ * `runscTaintLabel` keeps a clause only when it is an array, so a taint whose
+ * `confidentiality` is a string — or anything else that is not a list of
+ * atoms — would be silently reduced to the empty label while
+ * `isPublicRunscTaint` still reported it as non-public. The result would be a
+ * container carrying a requirement, rendered as one carrying none. A shape
+ * this cannot read is not evidence about the container; it is a sidecar this
+ * build does not understand.
+ */
+const isRepresentableRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
+  if (taint.xattrJSON === undefined) {
+    // Only the rendered string, and `runscTaintLabel` reads nothing out of
+    // it. An EMPTY one is a public container and says all there is to say; a
+    // non-empty one names atoms this cannot parse, so calling it public would
+    // report a container carrying a requirement as one carrying none.
+    return isPublicRunscTaint(taint);
+  }
+  if (!isObjectNotArray(taint.xattrJSON)) {
+    return false;
+  }
+  return Object.entries(taint.xattrJSON).every(([clause, value]) =>
+    (clause === "confidentiality" || clause === "integrity")
+      ? Array.isArray(value)
+      : !hasNonEmptyXattrValue(value)
+  );
 };
 
 const cfcResultFromRunscSidecar = (

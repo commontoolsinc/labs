@@ -88,6 +88,15 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   extraDockerArgs?: readonly string[];
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
+
+  /**
+   * The run's artifact root, when it has one. Not a mount, and named here
+   * only so a CFC sidecar transport directory inside it is refused: the
+   * artifact root holds the record a run writes about itself, and a transport
+   * directory there would put the evidence that record is labelled from
+   * within reach of whatever can reach the artifacts.
+   */
+  artifactRootHostPath?: string;
 }
 
 /**

@@ -253,36 +253,39 @@ The current package provides:
   carries the claim: a mount point cannot be replaced from inside, a hard link
   cannot cross into it from the workspace because the two are different
   filesystems, and a symlink inside it resolves outside its real path. On top of
-  that the directory's identity — device and inode — is recorded when it is made
-  and checked before every read; a candidate whose real path is not under the
-  root's is refused; and a candidate carrying more than one name is refused,
-  since a hard link is a second entry for bytes the family never wrote. Being in
-  the workspace is not evidence that this run wrote a file, while a directory
-  nothing predates is. A run with nowhere to put one — no artifact root, or a
-  directory that cannot be created — loses its ingest, not its tools. EVIDENCE:
-  the label is the join of the container taints runsc reported for the family's
-  sandbox invocations, collected at the invocation boundary so no tool can drop
-  one, and an invocation that returned no readable result poisons the family to
-  `unknown` for the rest of the run — there is no recovery, because nothing
-  later can establish what it wrote. That includes a result the runtime
-  SYNTHESIZED because it could not read the sidecar: an unsupported version, a
-  container mismatch, a missing taint, a read or parse failure, or a taint whose
-  shape this build cannot represent, such as a confidentiality clause that is a
-  string rather than a list. Each is rendered as a denial carrying an empty
-  label, shaped exactly like a public container, so only its recorded origin
-  tells the two apart. A run configured without the runsc CFC result transport
-  therefore ingests nothing, which is the intended reading: no trusted taint
-  source, no honest label. A resumed run seeds this state from its own record,
-  and a record that says nothing about it is `unknown` rather than clean; it
-  also restores its recorded output directory rather than making it again,
-  refusing when what stands at the recorded path is no longer the directory that
-  was recorded. Every record the family writes — a delegated child's and its
-  parent's alike — carries the family's state, so a child's taint cannot leave a
-  parent's record saying the family was clean. BYTES: the file is decoded
-  strictly, and one that is not valid UTF-8 is refused rather than repaired, and
-  a byte-order mark is kept as content rather than stripped — dropping it would
-  take three bytes out of the value while the reported length still counted
-  them. Nothing reaches a cell that was not in the file.
+  that the directory's identity is recorded when it is made and checked before
+  every read: device and inode, and a nonce written inside it, because device
+  and inode alone do not identify a directory across time — on ext4 and tmpfs a
+  directory remade at the same path frequently gets its inode back; a candidate
+  whose real path is not under the root's is refused; and a candidate carrying
+  more than one name is refused, since a hard link is a second entry for bytes
+  the family never wrote. Being in the workspace is not evidence that this run
+  wrote a file, while a directory nothing predates is. A run with nowhere to put
+  one — no artifact root, or a directory that cannot be created — loses its
+  ingest, not its tools. EVIDENCE: the label is the join of the container taints
+  runsc reported for the family's sandbox invocations, collected at the
+  invocation boundary so no tool can drop one, and an invocation that returned
+  no readable result poisons the family to `unknown` for the rest of the run —
+  there is no recovery, because nothing later can establish what it wrote. That
+  includes a result the runtime SYNTHESIZED because it could not read the
+  sidecar: an unsupported version, a container mismatch, a missing taint, a read
+  or parse failure, or a taint whose shape this build cannot represent, such as
+  a confidentiality clause that is a string rather than a list. Each is rendered
+  as a denial carrying an empty label, shaped exactly like a public container,
+  so only its recorded origin tells the two apart. A run configured without the
+  runsc CFC result transport therefore ingests nothing, which is the intended
+  reading: no trusted taint source, no honest label. A resumed run seeds this
+  state from its own record, and a record that says nothing about it is
+  `unknown` rather than clean; it also restores its recorded output directory
+  rather than making it again, refusing when what stands at the recorded path is
+  no longer the directory that was recorded. Every record the family writes — a
+  delegated child's and its parent's alike — carries the family's state, so a
+  child's taint cannot leave a parent's record saying the family was clean.
+  BYTES: the file is decoded strictly, and one that is not valid UTF-8 is
+  refused rather than repaired, and a byte-order mark is kept as content rather
+  than stripped — dropping it would take three bytes out of the value while the
+  reported length still counted them. Nothing reaches a cell that was not in the
+  file.
 
   Both sidecar transports are held to the boundary the label rests on:
   `resolveDockerRunscSandboxConfig` refuses a result or invocation-context
