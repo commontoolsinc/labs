@@ -913,6 +913,165 @@ being imposed.
 - A repeat names an identity and invokes its file with every other
   identity in that file skipped.
 
+### What the specifier resolves to when the module goes away
+
+Sending the specifier through one module of ours turns the migration off
+a deprecated `@std/testing/bdd` into an edit of one file, as
+[two interception points](#two-interception-points-and-no-test-file-changed)
+says. What that file should become is a `describe` and `it` written
+here, which build the chain themselves and register under it, keeping
+one `Deno.test` per suite with a step for each leaf. Nothing a test file
+written in the bdd style has to change: the import map already resolves
+the specifier to our module, and this is a change behind it. What that
+buys, beyond the identity faults below, is a registrar the rest of the
+test machinery can hook into instead of replacing `Deno.test` behind
+each other's backs.
+
+#### What it fixes
+
+Every fault the re-export has produced is a recorded name disagreeing
+with a reported name. A wrapper with nothing to do stood between the
+test file and the registrar and took the class name, so almost no record
+carried a file (#7126). The leaves of a file declaring a hook outside
+every `describe` carried none, since the runner reports those beneath a
+root suite it invents while the tracked chain opened at the file's own
+outermost `describe` (#7173). A leaf whose call names its suite by
+handle was the same shape (#7184), and a leaf named after its body was
+the same again (#7195).
+
+The name map is a join, and a join fails on a wrong key whatever carries
+the key. Each of those entries was written and filed under a name no
+leaf had. A module that builds the chain and registers under it is
+handed both halves of what the runner will report, so there is no rule
+left for it to predict and no name for it to get wrong. That is the
+whole of what this changes and the whole of what has been going wrong.
+
+The clock harness gains the same thing. `installFakeClock` replaces
+`Deno.test` as well, and tells a test that wants the real clock from one
+that wants the fake one by asking whether a stack string contains any of
+twenty-four file basenames. A registrar of ours is handed the file and
+the leaf already, so that choice becomes an option on the `describe`
+making it, and the twenty-four names and the reasons recorded beside
+them move to the tests they are about. Nothing currently checks that
+such a name still matches a file, and a rename would quietly move a test
+onto the fake clock. What this does not reach is the harness's other
+reader, which classifies who armed a `setTimeout` on every timer and
+needs a stack because that caller is arbitrary source; auto-advance
+rests on it and it stays as it is.
+
+#### Why this shape and not another
+
+The deprecation notice points at `node:test`, which cannot carry this
+tree's tests: a `node:test` suite takes no `sanitizeOps`,
+`sanitizeResources` or `permissions`, and the tree passes those 109
+times.
+
+Registering each leaf as its own `Deno.test` fails on group teardown.
+Measured against Deno 2.9.4, `Deno.test.beforeAll` and its siblings take
+the module as their scope and do not nest, the scope is not positional,
+and a call inside a test body is accepted and then never runs. The
+runner brackets its own hooks around whatever a filter leaves, and
+around a file whose every test is ignored, but it never says which leaf
+runs last and `afterEach` takes no argument naming one. So a module
+holding a nested group's `afterAll` would have nothing to trigger it on.
+One `Deno.test` per suite makes that hook ordinary code in the group's
+body, owing the runner nothing.
+
+Nothing is lost by putting the leaves in steps. `t.step` takes `ignore`,
+reports an ignored step as a case carrying `<skipped/>` under its full
+joined name, which is what the skip list asks for, and takes the
+sanitizer options per step, defaulting to the enclosing test's.
+
+Letting each test file call `Deno.test` itself was measured and
+rejected. A case's class name follows the lexical call site, so a helper
+may compute `ignore` and may even build the whole `TestDefinition` while
+the report still names the test file; that would free the file
+attribution and retire the name map, the spool, the stack read and the
+container case with it. It costs a line in each of 2,241 test files, and
+a file missing that line runs no tests and reports none. Trading a
+silent green run of nothing, in the system whose whole purpose is to
+notice, against the deletion of machinery that works and has caused none
+of the faults, is the wrong way round.
+
+#### Nothing else needs to replace `Deno.test`
+
+Three things sit between a test file and the registrar, and each got
+there by replacing or shadowing `Deno.test`, because a global is the
+only thing there is to reach for. The records preload replaces it to
+apply the skip list and to capture which file a registration came from.
+The fake-clock harness replaces it to wrap each body in `freezeAround`,
+and to decide per test whether to wrap at all. The fixture runner does
+not replace it, but stands between the file and the registrar lexically,
+which costs the same class name and puts it on the same list.
+
+Five things a registrar of ours can offer are the whole of what those
+three do. A callback told of each leaf as it registers, with its file
+and its identity. A predicate consulted at registration, so that a
+listed leaf registers as ignored. Options carried from a `describe` or
+an `it` through to the test. A wrapper a suite installs once and the
+registrar runs around every leaf's body. And a way for a helper that
+builds tests to say which file it builds them for.
+
+That holds only while the registrar is the only caller of `Deno.test`,
+which it is not today: 553 test files call it directly, at 7,327 sites.
+Every one of those is the plain entry point, since `Deno.test.only`,
+`Deno.test.ignore` and `Deno.test.each` appear nowhere in the tree, so
+each site is a rename onto the registrar's own `test`. A file the rename
+misses keeps its tests and loses its file and its skippability, which is
+the direction to fail in, and a lint rule of the kind the tree already
+carries for self-imports holds the invariant afterwards.
+
+What goes with the replacements is the machinery for seeing around them.
+`MACHINERY_MODULE_SUFFIXES` and `registerFrameworkModule` are two lists
+of the modules that stand in the way, kept in step by hand, and one
+registrar leaves nothing for them to name. Three readers of the call
+stack become one, which can raise `Error.stackTraceLimit` around its own
+capture and take the repository root from `Deno.cwd()` or its own
+`import.meta.url` rather than climbing to a `.git` directory.
+
+The name map stays, because the file has to reach the process that
+writes the record and that is not the process that knows it. A record's
+file is what the topology places it by, and an identity the topology
+cannot place is one the publisher leaves out of the manifest, which
+makes every lane run it forever and score it never: of the 3,660
+identities one reproduction of the publisher could not claim, 3,648 had
+no file at all. The report cannot carry it, since Deno puts a bdd leaf's
+describe chain in the class name rather than a path, and a class name
+names whichever module called `Deno.test` in any case. The registrar
+knows the file and does not write the record; `ingestJUnit` writes it in
+another process after `deno test` has exited. The map is what passes
+between the two.
+
+What does get simpler is the lookup. `fileForName` walks the whole map
+for each leaf and takes the longest registered name that leaf's own name
+extends, because a bare `Deno.test` registers a container and its leaves
+extend that container's name with the separator. A registrar writes an
+entry per leaf under the whole identity, so the lookup is an exact one.
+A name two files both register stops being two files that share a
+top-level `describe` title and becomes two tests holding one identity,
+which the store cannot tell apart either, so dropping it is then the
+right answer rather than a loss.
+
+#### What it leaves standing
+
+The reconstruction goes: the root suite the runner invents, the suite a
+call names by handle, the name a body carries, and the overload sniffing
+that feeds them. Everything else stays as it is, that being the name
+map, the spool, the preload's wrapper for a bare `Deno.test`, the JUnit
+ingestion and the skip list.
+
+Two things this does not reach are worth naming so they are not mistaken
+for solved. A run killed at its bound writes no JUnit report at all, so
+every case it had already passed is lost, which the specification's
+claim that a killed run's records are worth reading does not currently
+hold for. And `Error.stackTraceLimit` is 10, which eight wrapper frames
+would exhaust; fourteen nested `describe` levels do not, because the
+innermost frame that is not machinery is the test file whatever the
+nesting, so this is a hazard rather than a live fault.
+
+Not measured: `it.only`, parallel execution, a step inside a leaf, and
+what a `beforeAll` that throws should do to the rest of its group.
+
 ### The work this adds
 
 - [x] The preload reads a skip list keyed by registering file and name,
