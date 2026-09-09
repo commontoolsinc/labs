@@ -17,14 +17,9 @@ import {
   FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
-import {
-  isFabricArray,
-  isFabricContainerValue,
-  isFabricPlainObject,
-} from "./type-check.ts";
 import { isValidFabricValue } from "./validity-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
-import { type ValueTag } from "./value-tags.ts";
+import { tagFromFabricValue, type ValueTag, VALUE_TAGS } from "./value-tags.ts";
 
 /** Type for a `mainResult` form. */
 type MainResultForm<ResultType> = { type: "mainResult"; value: ResultType };
@@ -361,24 +356,39 @@ class VisitInProgress<Domain, ResultType> {
       }
 
       if (VisitInProgress.#isValidFabricValue(value)) {
-        if (isFabricContainerValue(value)) {
-          result = vis.visitFabricContainer(value);
-          if (result?.type === "visitSubtype") {
-            if (isFabricArray(value)) {
-              result = vis.visitFabricArray(value);
-            } else if (isFabricPlainObject(value)) {
-              result = vis.visitFabricPlainObject(value);
-            } else if (value instanceof FabricInstance) {
-              result = vis.visitFabricInstance(value);
-            } else {
-              const type = backtickQuote(toDebugKindString(value));
-              throw new Error(
-                `Shouldn't happen: Asked to visit container of type ${type}.`,
-              );
+        const tag = tagFromFabricValue(value);
+        switch (tag) {
+          case VALUE_TAGS.Array: {
+            const array = value as (Domain & FabricArray);
+            result = vis.visitFabricContainer(array);
+            if (result?.type === "visitSubtype") {
+              result = vis.visitFabricArray(array);
             }
+            break;
           }
-        } else {
-          result = vis.visitPrimitive(value);
+
+          case VALUE_TAGS.FabricInstance: {
+            const instance = value as (Domain & FabricInstance);
+            result = vis.visitFabricContainer(instance);
+            if (result?.type === "visitSubtype") {
+              result = vis.visitFabricInstance(instance);
+            }
+            break;
+          }
+
+          case VALUE_TAGS.Object: {
+            const object = value as (Domain & FabricPlainObject);
+            result = vis.visitFabricContainer(object);
+            if (result?.type === "visitSubtype") {
+              result = vis.visitFabricPlainObject(object);
+            }
+            break;
+          }
+
+          default: {
+            const prim = value as (Domain & (Primitive | FabricPrimitive))
+            result = vis.visitPrimitive(prim, tag);
+          }
         }
       } else {
         result = vis.visitNonFabricValue(value);
