@@ -1016,6 +1016,47 @@ interface OptionTally {
   }>;
 }
 
+/**
+ * The key a voter's cell groups under, so that a lookup made for one of a
+ * voter's votes serves the rest. A voter is compared with `equals()`, which
+ * resolves both sides; this key only says which cells are the same link, so
+ * two spellings of one voter cost one comparison each and never a wrong one.
+ */
+const voterKey = (voter: LunchProfileCell): string | undefined => {
+  const id = getEntityId(voter);
+  return id === undefined ? undefined : entityRefToString(id);
+};
+
+/** A vote as the tally holds it: read off the reactive list once. */
+type VoteRecord = Pick<Vote, "voter" | "voteType">;
+
+/**
+ * Reads each vote off the poll's list once and groups the records by option.
+ *
+ * Every element and property read on a reactive list is a runtime call — a
+ * link resolved and a labeled view built — so the tally takes its votes from
+ * this one pass rather than scanning the list once per option and again per
+ * color.
+ */
+const groupVotesByOption = (
+  votes: readonly Vote[],
+): Map<string, VoteRecord[]> => {
+  const byOption = new Map<string, VoteRecord[]>();
+  for (const vote of votes) {
+    const record: VoteRecord = {
+      voteType: vote.voteType,
+      ...(vote.voter === undefined ? {} : { voter: vote.voter }),
+    };
+    const group = byOption.get(vote.optionId);
+    if (group === undefined) {
+      byOption.set(vote.optionId, [record]);
+    } else {
+      group.push(record);
+    }
+  }
+  return byOption;
+};
+
 const tallyOptions = (
   options: readonly Option[],
   votes: readonly Vote[],
@@ -1027,20 +1068,57 @@ const tallyOptions = (
 ): OptionTally[] => {
   // A vote carries its voter's identity, so the display name and swatch colour
   // are looked up from the roster by comparison. A voter who has left the
-  // roster still tallies; they just render without a name.
-  const participantNames = users.map((u) => u.name);
+  // roster still tallies; they just render without a name. The roster is read
+  // once, and each voter is compared once however many votes they cast.
+  const roster = users.map((u) => ({
+    name: u.name,
+    color: u.color,
+    ...(u.profile === undefined ? {} : { profile: u.profile }),
+  }));
+  const participantNames = roster.map((u) => u.name);
   const initialsByName = getInitialsByName(participantNames);
-  const rosterOf = (voter: LunchProfileCell | undefined): User | undefined =>
-    voter === undefined
-      ? undefined
-      : users.find((u) => equals(u.profile, voter));
+  const rosterByVoter = new Map<string, (typeof roster)[number] | undefined>();
+  const rosterOf = (
+    voter: LunchProfileCell | undefined,
+  ): (typeof roster)[number] | undefined => {
+    if (voter === undefined) return undefined;
+    const key = voterKey(voter);
+    if (key !== undefined && rosterByVoter.has(key)) {
+      return rosterByVoter.get(key);
+    }
+    const entry = roster.find((u) =>
+      u.profile !== undefined && equals(u.profile, voter)
+    );
+    if (key !== undefined) rosterByVoter.set(key, entry);
+    return entry;
+  };
+  const selfByVoter = new Map<string, boolean>();
+  const isSelf = (voter: LunchProfileCell | undefined): boolean => {
+    if (viewer === undefined || voter === undefined) return false;
+    const key = voterKey(voter);
+    if (key !== undefined && selfByVoter.has(key)) {
+      return selfByVoter.get(key)!;
+    }
+    const same = equals(voter, viewer);
+    if (key !== undefined) selfByVoter.set(key, same);
+    return same;
+  };
+  const byOption = groupVotesByOption(votes);
   const tallies = options.map((option): OptionTally => {
-    const optionVotes = votes.filter((v) => v.optionId === option.id);
+    const optionVotes = byOption.get(option.id) ?? [];
+    let green = 0;
+    let yellow = 0;
+    let red = 0;
+    for (const v of optionVotes) {
+      if (v.voteType === "green") green++;
+      else if (v.voteType === "yellow") yellow++;
+      else if (v.voteType === "red") red++;
+    }
     return {
       option,
-      green: optionVotes.filter((v) => v.voteType === "green").length,
-      yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
-      red: optionVotes.filter((v) => v.voteType === "red").length,
+      green,
+      yellow,
+      red,
       voters: optionVotes.map((v) => {
         const entry = rosterOf(v.voter);
         const name = entry?.name ?? "";
@@ -1050,7 +1128,7 @@ const tallyOptions = (
           color: entry?.color ?? "#888",
           initials: initialsByName.get(name) ??
             getInitials(name, participantNames),
-          isSelf: viewer !== undefined && equals(v.voter, viewer),
+          isSelf: isSelf(v.voter),
         };
       }),
     };
