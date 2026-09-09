@@ -43,9 +43,9 @@ Seven nouns, each one thing, in the order a reference names them.
   returns its value.
 - **Path** — the way from a document's root to a cell, as JSON Pointer segments
   (RFC 6901): the `path` field of every link and address. A stored path is an
-  array of segments; RFC 6901's `~0` and `~1` escapes belong to the rendered
-  string alone. A reference is never called a path; the whole string is a
-  **reference**.
+  array of segments, any of which may be the empty string; RFC 6901's `~0` and
+  `~1` escapes belong to the rendered string alone. A reference is never called
+  a path; the whole string is a **reference**.
 - **Scope** — which instance of a document: `space`, `user`, or `session`. A
   stored link may also say `inherit`, the containing cell's scope.
 
@@ -62,9 +62,14 @@ reader in the fabric. It is written at one of three levels, and the head of the
 string says which:
 
 ```text
-//<space>/<piece>[#<member>][@<qualifier>…][/<path>]     complete
-/<piece>[#<member>][@<qualifier>…][/<path>]              space-relative
-.[#<member>][@<qualifier>…][/<path>]  or  <path>          piece-relative
+reference      ::= complete | space-relative | piece-relative
+complete       ::= "//" space "/" piece piece-parts pointer
+space-relative ::= "/" piece piece-parts pointer
+piece-relative ::= head piece-parts pointer | barepath
+head           ::= "." | ".." { "/" ".." }
+piece-parts    ::= [ "#" member ] { "@" qualifier }
+pointer        ::= { "/" key }         an RFC 6901 JSON Pointer
+barepath       ::= key { "/" key }     a pointer without its leading "/"
 ```
 
 A complete reference names its whole location. A space-relative one takes its
@@ -73,6 +78,12 @@ from the context and names a path against the context's position. The scope,
 when omitted, is the context's at every level, and the empty context's scope is
 the base. Parsing never needs the context — the head decides the level — and
 only resolving does.
+
+Everything after the piece is a JSON Pointer and nothing else
+([D11](#d11-the-path-is-a-json-pointer)), so a key is any string RFC 6901 can
+write, the empty one included. `.` and `..` are tokens at a relative
+reference's head and ordinary keys inside a pointer
+([D12](#d12-climbing-is-a-head-token)).
 
 Three characters carry structure, and each carries exactly one meaning:
 
@@ -314,13 +325,13 @@ requirements, and the shell-safe alphabet below is smaller than it looks.
 
 | Character              | Reserved by                           | Meaning                                                                                                                                                                                                       |
 | ---------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                    | this grammar                          | segment separator; at the head, `//` opens the space slot, one `/` roots at the context's space, and neither is piece-relative                                                                                |
+| `/`                    | this grammar                          | segment separator; at the head, `//` opens the space slot, one `/` roots at the context's space, and neither is piece-relative. After the piece it is the pointer's own separator, so an empty token is the key `""` ([D11](#d11-the-path-is-a-json-pointer)) |
 | `@`                    | this grammar                          | qualifier introducer on the piece ([D2](#d2--is-the-qualifier-introducer-and-nothing-else))                                                                                                                   |
 | `#`                    | this grammar, on the piece segment    | member introducer, `#argument` ([D6](#d6-a-pieces-other-documents-are-members)); in a path it is data. Separately, a leading `#name` on a whole operand is a wish target at `cf`'s intake seams               |
 | `~0`, `~1`             | RFC 6901                              | escapes for `~` and `/` inside a path key — the one escape scheme the grammar has                                                                                                                             |
 | `:`                    | the identifiers                       | inside a DID and a handle (`did:key:…`, `of:fid1:…`); a segment holding one is an identifier, one without is a name                                                                                           |
 | `=`                    | this grammar, inside a qualifier      | separates a qualifier's name from its value                                                                                                                                                                   |
-| `.`, `..`              | this grammar, in a relative reference | the context's position and its parent, as whole segments anywhere in a relative reference, and keys in a form that names a piece; `.` at the head is where a relative reference takes a member or a qualifier |
+| `.`, `..`              | this grammar, at a relative reference's head | the context's position and its parent, at the head of a relative reference and nowhere else; inside a pointer both are ordinary keys, as they are in a form that names a piece. The head is where a relative reference takes its member and qualifiers ([D12](#d12-climbing-is-a-head-token)) |
 | `,` and a trailing `@` | the projection grammar                | list separator, and the address marker on a projected position                                                                                                                                                |
 | a leading `@`          | `--schema`                            | its `@file` form; the projection's own document records the interaction with the trailing marker                                                                                                              |
 
@@ -388,9 +399,12 @@ quoting, and only then applies the path's unescaping, which is the grammar's.
 The [table above](#shell-behavior-measured) is about quoting: it measures which
 characters a shell consumes unquoted, and the grammar's design goal is that none
 of its structural characters need quoting at a stock prompt — R8 names the one
-exception. A writer never adds quoting, and a reader never expects it; whoever
-hands a reference to a transport — a person, completion, a tool printing a
-command line — owns it.
+exception. That promise is about structure and reaches no further: a key is any
+string, so a key holding a space, a `$`, or a `*` is quoted at a shell like any
+other argument, and R8 is no claim that every reference is bare-typeable. A
+writer never adds quoting, and a reader never expects it; whoever hands a
+reference to a transport — a person, completion, a tool printing a command line
+— owns it.
 
 ## Decisions
 
@@ -402,9 +416,8 @@ and the existing decisions it confirms or replaces.
 ```text
 //<space>/<piece>…      complete: the location is all its own
 /<piece>…               space-relative: the space is the context's
-.[#<member>][@<qualifier>…][/<path>]  or  <path>
-                        piece-relative: space and piece are the context's,
-                        and the path is against the context's position
+<head>…  or  <barepath> piece-relative: space and piece are the context's,
+                        and the pointer runs from the position the head names
 ```
 
 The head of the string says how much of the address it carries, and it spends no
@@ -423,27 +436,29 @@ the runner's base cell, `cf`'s `--space` and `--cell` — supplies the parts a
 reference omits, and a reader holding less than a reference needs refuses it: a
 piece-relative reference read with a space and no piece names nothing. A
 relative reference is written against the position's path the way a relative URL
-is written against the page: `.` is the position and `..` its parent, as whole
-segments anywhere in it — mid-path `items/../title` climbs, as a URL does — and
-a `..` that would leave the piece is refused by this grammar, which has nothing
-above a piece — a layer with a larger tree above the piece may continue the walk
-on its own terms. At a position that is a piece's root, the common case,
-"against the position" and "from the piece's root" coincide.
+is written against the page: `.` is the position and `..` its parent. Both are
+head tokens and neither is a path token — a relative reference opens with `.`,
+or with a run of `..`, and everything after the head is a pointer in which `.`
+and `..` are ordinary keys ([D12](#d12-climbing-is-a-head-token)). A `..` that
+would leave the piece is refused by this grammar, which has nothing above a
+piece — a layer with a larger tree above the piece may continue the walk on its
+own terms. At a position that is a piece's root, the common case, "against the
+position" and "from the piece's root" coincide.
 
-A relative reference takes a member or a qualifier only on the `.` that stands
-for the context's piece: `.@user/items` is the context's piece at scope `user`,
-then `items`; `.@user` alone is the position at that scope; and
-`.#argument/items` is the context's piece's arguments document, from its root,
-since switching documents leaves the position's path nothing to be inside of;
-`.#result/items` returns to the result from inside the arguments document, the
-member's counterpart of `.@space`. Everywhere else in a relative reference `@`
-and `#` are ordinary characters of a key — `items@user` is a key named
-`items@user`, `issue#12` a key named `issue#12` — and `..` takes neither, so a
-move that also climbs is written `.@user/../title`, one spelling rather than
-two. Unless `.#argument` switches it, the document is the context's, since the
-path is inside it. The `./` form exists so that a relative reference can be
-written where a bare word is read as something else — a slug on `--cell` — and
-means exactly what the bare form means.
+A relative reference takes a member or a qualifier on its head, whichever head
+it has: `.@user/items` is the context's piece at scope `user`, then `items`;
+`.@user` alone is the position at that scope; `..@user/title` is the same move
+one level up; and `.#argument/items` is the context's piece's arguments
+document, from its root, for the reason
+[D6](#d6-a-pieces-other-documents-are-members) gives. `.#result/items` returns
+to the result from inside the arguments document, the member's counterpart of
+`.@space`. After the head `@` and `#` are ordinary characters of a key —
+`items@user` is a key named `items@user`, `issue#12` a key named `issue#12`.
+Unless `.#argument` switches it, the document is the context's, since the path
+is inside it. The `./` form exists so that a relative reference can be written
+where a bare word is read as something else — a slug on `--cell`; `./items`
+means what `items` means, while `./` alone is the key `""`
+([D11](#d11-the-path-is-a-json-pointer)).
 
 Serves R4, R6, R7, R9, R11. Taking `@` off the space is what gives `@` one
 meaning ([D2](#d2--is-the-qualifier-introducer-and-nothing-else)); it also ends
@@ -590,6 +605,13 @@ A name not on this table is refused, with the message naming the table. Adding a
 row is the whole cost of a new qualifier
 ([Admitting a new requirement](#admitting-a-new-requirement)).
 
+A relative head takes the scope and no other qualifier. The scope's question —
+which instance — is one a context can answer, which is what makes `.@user` and
+`@inherit` mean anything. The pin's question is which version of a module, which
+belongs to an import specifier, and a specifier has no relative form
+([Translation](#translation-to-the-sibling-grammars)); a pin on a head would be
+read by nobody, so `.@pin=` is refused rather than ignored.
+
 Serves R9.
 
 ### D6. A piece's other documents are members
@@ -620,6 +642,19 @@ That last asymmetry with `@space` is the two axes of
 piece is written, so an omitted scope means the context's and the empty context
 must write `@space`; the member is a location part, cut off with the piece, so
 nothing is left to disambiguate.
+
+What makes the member cut the path off is not that it selects a different
+document, because a scope move selects one too: [scoped cell
+instances](scoped-cell-instances.md#runtime-scope-context) addresses the stored
+object by `(space, id, scope_key)`, so `.@session` names a different object
+than the position does. The difference is what the two objects hold. Scoped
+instances share "pattern code, schemas, and link structure", in that
+specification's words, so a path that means something at the position means the
+same thing in the other instance and the position carries over. The arguments
+document has an id of its own and a shape unrelated to the result's, so there
+is nothing for the position to carry over into. A relative reference anchors at
+the position when the target shares its schema and starts at the target's root
+when it does not, and the member is the only part that changes the answer.
 
 The piece segment is `name[#member][@qualifier…]`, one spelling: what, then
 which. It is read by splitting at `/`, then at `@`, then its head at `#`.
@@ -679,9 +714,11 @@ The consequences, in the order they arise:
   next level up. On inequality a writer falls back a level and never refuses: a
   more-qualified form is always correct in the same context, and a listing that
   mixes levels is fine because the head of each string says its level (R3).
-- **A relative reference whose path has a segment written `.` or `..`** is not
-  produced — those are tokens in a relative reference and keys everywhere else —
-  so a key by either name renders space-relative.
+- **A key named `.` or `..`** is written into the pointer like any other, since
+  the head is where those are tokens
+  ([D12](#d12-climbing-is-a-head-token)). The one spelling the head cannot
+  reach is a pointer whose first key is `..` directly after a climb, and there
+  the writer closes the head with `@inherit` rather than falling back a level.
 
 The writer assumes the reader has the same context it was given, and writes
 nothing more. The requester owns the difference between the context it passes
@@ -702,11 +739,14 @@ to defeat the omission is no longer needed.
 ### D8. The space segment's vocabulary
 
 A space segment is a DID or a name. A name may not contain `/` (the separator),
-`@` (a qualifier never attaches to a space), or `:` (what tells a DID from a
-name). Those are the grammar's rules; a resolver may hold a name to more —
-`createSession` today holds it to nothing further, and a registry would hold it
-to an alphabet of its own. No word is reserved: a space named `user` is written
-`//user/…`, and nothing else in the grammar can be written that way.
+`@` (a qualifier never attaches to a space), `#` (a member never attaches to one
+either), or `:` (what tells a DID from a name). The space segment is never split
+at `#`, so excluding it buys uniformity rather than a reading: one rule for
+which characters are structural, holding wherever a name is written. Those are
+the grammar's rules; a resolver may hold a name to more — `createSession` today
+holds it to nothing further, and a registry would hold it to an alphabet of its
+own. No word is reserved: a space named `user` is written `//user/…`, and
+nothing else in the grammar can be written that way.
 
 Serves R7. This is where the reserved-word alternative under D1 becomes
 unnecessary: the collision was between two `@`-introduced slots, and once only
@@ -769,10 +809,11 @@ form.
 that names a piece ignores the context's piece, document, and path — its path is
 from the piece's root, and its document is the result unless it writes
 `#argument`. A reference that names a space ignores everything below the space.
-A piece-relative reference names no location part above the document — `.` is
-the context's piece, and `.#argument` chooses its document — so it takes space
-and piece from the context, the document unless it chose one, and anchors its
-path at the context's path.
+A piece-relative reference names no location part above the document — its head
+is the context's piece, and `.#argument` chooses its document — so it takes
+space and piece from the context, the document unless it chose one, and anchors
+its pointer at the context's path, or above it by as many levels as the head
+climbs.
 
 **Scope: written → the reference's; omitted → the context's.** The scope is not
 cut off when a piece or a space is written, because it is not a level of the
@@ -843,6 +884,127 @@ that writing a piece resets the scope to the base. It would make `/X` at a
 reference in a user-scoped session re-write `@user`, against the minimality D7
 asks for.
 
+### D11. The path is a JSON Pointer
+
+```text
+/glaze-tracker              pointer "",       the document's root
+/glaze-tracker/flavor       pointer "/flavor"
+/glaze-tracker/             pointer "/",      the key ""
+/glaze-tracker//flavor      pointer "//flavor", the keys "" and "flavor"
+```
+
+What follows the piece is an RFC 6901 JSON Pointer, whole and unmodified. The
+pointer's own leading `/` is the reference's separator rather than an extra
+one, so the common forms are spelled the way they always were and the two edges
+fall out of the pointer instead of needing a rule each: the empty pointer is the
+root, and an empty token is the key `""` wherever it sits, trailing included.
+
+A key is therefore any string, and every key has a written form at every level
+(R2), which is what a link already stores — a path is an array of segments, and
+`""` is a segment like another. The escapes are the pointer's own, `~0` and
+`~1`, and there are no others.
+
+The bare form carries the same pointer with its leading `/` removed, which puts
+three keys out of its reach: `""` would make the string begin with `/` and read
+as space-relative, and `.` and `..` are the heads
+([D12](#d12-climbing-is-a-head-token)). A bare path is also never empty, since
+the empty operand is no operand. The `.` head reaches all three, and the root
+besides — `./` is the key `""`, `./.` the key `.`, `./..` the key `..`, and `.`
+alone the position — so the restriction is on one spelling rather than on a
+cell.
+
+Serves R2, R3, R11, and the one-escape-table rule of
+[Escaping](#escaping-is-the-grammars-quoting-is-the-transports).
+
+**Confirms.** The mid-path empty token `decodeJsonPointer` already reads, and
+the path array a link stores, which admits `""` today.
+
+**Replaces.** The trailing empty segment `parseReferenceParts` pops, which makes
+`""` writable everywhere except as the last key.
+
+**Cost, stated.** Two, both named rather than argued away. A habitual trailing
+slash stops naming the root: `/glaze-tracker/` is the key `""`, so a read of it
+is a not-found rather than a different cell, and a write of it creates that key
+— the [open question](#open-questions) on the write path is where that is
+decided. And the shell page URL cannot carry an empty key at all, since
+`splitPath` in `packages/runner/src/fabric-url.ts` discards empty segments; a
+cell whose path holds one has no page URL, which is R11's one stated exception
+and is recorded in [Translation](#translation-to-the-sibling-grammars).
+
+**Rejected.**
+
+- **A glyph for the empty key** — an explicit token in place of an empty one.
+  It reserves a character against R9 and then needs an escape for a key spelled
+  like the glyph, which is the second escape table this grammar does not have.
+  RFC 6901 already answers the question, and answering it again is what makes
+  two answers.
+- **No empty key at all** — refuse an empty token everywhere. It is the smaller
+  change and it costs R2 a stated exception for a key a JS object allows, a
+  link's path array holds, and a pattern's own input field produces when someone
+  leaves it blank.
+
+### D12. Climbing is a head token
+
+```text
+.               the position
+..              its parent
+../..           two levels up
+../../..@user   three levels up, at scope `user`
+```
+
+`.` and `..` are the head of a relative reference and nothing else. The head is
+a `.`, or a run of `..` joined by `/`; a member and the qualifiers attach to it;
+and everything from there is a pointer in which `.` and `..` are ordinary keys.
+Three rules make the head total:
+
+1. The head run is the longest prefix of `..` segments.
+2. A `#` or `@` closes the run, and the pointer starts at the next `/`.
+3. `.` is a head only when it is the whole head, so `./..` is the key `..`.
+
+Rule 1 costs exactly one form, and it is worth naming precisely: **the
+pointer's first key cannot be `..` directly after a climb**, because that
+string is spelled the way one more climb is. Nothing wider — a first key of `.`
+is untouched (`../.` is up one, then the key `.`), and `..` at any later
+position is untouched (`../x/..`), since the run stops at the first segment that
+is not `..`.
+
+Rule 2 is what reaches the form rule 1 costs. A `#` or an `@` cannot be a key's
+first character in that position, so writing one says where the run ended, and
+the qualifier to write is `@inherit`: it is the explicit spelling of an omitted
+scope ([D3](#d3-the-scope-keeps-its-abbreviation)), so it closes the head
+without saying anything the reference was not already saying.
+
+```text
+..@inherit/..           up one, then a key named ".."
+../../..@inherit/..     up three, then a key named ".."
+```
+
+Serves R2 (every key keeps a written form), R3, and R6, since `.` and `..` now
+mean one thing in one place instead of one thing in a relative reference and
+another everywhere else.
+
+**Confirms.** `moveBySegments` in `packages/cli/lib/shuttle/place.ts`, which
+reads `..` through `moveUp` and treats `.` as an ordinary segment; the head
+gains `.` and keeps `..`.
+
+**Replaces.** `..` as a segment anywhere in a relative reference. Nothing is
+lost by the restriction: within one document a mid-path `..` always reduces to a
+head-only prefix, since a walk of downs and ups nets out to some ups followed by
+some downs. The walk that does not reduce is the one that climbs back out
+through a link into another piece, which is the walk
+[D1](#d1-qualification-is-positional-the-urls-three-levels) already refuses and
+leaves to the layer with a tree above the piece.
+
+**Rejected.**
+
+- **`..` as an ordinary key everywhere**, which is the cleanest pointer of all
+  and retires `cd ..` — a reading `moveBySegments` has today.
+- **`.` as the run's terminator**, `../.` closing the head. A terminator drawn
+  from the key alphabet is itself a legal key, so this trades one ambiguity for
+  two: `../.` becomes both "up one, then here" and "up one, then the key `.`",
+  and `../..` is no better off. The terminator has to be structural, which is
+  why rule 2 spends a character the head already had.
+
 ## Examples
 
 Every combination the grammar admits, with `bakery` a space name,
@@ -870,15 +1032,21 @@ the same cells. The relative rows at the end need a context, and theirs is
 | `/glaze-tracker#argument`                                                     | the reader's           | slug          | `space`       | root                                        | the arguments document                                                                                                               |
 | `/glaze-tracker#argument@user/items`                                          | the reader's           | slug          | `user`        | `items`                                     | inside the user instance's arguments document                                                                                        |
 | `/glaze-tracker/issue#12`                                                     | the reader's           | slug          | `space`       | `issue#12`                                  | a key named `issue#12`: `#` in a path is data                                                                                        |
+| `/glaze-tracker/`                                                             | the reader's           | slug          | `space`       | the key `""`                                | the pointer `/`, not the root; the root is `/glaze-tracker`                                                                          |
+| `/glaze-tracker//flavor`                                                      | the reader's           | slug          | `space`       | the keys `""` and `flavor`                  | an empty token is a key wherever it sits                                                                                             |
 | `/glaze-tracker/items/0#argument`                                             | the reader's           | slug          | `space`       | `items/0#argument`                          | a key named `0#argument` — not the child's arguments; the child at `items/0` has its own id, and `/of:fid1:Dnt…#argument` names them |
 | `title`                                                                       | the context's          | the context's | the context's | `title` against the position                | `//bakery/glaze-tracker@user/items/0/title`                                                                                          |
 | `./title`                                                                     | the context's          | the context's | the context's | `title` against the position                | the same as `title`; `./` forces the reading where a bare word is a slug                                                             |
 | `.`                                                                           | the context's          | the context's | the context's | the position                                | the context's own cell                                                                                                               |
-| `./items@user`                                                                | the context's          | the context's | the context's | `items@user` against the position           | a key named `items@user`: `@` is data everywhere but on the `.` head                                                                 |
+| `./items@user`                                                                | the context's          | the context's | the context's | `items@user` against the position           | a key named `items@user`: `@` is data everywhere after the head                                                                 |
 | `../1/title`                                                                  | the context's          | the context's | the context's | the parent, then `1/title`                  | `//bakery/glaze-tracker@user/items/1/title`                                                                                          |
 | `.@session/title`                                                             | the context's          | the context's | `session`     | `title` against the position                | `//bakery/glaze-tracker@session/items/0/title`: the scope moves, the position holds                                                  |
 | `.@space`                                                                     | the context's          | the context's | `space`       | the position                                | `//bakery/glaze-tracker@space/items/0`                                                                                               |
-| `.@user/../title`                                                             | the context's          | the context's | `user`        | the parent, then `title`                    | `//bakery/glaze-tracker@user/items/title`; the one spelling for a scope move that climbs                                             |
+| `..@user/title`                                                               | the context's          | the context's | `user`        | the parent, then `title`                    | `//bakery/glaze-tracker@user/items/title`; a qualifier attaches to whichever head the reference has                                  |
+| `..@inherit/..`                                                               | the context's          | the context's | the context's | the parent, then a key named `..`           | `//bakery/glaze-tracker@user/items/..`; `@inherit` closes the climb so the key is read as one ([D12](#d12-climbing-is-a-head-token)) |
+| `./`                                                                          | the context's          | the context's | the context's | the key `""` under the position             | `//bakery/glaze-tracker@user/items/0/`: the pointer `/`, whose one token is empty ([D11](#d11-the-path-is-a-json-pointer))           |
+| `./..`                                                                        | the context's          | the context's | the context's | a key named `..` under the position         | `//bakery/glaze-tracker@user/items/0/..`: `.` is a head only when it is the whole head                                               |
+| `items/../title`                                                              | the context's          | the context's | the context's | the keys `items`, `..`, `title`             | `//bakery/glaze-tracker@user/items/0/items/../title`: a `..` inside a pointer is a key, and the climb is `../title`                  |
 | `.#argument/items`                                                            | the context's          | the context's | the context's | `items`, from the arguments document's root | `//bakery/glaze-tracker#argument@user/items`: a member switch resets the path                                                        |
 | `.#result/title`, read where the context's document is the arguments document | the context's          | the context's | the context's | `title`, from the result document's root    | the result document; the member's counterpart of `.`                                                                                 |
 
@@ -894,7 +1062,8 @@ Refused, and why:
 | `/glaze-tracker#items`                | not a member of a piece: the message names `#argument` and `#result`                                                        |
 | `/glaze-tracker@user#argument`        | `user#argument` is not a scope value; the one spelling is `#argument@user`                                                  |
 | `items/0`, read with no context piece | a relative reference and nothing to resolve it against                                                                      |
-| `..@user/title`                       | a qualifier on `..`; the scope move is written `.@user/../title`                                                            |
+| `.@pin=Avcny…rC1c`                    | a pin on a relative head: it selects a version of a module, which only a specifier names ([D5](#d5-registered-qualifiers)) |
+| `..`, read at a piece's root          | above the piece; this grammar has nothing there                                                                            |
 
 ## Translation to the sibling grammars
 
@@ -911,14 +1080,18 @@ The same cell in each grammar, segment for segment (R11):
 
 The page URL has no scope and no pin; the specifier has no scope, no path into a
 cell, and no relative form — an import's subpath is a public name, not a
-position. The page URL may also carry, before the space, things a reference
-never does — a namespace naming the provider, or an empty space meaning the
-reader's home — the way it carries a host: the URL layer resolves them to a
-space before any reference is formed. Where a slot exists in two of them it is
-in the same place and written the same way, and the one written difference — the
-specifier's bare `@<pin>` against the reference's `@pin=` — is the specifier's
-own to close when it next changes, since a bare word after `@` is the scope's
-under this grammar.
+position. The page URL also cannot carry an empty key: `splitPath` in
+`packages/runner/src/fabric-url.ts` discards empty segments, so a cell whose
+path holds `""` has a reference and no URL. That is R11's one stated exception,
+and [D11](#d11-the-path-is-a-json-pointer) records it as a cost rather than
+closing it, since the URL's splitter is the shell's to change. The page URL may
+also carry, before the space, things a reference never does — a namespace naming
+the provider, or an empty space meaning the reader's home — the way it carries a
+host: the URL layer resolves them to a space before any reference is formed.
+Where a slot exists in two of them it is in the same place and written the same
+way, and the one written difference — the specifier's bare `@<pin>` against the
+reference's `@pin=` — is the specifier's own to close when it next changes,
+since a bare word after `@` is the scope's under this grammar.
 
 ## Admitting a new requirement
 
@@ -969,10 +1142,14 @@ leaves the tree consistent.
    and completion providers follow the same split. The reader takes a context
    ([D10](#d10-reader-and-writer-share-one-context)) and reads the
    piece-relative form against it; `cf`'s positional path is one already, and
-   gains only `./` and `..`; every reader of the piece-relative form — an
-   interactive reader with a position among them — takes `.`, `./`, and `..`
-   from the shared reader rather than reading them on its own. `#argument` is
-   read on the piece segment, and the trailing slot is refused with a message
+   gains only the heads; every reader of the piece-relative form — an
+   interactive reader with a position among them — takes `.`, `./`, and the `..`
+   run from the shared reader rather than reading them on its own. Two readers
+   stop discarding a trailing empty segment, so that an empty token is a key
+   wherever it sits ([D11](#d11-the-path-is-a-json-pointer)):
+   `parseReferenceParts`, and `moveBySegments` in
+   `packages/cli/lib/shuttle/place.ts`, which pops one from a walk. `#argument`
+   is read on the piece segment, and the trailing slot is refused with a message
    naming the new one: no writer has rendered it, so nothing rendered carries
    it.
 2. **Write the new forms.** `renderCellReference` is the reader's inverse, in
@@ -1037,6 +1214,8 @@ exit (R12):
 | The projection grammar is its own; `--schema @` is the file form                                                         | `packages/cli/README.md`, "Shell completion"                            | confirms as out of scope; records the borrowed characters                                                                         |
 | The space is written `/@<space>/`                                                                                        | `parseReferenceParts`; `createLLMFriendlyLink`                          | **replaces** (D1)                                                                                                                 |
 | A bare `@word` is the whole qualifier vocabulary                                                                         | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                             | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3)                                     |
+| A trailing empty segment is dropped and a mid-path one is a key                                                          | `parseReferenceParts`; `moveBySegments` in `packages/cli/lib/shuttle/place.ts` | **replaces**: the path is a JSON Pointer, so an empty token is a key wherever it sits (D11)                                 |
+| `..` walks up and `.` is an ordinary segment                                                                             | `moveBySegments` in `packages/cli/lib/shuttle/place.ts`                 | confirms the `..` reading; makes both head tokens and gives `.` a reading the walk lacks (D12)                                    |
 
 ## Open questions
 
@@ -1061,6 +1240,12 @@ exit (R12):
   The alternative puts a leading `@` back into the head with a second meaning,
   the shape #6775 is about, so it is closed unless a reader can show it cannot
   manage without it.
+- **A trailing slash on the write path.** Under
+  [D11](#d11-the-path-is-a-json-pointer) a read of `/glaze-tracker/` is a
+  not-found, which is loud, but a write to it creates the key `""`, which is
+  not. Whether a write refuses an empty leaf unless something asks for it, or
+  treats it as any other key, is a decision for the commands that write, and it
+  is the one place where the trailing slash is not self-announcing.
 - **`#` at a shell.** The measured hazard on a leading `#` is real and predates
   this document. Whether the wish syntax moves, and to what, is a decision for
   the wish surface; the member's mid-word `#` is not affected.
@@ -1107,7 +1292,7 @@ table:
 | -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | complete       | space, piece, member, path                                        | scope, when the string omits it                                                                                                                   |
 | space-relative | piece, member, path                                               | space; scope, when omitted                                                                                                                        |
-| piece-relative | a path against the position, and a member or qualifier on its `.` | space, piece; the document unless `.#argument` or `.#result` switches it; the scope unless `.@scope` writes it; the position's path as the anchor |
+| piece-relative | a pointer against the position the head names, and a member or qualifier on that head | space, piece; the document unless `.#argument` or `.#result` switches it; the scope unless `.@scope` writes it; the position's path as the anchor |
 
 The string's parts are never overridden by the context, and the context's parts
 are never read for a slot the string fills. That is what "defaulting is
@@ -1156,9 +1341,12 @@ in its tree. Two rules keep that layering honest:
 
 - A piece-relative reference with no piece in the context.
 - `..` that would leave the piece, unless the reader's own tree continues it.
-- A member or qualifier anywhere in a relative reference but on its `.` head.
-  `./items@user` is a key named `items@user`, `..@user` is refused, and the
-  scope move is written `.@user/items`.
+- A member or qualifier anywhere in a relative reference but on its head.
+  `./items@user` is a key named `items@user`; the head takes them whether it is
+  `.` or a run of `..`, so the scope move is written `.@user/items` and the one
+  that climbs `..@user/items`.
+- A pin on a relative head ([D5](#d5-registered-qualifiers)): the scope is the
+  only qualifier a context can answer.
 - A complete reference naming a space the connection does not serve. Denoting is
   not reaching, and following the reference silently into a space the reader
   cannot read would make the same string mean two things in two sessions.
@@ -1169,5 +1357,7 @@ An interactive line has verbs and bare words of its own, so a bare `items` may
 be a command, a listing handle, or a key. `./items` is unambiguous everywhere:
 it is a piece-relative reference and nothing else, and it means exactly what the
 bare form means where the bare form is read as one. A reader that offers a bare
-form should offer `./` beside it for that reason, and never give `./` a reading
-of its own.
+form should offer `./` beside it for that reason, and should not give the prefix
+a reading of its own — the one reading it has is the grammar's, since `./` with
+nothing after it is the key `""`
+([D11](#d11-the-path-is-a-json-pointer)) rather than a bare `.`.
