@@ -105,7 +105,7 @@ describe("what the wrappers do once a capture is installed", () => {
     // recognize it.
     const seen: unknown[][] = [];
     const through = (...args: unknown[]) => seen.push(args);
-    wrapDescribe(through, capturing())("a name with no body");
+    wrapDescribe(through)("a name with no body");
     wrapIt(through, () => {}, capturing())({ no: "name" });
     expect(seen).toEqual([["a name with no body"], [{ no: "name" }]]);
   });
@@ -121,7 +121,7 @@ describe("what the wrappers do once a capture is installed", () => {
       definition.fn();
     };
     const it_ = wrapIt(() => {}, () => {}, inner);
-    wrapDescribe(through, capturing())({
+    wrapDescribe(through)({
       name: "outer",
       fn: () => it_("leaf", () => {}),
     });
