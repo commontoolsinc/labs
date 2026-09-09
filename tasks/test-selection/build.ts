@@ -490,6 +490,9 @@ export interface BuildInput {
   calibration?: Partial<Calibration>;
 }
 
+/** Decimal places a manifest records a flake share to. */
+const SHARE_PLACES = 4;
+
 /** A number with the digits past `places` dropped. */
 function round(value: number, places: number): number {
   const scale = 10 ** places;
@@ -523,8 +526,14 @@ export function buildManifest(input: BuildInput): Manifest {
     const evidence = flakeCounts(state, input.today);
     // Rounded before anything reads it, so the figure the manifest
     // carries is the figure every decision here was taken on, and a
-    // consumer applying the same threshold reaches the same answer.
-    const rate = round(flakeRate(state, input.today), 4);
+    // consumer applying the same threshold reaches the same answer. A
+    // share that is not zero is held above zero: zero is what says a
+    // test has never been seen to disagree, and both the execution count
+    // and the exclusion turn on that rather than on the size of it.
+    const measured = flakeRate(state, input.today);
+    const rate = measured === 0
+      ? 0
+      : Math.max(round(measured, SHARE_PLACES), 10 ** -SHARE_PLACES);
     // Rounded because the digits past these are noise, and because a
     // manifest carries one entry per identity: at twenty thousand of them
     // the difference between a rounded float and a full one is megabytes.

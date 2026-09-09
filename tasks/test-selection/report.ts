@@ -783,8 +783,9 @@ export function renderReport(
         out.push(
           `  The store has seen this test disagree with itself ${
             flakes === 1 ? "once" : `${flakes} times`
-          } in ${runs} runs over the last ${FLAKE_WINDOW_DAYS} days, so ` +
-            "this failure may be its own and not the change's.",
+          } in ${runs} ${runs === 1 ? "run" : "runs"} over the last ` +
+            `${FLAKE_WINDOW_DAYS} days, so this failure may be its own ` +
+            "and not the change's.",
         );
       }
     }

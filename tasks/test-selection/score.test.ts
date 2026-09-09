@@ -646,6 +646,15 @@ describe("flakeCounts()", () => {
     state.flakesByDay["2026-08-20"] = 10;
     expect(flakeCounts(state, "2026-08-20")).toEqual({ flakes: 10, runs: 200 });
   });
+
+  it("counts neither half from a day the window cannot reach", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 200;
+    state.flakesByDay["2026-08-20"] = 10;
+    state.runsByDay["2020-01-01"] = 9000;
+    state.flakesByDay["2020-01-01"] = 500;
+    expect(flakeCounts(state, "2026-08-20")).toEqual({ flakes: 10, runs: 200 });
+  });
 });
 
 describe("flakeRate()", () => {

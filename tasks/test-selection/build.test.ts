@@ -764,6 +764,19 @@ describe("what buildManifest() does with the states it is given", () => {
     expect(manifest.entries[0]!.repeats).toBe(FLAKE_MIN_EXECUTIONS);
   });
 
+  it("holds a share that is not zero above the precision it records", () => {
+    // One disagreement among enough runs that the share rounds to
+    // nothing. Zero is what says a test has never been seen to disagree,
+    // so the execution count would read this as a test that never has.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 100_000;
+    state.failuresByDay["2026-08-20"] = 1;
+    state.flakesByDay["2026-08-20"] = 1;
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.flakeRate).toBeGreaterThan(0);
+    expect(entry.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
   it("carries the counts the share was taken from", () => {
     const state = emptyState();
     state.runsByDay["2026-08-20"] = 80;

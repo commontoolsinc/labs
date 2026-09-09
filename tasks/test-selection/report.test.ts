@@ -937,6 +937,20 @@ describe("report", () => {
       expect(body).toContain("may be its own and not the change's");
     });
 
+    it("counts one run as a run rather than as runs", () => {
+      const body = renderReport(
+        buildReport(input({
+          previous: run([["proves", "pass"]]),
+          current: run([["proves", "fail"]]),
+          pullRequest: ranThere([["proves", "pass"]], {
+            flakes: new Map([[key("proves"), { flakes: 1, runs: 1 }]]),
+          }),
+        })),
+        context,
+      )!;
+      expect(body).toContain("disagree with itself once in 1 run over");
+    });
+
     it("counts one disagreement in words rather than as a figure", () => {
       const body = renderReport(
         buildReport(input({

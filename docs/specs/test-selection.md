@@ -239,6 +239,13 @@ past that anchor until `MAX_EXECUTIONS` stops it. So a test that has been
 seen to disagree at all is run at least twice, because one execution
 cannot tell a pass from a lucky pass.
 
+A share the manifest records is rounded, and a share that is not zero is
+held above zero rather than rounded to it. Zero is what says a test has
+never been seen to disagree, and both this count and the exclusion turn
+on that rather than on the size of the share, so a rounding that reached
+zero would report a test as clean on the strength of how many times it
+had run.
+
 The line runs past `FLAKE_EXCLUSION_RATE`, which the exclusion rule makes
 sensible rather than contradictory. A test that flaky is not selected, so
 the only way it reaches a lane is a change that edits it or that its suite
