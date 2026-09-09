@@ -233,13 +233,13 @@ const RESULT_SHORTCUT_LIMIT = 4096;
  * spent budget reads as absent, and the run pays one name-sync it may not
  * have needed. A wide argument — one whose links, and the values behind
  * them, fan out past the budget within the walk's depth — is therefore held
- * once per runtime per pattern identity even when its whole family is
- * local. That is the cheaper error. Narrowing the walk to the argument's own
- * links would skip the links a linked document's value holds, which the
- * name-sync's argument-link-target wave exists to warm; a missed absence
- * costs a conflicting first commit, a spurious hold costs a re-sync the
- * client answers from coverage it already has. The gate logs a spent budget
- * so a wide piece held for it is diagnosable.
+ * even when its whole family is local. The hold is paid once per piece and
+ * pattern identity while the runner's shortcut remains cached; eviction
+ * can cause another probe and hold. The walk follows links in a linked
+ * document's value because the name-sync's argument-link-target wave warms
+ * them; a missed absence costs a conflicting first commit, a spurious hold
+ * costs a re-sync the client answers from coverage it already has. The gate
+ * logs a spent budget so a wide piece held for it is diagnosable.
  */
 const NAMING_PROBE_BUDGET = 256;
 
@@ -2087,13 +2087,12 @@ export class Runner {
    * an internal cell the crossing never delivered. Bounded like the other
    * result shortcuts; an evicted entry costs a probe, never a wrong verdict.
    *
-   * A name-sync that rejects lands all the same. The run then degrades to
-   * what it was before the gate existed — over what is local, its own
-   * subscriptions fetching the rest, the rejection logged as the signal —
-   * and a later run under the same pattern is not held again for this
-   * runner's lifetime, a transient rejection included. Withholding the
-   * landing would name the piece again on every run, and the deferred run's
-   * own re-check of the gate would loop on the same rejection.
+   * A name-sync that rejects lands all the same. The run proceeds over what
+   * is local, with its own subscriptions fetching the rest and the rejection
+   * logged as the signal. A later run of the same piece under the same pattern
+   * is not held again while the runner's shortcut remains cached, a transient
+   * rejection included; eviction can cause another probe and hold. Recording
+   * the landing lets the deferred run's re-check pass the gate.
    */
   readonly #namedFamilies = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
