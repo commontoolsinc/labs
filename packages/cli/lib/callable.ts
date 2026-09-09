@@ -45,6 +45,7 @@ import {
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
+  LINK_MARKER_KEY,
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
@@ -461,6 +462,19 @@ function carriesCellMarker(node: Record<string, unknown>): boolean {
 }
 
 /**
+ * The address inside the `{"$link": "/of:…"}` object a marked read renders
+ * (`composeLinkAddresses`, cell-selection.ts), whether the address stands
+ * alone there or the contents the same read projected sit beside it.
+ * `undefined` for every other value, a `$link` holding no string included:
+ * `{"$link": true}` is the projection-schema marker, not an address.
+ */
+function printedAddressOf(value: unknown): string | undefined {
+  if (!isObjectNotArray(value)) return undefined;
+  const address = (value as Record<string, unknown>)[LINK_MARKER_KEY];
+  return typeof address === "string" ? address : undefined;
+}
+
+/**
  * The first field the payload carries that the schema at its position does not
  * declare, walking the PAYLOAD (finite JSON the caller supplied, so the walk
  * terminates on its own) and consulting the schema beside it.
@@ -872,7 +886,11 @@ export function verbInputSchemaError(
  * event schema keeps and a link-derived dispatch schema does not, see
  * `CallableResolution.declaredEvent` — a string holding the address a read
  * emits (`/of:…`, the canonical fabric reference) converts to the link
- * envelope dispatch already accepts.
+ * envelope dispatch already accepts. So does the `{"$link": "/of:…"}` object
+ * a marked read renders that address in, alone or joined by the contents the
+ * same read projected: the address inside is what the position takes, and
+ * the contents beside it are the target's own fields, which a reference
+ * never stores.
  * An address printed by one command is now a verb argument in the next,
  * which is the property the CLI surface states for commands, one level in.
  *
@@ -909,10 +927,11 @@ export function resolveEmittedAddressArguments(
   // authored cell wrapper was declared, so the pre-resolution node is
   // checked as well as the target.
   if (!atRoot && (carriesCellMarker(schema) || carriesCellMarker(node))) {
-    if (typeof value === "string") {
+    const spelled = printedAddressOf(value) ?? value;
+    if (typeof spelled === "string") {
       let parsed: NormalizedLLMFriendlyRef | undefined;
       try {
-        parsed = normalizeLLMFriendlyRef(value);
+        parsed = normalizeLLMFriendlyRef(spelled);
       } catch {
         parsed = undefined;
       }
@@ -926,7 +945,8 @@ export function resolveEmittedAddressArguments(
       ) {
         return {
           value,
-          refusal: `${JSON.stringify(value)} at ${path} is not an address — ` +
+          refusal:
+            `${JSON.stringify(spelled)} at ${path} is not an address — ` +
             `the position declares a reference, and takes the /of:… form ` +
             `a read prints`,
         };

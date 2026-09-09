@@ -224,7 +224,7 @@ invisible, the prompt renders the whole ambient record — place and scope
     whichever checkout `bin/cf` resolved from the working directory. The
     forward carries no checkout logic of its own — `exec` leaves the working
     directory alone, so both hops mean the same checkout — and it finds `cf`
-    by name, where mise and `install-cf` put it. `install-cf` installs
+    by name, where `install-cf` put it. `install-cf` installs
     `cfsh` beside `cf`, without which the spelling this decision settles on
     is one nobody has on their PATH.
 20. **Scope is the cwd's second dimension.** Per-identity overlays

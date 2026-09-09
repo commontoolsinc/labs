@@ -1511,15 +1511,19 @@ itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
 to force the source CLI.)
 
 `bin/cf` is the install, with `bin/cfsh` beside it for the interactive shell.
-Both run from source, so neither goes stale against the checkout:
+Both run from source, so neither goes stale against the checkout. One route,
+once per machine, mise or not:
 
 ```bash
-# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH.
-mise trust    # only if this checkout has not been trusted yet
-
-# everyone else (mise is recommended in README.md but not required):
 deno task install-cf              # --dry-run to see what it would do
 ```
+
+It is a real file in a directory on PATH, so every shell sees it: a login shell,
+an agent's non-interactive one, `make`, an editor's task runner. The repo's
+`mise.toml` pins Deno and declares no PATH entry, since a per-directory entry
+reaches only shells whose mise hook ran for that directory and needs
+`mise trust` in every new worktree. Where `cf` is not on PATH at all,
+`deno task cf` runs the same CLI and needs nothing.
 
 `install-cf` copies `bin/cf` and `bin/cfsh` to a directory already on your PATH
 — refusing to guess if there isn't one, since installing somewhere unreachable
@@ -1539,7 +1543,7 @@ does not strand it.
 
 Several checkouts coexisting is normal — worktrees, and a vendored labs inside
 another repo (a supported, tested layout: see `test/launcher.test.ts`). So the
-symlink above does **not** pin `cf` to the checkout you installed it from. It
+copy above does **not** pin `cf` to the checkout you installed it from. It
 selects, in order:
 
 1. **`$CF_LABS_ROOT`**, when set — the explicit override for when your cwd
@@ -1577,11 +1581,10 @@ is always `packages/cli/mod.ts`, which _is_ the CLI (it ends in
 `if (import.meta.main)` and nothing outside `packages/cli/` imports it as a
 library).
 
-Rule 2 is what mise already does for its route (`_.path` resolves relative to
-the `mise.toml` declaring it), so both install routes agree on which checkout
-you get. The consequence worth knowing: `cf` inside checkout B runs B's code
-even though you installed the link from A. That is the point, but it means a
-stack trace is the quickest way to confirm which checkout answered.
+Rule 2 is what lets one installed copy serve every checkout. The consequence
+worth knowing: `cf` inside checkout B runs B's code even though you installed
+the copy from A. That is the point, but it means a stack trace is the quickest
+way to confirm which checkout answered.
 
 ### Why not `dist/cf`
 

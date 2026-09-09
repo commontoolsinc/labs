@@ -15,6 +15,7 @@ import {
   verbRunsWithoutPayload,
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
+import { shellQuote } from "./shell-quote.ts";
 import {
   firstReadOption,
   projectionInSectionRefusal,
@@ -121,10 +122,6 @@ function schemaType(schema: JSONSchema): string | undefined {
 
 function flagNameForKey(key: string): string {
   return key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function displayCommandPath(path: string): string {
