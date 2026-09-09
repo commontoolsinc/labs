@@ -1975,7 +1975,8 @@ type CalculatorRequest = {
     it("believes a supplied program answer over the file name", async () => {
       // The transformer hands down `program.isSourceFileDefaultLibrary`; a
       // program that says the library file is NOT a library sends the alias
-      // to the general path, which cannot instantiate it.
+      // to the general path, which resolves the name to the alias's
+      // uninstantiated declared type: an empty object, the member gone.
       const { checker, sourceFile } = await createTestProgram(
         "type Dummy = unknown;",
       );
@@ -1988,11 +1989,7 @@ type CalculatorRequest = {
           sourceFile,
           { isDefaultLibrarySourceFile: () => false },
         ) as Record<string, unknown>;
-      expect(schema).not.toEqual({
-        type: "object",
-        properties: { topic: { type: "unknown" } },
-        required: ["topic"],
-      });
+      expect(schema).toEqual({ type: "object", properties: {} });
     });
 
     it("leaves an authored alias of a library name to the general path", async () => {
