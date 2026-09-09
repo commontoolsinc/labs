@@ -8,7 +8,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assert } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import {
   dropContainerCases,
   ingestJUnit,
@@ -42,6 +42,14 @@ const FIXTURE_CONFIG = {
 
 interface Fixture {
   dir: string;
+
+  /**
+   * The directory the run happens in, which is the fixture root unless
+   * one was named. A workspace member's test task runs in the member's
+   * own directory, and the file names a run reports are relative to it.
+   */
+  runIn: string;
+
   spool: string;
   junit: string;
 }
@@ -50,7 +58,10 @@ interface Fixture {
  * A tree that looks like a repository to the preload: the `.git` marker is
  * what it climbs to, so a fixture needs one and needs nothing else.
  */
-async function makeFixture(files: Record<string, string>): Promise<Fixture> {
+async function makeFixture(
+  files: Record<string, string>,
+  runIn = ".",
+): Promise<Fixture> {
   const dir = await Deno.makeTempDir({ prefix: "preload-fixture-" });
   await Deno.mkdir(join(dir, ".git"));
   await Deno.writeTextFile(
@@ -58,11 +69,15 @@ async function makeFixture(files: Record<string, string>): Promise<Fixture> {
     JSON.stringify(FIXTURE_CONFIG),
   );
   for (const [name, source] of Object.entries(files)) {
-    await Deno.writeTextFile(join(dir, name), source);
+    const path = join(dir, name);
+    await Deno.mkdir(dirname(path), { recursive: true });
+    await Deno.writeTextFile(path, source);
   }
   const spool = join(dir, "spool");
   await Deno.mkdir(spool);
-  return { dir, spool, junit: join(dir, "report.xml") };
+  const runDir = join(dir, runIn);
+  await Deno.mkdir(runDir, { recursive: true });
+  return { dir, runIn: runDir, spool, junit: join(dir, "report.xml") };
 }
 
 async function runFixture(
@@ -89,7 +104,7 @@ async function runFixture(
       `--junit-path=${fixture.junit}`,
       ...files,
     ],
-    cwd: fixture.dir,
+    cwd: fixture.runIn,
     env,
     stdout: "piped",
     stderr: "piped",
@@ -293,6 +308,48 @@ describe("preload", () => {
       const byName = new Map(records.map((r) => [r.test.n, r.file]));
       expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
       expect(byName.get("bare kept")).toEqual("bare.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("places a file above the directory the run happened in", async () => {
+    // A workspace member's test task runs in the member's directory and
+    // may name a file anywhere in the tree: `packages/test-support` runs
+    // the repository tools' own regression tests, two directories above
+    // itself. The map says which directory the run happened in, and a
+    // read scoped to that directory takes it whole.
+
+    const fixture = await makeFixture({
+      "member/own.test.ts": BDD_FILE,
+      "tools/away.test.ts": OTHER_BDD_FILE,
+    }, "member");
+    try {
+      const run = await runFixture(fixture, [
+        "own.test.ts",
+        "../tools/away.test.ts",
+      ]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool, { ranIn: "member" });
+      expect(names.get("outer > kept")).toEqual("member/own.test.ts");
+      expect(names.get("elsewhere > dropped")).toEqual("tools/away.test.ts");
+      // The directory the file sits in is not the directory the run
+      // happened in, and a read scoped to it is offered nothing.
+      expect((await readNameMaps(fixture.spool, { ranIn: "tools" })).size)
+        .toEqual(0);
+
+      // The join ingestion performs, with the prefix the workspace runner
+      // passes. Every class name in the report names the wrapper, so the
+      // map is the only thing that can place either file.
+      const records = ingestJUnit(await Deno.readTextFile(fixture.junit), {
+        kind: "unit",
+        scope: "fixture",
+        filePrefix: "member",
+        fileByName: names,
+      });
+      const byName = new Map(records.map((r) => [r.test.n, r.file]));
+      expect(byName.get("outer > kept")).toEqual("member/own.test.ts");
+      expect(byName.get("elsewhere > dropped")).toEqual("tools/away.test.ts");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });
     }
