@@ -33,11 +33,12 @@ export CF_IDENTITY="${CF_IDENTITY:-$HOME/.config/commonfabric/identity.key}"
 
 The key is the team's per-user default at that path, the same one your human
 user holds; an already-set `CF_IDENTITY` is the explicit override. When `cf`
-reports the keyfile missing or unreadable, stop and ask the human: the check
-belongs to `cf`, so the shell never touches the key. Do not search for keys,
-mint an agent key, use another human's key, or use the publicly derivable
-`implicit trust` identity, and never print or inspect key material;
-`deno task cf id did "$CF_IDENTITY"` gives the public DID when one is needed.
+reports the keyfile missing or unreadable, stop and ask the human to provision
+that default or export the correct path: the check belongs to `cf`, so the shell
+never touches the key. Do not search for keys, mint an agent key, use another
+human's key, or use the publicly derivable `implicit trust` identity, and never
+print or inspect key material; `deno task cf id did "$CF_IDENTITY"` gives the
+public DID when one is needed.
 
 Every authored-content mutation carries `agentName` in the same event: one
 stable agent name, and no second signature in titles, labels, bodies, or
