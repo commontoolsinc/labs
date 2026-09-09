@@ -631,8 +631,9 @@ contract. Capability-kind and scope checks still apply. Changed handle contracts
 require the full producer-contract proof.
 
 Retaining a handle proves continuity of the consumer contract, not a historical
-producer-contract check: raw link creation can omit that check, and the producer
-schema can change after the link is stored. The retained-handle rule relies on
+producer-contract check: writes that bypass `PiecesController.link`, such as
+`setRawUntyped` and `cf cell set`, can omit that check, and the producer schema
+can change after the link is stored. The retained-handle rule relies on
 producer enforcement at access and commit time for payload and flow-policy
 constraints rather than re-proving their subset relation during the update.
 
