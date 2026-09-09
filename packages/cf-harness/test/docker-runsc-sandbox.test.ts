@@ -1674,6 +1674,10 @@ Deno.test("DockerRunscSandboxRuntime treats an unreadable taint as synthetic, no
       // would report a container carrying a requirement as one carrying none.
       { string: "finance" },
       { string: '{conf: "finance", integ: \u2205}' },
+      // Neither representation: a sidecar that reported nothing, which is not
+      // a container that carried nothing.
+      {},
+      { string: 7 },
     ]
   ) {
     const cfcResultDir = await Deno.makeTempDir();

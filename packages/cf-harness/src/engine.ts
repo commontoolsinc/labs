@@ -313,9 +313,69 @@ export interface BuiltinToolOutputMap {
   loom_authoring_context: LoomAuthoringToolOutput;
 }
 
-const CFC_OBSERVATION_POLICIES = new Set(["observed", "opaque", "denied"]);
+/**
+ * Whether `value` is an IFC label this can represent: clauses that are lists,
+ * and nothing else carrying content. A label whose `confidentiality` is a
+ * string survives an equality comparison and is then dropped by the merge,
+ * leaving a family that carried a requirement recorded as carrying none.
+ */
+const isRepresentableIfcLabel = (value: unknown): boolean => {
+  if (!isObjectNotArray(value)) {
+    return false;
+  }
+  return Object.entries(value).every(([clause, entry]) =>
+    (clause === "confidentiality" || clause === "integrity")
+      ? Array.isArray(entry)
+      : entry === undefined || entry === null
+  );
+};
 
-/** Whether two labels state the same requirement. */
+/** Whether one stream observation is complete for the policy it declares. */
+const isCompleteStreamObservation = (
+  value: unknown,
+  channel: "stdout" | "stderr",
+): boolean => {
+  if (!isObjectNotArray(value) || value.channel !== channel) {
+    return false;
+  }
+  if (!isRepresentableIfcLabel(value.label)) {
+    return false;
+  }
+  switch (value.policy) {
+    case "observed":
+      return Array.isArray(value.segments);
+    case "opaque":
+    case "denied":
+      return true;
+    default:
+      return false;
+  }
+};
+
+/** Whether the exit-code observation is complete for the policy it declares. */
+const isCompleteExitCodeObservation = (value: unknown): boolean => {
+  if (!isObjectNotArray(value) || !isRepresentableIfcLabel(value.label)) {
+    return false;
+  }
+  switch (value.policy) {
+    case "observed":
+      return typeof value.value === "number" || value.value === null;
+    case "opaque":
+    case "denied":
+      return true;
+    default:
+      return false;
+  }
+};
+
+/**
+ * Whether two labels state the same requirement.
+ *
+ * Both are known representable before this runs, so serializing them cannot
+ * meet a cycle. That order matters: a cyclic label reaching `JSON.stringify`
+ * would throw out of the taint reader, and an exception there leaves the
+ * family recorded as it was — which is to say clean.
+ */
 const sameLabel = (left: unknown, right: unknown): boolean =>
   JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
 
@@ -323,16 +383,16 @@ const sameLabel = (left: unknown, right: unknown): boolean =>
  * The container taint a sandbox invocation reported, or `undefined` when it
  * established none.
  *
- * Only a COMPLETE result runsc itself reported counts, and every part of it
- * is checked rather than the one field the label is read from. A result the
- * runtime synthesized because it could not read the sidecar is rendered as a
- * `denied` observation with an EMPTY label, shaped exactly like a public
- * container; the origin is what tells them apart, and its absence is read as
- * synthetic. Beyond that, a result missing an observation, carrying a policy
- * or channel that is not one of the ones defined, or whose three observations
- * disagree about the container's label, is not a reading of one container —
- * it is a shape this cannot interpret, and interpreting it anyway is how an
- * empty label gets minted from a tainted run.
+ * Only a COMPLETE result runsc itself reported counts, and completeness is
+ * checked over the whole union rather than over the one field the label is
+ * read from. A result the runtime synthesized because it could not read the
+ * sidecar is rendered as a `denied` observation with an EMPTY label, shaped
+ * exactly like a public container; the origin is what tells them apart, and
+ * its absence is read as synthetic. Beyond that: an observation missing, a
+ * policy or channel outside the ones defined, a policy whose own fields are
+ * absent, a label this cannot represent, or three observations that disagree
+ * about the container's label — each describes no container, and reading one
+ * anyway is how an empty label gets minted from a tainted run.
  */
 const cfcSandboxTaintOfResult = (
   result: SandboxCommandResult | undefined,
@@ -346,34 +406,22 @@ const cfcSandboxTaintOfResult = (
   }
   const { stdout, stderr, exitCode } = cfcResult;
   if (
-    !isObjectNotArray(stdout) || !isObjectNotArray(stderr) ||
-    !isObjectNotArray(exitCode)
-  ) {
-    return undefined;
-  }
-  if (
-    stdout.channel !== "stdout" || stderr.channel !== "stderr" ||
-    !CFC_OBSERVATION_POLICIES.has(stdout.policy as string) ||
-    !CFC_OBSERVATION_POLICIES.has(stderr.policy as string) ||
-    !CFC_OBSERVATION_POLICIES.has(exitCode.policy as string)
-  ) {
-    return undefined;
-  }
-  if (
-    !isObjectNotArray(stdout.label) || !isObjectNotArray(stderr.label) ||
-    !isObjectNotArray(exitCode.label)
+    !isCompleteStreamObservation(stdout, "stdout") ||
+    !isCompleteStreamObservation(stderr, "stderr") ||
+    !isCompleteExitCodeObservation(exitCode)
   ) {
     return undefined;
   }
   // One container has one taint, and `cfcResultFromRunscSidecar` puts it on
   // all three observations. Three that disagree describe no container.
+  const label = (stdout as { label: unknown }).label;
   if (
-    !sameLabel(stdout.label, stderr.label) ||
-    !sameLabel(stdout.label, exitCode.label)
+    !sameLabel(label, (stderr as { label: unknown }).label) ||
+    !sameLabel(label, (exitCode as { label: unknown }).label)
   ) {
     return undefined;
   }
-  return stdout.label as IFCLabel;
+  return label as IFCLabel;
 };
 
 interface ToolOutputWithId {
@@ -393,6 +441,17 @@ export interface CreateHarnessEngineOptions
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
   sandboxRuntime?: SandboxRuntime;
+
+  /**
+   * The run family's harness directory, for a delegated child.
+   *
+   * A child is handed its parent's runtime and workspace but not its mounts,
+   * so re-deriving the directory could put it somewhere the parent did not
+   * choose — and the family's taint record lives there, so two derivations
+   * mean two records and a family that cannot see its own evidence. The
+   * parent's choice is inherited rather than recomputed.
+   */
+  familyDirHostPath?: string;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
 
@@ -503,37 +562,95 @@ interface ResolveSandboxConfigOptions {
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
+  artifactRootHostPath?: string;
 }
 
+/**
+ * The mounts a pre-resolved sandbox configuration already carries, or the
+ * ones this run was asked for. Family placement is decided against these, so
+ * a caller that supplied a whole configuration is answered from ITS mounts
+ * rather than from the option that configuration replaced.
+ */
+const configuredMounts = (
+  config: HarnessConfig,
+  options: ResolveSandboxConfigOptions,
+): {
+  workspaceHostPath?: string;
+  additionalMounts: readonly DockerRunscAdditionalMountConfig[];
+} => ({
+  ...(config.sandbox?.workspaceHostPath ?? options.workspaceHostPath) !==
+      undefined
+    ? {
+      workspaceHostPath: config.sandbox?.workspaceHostPath ??
+        options.workspaceHostPath!,
+    }
+    : {},
+  additionalMounts: config.sandbox?.additionalMounts ??
+    options.additionalMounts ?? [],
+});
+
+/**
+ * The sandbox configuration this run actually gets, with the family's output
+ * mount in it and every check run over the list that results.
+ *
+ * A pre-resolved `config.sandbox` is RE-RESOLVED rather than passed through.
+ * Passing it through was the hole: the output mount never reached the
+ * runtime, and the non-overlap and sidecar-isolation checks never saw the
+ * final mount set, so a caller supplying a whole configuration got neither
+ * the directory nor the guarantees. Re-resolving states every field it
+ * already carried, so nothing is defaulted back out from under it.
+ */
 const resolveSandboxConfig = (
   config: HarnessConfig,
   options: ResolveSandboxConfigOptions,
+  outputMount?: DockerRunscAdditionalMountConfig,
 ): DockerRunscSandboxConfig => {
-  if (config.sandbox !== undefined) {
-    return config.sandbox;
-  }
-  if (options.workspaceHostPath === undefined) {
+  const preResolved = config.sandbox;
+  const workspaceHostPath = preResolved?.workspaceHostPath ??
+    options.workspaceHostPath;
+  if (workspaceHostPath === undefined) {
     throw new Error(
       "sandbox config is required when no workspaceHostPath default is provided",
     );
   }
+  const additionalMounts = [
+    ...(preResolved?.additionalMounts ?? options.additionalMounts ?? []),
+    ...(outputMount === undefined ? [] : [outputMount]),
+  ];
+  const image = options.sandboxImage ?? preResolved?.image;
+  const runtimeName = options.sandboxDockerRuntime ?? preResolved?.runtimeName;
+  const cfcResultDir = preResolved?.cfcResultDir ?? options.cfcResultDir;
+  const cfcInvocationContextDir = preResolved?.cfcInvocationContextDir ??
+    options.cfcInvocationContextDir;
   return resolveDockerRunscSandboxConfig({
-    workspaceHostPath: options.workspaceHostPath,
-    ...(options.sandboxImage !== undefined
-      ? { image: options.sandboxImage }
+    workspaceHostPath,
+    ...(image !== undefined ? { image } : {}),
+    ...(runtimeName !== undefined ? { runtimeName } : {}),
+    ...(preResolved?.dockerBinary !== undefined
+      ? { dockerBinary: preResolved.dockerBinary }
       : {}),
-    ...(options.sandboxDockerRuntime !== undefined
-      ? { runtimeName: options.sandboxDockerRuntime }
+    ...(preResolved?.containerUser !== undefined
+      ? { containerUser: preResolved.containerUser }
       : {}),
-    ...(options.additionalMounts !== undefined &&
-        options.additionalMounts.length > 0
-      ? { additionalMounts: options.additionalMounts }
+    ...(preResolved?.workspaceMountPath !== undefined
+      ? { workspaceMountPath: preResolved.workspaceMountPath }
       : {}),
-    ...(options.cfcResultDir !== undefined
-      ? { cfcResultDir: options.cfcResultDir }
+    ...(preResolved?.shellPath !== undefined
+      ? { shellPath: preResolved.shellPath }
       : {}),
-    ...(options.cfcInvocationContextDir !== undefined
-      ? { cfcInvocationContextDir: options.cfcInvocationContextDir }
+    ...(preResolved?.dockerNetworkMode !== undefined
+      ? { dockerNetworkMode: preResolved.dockerNetworkMode }
+      : {}),
+    ...(preResolved?.extraDockerArgs !== undefined
+      ? { extraDockerArgs: preResolved.extraDockerArgs }
+      : {}),
+    ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
+    ...(cfcResultDir !== undefined ? { cfcResultDir } : {}),
+    ...(cfcInvocationContextDir !== undefined
+      ? { cfcInvocationContextDir }
+      : {}),
+    ...(options.artifactRootHostPath !== undefined
+      ? { artifactRootHostPath: options.artifactRootHostPath }
       : {}),
   });
 };
@@ -623,15 +740,18 @@ export class CfHarnessEngine {
   readonly #familyRunId: string;
 
   /**
-   * The family's output directory on the host, when the run has an artifact
-   * root to put one under. Deliberately not in the workspace: the workspace
-   * is mounted read-write, so a name inside it is a name the workload can
-   * re-point.
+   * The family's output directory on the host, when a place outside every
+   * writable mount could be found for it. Deliberately not in the workspace,
+   * nor under an artifact root that is itself inside one: a name the workload
+   * can reach is a name it can re-point.
    */
   readonly #sandboxOutputRootHostPath?: string;
 
   /** The directory's recorded identity, once it has been established. */
   #sandboxOutputRoot?: HarnessSandboxOutputRoot;
+
+  /** The family's harness directory, when one could be placed. */
+  readonly #familyDirHostPath?: string;
 
   /** Why the family has no usable output directory, once that is settled. */
   #sandboxOutputRootFailure?: string;
@@ -869,11 +989,22 @@ export class CfHarnessEngine {
     // so the ordinary configuration is exactly the one the artifact root
     // cannot serve. A sibling of the workspace is used instead, and a host
     // that offers neither gets no output directory and no ingest.
-    const writableMountHostPaths = [
+    // From the configuration this run will actually get, so a caller that
+    // supplied a whole sandbox config is answered from ITS mounts rather than
+    // from the options that config replaced.
+    const configured = configuredMounts(this.config, {
       ...(options.workspaceHostPath !== undefined
-        ? [options.workspaceHostPath]
+        ? { workspaceHostPath: options.workspaceHostPath }
+        : {}),
+      ...(options.additionalMounts !== undefined
+        ? { additionalMounts: options.additionalMounts }
+        : {}),
+    });
+    const writableMountHostPaths = [
+      ...(configured.workspaceHostPath !== undefined
+        ? [configured.workspaceHostPath]
         : []),
-      ...(options.additionalMounts ?? [])
+      ...configured.additionalMounts
         .filter((mount) => !mount.readOnly)
         .map((mount) => mount.hostPath),
     ].filter((path): path is string => path !== undefined);
@@ -885,38 +1016,39 @@ export class CfHarnessEngine {
     // Its `out` child is what gets mounted; everything else the harness keeps
     // for the family — the taint record among them — sits beside that child
     // and is therefore out of reach even though its sibling is bound in.
-    const familyDirHostPath = [
+    const familyDirHostPath = options.familyDirHostPath ?? [
       ...(artifactRootHostPath === undefined ? [] : [
         familyDirUnderArtifactRoot(artifactRootHostPath, familyRunId),
       ]),
-      ...(options.workspaceHostPath === undefined ? [] : [
-        familyDirBesideWorkspace(options.workspaceHostPath, familyRunId),
+      ...(configured.workspaceHostPath === undefined ? [] : [
+        familyDirBesideWorkspace(configured.workspaceHostPath, familyRunId),
       ]),
     ].find(outsideEveryWritableMount);
     const sandboxOutputRootHost = familyDirHostPath === undefined
       ? undefined
       : sandboxOutputRootHostPath(familyDirHostPath);
     const sandboxConfig = options.sandboxRuntime === undefined
-      ? resolveSandboxConfig(this.config, {
-        workspaceHostPath: options.workspaceHostPath,
-        sandboxImage: options.sandboxImage,
-        sandboxDockerRuntime: options.sandboxDockerRuntime,
-        additionalMounts: sandboxOutputRootHost === undefined
-          ? options.additionalMounts
-          : [
-            ...(options.additionalMounts ?? []),
-            {
-              kind: "host-bind" as const,
-              name: SANDBOX_OUTPUT_MOUNT_NAME,
-              hostPath: sandboxOutputRootHost,
-              sandboxPath: SANDBOX_OUTPUT_MOUNT_PATH,
-              readOnly: false,
-            },
-          ],
-        cfcResultDir: options.cfcResultDir,
-        cfcInvocationContextDir: options.cfcInvocationContextDir,
-        ...(artifactRootHostPath !== undefined ? { artifactRootHostPath } : {}),
-      })
+      ? resolveSandboxConfig(
+        this.config,
+        {
+          workspaceHostPath: options.workspaceHostPath,
+          sandboxImage: options.sandboxImage,
+          sandboxDockerRuntime: options.sandboxDockerRuntime,
+          additionalMounts: options.additionalMounts,
+          cfcResultDir: options.cfcResultDir,
+          cfcInvocationContextDir: options.cfcInvocationContextDir,
+          ...(artifactRootHostPath !== undefined
+            ? { artifactRootHostPath }
+            : {}),
+        },
+        sandboxOutputRootHost === undefined ? undefined : {
+          kind: "host-bind",
+          name: SANDBOX_OUTPUT_MOUNT_NAME,
+          hostPath: sandboxOutputRootHost,
+          sandboxPath: SANDBOX_OUTPUT_MOUNT_PATH,
+          readOnly: false,
+        },
+      )
       : this.config.sandbox;
 
     // Capture the engine-owned docker-runsc config so we can refuse to *run*
@@ -939,6 +1071,7 @@ export class CfHarnessEngine {
       sandboxConfig?.workspaceMountPath ?? sandbox.defaultWorkingDirectory(),
     );
     this.#familyRunId = familyRunId;
+    this.#familyDirHostPath = familyDirHostPath;
     this.#sandboxOutputRootHostPath = sandboxOutputRootHost;
     // Every invocation carries the output directory, so a workload names it
     // the same way the ingest does and neither spells it out — and every one
@@ -1646,8 +1779,9 @@ export class CfHarnessEngine {
     const hostPath = this.#sandboxOutputRootHostPath;
     if (hostPath === undefined) {
       this.#sandboxOutputRootFailure =
-        "this run has no artifact root to hold one, and the output directory " +
-        "is deliberately not in the workspace, which the sandbox can write";
+        "this run has nowhere to put one: the output directory is " +
+        "deliberately outside every mount the sandbox can write, and neither " +
+        "this run's artifact root nor a directory beside its workspace is";
       return;
     }
     const recorded = this.#runState.sandboxOutputRoot;
@@ -1713,6 +1847,14 @@ export class CfHarnessEngine {
       );
     }
     return found;
+  }
+
+  /**
+   * The run family's harness directory, for handing to a delegated child so
+   * it inherits this choice rather than making its own.
+   */
+  get familyDirHostPath(): string | undefined {
+    return this.#familyDirHostPath;
   }
 
   /** Why this family cannot ingest, or `undefined` while it can. */

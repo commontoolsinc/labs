@@ -206,8 +206,8 @@ export interface HarnessRunState {
    * vouches for, and so the only one `ingest_sandbox_file` reads from. The
    * identity is what a resume checks the recorded path against, so a
    * directory something else made in the meantime is refused rather than
-   * read. Absent until it is established, and for a run with no artifact root
-   * to put one under.
+   * read. Absent until it is established, and for a run that had nowhere
+   * outside every writable mount to put one.
    */
   sandboxOutputRoot?: HarnessSandboxOutputRoot;
 

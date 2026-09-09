@@ -20,6 +20,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
 import {
   createSandboxOutputRoot,
   familyDirBesideWorkspace,
@@ -69,6 +70,19 @@ const sandboxResult = (label: IFCLabel): CfcSandboxResult => {
       ? { policy: "opaque", label }
       : { policy: "observed", label, value: 0 },
   };
+};
+
+/** A result whose three labels are the same cyclic object. */
+const cyclicLabelResult = (): CfcSandboxResult => {
+  const label: Record<string, unknown> = { confidentiality: [] };
+  label.self = label;
+  const base = sandboxResult(FINANCE_LABEL);
+  return {
+    version: 1,
+    stdout: { ...base.stdout, label },
+    stderr: { ...base.stderr, label },
+    exitCode: { ...base.exitCode, label },
+  } as unknown as CfcSandboxResult;
 };
 
 /** The shape the runtime composes when it cannot read runsc's sidecar. */
@@ -703,6 +717,27 @@ describe("ingest_sandbox_file", () => {
     }
   });
 
+  it("refuses a symlink inside the output directory that leads back into it", async () => {
+    // Refused for being a link, not for where it leads. A link whose target
+    // is also inside the directory passes every containment check, and the
+    // bytes read are still whatever the target holds when it is followed
+    // rather than the file the caller named.
+
+    await withRun(
+      { taint: FINANCE_LABEL, outputFiles: { "total.txt": TOTAL_TEXT } },
+      async ({ engine, outputRoot, outputDir }) => {
+        await Deno.symlink(
+          join(outputRoot, "total.txt"),
+          join(outputRoot, "link.txt"),
+        );
+
+        const output = failure(await ingest(engine, `${outputDir}/link.txt`));
+
+        expect(output.message).toContain("refuses a symbolic link");
+      },
+    );
+  });
+
   it("refuses a symlink in the output directory that leads outside it", async () => {
     // The sandbox can write into the output directory, so it can plant a link
     // there. A lexical containment test passes it and the read follows it, and
@@ -1274,6 +1309,37 @@ describe("ingest_sandbox_file", () => {
           ...complete,
           exitCode: { ...complete.exitCode, label: {} },
         },
+        // A label that survives an equality comparison and is then dropped by
+        // the merge, leaving a family that carried a requirement recorded as
+        // carrying none.
+        {
+          version: 1,
+          stdout: {
+            ...complete.stdout,
+            label: { confidentiality: "finance" },
+          },
+          stderr: {
+            ...complete.stderr,
+            label: { confidentiality: "finance" },
+          },
+          exitCode: {
+            ...complete.exitCode,
+            label: { confidentiality: "finance" },
+          },
+        },
+        // Policies whose own fields are absent.
+        {
+          ...complete,
+          stdout: {
+            ...complete.stdout,
+            policy: "observed",
+            segments: undefined,
+          },
+        },
+        {
+          ...complete,
+          exitCode: { ...complete.exitCode, policy: "observed", value: "1" },
+        },
       ]
     ) {
       const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
@@ -1298,6 +1364,96 @@ describe("ingest_sandbox_file", () => {
         await Deno.remove(workspace, { recursive: true });
         await Deno.remove(artifactRoot, { recursive: true });
       }
+    }
+  });
+
+  it("poisons rather than throwing on a label it cannot serialize", async () => {
+    // Comparing two labels serializes them, and a cyclic one would throw out
+    // of the reader — an exception there leaves the family recorded as it
+    // was, which is to say clean. Representability is therefore established
+    // before anything is serialized.
+    //
+    // Run without an artifact root, so nothing tries to persist the tool
+    // output: a cycle cannot reach here from a real sidecar, which is parsed
+    // from JSON, and this is about the reader rather than the artifact store.
+
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    try {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(cyclicLabelResult(), "runsc-taint"),
+        runId,
+        workspaceHostPath: "/tmp",
+      });
+
+      await engine.invokeBuiltinTool("bash", { command: "x" });
+
+      expect(engine.workspaceTaint.kind).toBe("unknown");
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+    }
+  });
+
+  it("keeps a delegated child on the family directory its parent chose", async () => {
+    // The child is handed the runtime, the workspace and the artifact root,
+    // but not the mounts the parent's placement was decided against. A child
+    // that re-derived would pick the artifact-root layout where the parent
+    // picked the sibling — two directories, two taint records, and a family
+    // unable to see its own evidence.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-fam-" });
+    const extra = await Deno.makeTempDir({ prefix: "cf-harness-extra-" });
+    const artifactRoot = join(extra, "artifacts");
+    const runId = `fam-${crypto.randomUUID()}`;
+    try {
+      await Deno.mkdir(artifactRoot);
+      const parent = new CfHarnessEngine({
+        runId,
+        artifactRoot,
+        sandbox: resolveDockerRunscSandboxConfig({
+          workspaceHostPath: workspace,
+          additionalMounts: [{
+            kind: "host-bind",
+            name: "extra",
+            hostPath: extra,
+            sandboxPath: "/extra",
+            readOnly: false,
+          }],
+        }),
+        sandboxRuntime: new FakeSandbox(sandboxResult(FINANCE_LABEL)),
+      });
+      await parent.invokeBuiltinTool("bash", { command: "x" });
+
+      const child = new CfHarnessEngine({
+        runId: `${runId}.subagent.1`,
+        lineage: {
+          role: "subagent",
+          rootRunId: runId,
+          parentRunId: runId,
+          parentToolCallId: "call-1",
+          depth: 1,
+        },
+        workspaceHostPath: workspace,
+        artifactRoot,
+        familyDirHostPath: parent.familyDirHostPath,
+        sandboxRuntime: new FakeSandbox(
+          sandboxResult({ confidentiality: ["health"] }),
+        ),
+      });
+      await child.invokeBuiltinTool("bash", { command: "x" });
+
+      expect(child.familyDirHostPath).toBe(parent.familyDirHostPath);
+      // One record, so the parent's export sees what the child saw.
+      expect(parent.getRunState().cfcWorkspaceTaint).toEqual({
+        kind: "known",
+        label: { confidentiality: ["finance", "health"] },
+      });
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(extra, { recursive: true });
+      await Deno.remove(familyDirBesideWorkspace(workspace, runId), {
+        recursive: true,
+      }).catch(() => {});
     }
   });
 

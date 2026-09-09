@@ -4551,6 +4551,12 @@ export class CfHarnessPromptLoop {
       sandboxRuntime: this.engine.sandboxForDelegation,
       sandbox: this.engine.config.sandbox,
       workspaceHostPath: this.engine.workspaceHostPath,
+      // The family's directory is the parent's choice, not a derivation the
+      // child repeats: a child is handed the runtime and the workspace but
+      // not the mounts the choice was made against.
+      ...(this.engine.familyDirHostPath !== undefined
+        ? { familyDirHostPath: this.engine.familyDirHostPath }
+        : {}),
       processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
       // The child ends in the same space the parent does, so its label

@@ -806,32 +806,54 @@ const isPublicRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
 };
 
 /**
- * Whether the sidecar's raw taint is a shape this can represent.
+ * Whether the sidecar's raw taint is a complete shape this can represent.
  *
- * `runscTaintLabel` keeps a clause only when it is an array, so a taint whose
- * `confidentiality` is a string — or anything else that is not a list of
- * atoms — would be silently reduced to the empty label while
- * `isPublicRunscTaint` still reported it as non-public. The result would be a
- * container carrying a requirement, rendered as one carrying none. A shape
- * this cannot read is not evidence about the container; it is a sidecar this
- * build does not understand.
+ * Three ways a taint can fail to be evidence, and all three read as "public"
+ * if only the parts that are present are checked. `runscTaintLabel` keeps a
+ * clause only when it is an array, so a `confidentiality` that is a string
+ * would be reduced to the empty label while the container in fact carried a
+ * requirement. And a taint with NEITHER representation, or whose `string` is
+ * not one, says nothing at all — an empty sidecar object is a sidecar that
+ * reported nothing, which is not a container that carried nothing.
  */
 const isRepresentableRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
-  if (taint.xattrJSON === undefined) {
-    // Only the rendered string, and `runscTaintLabel` reads nothing out of
-    // it. An EMPTY one is a public container and says all there is to say; a
-    // non-empty one names atoms this cannot parse, so calling it public would
-    // report a container carrying a requirement as one carrying none.
+  const hasString = taint.string !== undefined;
+  const hasXattr = taint.xattrJSON !== undefined;
+  if (hasString && typeof taint.string !== "string") {
+    return false;
+  }
+  if (!hasString && !hasXattr) {
+    // No rendering and no structure: an empty object is a sidecar that
+    // reported nothing, not a container that carried nothing.
+    return false;
+  }
+  if (!hasXattr) {
+    // Only the rendered string, which `runscTaintLabel` reads nothing out of.
+    // An EMPTY one is a public container and says all there is to say; a
+    // non-empty one names atoms this cannot parse.
     return isPublicRunscTaint(taint);
   }
   if (!isObjectNotArray(taint.xattrJSON)) {
     return false;
   }
-  return Object.entries(taint.xattrJSON).every(([clause, value]) =>
+  const clausesRepresentable = Object.entries(taint.xattrJSON).every((
+    [clause, value],
+  ) =>
     (clause === "confidentiality" || clause === "integrity")
       ? Array.isArray(value)
       : !hasNonEmptyXattrValue(value)
   );
+  if (!clausesRepresentable) {
+    return false;
+  }
+  // With `xattrJSON` present it is the answer, and `string` beside it is a
+  // rendering for a person. The two are NOT cross-checked, because doing so
+  // would mean reading the rendering — and runsc renders a public container
+  // as prose ("{conf: public, integ: empty}"), which is the same shape as a
+  // rendering that names an atom. Telling those apart needs a parser for a
+  // format this deliberately does not parse, and a parser that guessed would
+  // refuse honest public results.
+  return true;
 };
 
 const cfcResultFromRunscSidecar = (

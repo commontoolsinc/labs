@@ -86,11 +86,9 @@ export const familyDirBesideWorkspace = (
   );
 
 /**
- * Where a family's output directory sits on the host: inside the artifact
- * directory of the run that heads the family, so the artifact root's own
- * shape stays one directory per run and a delegated child — which is handed
- * its parent's artifact root and shares its family id — computes the same
- * path.
+ * The one child of the family's directory that is mounted. Which directory
+ * that is comes from the caller, because where a family's directory goes is a
+ * choice between layouts rather than a fixed path.
  */
 export const sandboxOutputRootHostPath = (
   familyDirHostPath: string,
