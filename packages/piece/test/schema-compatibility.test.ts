@@ -2410,6 +2410,118 @@ describe("piece schema compatibility", () => {
     });
   }
 
+  it("judges a node's semantic extensions once, on the node", () => {
+    const a: JSONSchema = {
+      type: "object",
+      properties: { a: { type: "string" } },
+    };
+    const b: JSONSchema = {
+      type: "object",
+      properties: { b: { type: "number" } },
+    };
+    const extensions = [
+      { asCell: ["cell"] },
+      { ifc: { confidentiality: ["secret"] } },
+      { readOnly: true },
+    ] satisfies Exclude<JSONSchema, boolean>[];
+    for (const extension of extensions) {
+      const single: JSONSchema = { ...a, ...extension };
+      const union: JSONSchema = { anyOf: [a, b], ...extension };
+      // An argument widens and a result narrows across the two spellings.
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(single, union),
+          pattern(union, single),
+        )
+      ).not.toThrow();
+      // A producer stating one shape links into a demand stating either.
+      expect(() => assertSchemaSubset(single, union)).not.toThrow();
+      // The other way round is a narrowing, as it stands.
+      expect(() => assertSchemaSubset(union, single)).toThrow(
+        /schema alternative accepted previously/,
+      );
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(union, single),
+          pattern(single, union),
+        )
+      ).toThrow(/schema alternative accepted previously/);
+    }
+
+    // The `type` list and `anyOf` spellings of one union, in either order.
+    const list: JSONSchema = {
+      type: ["string", "undefined"],
+      asCell: ["cell"],
+    };
+    const branches: JSONSchema = {
+      anyOf: [{ type: "string" }, { type: "undefined" }],
+      asCell: ["cell"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(list, branches),
+        pattern(branches, list),
+      )
+    ).not.toThrow();
+
+    // The generator's own spelling of `Cell<Doc | undefined>` held opaquely:
+    // an `anyOf` of `undefined` and a reference, beside `asCell: ["opaque"]`.
+    const defs = {
+      $defs: {
+        Doc: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+      },
+    } satisfies Exclude<JSONSchema, boolean>;
+    const doc: JSONSchema = {
+      $ref: "#/$defs/Doc",
+      asCell: ["opaque"],
+      ...defs,
+    };
+    const optionalDoc: JSONSchema = {
+      anyOf: [{ type: "undefined" }, { $ref: "#/$defs/Doc" }],
+      asCell: ["opaque"],
+      ...defs,
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(doc, optionalDoc),
+        pattern(optionalDoc, doc),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(doc, optionalDoc, "value", {
+        sourceRoot: doc,
+        targetRoot: optionalDoc,
+      })
+    ).not.toThrow();
+
+    // The extension is still held to exact equality on the node, and a
+    // difference is reported as the extension's own, not the alternatives'.
+    const cell: JSONSchema = { ...a, asCell: ["cell"] };
+    for (
+      const changed of [
+        { anyOf: [a, b] },
+        { anyOf: [a, b], asCell: ["readonly"] },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(cell, true),
+          pattern(changed, true),
+        )
+      ).toThrow(/asCell changed/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(changed, true),
+          pattern(cell, true),
+        )
+      ).toThrow(/asCell changed/);
+    }
+  });
+
   it("rejects unresolved references and terminates on recursive references", () => {
     const unresolved = pattern(
       {

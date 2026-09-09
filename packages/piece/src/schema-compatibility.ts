@@ -784,6 +784,27 @@ function schemaSubsetIssue(
   if (pairIsActive(source, target, context)) return undefined;
   markPairActive(source, target, context);
   try {
+    // A semantic extension is a fact about the node as a whole, compared for
+    // exact equality, so it is judged here, once, whatever spelling the
+    // node's alternatives take. The fragments an expansion produces below
+    // carry none of these keys ({@link schemaAlternatives}): a fragment that
+    // did carry one would meet a fragment that does not — an `anyOf` node's
+    // base holds the extension while its branches hold the types — and the
+    // one-sided key would read as a change the node never made.
+    //
+    // The `ifc` extension is compared for exact equality except for a
+    // `writeAuthorizedBy` writer claim's volatile identity — its content hash
+    // and its resolver-dependent file spelling, which the runtime does not
+    // hold fixed either — and the derived per-value label annotations, which
+    // describe the label a write produces rather than the policy the store
+    // declares. `keywordValuesEqual` applies that reduction, the same one it
+    // applies to an `ifc` nested below a composite keyword.
+    for (const key of SEMANTIC_EXTENSION_KEYS) {
+      if (!keywordValuesEqual(key, source[key], target[key])) {
+        return `${path}: ${key} changed`;
+      }
+    }
+
     if (
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
@@ -830,19 +851,6 @@ function schemaSubsetIssue(
 
     const constraintIssue = scalarConstraintSubsetIssue(source, target, path);
     if (constraintIssue) return constraintIssue;
-
-    for (const key of SEMANTIC_EXTENSION_KEYS) {
-      // The `ifc` extension is compared for exact equality except for a
-      // `writeAuthorizedBy` writer claim's volatile identity — its content hash
-      // and its resolver-dependent file spelling, which the runtime does not
-      // hold fixed either — and the derived per-value label annotations, which
-      // describe the label a write produces rather than the policy the store
-      // declares. `keywordValuesEqual` applies that reduction, the same one it
-      // applies to an `ifc` nested below a composite keyword.
-      if (!keywordValuesEqual(key, source[key], target[key])) {
-        return `${path}: ${key} changed`;
-      }
-    }
 
     for (const key of COMPLEX_CONSTRAINT_KEYS) {
       const applicableTypes = COMPLEX_CONSTRAINT_TYPES[key];
@@ -1497,21 +1505,51 @@ function schemaMayProduceType(
 }
 
 /**
- * Conjunctions for each alternative after the caller checks whole-schema
- * defaults. The root default is omitted from both sides, including a schema
- * with a single type, so branch comparisons concern their value constraints.
- * Descendant schemas and their defaults remain intact.
+ * The alternatives a node states, each a conjunction of fragments, after the
+ * caller has judged the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). No
+ * fragment carries those keywords — the single fragment of a node that states
+ * one thing included — so the branch proofs concern value constraints alone.
+ * Descendant schemas keep their defaults and extensions.
  */
 function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
-  const { default: _default, ...withoutDefault } = schema;
-  if (withoutDefault.anyOf) {
-    const { anyOf, ...base } = withoutDefault;
+  const fragment = withoutNodeLevelKeywords(schema);
+  if (fragment.anyOf) {
+    const { anyOf, ...base } = fragment;
     return anyOf.map((alternative) => [base, alternative]);
   }
-  if (Array.isArray(withoutDefault.type)) {
-    return withoutDefault.type.map((type) => [{ ...withoutDefault, type }]);
+  if (Array.isArray(fragment.type)) {
+    return fragment.type.map((type) => [{ ...fragment, type }]);
   }
-  return [[withoutDefault]];
+  return [[fragment]];
+}
+
+/**
+ * The keywords a node states about itself as a whole, which
+ * {@link schemaSubsetIssue} judges once at the node before it expands the
+ * node's alternatives: the `default`, checked for validity or for change
+ * there, and the semantic extensions, compared for exact equality there. A
+ * fragment entering a branch proof carries none of them.
+ */
+const NODE_LEVEL_KEYWORDS: ReadonlySet<string> = new Set([
+  "default",
+  ...SEMANTIC_EXTENSION_KEYS,
+]);
+
+/**
+ * The schema without its node-level keywords; the same object when it has
+ * none. Copies with {@link keep}, so a `__proto__` key read off the wire lands
+ * as an own property the way it does everywhere else in this comparison.
+ */
+function withoutNodeLevelKeywords(schema: SchemaObject): SchemaObject {
+  const keys = Object.keys(schema);
+  if (!keys.some((key) => NODE_LEVEL_KEYWORDS.has(key))) return schema;
+  const fragment: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!NODE_LEVEL_KEYWORDS.has(key)) {
+      keep(fragment, key, (schema as Record<string, unknown>)[key]);
+    }
+  }
+  return fragment as SchemaObject;
 }
 
 /**

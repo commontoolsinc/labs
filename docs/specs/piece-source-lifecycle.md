@@ -612,7 +612,10 @@ caller compiles and verifies the candidate and runs these structural
 comparisons. Descriptions, titles, examples, and listing annotations do not
 change a contract, including inside defaulted unions. Defaults, reference
 targets, value constraints, and capability and CFC metadata remain part of the
-proof. The unconstrained schemas `true`, `{}`, and `{ type: "unknown" }`
+proof. Capability and CFC metadata are compared once, on the node that carries
+them, whatever spelling that node's alternatives take: one member type, a
+`type` list, or `anyOf` branches. The unconstrained schemas `true`, `{}`, and
+`{ type: "unknown" }`
 accept the same values; constraints beside `type: "unknown"` still apply.
 Adding an optional `unknown` read to an open producer contract is compatible,
 while adding an optional typed read requires the producer to guarantee that
