@@ -19,6 +19,9 @@
  * contention burst. If the window elapses without the write landing, the failure
  * surfaces as a terminal error rather than vanishing.
  */
+
+import { EVENT_DEFERRAL_DROP_THRESHOLD } from "./constants.ts";
+
 export interface CommitBackpressurePolicy {
   /**
    * Delay before the first retry, in milliseconds. Small by default so the
@@ -143,10 +146,10 @@ export class CommitConvergenceError extends Error {
  * announced, which a permanently unresolvable argument never gets. The
  * requeued event holds the event queue's head while it waits, so this bound
  * is what keeps one such argument from blocking every later event for the
- * whole retry window. The same threshold the serving drain applies to its
- * deferrals.
+ * whole retry window. It is the serving drain's deferral threshold, so the
+ * two budgets move together.
  */
-export const HANDLER_NOT_RUN_BACKOFF_LIMIT = 8;
+export const HANDLER_NOT_RUN_BACKOFF_LIMIT = EVENT_DEFERRAL_DROP_THRESHOLD;
 
 /**
  * Terminal failure raised when a client event's handler body never ran: every

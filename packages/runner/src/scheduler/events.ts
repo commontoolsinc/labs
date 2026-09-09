@@ -1511,6 +1511,17 @@ export async function dispatchQueuedEvent(state: {
       ...(queuedEvent.parentEventId !== undefined
         ? { parentEventId: queuedEvent.parentEventId }
         : {}),
+      // The intent's retry budget rides along: a name resolution in the
+      // middle of a retry sequence is settlement, not a fresh start.
+      ...(queuedEvent.retryAttempts !== undefined
+        ? { retryAttempts: queuedEvent.retryAttempts }
+        : {}),
+      ...(queuedEvent.retryDeadline !== undefined
+        ? { retryDeadline: queuedEvent.retryDeadline }
+        : {}),
+      ...(queuedEvent.notRunBackoffs !== undefined
+        ? { notRunBackoffs: queuedEvent.notRunBackoffs }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
