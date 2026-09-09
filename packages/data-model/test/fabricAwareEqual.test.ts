@@ -182,16 +182,9 @@ describe("fabricAwareEqual()", () => {
   });
 
   describe("given a container the model would refuse to hash", () => {
-    // Where the walk being the frame shows. Each of these operands is one
-    // `valueEqual()` cannot decide whole, and each has an answer all the same,
-    // because the walk reaches the pair that settles it without hashing
-    // anything above it.
-
     it("returns for a cycle the two operands reach at one reference", () => {
-      // `hashStringOf()` has no cycle tracking and exhausts the stack on one,
-      // so the model is not asked. The walk reads the same reference on both
-      // sides and stops there. Two separate cyclic graphs exhaust the stack
-      // here as well, this walk carrying no tracking of its own either.
+      // The walk stops at the shared reference. Separate cyclic graphs still
+      // need the pair tracking provided by `valueEqual()`.
 
       const cyclic: Record<string, unknown> = { a: 1 };
       cyclic.self = cyclic;
@@ -252,10 +245,8 @@ describe("fabricAwareEqual()", () => {
 
     it("returns `false` against another class whether or not it is frozen", () => {
       // Two classes settle the pair, so neither operand's contents are
-      // consulted and no codec is asked about either. The frozen half is the
-      // discriminating one: handed a deep-frozen pair, `valueEqual()` asks
-      // whether each operand is deep-frozen, and a `FabricMap` refuses that
-      // question the same way it refuses to be hashed.
+      // consulted and no codec is asked about either, even when the outer
+      // objects are frozen and one class carries a stub codec.
 
       const bytes = () => new FabricBytes(new Uint8Array([1]));
       const map = () => new FabricMap(new Map([["a", 1]]));
@@ -358,9 +349,8 @@ describe("fabricAwareEqual()", () => {
     });
 
     it("returns `false` for a null-prototype record against a plain one", () => {
-      // A null-prototype object is outside the `FabricValue` type, so a pair
-      // holding one on one side and a plain record on the other reaches
-      // neither comparison whole and is unequal, whatever the two hold.
+      // This walk separates records by constructor even when their contents
+      // agree; `valueEqual()` treats both prototypes as plain records.
 
       const nullProto = Object.create(null) as Record<string, unknown>;
       nullProto.a = 1;
