@@ -262,15 +262,6 @@ export function tagFromNativeBuiltinClassElseNull(
  * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
- *
- * Everything else is decided by its class, read from its prototype, through
- * `tagFromNativeBuiltinClassElseNull()`, that being the question a plain
- * object answers at once, and plain objects outnumber everything else this is
- * asked about. A null-prototype object is an error if `Error.isError()` says
- * so and otherwise a bare record, tagged `Object`. A class the builtin lookup
- * declines falls through to the tests that hold where a class does not: an
- * error by `Error.isError()`, which holds across realms; a `FabricPrimitive`
- * by the tag its instance carries; a `FabricInstance` by class.
  */
 export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   if (value === null || typeof value !== "object") {
@@ -284,6 +275,10 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
 
   const proto = Object.getPrototypeOf(value);
 
+  if (proto === Object.prototype) {
+    return VALUE_TAGS.Object;
+  }
+
   // A `null` prototype settles the value here, both ways it can go. It names
   // no class, so the lookup below could recognize none; and `instanceof`
   // walks a chain that is empty, so the fabric tests below cannot claim it
@@ -294,22 +289,6 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
     return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
   }
 
-  // The class is read from the PROTOTYPE, not from the value. What is being
-  // asked is which class the value is an instance of, and that is a fact about
-  // its prototype; an own `constructor` property is ordinary data that happens
-  // to share the name, and must not decide the value's type. Reading it off
-  // the value would let `{constructor: Error}` -- a plain record -- be tagged
-  // `Error` and silently rebuilt as one.
-  const ctor = constructorOfPrototype(proto);
-
-  if (ctor !== undefined) {
-    const tag = tagFromNativeBuiltinClassElseNull(ctor);
-    if (tag !== null) return tag;
-  }
-
-  // The class was unrecognized or unreadable, so the tests that hold where a
-  // class does not decide the rest: an error from another realm, and the
-  // fabric kinds, which the builtin lookup declines by design.
   if (Error.isError(value)) {
     return VALUE_TAGS.Error;
   } else if (value instanceof FabricPrimitive) {
@@ -318,5 +297,13 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
     return VALUE_TAGS.FabricInstance;
   }
 
-  return null;
+  // The class is read from the PROTOTYPE, not from the value. What is being
+  // asked is which class the value is an instance of, and that is a fact about
+  // its prototype; an own `constructor` property is ordinary data that happens
+  // to share the name, and must not decide the value's type. Reading it off
+  // the value would let `{constructor: Error}` -- a plain record -- be tagged
+  // `Error` and silently rebuilt as one.
+  const ctor = constructorOfPrototype(proto);
+
+  return (ctor === undefined) ? null : tagFromNativeBuiltinClassElseNull(ctor);
 }
