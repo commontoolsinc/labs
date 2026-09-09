@@ -8258,26 +8258,20 @@ export class Runner {
     };
   }
 
-  #serializeQueryResult(
-    inputsCell: Cell<any>,
-    tx: IExtendedStorageTransaction,
-  ): string {
-    try {
-      return JSON.stringify(inputsCell.getAsQueryResult([], tx));
-    } catch (_error) {
-      return "(Can't serialize to JSON)";
-    }
-  }
-
+  /**
+   * What an action's argument was validated against and what it was
+   * validated from, for the invalid-input diagnostics. The raw binding is
+   * the inputs as bound — links unresolved — so building this reads no
+   * document the argument schema does not, and registers nothing in the
+   * action's transaction beyond what validating the argument already did.
+   */
   #getJavaScriptInputState(
     module: Module,
     inputsCell: Cell<any>,
-    tx: IExtendedStorageTransaction,
-  ): { schema: Module["argumentSchema"]; raw: unknown; queryResult: string } {
+  ): { schema: Module["argumentSchema"]; raw: unknown } {
     return {
       schema: module.argumentSchema,
       raw: inputsCell.getRaw(),
-      queryResult: this.#serializeQueryResult(inputsCell, tx),
     };
   }
 
@@ -8286,7 +8280,6 @@ export class Runner {
     isValidArgument: boolean,
     module: Module,
     inputsCell: Cell<any>,
-    tx: IExtendedStorageTransaction,
   ): void {
     if (!name) return;
 
@@ -8295,7 +8288,7 @@ export class Runner {
         "action invalid input",
         `action:${name}`,
         true,
-        this.#getJavaScriptInputState(module, inputsCell, tx),
+        this.#getJavaScriptInputState(module, inputsCell),
       );
       return;
     }
@@ -9048,35 +9041,24 @@ export class Runner {
           isValidArgument,
           module,
           inputsCell,
-          tx,
         );
 
         if (!isValidArgument) {
-          const inputState = this.#getJavaScriptInputState(
-            module,
-            inputsCell,
-            tx,
-          );
           logger.error(
             "stream",
             () => [
               "action argument is undefined (potential schema mismatch) -- not running",
-              {
-                schema: inputState.schema,
-                raw: inputState.raw,
-                asQueryResult: inputState.queryResult,
-              },
+              this.#getJavaScriptInputState(module, inputsCell),
             ],
           );
-          // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
-          // a04 write-side member): record the skip on the transaction so
-          // the scheduler's event finalize can withdraw a SERVED
-          // dispatch's tx instead of sealing it. The dispatch stamper
-          // wrote the entry's `consequenced` mark into this tx BEFORE
-          // the body ran (space-server.ts), so sealing a skipped run
-          // commits a 1-op mark-only consequence — the entry permanently
-          // consumed with zero effects and no error. A fact, recorded
-          // unconditionally; the scheduler gates on `served`.
+          // Record the skip on the transaction: the scheduler's event
+          // finalize withdraws the transaction instead of sealing it and
+          // re-runs the handler (events.md §5). On a replica still loading
+          // what the argument reaches, `undefined` is a cold read rather
+          // than a mismatch, and a sealed skip would consume the event —
+          // for a served dispatch as a 1-op mark-only consequence, for a
+          // client dispatch as a commit callback reporting a handling
+          // that never happened.
           tx.dispatchedHandlerNotRun = {
             reason: "action argument is undefined (potential schema mismatch)",
           };
@@ -9410,26 +9392,16 @@ export class Runner {
           isValidArgument,
           module,
           inputsCell,
-          tx,
         );
 
         if (!isValidArgument || previouslyInvalidArgument) {
-          const inputState = this.#getJavaScriptInputState(
-            module,
-            inputsCell,
-            tx,
-          );
           logger.info(
             "action",
             () => [
               isValidArgument
                 ? "action argument is valid now -- running"
                 : "action argument is undefined (potential schema mismatch) -- not running",
-              {
-                schema: inputState.schema,
-                raw: inputState.raw,
-                asQueryResult: inputState.queryResult,
-              },
+              this.#getJavaScriptInputState(module, inputsCell),
             ],
           );
           previouslyInvalidArgument = !isValidArgument;

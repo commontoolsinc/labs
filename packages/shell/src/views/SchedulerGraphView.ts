@@ -2546,23 +2546,6 @@ export class XSchedulerGraph extends LitElement {
                         )}</pre>
                       </div>
                     `
-                    : ""} ${flagMeta.queryResult !== undefined
-                    ? html`
-                      <div class="flag-meta-field">
-                        <div class="flag-meta-label">Query Result</div>
-                        <pre class="flag-meta-value">${(() => {
-                          try {
-                            return JSON.stringify(
-                              JSON.parse(flagMeta.queryResult as string),
-                              null,
-                              2,
-                            );
-                          } catch {
-                            return String(flagMeta.queryResult);
-                          }
-                        })()}</pre>
-                      </div>
-                    `
                     : ""}
                 </div>
               `
