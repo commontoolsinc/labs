@@ -852,13 +852,18 @@ function schemaSubsetIssue(
 
 const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   ...ANNOTATION_KEYS,
-  // Cell wrappers and storage scopes do not constrain descendant values.
-  // The classification is conservative: `readOnly`, `writeOnly`, and `ifc`
-  // remain default-unstable until their compatibility with default insertion
-  // is verified.
-  // Changes to the metadata itself are checked by `SEMANTIC_EXTENSION_KEYS`.
+  // Four of the five `SEMANTIC_EXTENSION_KEYS` say how a value is delivered,
+  // stored, or written, not what shape it has, so a default inserted beneath
+  // one cannot falsify it. A change to the marker itself is still refused by
+  // the exact comparison in `objectSubsetIssue`. `ifc` is left out on
+  // purpose: a label is policy the write-authority comparison reasons about
+  // (`comparableIfc`), and whether a materialized default satisfies a
+  // labeled node's floor is that comparison's question, not this one's, so
+  // a changed default beneath an `ifc` stays refused until it is decided.
   "asCell",
+  "readOnly",
   "scope",
+  "writeOnly",
   "$ref",
   "additionalProperties",
   "exclusiveMaximum",

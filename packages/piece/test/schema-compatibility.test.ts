@@ -1432,6 +1432,64 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
+  it("treats a default beneath unchanged readOnly or writeOnly as beneath a plain node", () => {
+    // The same principle as cells and scopes: the marker says how the value
+    // is written, not what shape it has. The marker itself must still match.
+    for (const marker of [{ readOnly: true }, { writeOnly: true }] as const) {
+      const field = (value: string): JSONSchema => ({
+        type: "object",
+        properties: { note: { type: "string", ...marker, default: value } },
+      });
+      const resultSchema: JSONSchema = { type: "object" };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(field("none"), resultSchema),
+          pattern(field("blue"), resultSchema),
+        )
+      ).not.toThrow();
+    }
+    const flipped = (marker: { readOnly: boolean }): JSONSchema => ({
+      type: "object",
+      properties: { note: { type: "string", ...marker, default: "none" } },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flipped({ readOnly: true }), { type: "object" }),
+        pattern(flipped({ readOnly: false }), { type: "object" }),
+      )
+    ).toThrow("readOnly changed");
+  });
+
+  it("still refuses a changed default beneath an ifc label", () => {
+    // `ifc` is the one semantic extension left out of the default-stable set
+    // on purpose: whether a materialized default satisfies a labeled node's
+    // floor is the write-authority comparison's question.
+    const labeled = (value: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                file: "/packages/patterns/demo/main.tsx",
+                path: ["setFlag"],
+                moduleIdentity: "UVJh2ChHuLkknYrVet0Iu",
+              },
+            },
+          },
+          default: value,
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(labeled(false), { type: "object" }),
+        pattern(labeled(true), { type: "object" }),
+      )
+    ).toThrow(/not stable under default insertion/);
+  });
+
   it("rejects cell and scope changes when a record gains a default", () => {
     for (
       const [before, after, message] of [

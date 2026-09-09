@@ -117,24 +117,24 @@ candidate pattern generates it during setup. This admits the forward migration;
 add a result default as well when an older concurrently running generation must
 still be able to write its previous result shape.
 
-Cell wrappers (`asCell`) and storage scopes (`scope`) are default-stable: they
-say how a value is delivered or stored, not what shape it has, so a default
-beneath one may be introduced or changed under the same rules as beneath a
-plain object node. That covers an empty-object default on a record reached
-through a `$ref`, a default that changes value on an unchanged cell, a verb's
-event below its stream marker (a newly required event field is rescued by a
-valid default the candidate carries, including a newly introduced one), and a
+Cell wrappers (`asCell`), storage scopes (`scope`), and the write markers
+(`readOnly`, `writeOnly`) are default-stable: they say how a value is
+delivered, stored, or written, not what shape it has, so a default beneath one
+may be introduced or changed under the same rules as beneath a plain object
+node. That covers an empty-object default on a record reached through a
+`$ref`, a default that changes value on an unchanged cell, a verb's event
+below its stream marker (a newly required event field is rescued by a valid
+default the candidate carries, including a newly introduced one), and a
 durable-link proof whose target declares a default below a cell. The metadata
-itself must still compare equal across an update: a changed `asCell` or
-`scope` is refused on its own. Value constraints that default insertion can
-invalidate, such as `maxProperties`, continue to require equal defaults
-beneath them.
+itself must still compare equal across an update: a changed `asCell`, `scope`,
+`readOnly`, or `writeOnly` is refused on its own. Value constraints that
+default insertion can invalidate, such as `maxProperties`, continue to require
+equal defaults beneath them.
 
-The semantic-extension classification is conservative: `readOnly`, `writeOnly`,
-and `ifc` still require equal defaults beneath them. Extending default-stability
-to these markers requires a separate proof of their default-materialization
-behavior; the classification does not assert that default insertion through
-them is inherently unsafe.
+`ifc` is the one semantic extension deliberately not on that list: a label is
+policy the write-authority comparison reasons about, and whether a materialized
+default satisfies a labeled node's floor is that comparison's question, so a
+changed default beneath an `ifc` stays refused until it is decided there.
 
 A verb's event follows argument compatibility rules even when declared in a
 result. A caller supplies the event, so it does not receive the result-side
