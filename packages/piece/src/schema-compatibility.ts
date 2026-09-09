@@ -114,9 +114,10 @@ const DESCRIPTIVE_ANNOTATION_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The keywords a schema comparison may ignore: they annotate a schema without
- * constraining the values it admits, so adding or removing one across a piece
- * update proves nothing about compatibility either way.
+ * Keywords excluded from the subset proof's ordinary constraint comparison.
+ * Descriptive annotations leave the contract unchanged. Defaults and reference
+ * metadata have dedicated checks: defaults affect materialization, and reference
+ * metadata determines which schemas are compared.
  *
  * Exported because a second reader classifies keywords and would otherwise
  * keep its own copy of this list. What it says is which keywords are
@@ -768,22 +769,16 @@ function schemaSubsetIssue(
   if (schemasResolveEqually(source, target, context)) return undefined;
 
   if (source === false || target === true) return undefined;
+  if (target === false) {
+    return `${path}: the candidate schema rejects values accepted previously`;
+  }
   if (source === true) {
     // The object proof recognizes unconstrained targets such as `{}` and
     // `type: "unknown"` while checking any constraints beside them.
-    if (
-      target !== false &&
-      schemaSubsetIssue(UNCONSTRAINED_SCHEMA, target, path, {
-          ...context,
-          allowEvolutionPolicy: false,
-        }) === undefined
-    ) return undefined;
-    return target === false
-      ? `${path}: the candidate schema rejects values accepted previously`
-      : `${path}: an unconstrained schema is no longer accepted`;
-  }
-  if (target === false) {
-    return `${path}: the candidate schema rejects values accepted previously`;
+    return schemaSubsetIssue(UNCONSTRAINED_SCHEMA, target, path, {
+      ...context,
+      allowEvolutionPolicy: false,
+    });
   }
 
   if (pairIsActive(source, target, context)) return undefined;
@@ -1283,16 +1278,6 @@ function additionalPropertiesSubsetIssue(
   if (targetAdditional === false) {
     return `${path}: additional properties accepted previously would now be rejected`;
   }
-  if (sourceAdditional === true) {
-    return schemaSubsetIssue(
-        sourceAdditional,
-        targetAdditional,
-        `${path}.*`,
-        context,
-      ) === undefined
-      ? undefined
-      : `${path}: additional properties are now constrained`;
-  }
   return schemaSubsetIssue(
     sourceAdditional,
     targetAdditional,
@@ -1518,15 +1503,15 @@ function schemaMayProduceType(
  * Descendant schemas and their defaults remain intact.
  */
 function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
-  const { default: _default, ...branch } = schema;
-  if (branch.anyOf) {
-    const { anyOf, ...base } = branch;
-    return anyOf.map((branch) => [base, branch]);
+  const { default: _default, ...withoutDefault } = schema;
+  if (withoutDefault.anyOf) {
+    const { anyOf, ...base } = withoutDefault;
+    return anyOf.map((alternative) => [base, alternative]);
   }
-  if (Array.isArray(branch.type)) {
-    return branch.type.map((type) => [{ ...branch, type }]);
+  if (Array.isArray(withoutDefault.type)) {
+    return withoutDefault.type.map((type) => [{ ...withoutDefault, type }]);
   }
-  return [[branch]];
+  return [[withoutDefault]];
 }
 
 /**

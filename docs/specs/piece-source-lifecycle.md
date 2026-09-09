@@ -618,6 +618,21 @@ Adding an optional `unknown` read to an open producer contract is compatible,
 while adding an optional typed read requires the producer to guarantee that
 type whenever the property is present.
 
+Link materialization fills valid target defaults before validating the consumer
+view. Its subset proof can therefore accept an unconstrained producer (`true`)
+against `{ required: ["count"], properties: { count: { default: 1 } } }`:
+the member accepts any present value, and materialization fills an absent one.
+This allowance requires every ancestor constraint to remain valid under default
+insertion. Pattern evolution judges defaults as a migration; it does not use
+this link-materialization allowance. Its policy permitting new optional or
+defaulted fields on open argument objects is disabled inside the unconstrained
+schema proof and conjunction proofs.
+
+Union comparisons check defaults on the complete schemas before comparing
+alternatives, then omit the root default from both sides of each alternative
+comparison. Descendant defaults remain checked. This applies to both pattern
+evolution and link proofs, under their respective default policies.
+
 An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line
 tooling requires an explicit flag, before applying it. A materialized retained

@@ -363,9 +363,9 @@ Mike's call, after S4.
 
    **The board leg of the deploy needs
    `--dangerously-allow-incompatible-schema`.** `setsrc --check` refuses it over
-   a board holding topics filed before the namespace, with
-   `input link at topics.0.shortName: an unconstrained schema is no longer
-   accepted`. An open producer contract permits any value at an undeclared
+   a board holding topics filed before the namespace, because the typed
+   `topics.0.shortName` demand constrains an unconstrained producer. An open
+   producer contract permits any value at an undeclared
    property. A new string demand narrows that contract even when optional:
    absence is allowed, but a present non-string value is not. An optional
    `unknown` demand adds no value restriction and is compatible. The retained

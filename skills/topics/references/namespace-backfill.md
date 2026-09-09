@@ -20,11 +20,8 @@ that before deciding anything this procedure says needs deciding.
 
 1. **The board's source first**, and it needs
    `--dangerously-allow-incompatible-schema`. `setsrc --check` refuses it over a
-   board holding Topics filed before the namespace:
-
-   ```
-   input link at topics.0.shortName: an unconstrained schema is no longer accepted
-   ```
+   board holding Topics filed before the namespace, because the typed
+   `topics.0.shortName` demand constrains an unconstrained producer.
 
    An open producer contract permits any value at an undeclared property. A new
    string demand narrows that contract even when optional: absence is allowed,
