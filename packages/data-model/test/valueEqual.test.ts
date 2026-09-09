@@ -287,6 +287,15 @@ describe("valueEqual()", () => {
     expect(() => valueEqual({ a: 1 }, fn)).toThrow();
   });
 
+  it("rejects distinct functions reached through containers", () => {
+    const fn = (() => 1) as unknown as FabricValue;
+    const other = (() => 1) as unknown as FabricValue;
+    for (const [left, right] of [[fn, other], [fn, 1], [1, fn]]) {
+      expect(() => valueEqual({ nested: [left] }, { nested: [right] }))
+        .toThrow("Cannot compare a function value.");
+    }
+  });
+
   it("throws when given a non-record object (not a `FabricValue`)", () => {
     // A non-array, non-plain object (a `Date`, `Map`, or other class
     // instance) is reachable only via an unsound cast; reject it rather than

@@ -54,6 +54,54 @@ describe("mergeSchemaDefaults", () => {
     expect(value.options).toEqual({});
   });
 
+  it("preserves equivalent materializations outside the Fabric value model", () => {
+    const prototype = { materialized: true };
+    const value = {
+      get retained() {
+        return Object.assign(Object.create(prototype), { count: 3 });
+      },
+    };
+
+    expect(mergeSchemaDefaults(value, undefined, { type: "object" }))
+      .toBe(value);
+    expect(value.retained.count).toBe(3);
+  });
+
+  it("keeps the merged snapshot when materialized callbacks differ", () => {
+    const value = {
+      get retained() {
+        return () => 3;
+      },
+    };
+    const result = mergeSchemaDefaults(value, undefined, { type: "object" });
+
+    expect(result).not.toBe(value);
+    expect(result.retained()).toBe(3);
+    expect(result.retained).toBe(result.retained);
+  });
+
+  it("keeps the merged snapshot when opaque contents cannot be compared", () => {
+    const prototype = { materialized: true };
+    const value = {
+      get retained() {
+        return Object.create(prototype, {
+          count: {
+            enumerable: true,
+            get() {
+              throw new Error("Opaque contents unavailable.");
+            },
+          },
+        });
+      },
+    };
+    const result = mergeSchemaDefaults(value, undefined, { type: "object" });
+
+    expect(result).not.toBe(value);
+    expect(result.retained).toBe(result.retained);
+    expect(() => result.retained.count)
+      .toThrow("Opaque contents unavailable.");
+  });
+
   it("retains array elements, sparse holes, and explicit undefined", () => {
     const value = [unreadValue(), , undefined];
     const result = mergeSchemaDefaults(value, undefined, {
