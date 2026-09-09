@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { writerClaimFilesCorrespond } from "../src/cfc/writer-claim-correspondence.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
 import { reportDroppedCfcRejectedWrite } from "../src/scheduler/cfc-rejection-report.ts";
@@ -195,7 +196,7 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
     const digest = tx.prepareCfc();
     expect(digest).toBe("");
     const result = await tx.commit();
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
   });
 
   it("a different moduleIdentity still fails closed even with corresponding spellings", async () => {
@@ -224,7 +225,7 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
     const digest = tx.prepareCfc();
     expect(digest).toBe("");
     const result = await tx.commit();
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
   });
 
   it("an unrelated file cannot ride the tolerance to a stamp", async () => {
@@ -250,7 +251,7 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
     const digest = tx.prepareCfc();
     expect(digest).toBe("");
     const result = await tx.commit();
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
   });
 });
 
