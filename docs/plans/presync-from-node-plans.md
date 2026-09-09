@@ -94,50 +94,84 @@ Whatever a node reads at run time, it reads through `inputsCell` under
 `readSchema`, so a pre-sync that walks exactly that pair pulls exactly the
 run's read set and nothing the authored schema reaches beyond it.
 
-### The pre-sync walks the plan
+### The pre-sync syncs each plan under its schema
 
-`#syncArgumentLinkTargets` already walks a root value in lockstep with a
-schema, crossing each link the way a read crosses it. The pre-sync gives it
-one root per node, `{cell: inputsCell, schema: readSchema}`, in place of the
-per-link syncs, the per-link roots, and the whole-argument root. An immutable
-cell is a data-URI document that is local by construction, so crossing out of
-it costs no hop: the two-hop budget starts counting at the first stored
-document, where it starts today.
+Each node's pre-sync is one call: `inputsCell.asSchema(readSchema).sync()`.
+The inputs cell is a data-URI document, and syncing one under a schema runs
+the storage manager's `#collectLinkedCellSyncs`, which hands the server a
+selector for each binding link under the sub-schema the link's place
+selects. From there the server's query walk follows links the way a read
+does, through `combineSchemaForLink`, as deep as the declaration goes,
+tracking absent targets so they arrive when written. That is the read's own
+rule applied by the read's own traverser, so nothing the runner walks by
+hand can be more faithful to it.
+
+This retires the runner's link walks: `#syncArgumentLinkTargets` with its hop
+budget, wave loop, dedupe sets, opaque stop, and undeclared fallback;
+`syncAllMentionedCells`; and the schema-less use of the same walk on the
+pattern-update path, which `syncStoredPieceCells` covers once it runs the
+plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
+`isReferenceOnlySchema` go with them. The reference graphs that motivated the
+hop budget are declared `unknown` at their edges, where the traverser answers
+presence and stops, so no depth constant stands in for that.
+
+Two things the server walk cannot reach stay with the runner, in the shape
+`presyncInputs` already has:
+
+- **Cross-space targets past the first hop.** The server walk stops at its
+  space boundary; the storage manager opens the target space for a
+  first-hop link and no deeper. After the schema sync lands, the pre-sync
+  materializes the argument under `readSchema` in a read transaction of its
+  own, collects the traversal's `onMissingLinkTarget` reports, syncs those,
+  and repeats until a pass reports nothing. The read's own traversal decides
+  what is missing, so no second walk exists.
+- **Cell handles**, for handlers only. An `asCell` boundary is not traversed,
+  so a handle's document is not pulled. A lift that reads a cold handle
+  re-runs when the load lands; a handler is at-most-once and reads it now.
+  The handle collection `presyncInputs` does today stays as the second half
+  of the same function.
+
+One correction on the way: `#collectLinkedCellSyncs` syncs a first-hop link
+under `link.schema ?? schema`, the link's declared schema before the
+reader's. The read follows reader precedence, so the sync has to combine the
+two the way `combineSchemaForLink` does, or a binding link that carries the
+authored slice pulls the authored slice.
 
 Outputs are named under the output binding's schema for every node kind. For
 a JavaScript or raw node that is the write target, a derived internal cell or
 a result path, under the module's declared result schema. For a pattern node
 it is the child result cell under the child's result schema, which today is
-not named at all. A pattern node's inputs are not walked at the parent level:
+not named at all. A pattern node's inputs are not synced at the parent level:
 the child's own nodes read through the child's argument document, and the
-recursion below walks them under their own module schemas.
+recursion below syncs them under their own module schemas.
 
 The argument document itself stays named, schema-less, as #7193 made it:
 setup reads it whole to write the caller's argument over the stored slots.
 Naming a document schema-less pulls its bytes and follows nothing, so this
-keeps the document local without widening what is walked.
+keeps the document local without widening what is pulled.
 
-### Children are walked after they are local
+### Children are synced after they are local
 
 A child's node plans need the child's `argument` meta link, which is data on
 the child result document. The pre-sync therefore runs in two waves per
-level: name every child result cell in the first, then plan and walk each
+level: name every child result cell in the first, then plan and sync each
 child's nodes in the second, recursing. Each level names its own argument
 document and derived internal cells, as the top level does. List coordinators
 keep `#syncResumeListChildren`, whose children are derived from the
 coordinator plan rather than from a pattern node, and each child it names is
-then walked the same way.
+then synced the same way.
 
 ### A fresh start binds against a local stand-in
 
 Binding needs an argument link, and a fresh piece has no argument document
 until setup writes one. The pre-sync mints an immutable cell holding the
 caller's argument and binds every node plan against its link. The plans then
-walk as on a resume: `inputsCell` links into the stand-in, the stand-in holds
-the caller's links, and the walk crosses them under the module schema. This
-gives `runSynced` and `run()` the same per-node pre-sync a resume gets, with
-no separate mechanism and no derived read surface over the argument. The
-audit's recommendation to derive such a surface is superseded by this.
+sync as on a resume: `inputsCell` links into the stand-in, the stand-in holds
+the caller's links, and the server walk crosses them under the module
+schema. This gives `runSynced` and `run()` the same per-node pre-sync a
+resume gets, with no separate mechanism and no derived read surface over the
+argument. The audit's recommendation to derive such a surface is superseded
+by this.
 
 ### Each first run waits on what its plan named
 
@@ -161,9 +195,10 @@ produce, and it no longer depends on a two-second race.
 `#familyAbsent` and `#swapReadsAbsent` decide whether a run or a swap over a
 stored piece must name its family first. They probe presence with a raw
 four-hop scan of the argument under a 256-probe budget. With plans available
-the question has an exact answer: the documents the plans' walks would name.
-The gate keeps its structure and its hold, and reads the plan's set instead
-of scanning.
+the question has an exact answer: whether each node's selector is already
+covered, which the storage manager's sync-request index knows without a round
+trip. The gate keeps its structure and its hold, and asks that instead of
+scanning.
 
 ## Stages
 
@@ -195,30 +230,39 @@ landed.
 Exit: no binding call outside `#nodePlan` except `sendValueToBinding`, which
 writes rather than plans.
 
-### Stage 2. The resume pre-sync walks the plans
+### Stage 2. The resume pre-sync syncs the plans
 
+- [ ] Fix `#collectLinkedCellSyncs` to combine the reader's sub-schema with
+      the link's the way `combineSchemaForLink` does. Test, red first: an
+      immutable cell holding a link that carries a wide schema, synced under
+      a narrow one, pulls the narrow selection.
 - [ ] Replace the node walk in `#syncCellsForRunningPatternInner` with one
-      root per node plan, walked by `#syncArgumentLinkTargets`; make crossing
-      out of a data-URI document cost no hop.
+      `sync()` per node plan under its `readSchema`, followed by the
+      missing-target loop, and for handler nodes the handle collection.
 - [ ] Name each plan's outputs under the output binding's schema, the child
       result cell included.
-- [ ] Remove the whole-argument root under `pattern.argumentSchema`. Keep the
-      schema-less naming of the argument document.
+- [ ] Delete `#syncArgumentLinkTargets`, `LINK_HOPS`, `ArgumentLinkRoot`,
+      `narrowChildSchema`, `isReferenceOnlySchema`, `syncAllMentionedCells`,
+      and the whole-argument root. Keep the schema-less naming of the
+      argument document. `syncStoredSetupArgument` keeps its argument sync
+      and drops its raw scan.
 - [ ] Test, red first: a pattern whose authored argument type declares a link
-      no lift body reads. Under the current walk the target is pulled; under
-      the plan walk it stays cold, and the piece's first runs commit without
+      no lift body reads. Under the current walk the target is pulled; after
+      this stage it stays cold, and the piece's first runs commit without
       conflict. `resume-argument-link-target-presync.test.ts` is the file.
-- [ ] Test: a target a lift body reads through two stored hops arrives, so
-      the hop budget was not shortened by the immutable root.
-- [ ] Measure on the topics board and the default app: `resumeCellSync` count
-      and `resumeArgumentLinkTargetSync` total from the runner timing stats,
+- [ ] Test: a lift body that reads through three stored documents finds the
+      third local, which the two-hop walk never delivered.
+- [ ] Test: the `defaultProfile` shape, a container in the piece's space
+      linking to a document in another space, arrives through the
+      missing-target loop before the first run.
+- [ ] Measure on the topics board and the default app: `resumeCellSync`
+      count and the link-target sync total from the runner timing stats,
       before and after, and the count of `piece-start-commit-recovering`
       warnings on a cold resume. `docs/development/debugging/profiling.md`
       names the rows.
 
-Exit: no resume pre-sync path reads a schema wider than a module schema or an
-output binding's schema, and the measurements are recorded in the pull
-request.
+Exit: the runner holds no link walk of its own for pre-syncing, and the
+measurements are recorded in the pull request.
 
 ### Stage 3. Children and fresh starts
 
@@ -260,10 +304,10 @@ Exit: no resumed action's first run is released by a timer.
 
 ### Stage 5. The gates ask the plans
 
-- [ ] Replace the raw four-hop scan in `#familyAbsent` with the set the
-      plans' walks would name, and `#swapReadsAbsent` likewise. Keep the
-      probe budget only if the plan set can be large; measure the set's size
-      on the topics board first.
+- [ ] Replace the raw four-hop scan in `#familyAbsent` with a coverage
+      check of each node plan's selector against the storage manager's
+      sync-request index, and `#swapReadsAbsent` likewise. The probe budget
+      goes with the scan.
 - [ ] Test: the existing `piece-named-before-start.test.ts` cases pass
       unchanged, and a case where the raw scan over-held (a link in the
       argument no body reads) no longer holds.
@@ -293,10 +337,9 @@ the pull request.
   after.
 - It does not change what the store delivers. #7193 settles that: metadata
   is data, and the runner names what it reads.
-- It does not raise the two-hop budget. Stage 2 keeps the budget as it stands
-  and records the measurement that would justify changing it.
 - It does not remove the `FabricInstance` stops in the walks. They are
-  recorded gaps with their own TODOs; the plan walk inherits them.
+  recorded gaps with their own TODOs; the storage manager's data-URI walk
+  inherits them.
 
 ## Risks
 
@@ -304,9 +347,15 @@ the pull request.
   test is the guard, and stage 1 lands before any pre-sync change so a
   binding regression shows up on its own.
 - **A cold target the module schema does not declare.** A body that reads
-  more than the transformer saw, through `unknown` or a `true` schema, falls
-  back to the raw scan as today, with the same hop budget. Stage 2's
-  measurement watches the `piece-start-commit-recovering` count for a rise.
+  more than the transformer saw is a body the transformer should have
+  reported (`validateShrinkCoverage`); a `true` schema is followed by the
+  server as far as the links go. Stage 2's measurement watches the
+  `piece-start-commit-recovering` count for a rise.
+- **A selector the server walk cannot bound.** A `true` schema over a wide
+  reference graph asks the server for the whole graph, where the old walk
+  stopped at two hops. Such a schema is a body reading everything, and the
+  graphs that used to trip this are declared `unknown` at their edges. The
+  measurement above is where an unbounded pull would show.
 - **A hold that never releases.** Stage 4's promise settles on failure as
   well as success, and the test for a failed load is what pins that.
 - **Wider pull requests than the stages suggest.** `runner.ts` is where all
