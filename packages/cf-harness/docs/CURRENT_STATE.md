@@ -44,6 +44,11 @@ the model to make policy decisions.
 
 The current package provides:
 
+- durable Loom composition, exact inspection, and bounded receipt recovery over
+  an explicitly configured host command transport; current-turn console results
+  include verified authored Loom receipts and the submitted origin. See
+  [Durable Loom authoring](LOOM_AUTHORING.md) for authority, custody, and retry
+  contracts;
 - batch CLI execution with bounded model turns and optional streamed events;
 - machine-readable capability discovery with `--describe-capabilities`;
 - persistent provider configuration and structured config/auth control, with

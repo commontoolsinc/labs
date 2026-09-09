@@ -656,6 +656,35 @@ describe("console/server", () => {
     });
   });
 
+  describe("task Loom context", () => {
+    it("rejects malformed Loom targets before starting a turn", async () => {
+      for (const loomId of ["../private", {}, "loom-not-valid"]) {
+        const response = await server.handle(
+          jsonRequest("/api/task", { text: "Make a Loom", loomId }, { cookie }),
+        );
+        expect(response.status).toBe(400);
+      }
+      expect(server.service.turns()).toHaveLength(0);
+    });
+
+    it("persists the submitted origin even when the next turn names another Loom", async () => {
+      const first = await startTask({
+        text: "First",
+        loomId: "loom-1111111111111111",
+      });
+      await startTask({
+        text: "Second",
+        sessionId: first.sessionId,
+        loomId: "loom-2222222222222222",
+      });
+      expect(
+        server.service.turns(first.sessionId).map((entry) =>
+          entry.input.loomId
+        ),
+      ).toEqual(["loom-1111111111111111", "loom-2222222222222222"]);
+    });
+  });
+
   describe("GET /api/turns/<turnId>/result", () => {
     it("returns named errors for malformed and unknown turn paths", async () => {
       const malformedRoute = await server.handle(getRequest(
@@ -728,7 +757,10 @@ describe("console/server", () => {
         await page.body?.cancel();
         const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
         const startedResponse = await resultServer.handle(
-          jsonRequest("/api/task", { text: "track my books" }, {
+          jsonRequest("/api/task", {
+            text: "track my books",
+            loomId: "loom-1111111111111111",
+          }, {
             cookie: resultCookie,
           }),
         );
@@ -759,6 +791,8 @@ describe("console/server", () => {
 
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({
+          originLoomId: "loom-1111111111111111",
+          looms: [],
           pieces: [{
             slug: "reading-list",
             url: "http://localhost:8000/console-test/reading-list",
@@ -839,6 +873,7 @@ describe("console/server", () => {
 
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({
+          looms: [],
           pieces: [],
           spaceName: "console-test",
           finalText: "restored result",
@@ -1378,6 +1413,7 @@ describe("console/server", () => {
           { role: "assistant", content: "built it" },
         ]),
       ).toEqual({
+        looms: [],
         pieces: [{
           slug: "reading-list",
           url: "http://localhost:8000/console-test/reading-list",
@@ -1393,6 +1429,7 @@ describe("console/server", () => {
           { role: "assistant", content: "calculated it" },
         ]),
       ).toEqual({
+        looms: [],
         pieces: [],
         spaceName: "console-test",
         finalText: "calculated it",

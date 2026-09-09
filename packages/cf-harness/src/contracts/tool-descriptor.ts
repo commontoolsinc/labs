@@ -18,7 +18,10 @@ export type BuiltinToolId =
   | "record_feedback"
   | "search_skills"
   | "acquire_skill"
-  | "query_docs";
+  | "query_docs"
+  | "loom_compose"
+  | "loom_inspect"
+  | "loom_authoring_context";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",
@@ -79,6 +82,13 @@ const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["read_skill_resource", "run_skill_script"] as const,
 );
 
+/** Tools backed only by an explicitly configured host Loom transport. */
+export const LOOM_AUTHORING_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set([
+  "loom_compose",
+  "loom_inspect",
+  "loom_authoring_context",
+]);
+
 /** What a run can back the gated tools with. */
 export interface HarnessToolBackingAvailability {
   fabricSessionAvailable: boolean;
@@ -87,6 +97,9 @@ export interface HarnessToolBackingAvailability {
   skillsShAcquisitionAvailable: boolean;
   skillRegistryAvailable: boolean;
   docsCorpusAvailable: boolean;
+
+  /** Whether the operator configured host Loom authoring for this run. */
+  loomAuthoringAvailable?: boolean;
 }
 
 /** The gated tools this run cannot back, and so does not offer. */
@@ -102,6 +115,7 @@ export const withheldToolIds = (
       : SKILLS_SH_ACQUISITION_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
     ...(availability.docsCorpusAvailable ? [] : DOCS_CORPUS_TOOL_IDS),
+    ...(availability.loomAuthoringAvailable ? [] : LOOM_AUTHORING_TOOL_IDS),
   ]);
 
 /**
@@ -127,6 +141,7 @@ export const parentToolIdsForBacking = (
       ? SKILLS_SH_ACQUISITION_TOOL_IDS
       : []),
     ...(availability.docsCorpusAvailable ? DOCS_CORPUS_TOOL_IDS : []),
+    ...(availability.loomAuthoringAvailable ? LOOM_AUTHORING_TOOL_IDS : []),
   ].filter((toolId, index, ids) =>
     !withheld.has(toolId) && ids.indexOf(toolId) === index
   );

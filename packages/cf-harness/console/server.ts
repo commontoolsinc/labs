@@ -31,6 +31,7 @@
  * with a link rather than a transcript is what this surface is for.
  */
 
+import { readLoomAuthoringConfig } from "../src/loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import {
   dirname,
@@ -501,6 +502,7 @@ export const resolveConsoleConfig = async (
       "workspace",
       "artifact-root",
       "model",
+      "loom-authoring-config",
       "fabric-api-url",
       "fabric-identity",
       "fabric-space",
@@ -526,6 +528,10 @@ export const resolveConsoleConfig = async (
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
 
+  const loomAuthoring = await readLoomAuthoringConfig(
+    flag("loom-authoring-config") ??
+      nonEmpty(env.CF_HARNESS_LOOM_AUTHORING_CONFIG),
+  );
   const systemPromptFile = flag("system-prompt-file") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_SYSTEM_PROMPT_FILE);
 
@@ -671,6 +677,7 @@ export const resolveConsoleConfig = async (
     ),
     model: flag("model") ?? nonEmpty(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL,
     fabricSession,
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
     ...(patternIndexUrl !== undefined
       ? {
@@ -943,6 +950,7 @@ export class ConsoleServer {
       envelope.event.turnId,
     ) ?? {
       pieces: [],
+      looms: [],
       spaceName: this.#config.fabricSession.space,
       finalText: envelope.event.finalText ?? "",
     };
@@ -961,7 +969,12 @@ export class ConsoleServer {
     turnId: string,
   ): Promise<ConsoleTurnResult | undefined> {
     const [session] = this.#service.status(sessionId).sessions;
+    const turns = await this.#service.listTurnsForReplay({ sessionId });
+    const originLoomId = turns.turns.find((entry) =>
+      entry.turn.turnId === turnId
+    )?.input.loomId;
     return await readConsoleTurnResult({
+      ...(originLoomId !== undefined ? { originLoomId } : {}),
       artifactRoot: session?.artifactRoot ?? this.#config.artifactRoot,
       turnId,
       spaceName: this.#config.fabricSession.space,
@@ -1330,7 +1343,17 @@ export class ConsoleServer {
       sessionId?: unknown;
       inputCells?: unknown;
       patternRefs?: unknown;
+      loomId?: unknown;
     } = typeof parsed === "object" && parsed !== null ? parsed : {};
+    if (
+      body.loomId !== undefined &&
+      (typeof body.loomId !== "string" ||
+        !/^loom-[a-f0-9]{16}$/.test(body.loomId))
+    ) {
+      return Response.json({
+        error: "loomId must be a canonical Loom identifier",
+      }, { status: 400 });
+    }
     const text = body.text;
     if (typeof text !== "string" || text.trim() === "") {
       return Response.json({ error: "text is required" }, { status: 400 });
@@ -1365,7 +1388,10 @@ export class ConsoleServer {
     }
     const turn = await this.#service.startTurn(crypto.randomUUID(), {
       sessionId,
-      input: { text },
+      input: {
+        text,
+        ...(typeof body.loomId === "string" ? { loomId: body.loomId } : {}),
+      },
       ...(inputCells.length > 0 ? { inputCells } : {}),
       ...(patternRefs.length > 0 ? { patternRefs } : {}),
     });
