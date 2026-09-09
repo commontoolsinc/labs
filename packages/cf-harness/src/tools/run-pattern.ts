@@ -1433,7 +1433,18 @@ export const runPatternTool: HarnessToolDefinition<
       }
     };
     const barrier = (async () => {
-      await pieces.runtime.settled();
+      // Wait for THIS run to quiesce and its writes to land durably — NOT the
+      // capped whole-runtime `settled()`. `settled(maxRounds=50)` returns while
+      // a run is still working (its own doc: a cap "returns while the run is
+      // still working ... wrongly and silently"; runtime.ts notes "generation
+      // 50 while the chain kept running and writing"). run_pattern then reports
+      // the in-memory result as `ok` while the piece's content write is still
+      // in flight past the cap, and teardown loses it: the named piece resolves
+      // to an empty cell. `settledFor` is uncapped and scoped to this run, the
+      // same barrier the async builtins (llm, llm-dialog, navigate-to) use to
+      // wait for a result to land; the signal lets its loop stop on abort while
+      // `raceWithAbort` below still returns promptly.
+      await pieces.runtime.settledFor(piece.getCell(), signal);
       await pieces.synced();
     })();
     if (await raceWithAbort(barrier, signal) === "aborted") {
