@@ -80,7 +80,7 @@ export interface ManifestEntry {
 }
 
 /** Why an identity is not selectable on a pull request. */
-export type WithheldReason = "main-red" | "flaky";
+export type WithheldReason = "flaky";
 
 /** One identity held back, and why. */
 export interface WithheldEntry {
@@ -309,12 +309,27 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   return entry;
 }
 
-function parseWithheld(value: unknown): WithheldEntry | undefined {
-  if (!isRecord(value)) return undefined;
-  const test = parseIdentity(value.test);
-  if (test === undefined || !isNonEmptyString(value.suite)) return undefined;
-  if (value.reason !== "main-red" && value.reason !== "flaky") return undefined;
-  return { test, suite: value.suite, reason: value.reason };
+/**
+ * Validates the withheld list, keeping the entries whose reason this
+ * reader honors. A well-formed entry naming any other reason is dropped
+ * rather than refused: an unreadable manifest is treated as an absent
+ * one, which makes the whole corpus mandatory, so a writer that names a
+ * reason this reader has no rule for must not cost every other entry the
+ * manifest carries. A malformed entry still refuses the manifest, since
+ * that is a corrupt writer rather than a reason from elsewhere.
+ */
+function parseWithheldEntries(value: unknown): WithheldEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries: WithheldEntry[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) return undefined;
+    const test = parseIdentity(raw.test);
+    if (test === undefined || !isNonEmptyString(raw.suite)) return undefined;
+    if (!isNonEmptyString(raw.reason)) return undefined;
+    if (raw.reason !== "flaky") continue;
+    entries.push({ test, suite: raw.suite, reason: raw.reason });
+  }
+  return entries;
 }
 
 function parseUnavailable(value: unknown): UnavailableEntry | undefined {
@@ -461,7 +476,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
   }
   const calibration = parseCalibration(value.calibration);
   const entries = parseAll(value.entries, parseEntry);
-  const withheld = parseAll(value.withheld, parseWithheld);
+  const withheld = parseWithheldEntries(value.withheld);
   const unavailable = parseAll(value.unavailable, parseUnavailable);
   const unschedulable = parseAll(value.unschedulable, parseUnschedulable);
   const lanes = parseAll(value.lanes, parseLane);

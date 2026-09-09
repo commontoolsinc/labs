@@ -487,7 +487,6 @@ export function describeConflicts(conflicts: readonly TestRecord[]): void {
 
 /** What a withheld identity is absent for, in words. */
 const WITHHELD_REASONS: Record<WithheldReason, string> = {
-  "main-red": "already failing in the latest run on `main`",
   flaky: "too noisy to judge a change by",
 };
 

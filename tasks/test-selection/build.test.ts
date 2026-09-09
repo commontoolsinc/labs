@@ -411,16 +411,6 @@ describe("build", () => {
       expect(fold.knows(CI_NAME)).toBe(true);
       expect(fold.knows(`${CI_NAME}2`)).toBe(false);
     });
-
-    it("names the identities the newest run on main left red", () => {
-      const folded = foldReports(
-        emptyAggregate("2026-08-20"),
-        [stored(CI_NAME, context(), [record({ outcome: "fail" })])],
-        NO_ALIASES,
-        "2026-08-20",
-      );
-      expect(folded.mainRed.size).toBe(1);
-    });
   });
 
   describe("parseAggregate()", () => {
@@ -630,7 +620,6 @@ describe("build", () => {
       );
       const manifest = buildManifest({
         states: folded.states,
-        mainRed: folded.mainRed,
         surfaces: folded.surfaces,
         today: "2026-08-20",
         generatedAt: "2026-08-20T04:00:00.000Z",
@@ -640,28 +629,6 @@ describe("build", () => {
       });
       expect(manifest.entries.length).toBe(2);
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
-    });
-
-    it("withholds an identity failing in the newest run on main", () => {
-      const folded = foldReports(
-        emptyAggregate("2026-08-20"),
-        [stored(CI_NAME, context(), [record({ outcome: "fail" })])],
-        NO_ALIASES,
-        "2026-08-20",
-      );
-      const manifest = buildManifest({
-        states: folded.states,
-        mainRed: folded.mainRed,
-        surfaces: folded.surfaces,
-        today: "2026-08-20",
-        generatedAt: "2026-08-20T04:00:00.000Z",
-        seed: "01K3",
-        commit: "c1",
-        runs: 1,
-      });
-      expect(manifest.withheld.map((held) => held.reason)).toEqual([
-        "main-red",
-      ]);
     });
 
     it("takes the last day an identity actually ran, not the last it holds", () => {
@@ -699,7 +666,6 @@ describe("build", () => {
       );
       const manifest = buildManifest({
         states: folded.states,
-        mainRed: folded.mainRed,
         surfaces: folded.surfaces,
         today: "2026-08-20",
         generatedAt: "2026-08-20T04:00:00.000Z",
@@ -729,13 +695,9 @@ describe("a fold's count of what it has folded", () => {
 describe("what buildManifest() does with the states it is given", () => {
   const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
 
-  function built(
-    states: Map<string, IdentityState>,
-    mainRed = new Set<string>(),
-  ) {
+  function built(states: Map<string, IdentityState>) {
     return buildManifest({
       states,
-      mainRed,
       surfaces: new Map(),
       today: "2026-08-20",
       generatedAt: "2026-08-20T00:00:00.000Z",
@@ -763,17 +725,6 @@ describe("what buildManifest() does with the states it is given", () => {
     const manifest = built(new Map([[KEY, state]]));
     expect(manifest.withheld.length).toBe(1);
     expect(manifest.withheld[0]!.reason).toBe("flaky");
-  });
-
-  it("calls a test failing on main red, however flaky it also is", () => {
-    // The two reasons are exclusive, and being broken on the default
-    // branch is the one that decides what a pull request may act on.
-    const state = emptyState();
-    state.failuresByDay["2026-08-20"] = 10;
-    state.flakesByDay["2026-08-20"] = 10;
-    const manifest = built(new Map([[KEY, state]]), new Set([KEY]));
-    expect(manifest.withheld.length).toBe(1);
-    expect(manifest.withheld[0]!.reason).toBe("main-red");
   });
 
   it("withholds nothing for a test that has never failed", () => {
