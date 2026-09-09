@@ -1,13 +1,13 @@
 import {
+  fabricAwareEqual,
   type FabricValue,
   isFabricPlainObject,
   isValidFabricPlainObject,
+  isWalkableObjectOrArray,
   shallowMutableClone,
-  valueEqual,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   isModule,
@@ -31,19 +31,6 @@ import {
   isCellKind,
   isSchemaScope,
 } from "./scope.ts";
-
-const schemaDefaultValueEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return valueEqual(left as FabricValue, right as FabricValue);
-  } catch {
-    if (Object.is(left, right)) return true;
-    try {
-      return deepEqual(left, right);
-    } catch {
-      return false;
-    }
-  }
-};
 
 type ActiveDefaultMergePairs = WeakMap<
   object,
@@ -345,7 +332,7 @@ function extractDefaultValuesInternal(
       ).map((candidate) => candidate.value);
       return validCandidates.length > 0 &&
           validCandidates.every((candidate) =>
-            schemaDefaultValueEqual(candidate, validCandidates[0])
+            fabricAwareEqual(candidate, validCandidates[0])
           )
         ? validCandidates[0]
         : NO_SCHEMA_DEFAULT;
@@ -357,22 +344,17 @@ function extractDefaultValuesInternal(
       canonical.properties &&
       isObjectOrArray(canonical.properties)
     ) {
-      // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so a
-      // fabric-valued `default` under an object-with-properties schema skips
-      // this scalar return and proceeds below: `shallowMutableClone` returns
-      // a `FabricPrimitive` by identity (it is inherently frozen), so the
-      // first property-default assignment throws a `TypeError`; a
-      // `FabricInstance` gets own data properties grafted onto its clone
-      // that its codec never reads, and ships as the pattern's argument
-      // default. Wants a `FabricSpecialObject` test taking this return.
+      // A fabric-valued default takes this return alongside the scalars: it
+      // carries no properties for the assembly below to build on, and is
+      // already the whole of what the schema declares.
       if (
         Object.hasOwn(canonical, "default") &&
-        !isObjectOrArray(canonical.default)
+        !isWalkableObjectOrArray(canonical.default)
       ) {
         return canonical.default;
       }
       const hasObjectDefault = Object.hasOwn(canonical, "default") &&
-        isObjectOrArray(canonical.default);
+        isWalkableObjectOrArray(canonical.default);
       // Mutable top-level copy of the schema default, so injecting top-level
       // property defaults below doesn't mutate the schema's own default object.
       // Only top-level keys are written here, and the result is normalized
@@ -381,7 +363,7 @@ function extractDefaultValuesInternal(
       // children as inexpensive defense-in-depth against accidental deeper
       // mutation of the shared default.
       const obj = shallowMutableClone(
-        isObjectOrArray(canonical.default) ? canonical.default : {},
+        isWalkableObjectOrArray(canonical.default) ? canonical.default : {},
       ) as Record<string, FabricValue>;
       for (
         const [propKey, propSchema] of Object.entries(canonical.properties)
@@ -739,7 +721,7 @@ function mergeSchemaDefaultsUncached(
       if (
         acceptedCandidates.length > 0 &&
         acceptedCandidates.every((candidate) =>
-          schemaDefaultValueEqual(candidate, acceptedCandidates[0])
+          fabricAwareEqual(candidate, acceptedCandidates[0])
         )
       ) {
         return acceptedCandidates[0];
@@ -830,7 +812,7 @@ function mergeSchemaDefaultsUncached(
           context,
         );
       }
-      return schemaDefaultValueEqual(result, value) ? value : result;
+      return fabricAwareEqual(result, value) ? value : result;
     }
 
     const objectSchema = typeof resolved === "object" && resolved !== null &&
@@ -916,9 +898,7 @@ function mergeSchemaDefaultsUncached(
         });
       }
     }
-    return valuePresent && schemaDefaultValueEqual(result, value)
-      ? value
-      : result;
+    return valuePresent && fabricAwareEqual(result, value) ? value : result;
   } finally {
     if (trackedSchema !== undefined) activeSchemas?.delete(trackedSchema);
   }

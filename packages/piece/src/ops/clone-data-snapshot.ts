@@ -10,7 +10,11 @@ import {
   isCellResult,
   isStream,
 } from "@commonfabric/runner";
-import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
+import {
+  FabricInstance,
+  FabricSpecialObject,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   assertCloneDataUnlabeled,
   assertNoCloneFabricInstance,
@@ -54,10 +58,7 @@ export function snapshotCloneValue(
       "piece data containing FabricInstance values cannot be copied",
     );
   }
-  if (
-    value === null || typeof value !== "object" ||
-    value instanceof FabricPrimitive
-  ) {
+  if (!isWalkableObjectOrArray(value)) {
     return value;
   }
 
@@ -142,8 +143,7 @@ export async function preloadCloneValue(
   assertCloneDataUnlabeled(value);
   if (
     value === null || typeof value !== "object" ||
-    value instanceof FabricPrimitive || value instanceof FabricInstance ||
-    seen.has(value)
+    value instanceof FabricSpecialObject || seen.has(value)
   ) {
     return;
   }
