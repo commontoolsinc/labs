@@ -4,6 +4,7 @@ import {
   taggedHashStringOf,
   valueEqual,
 } from "@commonfabric/data-model";
+import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
@@ -14,6 +15,7 @@ import {
   deepEqual,
   extractDefaultValues,
   formatFabricRef,
+  getCellOrThrow,
   getMetaLink,
   getPatternIdentityRef,
   getPatternRepository,
@@ -22,6 +24,7 @@ import {
   getPieceSourceSnapshot,
   getValueAtPath,
   isCell,
+  isCellResultForDereferencing,
   isLink,
   isStream,
   type JSONSchema,
@@ -46,6 +49,7 @@ import {
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
+  schemaPathSelection,
   setPieceReconciliation,
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
@@ -74,6 +78,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
   qualifyFabricOrigin,
@@ -95,7 +100,7 @@ interface PieceCellIo {
     produce: (stored: unknown) => { value: unknown } | undefined,
     path?: CellPath,
   ): Promise<{ wrote: boolean }>;
-  getCell(): Promise<Cell<unknown>>;
+  getCell(path?: CellPath): Promise<Cell<unknown>>;
 }
 
 interface CloneInternalSnapshot {
@@ -1916,8 +1921,8 @@ function deriveTargetContracts(
 /**
  * Parse a supplied link and recover its producer's durable schema contract.
  * A metadata-less linked document is held to the prior argument contract on
- * a pattern update (see the `priorArgumentSchema` option's doc on
- * `assertSuppliedLinkSchemasCompatible`); otherwise it is refused outright.
+ * a pattern update. Dynamic binding can explicitly accept an unproven source;
+ * other supplied-link operations require the durable contract.
  */
 function resolveDurableSource(
   suppliedLink: SuppliedLink,
@@ -1927,10 +1932,11 @@ function resolveDurableSource(
   pieces: PiecesController,
   priorArgumentSchema: JSONSchema | undefined,
   displayPath: string,
+  allowUnprovenSource: boolean,
 ): {
   link: NormalizedLink;
   linkedCell: Cell<unknown>;
-  durableSource: DurableSourceContract;
+  durableSource: DurableSourceContract | undefined;
 } {
   const link = parseLinkOrThrow(suppliedLink.value, linkBase);
   const linkedCell = pieces.runtime.getCellFromLink(
@@ -1940,7 +1946,7 @@ function resolveDurableSource(
   );
   // A direct Cell view can be narrowed with asSchema() just as easily as a
   // serialized alias can carry a narrowed schema. Neither is a future-value
-  // invariant, so every durable link needs producer-owned Piece metadata.
+  // invariant, so a static producer proof needs producer-owned metadata.
   let durableSource = durableSourceContract(linkedCell, pieces);
   if (durableSource === undefined && priorArgumentSchema !== undefined) {
     // Pattern update over existing state: hold a metadata-less linked doc to
@@ -1956,11 +1962,36 @@ function resolveDurableSource(
       }],
     };
   }
-  if (durableSource === undefined) {
+  if (durableSource === undefined && !allowUnprovenSource) {
     throw incompatibleLinkError(
       displayPath,
       "source has no durable schema contract",
     );
+  }
+  if (durableSource === undefined) {
+    // An ordinary document is dynamic; a known Piece document whose contract
+    // cannot be recovered is unproved. Check both metadata partitions, as for
+    // scoped producer-contract recovery, before admitting a dynamic binding.
+    const sourceLink = linkedCell.getAsNormalizedFullLink();
+    const scopes = sourceLink.scope === "space"
+      ? [sourceLink.scope]
+      : [sourceLink.scope, "space"] as const;
+    for (const scope of scopes) {
+      const root = pieces.runtime.getCellFromLink(
+        { ...sourceLink, path: [], schema: undefined, scope },
+        undefined,
+        linkedCell.tx,
+      );
+      if (
+        root.getMetaRaw("result") !== undefined ||
+        getPatternIdentityRef(root) !== undefined
+      ) {
+        throw incompatibleLinkError(
+          displayPath,
+          "source Piece metadata cannot establish a durable schema contract",
+        );
+      }
+    }
   }
   return { link, linkedCell, durableSource };
 }
@@ -2172,8 +2203,7 @@ function policePreservedEnvelope(
   // so only the serialized case needs this check (`policeRebuiltAlias`
   // polices the same forgery for rebuilt links). A serialized link only
   // reaches here when it is identical to already-committed state, but
-  // committed does not mean vetted — raw write paths
-  // (`PiecesController.link`) commit links without ever running this
+  // committed does not mean vetted — stored links can originate outside this
   // validator — so re-assert it: a carried wrapper's `asCell` STACK (kind
   // and scope, per `asCellShapesMatch`; payload compatibility is decided
   // after these wrapper checks) has to match every durable
@@ -2369,8 +2399,19 @@ export function assertSuppliedLinkSchemasCompatible(
     destinationRoot?: JSONSchema;
 
     /**
+     * Admit a live source handle without producer-owned schema metadata. This
+     * preserves ordinary-cell and externally injected capability bindings in
+     * `PiecesController.link`; it provides no static payload or capability
+     * proof for such a source. Destination scope checks still apply. A source
+     * with a durable contract always undergoes the full proof; known Piece
+     * ownership without a recoverable contract is refused.
+     */
+    allowUnprovenSource?: boolean;
+
+    /**
      * The prior pattern's argument schema, supplied only on a pattern update
-     * over existing state. A linked document with no producer-owned metadata —
+     * over existing state. For callers without `allowUnprovenSource`, a
+     * linked document with no producer-owned metadata —
      * e.g. a mergeable-push element doc, which is created under the piece's
      * own write authority and never carries any — is then held to the prior
      * contract at the link's own path instead of failing closed outright: the
@@ -2434,6 +2475,7 @@ export function assertSuppliedLinkSchemasCompatible(
       pieces,
       options.priorArgumentSchema,
       displayPath,
+      options.allowUnprovenSource === true && isCell(suppliedLink.value),
     );
     const { localizedTargets, targetOuter } = localizeTargetOuter(
       targetContracts,
@@ -2448,6 +2490,9 @@ export function assertSuppliedLinkSchemasCompatible(
     );
     if (preservedOuter !== undefined) preservedDirectHandles.add(suppliedLink);
 
+    assertSourceScopeFits(targetContracts, linkedCell, displayPath);
+    if (durableSource === undefined) continue;
+
     const { rawSourceContracts, sourceContracts } = buildSourceContracts(
       durableSource,
       preservedOuter !== undefined,
@@ -2461,8 +2506,6 @@ export function assertSuppliedLinkSchemasCompatible(
         displayPath,
       );
     }
-    assertSourceScopeFits(targetContracts, linkedCell, displayPath);
-
     if (preservedOuter === undefined) {
       proveRebuiltContracts(sourceContracts, targetContracts, displayPath);
     } else {
@@ -2918,6 +2961,21 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    if (this.#type === "input" && path?.length) {
+      assertPieceInputPath(targetCell, path, { allowArrayLength: true });
+      const { conditionalDepth } = schemaPathSelection(
+        targetCell.getAsNormalizedFullLink().schema,
+        path,
+        { allowArrayLength: true },
+      );
+      if (conditionalDepth !== undefined) {
+        return await this.#getFromRoot(
+          targetCell.key(...path.slice(0, conditionalDepth)),
+          path.slice(conditionalDepth),
+          true,
+        );
+      }
+    }
     if (!path?.length) {
       return await this.#getFromRoot(targetCell, []);
     }
@@ -2955,7 +3013,11 @@ class PiecePropIo implements PieceCellIo {
     return selected;
   }
 
-  async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
+  async #getFromRoot(
+    targetCell: Cell<unknown>,
+    path: CellPath,
+    requireProjection = false,
+  ) {
     // Preserve the existing missing-path diagnostics and the distinction
     // between an absent field and a schema-valid undefined value.
     await targetCell.pull();
@@ -2965,14 +3027,78 @@ class PiecePropIo implements PieceCellIo {
     // those members instead of voiding to `undefined` while every child-path
     // read succeeds. See schemaWithScopedLinkRequiredsRelaxed for the
     // #4746-compatible rationale.
-    return resolveCellPath(
-      cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path,
-    );
+    let root = cellWithScopedLinkRequiredsRelaxed(targetCell);
+    if (requireProjection) {
+      // A handle is a separate read boundary: syncing its outer projection
+      // only materializes the handle, so demand its payload before choosing
+      // a branch within it.
+      while (true) {
+        const schema = root.getAsNormalizedFullLink().schema;
+        if (
+          typeof schema === "object" && schema.asCell === undefined &&
+          (schema.anyOf || schema.oneOf || schema.allOf)
+        ) {
+          const localized = localizeOuterCellContract({ schema, root: schema });
+          if (localized.issue === undefined && localized.outer !== undefined) {
+            // A union of uniform handles is one handle over a payload union.
+            // Hoisting keeps handle construction and scope enforcement in the
+            // runtime; removing the wrapper would remove its read cap.
+            const { kind, scope } = localized.outer;
+            root = root.asSchema(
+              schemaWithProperties(localized.contract.schema, {
+                asCell: [
+                  { kind, ...(scope === undefined ? {} : { scope }) },
+                  ...ContextualFlowControl.getAsCellValues(
+                    localized.contract.schema,
+                  ),
+                ],
+              }),
+            );
+          }
+        }
+        const value = root.get();
+        if (!isCell(value)) break;
+        root = cellWithScopedLinkRequiredsRelaxed(value);
+        await root.pull();
+      }
+    }
+    return resolveCellPath(root, path, { requireProjection });
   }
 
-  getCell(): Promise<Cell<unknown>> {
-    return this.#getTargetCell();
+  /** Returns the root cell, or a path admitted through the input projection. */
+  async getCell(path?: CellPath): Promise<Cell<unknown>> {
+    const cell = await this.#getTargetCell();
+    if (!path?.length) return cell;
+    const selectedCell = cell.key(...path);
+    if (this.#type === "input") {
+      assertPieceInputPath(cell, path, { allowArrayLength: true });
+      const { conditionalDepth } = schemaPathSelection(
+        cell.getAsNormalizedFullLink().schema,
+        path,
+        { allowArrayLength: true },
+      );
+      if (conditionalDepth !== undefined) {
+        const value = await this.#getFromRoot(
+          cell.key(...path.slice(0, conditionalDepth)),
+          path.slice(conditionalDepth),
+          true,
+        );
+        // A projected container's backpointer retains its active branch.
+        // Primitives have no backpointer; carry their selected default onto
+        // the original Cell so absent slots preserve the same read value.
+        if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+        if (
+          value === undefined || value === null || typeof value === "string" ||
+          typeof value === "number" || typeof value === "boolean"
+        ) {
+          return selectedCell.asSchema(schemaWithProperties(
+            selectedCell.getAsNormalizedFullLink().schema ?? true,
+            { default: value },
+          ));
+        }
+      }
+    }
+    return selectedCell;
   }
 
   async set(value: unknown, path?: CellPath) {
@@ -3020,6 +3146,7 @@ class PiecePropIo implements PieceCellIo {
       let targetCell: Cell<unknown>;
       if (this.#type === "input") {
         targetCell = pieces.getArgument(piece);
+        assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
         const durableSchema = resultCell.getMetaRaw("schema") as
@@ -4814,6 +4941,42 @@ function samePieceSourceSnapshot(
 const RETAINED_INPUT_COMPATIBILITY_PREFIX =
   "piece source is incompatible with retained input: ";
 
+async function syncRetainedLinkMetadata(
+  argumentCell: Cell<unknown>,
+  pieces: PiecesController,
+): Promise<void> {
+  const roots = new Map<string, Cell<unknown>>();
+  for (const supplied of suppliedLinks(argumentCell.getRaw())) {
+    let base = argumentCell;
+    for (const segment of supplied.path) {
+      base = base.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    const link = parseLinkOrThrow(supplied.value, base);
+    const root = pieces.runtime.getCellFromLink({
+      ...link,
+      path: [],
+      schema: undefined,
+    });
+    const { space, id, scope } = root.getAsNormalizedFullLink();
+    roots.set(JSON.stringify([space, id, scope]), root);
+  }
+  await Promise.all([...roots.values()].map(async (root) => {
+    // Naming the source root loads its metadata family, including the owner
+    // result of an argument/internal document. A value crossing loads only
+    // the selected value and does not establish that contract evidence.
+    await root.sync();
+    const link = root.getAsNormalizedFullLink();
+    if (
+      link.scope !== "space" && root.getMetaRaw("schema") === undefined &&
+      root.getMetaRaw("result") === undefined
+    ) {
+      // Scoped input redirects keep their producer metadata in base scope;
+      // scoped results instead own their metadata in the selected partition.
+      await pieces.runtime.getCellFromLink({ ...link, scope: "space" }).sync();
+    }
+  }));
+}
+
 function assertPieceSourceRetainedLinksCompatible(
   argumentCell: Cell<unknown>,
   candidateSchema: JSONSchema,
@@ -4904,7 +5067,9 @@ async function pieceSourceCompatibilityReview(
   }
 
   const argumentCell = pieces.getArgument(piece);
-  await argumentCell.sync();
+  // The candidate can select inputs the current pattern does not expose.
+  // Sync its projection before validating the newly selected values.
+  await argumentCell.asSchema(candidate.argumentSchema).sync();
   try {
     pieces.runtime.runner.validateStoredArgument(
       pieces.runtime.readTx(),
@@ -4916,6 +5081,7 @@ async function pieceSourceCompatibilityReview(
   }
 
   try {
+    await syncRetainedLinkMetadata(argumentCell, pieces);
     assertPieceSourceRetainedLinksCompatible(
       argumentCell,
       candidate.argumentSchema,

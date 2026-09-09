@@ -65,8 +65,9 @@ Four declarations say that, and they have to agree.
   argument contract of every pattern using an LLM builtin. It describes rather
   than polices: the runtime enforces an `enum` neither on read nor on write.
 - `llmMessageProblem()` in [`src/types.ts`](src/types.ts) is the check that
-  refuses one, reached through `llmRequestProblem()`, which is what the toolshed
-  handler gates an incoming payload on.
+  refuses one, reached through `llmRequestProblem()` and
+  `llmGenerateObjectRequestProblem()`, which are what the toolshed handlers gate
+  an incoming payload on.
 - `MessageSchema` in
   [`packages/toolshed/routes/ai/llm/llm.routes.ts`](../toolshed/routes/ai/llm/llm.routes.ts)
   is the route's own validator, and the one a caller sending JSON meets first:
@@ -74,6 +75,37 @@ Four declarations say that, and they have to agree.
 
 `docs/history/features/llm-message-role-narrowing-break.md` records why the role
 left, and what that cost the patterns whose contracts carried it.
+
+## A request that leaves `cache` out asks for caching
+
+`cache` is optional, and a request that leaves it out asks for its response to
+be cached. Only `cache: false` declines.
+
+Four declarations say that, and they have to agree.
+
+- `LLMRequest` and `LLMGenerateObjectRequest` in [`src/types.ts`](src/types.ts)
+  declare the field optional. TypeScript has no way to state a default, so their
+  doc comments carry it.
+- `llmRequestProblem()` and `llmGenerateObjectRequestProblem()` in the same
+  file, which the two POST handlers gate their payloads on, take a request that
+  leaves the field out and refuse a value that is not a boolean, so a caller
+  sending `cache: "yes"` is told which field to change.
+- `LLMRequestSchema` and `GenerateObjectRequestSchema` in
+  [`packages/toolshed/routes/ai/llm/llm.routes.ts`](../toolshed/routes/ai/llm/llm.routes.ts)
+  publish the field as optional with a default of `true`. That is the OpenAPI
+  document, and it is what a caller writing against this API reads.
+- `requestsCaching()` in
+  [`packages/toolshed/routes/ai/llm/cache.ts`](../toolshed/routes/ai/llm/cache.ts)
+  is where the default is applied, and both POST handlers ask it.
+
+What the field asks for is not the whole decision. `/api/ai/llm` answers a
+request naming a provider-native tool such as Google Search live whatever
+`cache` says, because those results are time-sensitive.
+
+Both handlers read the raw body rather than the value their route's validator
+parsed, which is how a body sent under another content type reaches the same
+check. The default therefore has to be applied in the handler as well as
+declared in the schema.
 
 ## The routes on the other side
 

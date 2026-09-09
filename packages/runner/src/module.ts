@@ -163,6 +163,31 @@ export interface RawModuleOptions {
   argumentSchema?: JSONSchema;
 }
 
+/**
+ * The inputs, owner, and output coordinates supplied to a raw builtin.
+ *
+ * `outputSpot` identifies the write redirect the output binding resolves to.
+ * A result store keyed on the owner and these coordinates keeps its identity
+ * while the output spot is unchanged. Renaming or reordering nodes can change
+ * their output coordinates and therefore their result-store identities.
+ *
+ * `inputs` is content-addressed on the serialized inputs, so its identity can
+ * change with branch literals, link schemas, or runtime serialization.
+ */
+export interface RawNodeCause {
+  /** The node's immutable inputs document. */
+  inputs: Cell<any>;
+
+  /** The piece's result cell, which owns every store the node mints. */
+  parents: Cell<any>["entityId"];
+
+  /**
+   * The node's output spot, scope and schema dropped. Absent only for a node
+   * whose output binding reaches no write redirect.
+   */
+  outputSpot?: { space: string; id: string; path: readonly unknown[] };
+}
+
 // This corresponds to the node factory factories in common-builder:module.ts.
 // But it's here, because the signature depends on implementation details of the
 // runner, and won't work with any other runners.

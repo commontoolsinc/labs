@@ -1,0 +1,119 @@
+name: Pull Request Comments
+
+# Everything this repository says to a pull request from a trusted context.
+# Both jobs run in the base-repository context with a write token, which is
+# what lets them comment at all: the runs they follow happen on
+# `pull_request` or on `push`, and a fork's pull request run only gets a
+# read-only token there. Each job names the workflow it follows, because
+# both triggers reach both jobs.
+#
+# The coverage comment carries what the Coverage Check gate found on the
+# pull request's own run, handed over as the `coverage-comment` artifact.
+#
+# The run report carries what a later run on the default branch found that
+# the pull request's own run could not have found for itself: a test that
+# failed for the first time at the merged commit, whether the pull request
+# ran that test, a rise in coverage debt, a rise in a covered package's own
+# tests, a new test that has already disagreed with itself, and a rename
+# that discarded a test's history. It addresses the commit and the test and
+# never an author, it is edited in place rather than repeated, and nothing
+# it produces is counted anywhere.
+#
+# The run report reads three runs' records: the one it reports on, the one
+# before it on this branch, and the pull request's own. The last two are
+# read from the record store, where the relay put them. The first has only
+# just finished, so it is read from that run's own artifacts, which hold
+# the same bytes the relay is at that moment shipping.
+#
+# It follows the CI workflow rather than the relay, because a workflow_run
+# payload describes the run it names and not the run that triggered it: a
+# relay run carries this branch and its tip whichever run's records it
+# shipped, so following the relay would report on whichever commit was the
+# tip rather than on the commit whose records had arrived.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  post-coverage-comment:
+    name: "Post Coverage Comment"
+    # Runs on both outcomes of a PR run: a failed run may carry a coverage
+    # regression to post, and a passing run may need to update an earlier
+    # regression comment to its resolved state. Other conclusions (cancelled,
+    # skipped) carry nothing to do.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 📥 Download coverage comment artifact
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 💬 Post coverage comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: deno run --allow-net --allow-env --allow-read tasks/post-coverage-comment.ts
+
+  post-main-report:
+    name: "Post Run Report"
+    # A finished push to the default branch, on every conclusion that
+    # leaves records. A failed run is the one most likely to hold a test
+    # that failed for the first time at its commit, and a run killed at
+    # its bound is the shape a hanging test takes.
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'cancelled' ||
+      github.event.workflow_run.conclusion == 'timed_out')
+    runs-on: ubuntu-latest
+    steps:
+      # The commit under report, so the topology the reporter reads is the
+      # pull request's tree as it landed, and so the diff behind the commit
+      # is the change itself. Two commits is what `HEAD^` needs. The commit
+      # is on the default branch, so this is base-repository code in a job
+      # holding a write token, which a pull request head would not be.
+      - name: 📥 Checkout the commit under report
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 💬 Post the run report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
+          TEST_RECORDS_PREFIX: ${{ vars.TEST_RECORDS_PREFIX }}
+          TEST_SELECTION_PREFIX: ${{ vars.TEST_SELECTION_PREFIX }}
+        run: >-
+          deno run --allow-net --allow-env --allow-read --allow-write
+          --allow-run=git,unzip tasks/post-main-report.ts

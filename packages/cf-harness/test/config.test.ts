@@ -181,14 +181,28 @@ Deno.test("resolveCfcEnforcementMode follows a fabric session raised to strict",
     cfcEnforcementMode: "enforce-strict" as const,
   };
 
-  // Nobody set the harness dial, so it follows the session rather than the
-  // harness default, and says where it came from.
+  // The raise is a comparison against whatever the loop would otherwise
+  // resolve, so the manifest puts that at `observe`, below the session, at
+  // any harness default. The session decides the mode, and the source names
+  // it.
+  const observeManifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    cfc: { enforcementMode: "observe" },
+  } as const;
   assertEquals(
-    resolveCfcEnforcementMode({ fabricSession: strictSession }),
+    resolveCfcEnforcementMode({
+      fabricSession: strictSession,
+      runManifest: observeManifest,
+    }),
     "enforce-strict",
   );
   assertEquals(
-    resolveCfcEnforcementModeSource({ fabricSession: strictSession }),
+    resolveCfcEnforcementModeSource({
+      fabricSession: strictSession,
+      runManifest: observeManifest,
+    }),
     "fabric-session",
   );
 
@@ -248,7 +262,7 @@ Deno.test("the harness loop's own default matches the rung an unstated fabric se
   assertEquals(
     fabricSessionCfcEnforcementMode(unstatedSession),
     pinned,
-    "`fabricSessionCfcEnforcementMode` restates the rung `presetCfcOptions` pins, and the two have parted; move the fallback in `config.ts` to the rung the preset now pins",
+    "`fabricSessionCfcEnforcementMode` no longer reads the rung `presetCfcOptions` resolves; take it back to that resolution rather than naming a rung in `config.ts`",
   );
 
   assert(
@@ -304,13 +318,17 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
     modelProvider: "openai-codex",
     credentialOwnerKey: "loom:user-1",
   });
-  assertEquals(config, {
+  // The enforcement rung is not a gateway field, and
+  // `resolveHarnessConfig normalizes the gateway base URL` above reads it.
+  // The source it came from stays: `default` is what a caller stating no dial
+  // gets whatever rung that dial resolves to.
+  const { cfcEnforcementMode: _rung, ...preserved } = config;
+  assertEquals(preserved, {
     modelProvider: "openai-codex",
     credentialOwnerKey: "loom:user-1",
     gatewayBaseUrl: DEFAULT_GATEWAY_BASE_URL,
     gatewayAuthMode: "bearer",
     skillScriptExecutionTarget: "sandbox",
-    cfcEnforcementMode: "enforce-explicit",
     cfcEnforcementModeSource: "default",
     docsCorpus: {
       type: "cf-harness.docs-corpus-record",

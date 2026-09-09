@@ -35,16 +35,24 @@ export {
 } from "./value-clone.ts";
 
 export {
-  assertValidFabricValueLayer,
+  isFabricArray,
   isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isKeyableObjectNotArray,
+  isKeyableObjectOrArray,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
+} from "./type-check.ts";
+
+export {
+  assertValidFabricValueLayer,
   isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
-} from "./type-check.ts";
+} from "./validity-check.ts";
 
 export {
   fabricFromNativeValue,
@@ -55,6 +63,10 @@ export {
   shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
+
+export { fabricAwareEqual } from "./fabricAwareEqual.ts";
+
+export { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 export { valueEqual } from "./valueEqual.ts";
 

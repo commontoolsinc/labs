@@ -20,7 +20,7 @@ import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
 import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
-import { isValidFabricNativeObject } from "@/type-check.ts";
+import { isValidFabricNativeObject } from "@/validity-check.ts";
 import { tagFromNativeBuiltinClass } from "@/tagFromNativeBuiltinClass.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";

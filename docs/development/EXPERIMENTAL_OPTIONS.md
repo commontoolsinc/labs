@@ -50,7 +50,7 @@ was last checked against the code.
 | [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
-| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
+| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate to an unconditional ceiling                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
@@ -1179,23 +1179,26 @@ the per-epic implementation notes).
   [`packages/shell/src/lib/render-ceiling.ts`](../../packages/shell/src/lib/render-ceiling.ts).
   Because the ceiling crosses the worker boundary in the fixed initialization
   data, flipping it takes effect on the next runtime (a reload or re-login), not
-  live.
+  live. A browser integration test states the side it needs through the
+  `renderCeiling` option of `ShellIntegration.goto`, which writes the same key
+  after the navigation and before the login.
 - **Added by.** Bernhard Seefeld, in "populate the render confidentiality
   ceiling behind a shell dogfood flag (Epic H3a)" (#4550, 2026-07-07).
 - **Purpose.** Populates the CFC render confidentiality ceiling in the shell's
-  runtime. When on, display sinks admit only the acting user's own identity atom
-  plus allow-listed influence-class caveat kinds; everything else fails closed
-  and renders as a blocked placeholder, and author-supplied render-boundary
-  declassification is denied.
-- **Current default and planned end state.** Off by default. It changes what the
-  shell renders and is expected to over-block until exchange resolution (a later
-  CFC stage, Epic H3b) lands, so it is enabled deliberately per browser profile
-  for dogfooding. The end state is to graduate the ceiling on once exchange
-  resolution makes the blocking precise.
-- **Status on 2026-07-08.** Implemented, off by default, dogfood only.
-- **Path to removal.** Land exchange resolution so the ceiling stops
-  over-blocking, turn it on by default, and then remove the localStorage toggle
-  and make the ceiling unconditional.
+  runtime. Display sinks admit the acting user's identity and personal-space
+  atoms plus allow-listed influence-class caveat kinds. Before the fit check,
+  the worker resolves shared `Space` labels through verified reader membership;
+  a delegate's access to the session workspace requires its own membership
+  evidence. Confidentiality the ceiling does not satisfy stays blocked, and
+  author-supplied render-boundary declassification is denied.
+- **Current default and planned end state.** Off by default and enabled per
+  browser profile for dogfooding. The end state is to enable the ceiling by
+  default and make it unconditional.
+- **Status on 2026-09-08.** Exchange resolution is implemented. Where reader
+  membership is required, missing or unsynced ACL evidence keeps the content
+  blocked; a reader grant admits it and a revocation blocks it again.
+- **Path to removal.** Finish dogfood validation, turn the ceiling on by default,
+  then remove the localStorage toggle and make the ceiling unconditional.
 
 ## Category 5: Fuse mount cache tuning
 
@@ -1318,9 +1321,24 @@ site has:
 
 The second is the weaker claim, but it does not fail quietly, and that is the
 point. Add a production use of one of these values and the throw fires — at the
-moment the use is added, in the change that added it — leaving exactly two
-honest ways forward: implement the handling the throw names, or back the use
-out. So the tripwire is its own enforcement, which is why an ungated site is
+moment the use is added, in the change that added it. Three honest ways lead out
+of that: implement the handling the throw names, back the use out, or establish
+that the site was never one a refusal belonged at and give it the answer it
+owes.
+
+That third one is rare and carries the heaviest burden of proof, because it
+closes nothing. A site taking it still cannot reach what the value holds; what
+changes is that it reports that in a form its caller can act on rather than
+throwing. So it is available only where the site has somewhere to put the
+report and records it there, and where refusing would cost more than the gap
+does — a walk under a subscription that has to keep delivering cannot throw at
+all, and a walk that only decides what a path finds is reporting an absence
+rather than handing back a wrong value. Reaching for a non-throwing predicate,
+on its own, is not this: without the record it is the quiet exemption the next
+obligation rules out, and the two are told apart by what the site does with the
+answer rather than by which identifier it calls.
+
+So the tripwire is its own enforcement, which is why an ungated site is
 legitimate. What it is not is a flag, so do not cite this section as though one
 stood behind every throw.
 
@@ -1338,7 +1356,10 @@ than at any one of the sites:
 - **Meeting one.** A throw firing is the instrument working, not a defect in it.
   Implement the missing handling at the site it names — for a flag-gated site
   that work _is_ the flag's graduation work — or back out the use that reached
-  it. What is not on the list is exempting the value so the walk stays quiet.
+  it, or take the third way above and say in the change why the site owes an
+  answer rather than a refusal. What is not on the list is exempting the value
+  so the walk stays quiet, and swapping a throwing call for a non-throwing one
+  without recording what the site now under-reports is that.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these

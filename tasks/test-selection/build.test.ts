@@ -15,7 +15,6 @@ import {
   emptyAggregate,
   Fold,
   foldReports,
-  identityOfKey,
   lastRun,
   localReporter,
   locateSurfaces,
@@ -412,16 +411,6 @@ describe("build", () => {
       expect(fold.knows(CI_NAME)).toBe(true);
       expect(fold.knows(`${CI_NAME}2`)).toBe(false);
     });
-
-    it("names the identities the newest run on main left red", () => {
-      const folded = foldReports(
-        emptyAggregate("2026-08-20"),
-        [stored(CI_NAME, context(), [record({ outcome: "fail" })])],
-        NO_ALIASES,
-        "2026-08-20",
-      );
-      expect(folded.mainRed.size).toBe(1);
-    });
   });
 
   describe("parseAggregate()", () => {
@@ -429,6 +418,28 @@ describe("build", () => {
       const aggregate = emptyAggregate("2026-08-20");
       aggregate.folded.push(CI_NAME);
       expect(parseAggregate(JSON.stringify(aggregate))).toEqual(aggregate);
+    });
+
+    it("carries what could not be placed into the next run", () => {
+      // A run compares what it cannot place against what the previous one
+      // could not, which is what tells an identity waiting for a record
+      // that places it from a surface whose records never carry one.
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.unclaimed = [KEY];
+      expect(parseAggregate(JSON.stringify(aggregate))?.unclaimed)
+        .toEqual([KEY]);
+    });
+
+    it("reads a malformed unplaced list as nothing to compare against", () => {
+      // Nothing in the fold reads this list, so an aggregate carrying
+      // something else in its place is read as holding no list rather
+      // than refused outright.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      older.unclaimed = [7];
+      expect(parseAggregate(JSON.stringify(older))?.unclaimed).toBeUndefined();
     });
 
     it("returns undefined for anything that is not one", () => {
@@ -474,28 +485,6 @@ describe("build", () => {
         states: {},
       };
       expect(parseAggregate(JSON.stringify(before))?.compacted).toEqual([]);
-    });
-  });
-
-  describe("identityOfKey()", () => {
-    it("recovers the identity a canonical key names", () => {
-      expect(identityOfKey('["unit","memory","a"]')).toEqual({
-        k: "unit",
-        s: "memory",
-        n: "a",
-      });
-      expect(identityOfKey('["unit","memory","a","on"]')).toEqual({
-        k: "unit",
-        s: "memory",
-        n: "a",
-        v: "on",
-      });
-    });
-
-    it("returns undefined for anything that is not one", () => {
-      expect(identityOfKey("not json")).toBeUndefined();
-      expect(identityOfKey('["unit","memory"]')).toBeUndefined();
-      expect(identityOfKey('["unit",1,"a"]')).toBeUndefined();
     });
   });
 
@@ -560,6 +549,28 @@ describe("build", () => {
       expect(unplaced.unclaimed).toEqual([KEY]);
     });
 
+    it("leaves out the lane measuring itself", () => {
+      // A lane measures its own setup and its own batches through the
+      // record machinery every test uses. Those are not test surfaces, so
+      // they are neither placed nor counted as unplaced, and the suite
+      // here claims everything to show which of the two decides.
+      const key = testIdentityKey({
+        k: "gate",
+        s: "ci",
+        n: "ci-lane batch workspace-unit",
+      });
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("workspace-unit", () => ({ level: "unit", unit: "one" }))],
+        new Map([[key, {
+          suite: "gate:ci",
+          unit: "ci-lane batch workspace-unit",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+    });
+
     it("passes over a key that names no identity", () => {
       // The surfaces come from a stored aggregate, which is untrusted
       // input like every other object in the store, so a key nothing can
@@ -609,7 +620,6 @@ describe("build", () => {
       );
       const manifest = buildManifest({
         states: folded.states,
-        mainRed: folded.mainRed,
         surfaces: folded.surfaces,
         today: "2026-08-20",
         generatedAt: "2026-08-20T04:00:00.000Z",
@@ -619,28 +629,6 @@ describe("build", () => {
       });
       expect(manifest.entries.length).toBe(2);
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
-    });
-
-    it("withholds an identity failing in the newest run on main", () => {
-      const folded = foldReports(
-        emptyAggregate("2026-08-20"),
-        [stored(CI_NAME, context(), [record({ outcome: "fail" })])],
-        NO_ALIASES,
-        "2026-08-20",
-      );
-      const manifest = buildManifest({
-        states: folded.states,
-        mainRed: folded.mainRed,
-        surfaces: folded.surfaces,
-        today: "2026-08-20",
-        generatedAt: "2026-08-20T04:00:00.000Z",
-        seed: "01K3",
-        commit: "c1",
-        runs: 1,
-      });
-      expect(manifest.withheld.map((held) => held.reason)).toEqual([
-        "main-red",
-      ]);
     });
 
     it("takes the last day an identity actually ran, not the last it holds", () => {
@@ -678,7 +666,6 @@ describe("build", () => {
       );
       const manifest = buildManifest({
         states: folded.states,
-        mainRed: folded.mainRed,
         surfaces: folded.surfaces,
         today: "2026-08-20",
         generatedAt: "2026-08-20T04:00:00.000Z",
@@ -708,13 +695,9 @@ describe("a fold's count of what it has folded", () => {
 describe("what buildManifest() does with the states it is given", () => {
   const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
 
-  function built(
-    states: Map<string, IdentityState>,
-    mainRed = new Set<string>(),
-  ) {
+  function built(states: Map<string, IdentityState>) {
     return buildManifest({
       states,
-      mainRed,
       surfaces: new Map(),
       today: "2026-08-20",
       generatedAt: "2026-08-20T00:00:00.000Z",
@@ -742,17 +725,6 @@ describe("what buildManifest() does with the states it is given", () => {
     const manifest = built(new Map([[KEY, state]]));
     expect(manifest.withheld.length).toBe(1);
     expect(manifest.withheld[0]!.reason).toBe("flaky");
-  });
-
-  it("calls a test failing on main red, however flaky it also is", () => {
-    // The two reasons are exclusive, and being broken on the default
-    // branch is the one that decides what a pull request may act on.
-    const state = emptyState();
-    state.failuresByDay["2026-08-20"] = 10;
-    state.flakesByDay["2026-08-20"] = 10;
-    const manifest = built(new Map([[KEY, state]]), new Set([KEY]));
-    expect(manifest.withheld.length).toBe(1);
-    expect(manifest.withheld[0]!.reason).toBe("main-red");
   });
 
   it("withholds nothing for a test that has never failed", () => {

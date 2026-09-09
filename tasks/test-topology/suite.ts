@@ -132,9 +132,6 @@ export interface Suite {
   /** Setup this suite needs before it can run. */
   needs: readonly CapabilityId[];
 
-  /** Whether a subset of it always runs, and on what basis. */
-  mandatory?: "always" | "changed";
-
   /**
    * Every unit available in this working tree. Read when the topology is
    * loaded rather than on demand, because `locate` answers from the same
@@ -156,10 +153,17 @@ export interface Suite {
   /**
    * Which units a change makes mandatory. Absent where a unit is a path,
    * because the diff naming that path is the whole of the question. A
-   * suite whose units are not paths — a type-check group, a binary —
-   * answers it here, and a suite that answers it wrongly runs too much
-   * or too little rather than reporting anything, so the answer errs
-   * toward running.
+   * suite whose units are not paths — a type-check group, a repository
+   * gate, a binary — answers it here, from a {@link ReachedBy} for each
+   * of them, and a suite that answers it wrongly runs too much or too
+   * little rather than reporting anything, so the answer errs toward
+   * running.
+   *
+   * It is absent too where what a unit covers is a large part of the
+   * repository, since a declaration for such a unit comes to most
+   * changes and places it in most lanes by declaration rather than by
+   * what it has caught. Such a unit reaches a lane on what it is worth,
+   * or because nothing has a record of it.
    */
   unitsForChange?(changed: ReadonlySet<string>): readonly Unit[];
 
@@ -171,6 +175,64 @@ export interface Suite {
     units: readonly UnitRequest[],
     context: CommandContext,
   ): Promise<Invocation[]>;
+}
+
+/**
+ * The paths a change reaches something by: a unit whose runner cannot be
+ * pointed at a path, a repository gate, a package whose coverage is being
+ * measured. Everything a change makes mandatory beyond the diff naming a
+ * unit outright is decided from one of these, so that one vocabulary
+ * answers the question wherever it comes up.
+ *
+ * An entry ending in a slash is a directory and covers everything under
+ * it; every other entry is one file; `**\/` in the middle of either
+ * stands for any run of directories. An entry opening with `!` takes what
+ * it names back out.
+ *
+ * A declaration is bounded rather than exhaustive, and the bounds are
+ * what keep this a fraction of what a lane runs rather than the bulk of
+ * it: nothing may be reached by a significant share of the tree, and no
+ * one file may reach a significant share of the things declaring. So what
+ * reads a large part of the repository declares the small and specific
+ * part of it, or declares nothing and is left to the score. Declaring too
+ * little costs only that; declaring too much spends part of every lane's
+ * budget forever.
+ */
+export type ReachedBy = readonly string[];
+
+/**
+ * Whether one entry names a path. `**\/` stands for any run of
+ * directories, so the segments on either side of it are matched against
+ * the ends of the path rather than against the whole of it.
+ */
+export function entryNames(entry: string, at: string): boolean {
+  const wildcard = entry.indexOf("**/");
+  if (wildcard === -1) {
+    return entry.endsWith("/") ? at.startsWith(entry) : at === entry;
+  }
+  const above = entry.slice(0, wildcard);
+  if (!at.startsWith(above)) return false;
+  const below = entry.slice(wildcard + "**/".length);
+  const rest = `/${at.slice(above.length)}`;
+  return below.endsWith("/")
+    ? rest.includes(`/${below}`)
+    : rest.endsWith(`/${below}`);
+}
+
+/** Whether a declaration comes to any of the changed paths. */
+export function reachedByChange(
+  reachedBy: ReachedBy,
+  changed: ReadonlySet<string>,
+): boolean {
+  const taken = reachedBy.filter((entry) => !entry.startsWith("!"));
+  const dropped = reachedBy
+    .filter((entry) => entry.startsWith("!"))
+    .map((entry) => entry.slice(1));
+  for (const at of changed) {
+    if (dropped.some((entry) => entryNames(entry, at))) continue;
+    if (taken.some((entry) => entryNames(entry, at))) return true;
+  }
+  return false;
 }
 
 /**
@@ -239,9 +301,8 @@ export interface ConfiguredSkip {
  *
  * A whole-file entry leaves the file out of the variant suite's units. A
  * step-level entry leaves the file in and names the one leaf that does
- * not run, so that leaf is excluded from the unknown-identity and
- * coverage-target rules while every other identity in the file behaves
- * normally.
+ * not run, so that leaf is excluded from the unknown-identity rule while
+ * every other identity in the file behaves normally.
  */
 export function unavailableFrom(
   skips: readonly ConfiguredSkip[],
@@ -314,7 +375,6 @@ export interface FileSuiteOptions {
   id: string;
   variant?: string;
   needs: readonly CapabilityId[];
-  mandatory?: "always" | "changed";
 
   /**
    * The packages it spans. One runner does not imply one scope: the
@@ -351,9 +411,6 @@ export function fileSuite(options: FileSuiteOptions): Suite {
     recordSurfaces,
     ...(options.variant === undefined ? {} : { variant: options.variant }),
     needs: options.needs,
-    ...(options.mandatory === undefined
-      ? {}
-      : { mandatory: options.mandatory }),
     units,
     unavailable,
 

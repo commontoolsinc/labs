@@ -11,6 +11,19 @@
 import { isObjectOrArray } from "./types.ts";
 
 /**
+ * Comparator a caller supplies to {@link deepEqual} for the object pairs it
+ * knows more about than a property walk can discover. It is consulted for every
+ * pair of non-`null` objects the walk reaches, the arguments included, before
+ * the walk reads either one's keys. Two references to one object are settled
+ * ahead of it, so it never sees such a pair.
+ *
+ * A `boolean` result settles that pair, and the walk neither descends into it
+ * nor compares its constructors. `undefined` declines the pair, leaving the
+ * ordinary property comparison to decide it.
+ */
+export type ObjectEqual = (a: object, b: object) => boolean | undefined;
+
+/**
  * Performs a deep equality comparison between two values.
  *
  * - Handles primitives, arrays, and plain objects
@@ -20,20 +33,23 @@ import { isObjectOrArray } from "./types.ts";
  *
  * @param a - First value to compare
  * @param b - Second value to compare
+ * @param objectEqual - Comparator consulted for each pair of objects reached,
+ *   before their properties are read. Omitted, every pair is compared by its
+ *   properties.
  * @returns True if the values are deeply equal
  *
- * **Not for `FabricValue`s.** This function compares class instances by
- * enumerable own-props, so two same-class `FabricPrimitive` values (state in
+ * **Not for `FabricValue`s on its own.** This function compares class instances
+ * by enumerable own-props, so two same-class `FabricPrimitive` values (state in
  * private `#fields`, zero own-props) compare equal regardless of value, and
  * `FabricInstance` values compare by internal slots rather than logical
- * contents. Use `data-model`'s `valueEqual()` for any `FabricValue` comparison.
- *
- * This is a property of the function, not a defect awaiting repair: `utils`
- * sits below `data-model` and cannot reach the codecs that decide fabric
- * equality, and a second implementation here would duplicate `valueEqual()`
- * rather than extend it. The scope is the fix.
+ * contents. `utils` sits below `data-model` and cannot reach the codecs that
+ * decide fabric equality, so the knowledge arrives through `objectEqual`:
+ * `data-model`'s `fabricAwareEqual()` is this walk carrying a comparator that
+ * hands every fabric special object to `valueEqual()`. Use that, or
+ * `valueEqual()` directly, for any comparison whose operands can hold a
+ * `FabricValue`.
  */
-export function deepEqual(a: any, b: any): boolean {
+export function deepEqual(a: any, b: any, objectEqual?: ObjectEqual): boolean {
   if (Object.is(a, b)) return true;
 
   if (!(isObjectOrArray(a) && isObjectOrArray(b))) {
@@ -42,6 +58,11 @@ export function deepEqual(a: any, b: any): boolean {
 
   // At this point, we're looking at a pair of non-null records (e.g. plain
   // objects, arrays, or instances).
+
+  if (objectEqual !== undefined) {
+    const answer = objectEqual(a, b);
+    if (answer !== undefined) return answer;
+  }
 
   // Note: Even if they have the same `constructor`, it's technically possible
   // for `a` and `b` to have different prototypes, in which case it's possible
@@ -67,7 +88,7 @@ export function deepEqual(a: any, b: any): boolean {
   const bIsArray = Array.isArray(b);
   if (!(aIsArray || bIsArray)) {
     // General record (non-array object) comparison.
-    return checkSpecificProps(a, b, keysA);
+    return checkSpecificProps(a, b, keysA, objectEqual);
   }
 
   if (!(aIsArray && bIsArray)) {
@@ -90,7 +111,7 @@ export function deepEqual(a: any, b: any): boolean {
 
     indexCount++; // Assume non-hole to start. Might get reversed below.
 
-    if (!deepEqual(aValue, bValue)) {
+    if (!deepEqual(aValue, bValue, objectEqual)) {
       return false;
     }
 
@@ -117,7 +138,7 @@ export function deepEqual(a: any, b: any): boolean {
   // and ES (as of ES2015) guarantees that all the indexed properties are
   // listed first in the result from `Object.keys()`, so we slice those off
   // and just check the remainder.
-  return checkSpecificProps(a, b, keysA.slice(indexCount));
+  return checkSpecificProps(a, b, keysA.slice(indexCount), objectEqual);
 }
 
 /**
@@ -128,18 +149,20 @@ export function deepEqual(a: any, b: any): boolean {
  * @param a - First record (properties assumed to exist here)
  * @param b - Second record (properties checked via `hasOwn` before access)
  * @param keysToCheck - Property keys to compare
+ * @param objectEqual - Comparator to carry into the recursion
  * @returns `true` if all specified properties exist on `b` and are deeply equal
  */
 function checkSpecificProps(
   a: Record<string, unknown>,
   b: Record<string, unknown>,
   keysToCheck: string[],
+  objectEqual: ObjectEqual | undefined,
 ): boolean {
   for (const key of keysToCheck) {
     const aValue = a[key];
     const bValue = b[key];
 
-    if (!deepEqual(aValue, bValue)) {
+    if (!deepEqual(aValue, bValue, objectEqual)) {
       return false;
     }
 

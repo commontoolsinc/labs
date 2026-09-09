@@ -1181,6 +1181,87 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
   // branch while their tuple slots differed, dropping the candidate's slot info
   // instead of merging it (fail-open: coverage=true skips the merge).
 
+  it("covers a candidate that declares nothing", () => {
+    // `true` and the empty object schema carry no label, no policy claim and
+    // no shape, so a merge leaves the stored envelope as it stands. The
+    // stored side saying nothing about the path is the case that matters
+    // most: the merge reads the STORED envelope, so a writer naming nothing
+    // would otherwise be refused for a defect in a schema it neither wrote
+    // nor touches.
+    const stored = {
+      type: "object",
+      properties: { name: { type: "string", ifc: { confidentiality: ["s"] } } },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, true)).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(stored, {})).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(undefined, true)).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(undefined, {})).toBe(true);
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        type: "object",
+        properties: { error: true },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not cover a candidate carrying only `ifc`, `default` or `$defs`", () => {
+    // `cfcSchemaIsTrue` admits all three as true schemas. Each carries
+    // something the merge has to fold in, so none of them is a schema that
+    // declares nothing.
+    const stored = { type: "object" } as const;
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        ifc: { confidentiality: ["s"] },
+      }),
+    ).toBe(false);
+    expect(storedSchemaCoversCandidateEnvelope(stored, { default: 1 })).toBe(
+      false,
+    );
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, { $defs: { a: true } }),
+    ).toBe(false);
+    expect(
+      storedSchemaCoversCandidateEnvelope(undefined, { default: 1 }),
+    ).toBe(false);
+  });
+
+  it("does not cover a nothing-declaring candidate against a stored `false`", () => {
+    // `false` admits no value, so there is nothing for a candidate to be
+    // folded into: `mergeCfcSchemaEnvelopes` refuses the form, and the write
+    // with it.
+    expect(storedSchemaCoversCandidateEnvelope(false, true)).toBe(false);
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        { type: "object", properties: { error: false } },
+        { type: "object", properties: { error: true } },
+      ),
+    ).toBe(false);
+  });
+
+  it("does not cover a candidate key a stored rest claim would govern", () => {
+    // The merge pulls an object-valued `additionalProperties` claim down
+    // onto a key the candidate names, which is what mints that key's label.
+    // Skipping the merge would land the value unlabeled.
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["seed"] } } },
+      additionalProperties: { ifc: { confidentiality: ["secret"] } },
+    } as const;
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        type: "object",
+        properties: { error: true },
+      }),
+    ).toBe(false);
+    // A key the stored side names itself is judged on that named schema.
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        type: "object",
+        properties: { a: true },
+      }),
+    ).toBe(true);
+  });
+
   it("differing tuple slots are not judged covered by matching items", () => {
     const stored = {
       type: "array",

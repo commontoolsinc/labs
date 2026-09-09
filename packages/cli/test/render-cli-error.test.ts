@@ -3,6 +3,7 @@ import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
 import { SlugAssignedError } from "@commonfabric/piece";
 import { SlugResolutionError } from "@commonfabric/runner";
 import { ValidationError } from "@cliffy/command";
+import { IdentityKeyfileError } from "../lib/identity.ts";
 import { renderCliError } from "../mod.ts";
 
 Deno.test("renderCliError prints a TransformerError's message, not its stack", () => {
@@ -36,6 +37,18 @@ Deno.test("renderCliError prints a SlugAssignedError's message, not its stack", 
   // take it anyway. Without this the class falls through to the plain-Error
   // arm below and every such refusal reaches the operator as a stack.
   const e = new SlugAssignedError("top", "/of:fid1:abc", "Pass --force.");
+  assertEquals(renderCliError(e), e.message);
+  assert(renderCliError(e) !== e.stack);
+});
+
+Deno.test("renderCliError prints an IdentityKeyfileError's message, not its stack", () => {
+  // The message names the keyfile's path, what is wrong with it, and what to
+  // do; a stack over it buries the one line the operator acts on.
+  const e = new IdentityKeyfileError(
+    "/home/me/.config/commonfabric/identity.key",
+    "does not exist",
+    "Point --identity or CF_IDENTITY at an existing keyfile.",
+  );
   assertEquals(renderCliError(e), e.message);
   assert(renderCliError(e) !== e.stack);
 });

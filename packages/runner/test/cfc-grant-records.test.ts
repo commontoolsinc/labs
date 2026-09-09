@@ -35,6 +35,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { prepareAndCommit } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-grant-records");
 
@@ -703,10 +704,12 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
           audience: [userMallory],
           grantedAt: 1000,
         });
-        const result = await tx.commit();
-        expect(result.error).toBeDefined();
-        expect(String((result.error as Error).message).toLowerCase())
-          .toContain("cfc");
+        const { reasons, result } = await prepareAndCommit(tx);
+        expect(reasons).toContain(
+          `unprivileged write to protected cfc path ` +
+            `${CFC_GRANT_ID_PREFIX}forged/value`,
+        );
+        expect(result.error?.name).toBe("CfcCommitRefusalError");
       });
     });
 

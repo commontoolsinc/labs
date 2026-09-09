@@ -258,7 +258,9 @@ Three nearby shapes are not this one:
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the
-  top-level `describe()`.
+  top-level `describe()`. That section is also what says a test file is not
+  owed one: a header that would only name the file under test, or restate its
+  contract, is left out.
 - A [section marker](code-comment-style.md#section-markers) titles a region of
   the file holding several blocks. Reach is what tells the two apart, not
   length or subject matter.

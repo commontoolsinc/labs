@@ -52,6 +52,8 @@ import {
   testSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -1438,8 +1440,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(flushed).toEqual(["effect-1"]);
 
       const rejected = runtime.edit();
-      rejected.setCfcEnforcementMode("enforce-explicit");
-      rejected.markCfcRelevant("test");
+      refuseAtCommitBoundary(rejected, "an effect must not flush");
       rejected.enqueuePostCommitEffect({
         id: "effect-2",
         kind: "test",
@@ -1455,7 +1456,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }, { ok: false });
 
       const rejectedResult = await rejected.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       expect(flushed).toEqual(["effect-1"]);
 
       const throwing = runtime.edit();

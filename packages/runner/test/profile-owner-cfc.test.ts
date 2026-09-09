@@ -6,7 +6,10 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
+import {
+  type NormalizedFullLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
 
 const alice = await Identity.fromPassphrase(
   "runner-profile-owner-cfc-alice",
@@ -700,7 +703,12 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const homePattern = await compileHomePattern(runtime);
-      // Seed a non-empty profiles list WITHOUT enforcement (no prepareCfc).
+      // The list starts non-empty, so that the write below is the shrink this
+      // case is named for. The container's `writeAuthorizedBy` names a
+      // verified handler in `profile-create.tsx`, which no transaction this
+      // test can author under, so the seed goes in through the raw document
+      // address: a write that names no schema records no write-policy input,
+      // and the gate under test does not decide it.
       const seed = runtime.edit();
       const profileA = runtime.getCell(
         alice.did(),
@@ -715,8 +723,11 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         seed,
       );
-      home.key("profiles").set([profileA]);
-      await seed.commit();
+      const storedProfiles = toMemorySpaceAddress(
+        home.key("profiles").getAsNormalizedFullLink(),
+      );
+      seed.writeOrThrow(storedProfiles, [profileA.getAsLink()]);
+      expect((await seed.commit()).error).toBeUndefined();
 
       // Untrusted truncation under enforcement → rejected by the container
       // writeAuthorizedBy (the array value changed [A] -> []).
@@ -727,10 +738,15 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         writeTx,
       );
+      // The stored list holds the seeded entry, so the write below empties it.
+      expect(writeTx.readOrThrow(storedProfiles)).toHaveLength(1);
       protectedHome.key("profiles").set([]);
       writeTx.prepareCfc();
       const result = await writeTx.commit();
-      expect(result.error?.message).toContain("trusted");
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity " +
+          "at /profiles",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

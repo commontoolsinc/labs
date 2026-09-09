@@ -29,9 +29,7 @@ import type {
 
 /** Why one identity is in the run. */
 export type SelectionReason =
-  | "always"
   | "changed"
-  | "covers-changed"
   | "unknown"
   | "coverage-gate"
   | "value"
@@ -124,8 +122,7 @@ export interface PlanInput {
 
   /**
    * Identities this change makes mandatory, against the reason. The lane
-   * runner fills this from the diff, from the topology's enumeration, and
-   * from the coverage attribution map.
+   * runner fills this from the diff and from the topology's enumeration.
    */
   mandatory: Map<string, SelectionReason>;
 
@@ -413,8 +410,9 @@ export function plan(input: PlanInput): Plan {
     unschedulable.push({ test: entry.test, suite: entry.suite, cost });
   }
 
-  // What must not run, unless the change touches what it covers, in which
-  // case it is very likely a fix and must be allowed to prove itself.
+  // What must not run, unless the change edits the test itself or its
+  // suite maps the change onto its unit, in which case it is very likely
+  // a fix and must be allowed to prove itself.
   const excluded = new Set<string>(
     unschedulable.map((entry) => testIdentityKey(entry.test)),
   );

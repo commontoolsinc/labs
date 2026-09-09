@@ -85,14 +85,22 @@ changing what the sync barrier does:
 
 ## CLI: surface the denial for the space it was asked to reach
 
-The CLI waits on storage sync in three places — `loadPieces`, the ACL
-operations, and the headless wish read — and none uses a wall-clock guard. Each
-calls `synced()`, then reads `storageManager.authorizationError(space)` for the
-one space it operates on, after that space has been pulled, and throws the real
-`AuthorizationError` when it is set. The ACL check runs after the ACL read or
-write, since that access is what opens and pulls the space; the wish check reads
-only its own space, so a denied cross-space profile load stays the expected "no
-profile yet" absent read.
+The CLI reads `storageManager.authorizationError(space)` for the one space it
+operates on and throws the real `AuthorizationError` when it is set, at three
+places, and none uses a wall-clock guard. They differ in what establishes the
+verdict first:
+
+- `loadPieces` authenticates the space session when the connection opens
+  (`ensureSpaceSession()`), then checks. It does not sync the space cell: by
+  default the space record stays unread until an operation addresses it, so a
+  denial surfaces from the session open itself. A caller that passes
+  `deferSpaceCellSync: false` gets the older eager `synced()` before the same
+  check.
+- The ACL operations check after the ACL read or write, since that access is
+  what pulls the space and records the verdict.
+- The headless wish read checks after its own space's sync, and reads only that
+  space, so a denied cross-space profile load stays the expected "no profile
+  yet" absent read.
 
 The `newPiece` 60-second bound is unrelated and remains. That hang is a scheduler
 `idle()` park in `getResult(piece).pull()` waiting for a pattern to quiesce — a

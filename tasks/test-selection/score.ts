@@ -181,28 +181,17 @@ function bump(counts: Record<string, number>, day: string): void {
 }
 
 /**
- * Whether anything a test covers changed between two `main` commits. The
- * coverage attribution map is what answers this; without one the answer
- * is yes, which errs toward calling a failure a catch.
- */
-export type CoveredChange = (
-  identity: string,
-  fromCommit: string,
-  toCommit: string,
-) => boolean;
-
-/**
  * Judges the failures on `main` that were waiting for a later `main` run.
  * A failure the next run still shows is the same breakage continuing, so
  * it keeps waiting and nothing new is learned. A failure the next run
- * does not show either went away by itself, which is a flake, or was
- * fixed by the change between the two, which is a catch.
+ * does not show is a flake when that run is at the same commit, and a
+ * catch otherwise. Nothing separates a failure a change fixed from one
+ * that healed itself, so a failure that healed itself is credited as a
+ * catch as well.
  */
 function resolvePendingMain(
   state: IdentityState,
-  key: string,
   observation: Observation,
-  coveredChanged: CoveredChange,
 ): void {
   if (state.pendingMain.length === 0) return;
   if (observation.outcome === "fail") return;
@@ -225,19 +214,7 @@ function resolvePendingMain(
     bump(state.flakesByDay, first.day);
     return;
   }
-  if (coveredChanged(key, first.commit, observation.commit)) {
-    creditCatch(state, "main", first.day, first.source);
-  } else {
-    bump(state.flakesByDay, first.day);
-  }
-}
-
-/** How a batch of observations was judged. */
-export interface FoldResult {
-  states: Map<string, IdentityState>;
-
-  /** Identities failing in the most recent `main` run that named them. */
-  mainRed: Set<string>;
+  creditCatch(state, "main", first.day, first.source);
 }
 
 /**
@@ -450,9 +427,6 @@ export interface FoldOptions {
   /** The state each identity's history had reached before this batch. */
   prior?: Map<string, IdentityState>;
 
-  /** How to tell a fixed failure on `main` from one that healed itself. */
-  coveredChanged?: CoveredChange;
-
   /** What earlier batches of the same stream saw. */
   context?: FoldContext;
 }
@@ -471,11 +445,14 @@ export interface FoldOptions {
  * replay it each time. A one-shot iterator would leave every pass after
  * the first with nothing to read and score the batch as though most of it
  * had never run, so one is refused rather than folded.
+ *
+ * Returns the state each identity was folded into, which is the map
+ * `options.prior` names when a caller carries one across batches.
  */
 export function foldObservations(
   observations: Iterable<Observation>,
   options: FoldOptions = {},
-): FoldResult {
+): Map<string, IdentityState> {
   // An iterator is its own iterable, which is what tells the two apart.
   if (Object.is(observations[Symbol.iterator](), observations)) {
     throw new Error(
@@ -483,7 +460,6 @@ export function foldObservations(
     );
   }
   const states = options.prior ?? new Map<string, IdentityState>();
-  const coveredChanged = options.coveredChanged ?? (() => true);
   const context = options.context ?? emptyContext();
   const stateOf = (key: string): IdentityState => {
     let state = states.get(key);
@@ -589,15 +565,14 @@ export function foldObservations(
     // about the test and nothing about the change, so it does not reach
     // `lastMainOutcome` either: a test skipped on the default branch has
     // not been shown to be fixed, and the last run that did execute it is
-    // the last thing known about it. That keeps a still-broken test out of
-    // every pull request, which is the direction this design takes
-    // whenever the two errors are a lost signal and a change that cannot
-    // go green.
+    // the last thing known about it. A failure elsewhere therefore goes
+    // on being read as the default branch's, and is not credited to the
+    // change in front of it.
     if (observation.outcome === "skip") continue;
 
     bump(state.runsByDay, day);
     if (observation.place === "main") {
-      resolvePendingMain(state, key, observation, coveredChanged);
+      resolvePendingMain(state, observation);
       state.lastMainOutcome = observation.outcome;
     }
     if (observation.outcome === "pass") continue;
@@ -642,11 +617,7 @@ export function foldObservations(
     creditCatch(state, observation.place, day, observation.source);
   }
 
-  const mainRed = new Set<string>();
-  for (const [key, state] of states) {
-    if (state.lastMainOutcome === "fail") mainRed.add(key);
-  }
-  return { states, mainRed };
+  return states;
 }
 
 /**
@@ -813,7 +784,6 @@ export function scoreInputs(
     catches: CATCH_WEIGHT_LOCAL * state.localCatches +
       CATCH_WEIGHT_PR * state.prCatches +
       CATCH_WEIGHT_MAIN * state.mainCatches,
-    mainCatches: state.mainCatches,
     sources: state.sources.length,
     churn: churn(state, today),
   };

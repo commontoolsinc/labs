@@ -242,7 +242,7 @@ export const modelSpend: Tile = {
       // lower bound, since the absent provider would add to it (≥).
       value,
       valueLabel: value,
-      aside: `<span class="hmtd" title="${mtd}">${mtd}</span>`,
+      aside: `<span class="hfacet" title="${mtd}">${mtd}</span>`,
       extra: legend + chart.chart,
       duration: chart.duration,
     };

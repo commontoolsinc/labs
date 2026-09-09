@@ -37,7 +37,7 @@ import {
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
-import { isLaneMeasurement } from "./ci-lane.ts";
+import { isLaneMeasurement } from "./lane-measurement.ts";
 import { dayOf } from "./test-selection/build.ts";
 import { DENO_TEST_FILE } from "./test-topology/deno-task.ts";
 import { claimsFor, loadTopology } from "./test-topology.ts";
@@ -142,33 +142,6 @@ const NOT_A_TEST_SURFACE: ReadonlyArray<{ path: string; reason: string }> = [
   },
 ];
 
-/**
- * Test files no suite runs, which is a defect rather than a decision.
- * Each is a test somebody wrote that nothing in this repository executes,
- * so it neither passes nor fails and nobody is told. They are reported
- * rather than failed on, because registering one means deciding where it
- * runs and finding out whether it still passes, and that is its own
- * change. A new unclaimed surface fails; these do not.
- *
- * An entry that stops applying fails as well, so a file that gets
- * registered or deleted takes its line with it.
- */
-const UNREGISTERED_SURFACES: ReadonlyArray<{ path: string; reason: string }> = [
-  {
-    path: "packages/cf-harness/integration/engine.integration.test.ts",
-    reason:
-      "reached only by the package's own `test:integration` task, which " +
-      "nothing dispatches",
-  },
-  {
-    path:
-      "packages/cf-harness/integration/pattern-index-live.integration.test.ts",
-    reason:
-      "reached only by the package's own `test:integration` task, which " +
-      "nothing dispatches",
-  },
-];
-
 /** One thing the check found. */
 export interface Finding {
   /** Whether it fails the check or is only reported. */
@@ -199,16 +172,12 @@ export function checkTree(
   candidates: readonly string[],
   declared: {
     fixtures?: ReadonlyArray<{ path: string; reason: string }>;
-    unregistered?: ReadonlyArray<{ path: string; reason: string }>;
   } = {},
 ): Finding[] {
   const findings: Finding[] = [];
   const claims = suites.map((suite) => ({ suite, ...claimsOf(suite) }));
   const fixtures = new Map(
     (declared.fixtures ?? []).map((entry) => [entry.path, entry.reason]),
-  );
-  const unregistered = new Map(
-    (declared.unregistered ?? []).map((entry) => [entry.path, entry.reason]),
   );
   const held = new Set<string>();
   for (const candidate of candidates) {
@@ -234,27 +203,18 @@ export function checkTree(
       }
     }
     if (exact.length > 0) {
-      const reason = fixtures.get(candidate) ?? unregistered.get(candidate);
+      const reason = fixtures.get(candidate);
       if (reason !== undefined) {
         findings.push({
           fails: true,
           message: `${candidate} is claimed by a suite and is still listed ` +
-            `as unclaimed: ${reason}`,
+            `as a fixture: ${reason}`,
         });
       }
       continue;
     }
     if (fixtures.has(candidate)) {
       held.add(candidate);
-      continue;
-    }
-    const unregisteredReason = unregistered.get(candidate);
-    if (unregisteredReason !== undefined) {
-      held.add(candidate);
-      findings.push({
-        fails: false,
-        message: `${candidate} runs nowhere: ${unregisteredReason}`,
-      });
       continue;
     }
     // A suite whose units are coarser than a file — a workspace member
@@ -273,12 +233,12 @@ export function checkTree(
       message: `${candidate} is claimed by no suite`,
     });
   }
-  for (const path of [...fixtures.keys(), ...unregistered.keys()]) {
+  for (const path of fixtures.keys()) {
     if (held.has(path)) continue;
     if (candidates.includes(path)) continue;
     findings.push({
       fails: true,
-      message: `${path} is listed as unclaimed and the tree no longer holds it`,
+      message: `${path} is listed as a fixture and the tree no longer holds it`,
     });
   }
   return findings;
@@ -414,7 +374,7 @@ export async function check(
   const findings = checkTree(
     suites,
     await candidateSurfaces(options.root),
-    { fixtures: NOT_A_TEST_SURFACE, unregistered: UNREGISTERED_SURFACES },
+    { fixtures: NOT_A_TEST_SURFACE },
   );
   if (options.records !== undefined) {
     findings.push(...checkStore(suites, await readRecords(options.records)));

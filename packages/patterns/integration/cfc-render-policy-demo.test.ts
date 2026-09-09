@@ -12,6 +12,7 @@ import {
   clickTrustedActionAndWaitForText,
   StepTimer,
   waitForRuntimeIdle,
+  waitForSettledText,
   waitForText,
   waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
@@ -75,6 +76,12 @@ describe("cfc render policy demo integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The subject is the pattern's own declassification: the trusted
+      // surface's render boundary names the health label, and the reveal below
+      // is that boundary letting the value through. The render ceiling denies
+      // author-supplied declassification, so this case runs the profile
+      // without it; the case below runs the same page with it.
+      renderCeiling: false,
     });
     await waitForRuntimeIdle(page);
 
@@ -117,6 +124,59 @@ describe("cfc render policy demo integration test", () => {
           "#raw-health-attempt",
           "Sensitive health data:",
         ),
+    );
+  });
+
+  it("denies the trusted surface's declassification under the render ceiling", async () => {
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId: piece.id,
+      },
+      identity,
+      renderCeiling: true,
+    });
+    await waitForRuntimeIdle(page);
+
+    // The reveal switch is a cell of the piece and every case in this file
+    // drives the same piece, so this case sets it rather than reading whatever
+    // the case before it left. Concealing first is what makes the reveal a
+    // transition; `clickTrustedActionAndWaitForText` returns without clicking
+    // when the text it waits for is already on the page.
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedConcealHealthData",
+      "#reveal-state",
+      "Reveal disabled",
+    );
+    await clickTrustedActionAndWaitForText(
+      page,
+      "TrustedRevealHealthData",
+      "#reveal-state",
+      "Reveal enabled",
+    );
+
+    // With the reveal on, the pattern's own "Content hidden by policy" node is
+    // `display: none` and `deepText` skips it, so the text below is the
+    // reconciler's blocked placeholder: the ceiling denied the
+    // declassification the trusted surface declares for
+    // `SensitiveHealthRecord`, which is outside the §8.10.6 display profile.
+    await waitForSettledText(
+      page,
+      "#trusted-health-surface",
+      "Content hidden by policy",
+    );
+
+    // The value the reveal would have shown reaches no part of the document,
+    // and neither does the untrusted card, which renders the same value behind
+    // no trusted surface at all.
+    await waitForTextAbsent(page, "cf-screen", "Sensitive health data:");
+    await waitForTextAbsent(
+      page,
+      "cf-screen",
+      "Untrusted direct render attempt",
     );
   });
 });

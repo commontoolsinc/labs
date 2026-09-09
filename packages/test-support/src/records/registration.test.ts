@@ -7,6 +7,7 @@ import {
   asDefinition,
   buildCapture,
   fileForName,
+  MACHINERY_MODULE_SUFFIXES,
   NAME_MAP_PREFIX,
   NAME_MAP_SUFFIX,
   parseSkipList,
@@ -17,9 +18,16 @@ import {
   repositoryRootOf,
   serializeSkipList,
 } from "./registration.ts";
+// Imported for what loading it declares: the shared fixture runner calls
+// `describe` on behalf of the file that asked for a suite, so it declares
+// itself machinery and the attribution walks past its frames.
+import "../fixture-runner.ts";
 
 // The wrapper's own frame, as it appears in a real registration stack.
 const WRAPPER = new URL("./registration.ts", import.meta.url).href;
+
+// The fixture runner's frame, as it appears in the same stack.
+const FIXTURE_RUNNER = new URL("../fixture-runner.ts", import.meta.url).href;
 
 async function writeNameMap(
   dir: string,
@@ -62,6 +70,28 @@ describe("registration", () => {
       expect(registeringModule(stack)).toBe(
         "file:///repo/packages/runner/test/scheduler.test.ts",
       );
+    });
+
+    it("passes over the shared fixture runner", () => {
+      const stack = [
+        "Error",
+        `    at Object.test (${WRAPPER}:3:17)`,
+        `    at defineFixtureSuite (${FIXTURE_RUNNER}:224:3)`,
+        "    at file:///repo/packages/ts-transformers/test/" +
+        "fixture-based.test.ts:27:3",
+      ].join("\n");
+      expect(registeringModule(stack)).toBe(
+        "file:///repo/packages/ts-transformers/test/fixture-based.test.ts",
+      );
+    });
+
+    it("names the shared fixture runner as machinery for ingestion too", () => {
+      // The two lists cover one module from two sides. Declaring it
+      // walks the map past its frames; naming its path tail stops
+      // ingestion reading it as the file every fixture case came from.
+      expect(
+        MACHINERY_MODULE_SUFFIXES.some((tail) => FIXTURE_RUNNER.endsWith(tail)),
+      ).toBe(true);
     });
 
     it("returns undefined when no frame names a file", () => {

@@ -440,6 +440,34 @@ because the serialized link has no durable source contract. The superseded
 `cf set` spelling mounts this same command and has identical validation
 behavior.
 
+## Linking piece inputs
+
+`cf piece link <source>/<path> <target>/<path>` stores a live connection in the
+target piece's argument. Rebinding a terminal path replaces that connection; it
+does not write through the previous producer. Binding a Stream stores its handle
+without sending an event.
+
+After the binding commits, linking starts the target piece and materializes its
+result. `--no-start` stores the binding without starting the target. A rejected
+binding leaves a stopped target stopped.
+
+The Piece API checks the binding before committing it. A producer with durable
+schema metadata must supply values the consumer can read. A writable consumer
+must also restrict its writes to values the producer accepts. Capability and
+scope constraints apply, and a rejected binding leaves the previous argument
+unchanged. `--allow-non-existing` only overrides the CLI's path-existence check;
+it does not waive contract validation.
+
+Ordinary cells and externally injected handles, including SQLite sources, can
+lack durable producer schema metadata. These remain supported as dynamic
+bindings, with destination scope checks but without a static producer payload or
+capability proof. A known Piece document whose producer contract cannot be
+recovered is refused. A piece without an argument schema imposes no consumer
+schema constraints, and plain-cell targets retain their ordinary binding
+behavior. Successful linking does not establish compatibility with a future
+producer schema; producer enforcement still applies when values are accessed or
+written.
+
 ## Updating piece source
 
 Run `cf piece setsrc --check` before every source update to a piece whose state
@@ -755,8 +783,7 @@ memo, which names a space once for the life of the process.
   callable's section — directly after the verb, before any `--`.
 - A `cf cell get` path that doesn't resolve prints a one-line error on stderr
   and exits 1 — it is a data error, not a usage error. A `piece link` that fails
-  validation (a source/target piece or path that doesn't exist) reports the same
-  way.
+  endpoint or contract validation reports the same way.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
@@ -894,14 +921,14 @@ about:
 
 See [what a selection means for a call](#what-a-selection-means-for-a-call) for
 the cases where the call's difference shows. `exec` is the same invocation
-reached through a mount, so it meets the value-less verb and the
-graph-quiescence coupling described there; it has neither `--no-wait` nor
-`--show-links`, so the two cases about those flags do not arise. `wish` adds one
-of its own: a query that matched nothing is an ordinary outcome rather than an
-error, so the selection is never reached and the empty result comes back as it
-always did. A selection that keeps nothing over a target that DID resolve is
-refused, because "the wish matched nothing" and "your projection kept nothing"
-are different facts.
+reached through a mount, so it meets the value-less verb and the readiness
+coupling described there; it has neither `--no-wait` nor `--show-links`, so the
+two cases about those flags do not arise. `wish` adds one of its own: a query
+that matched nothing is an ordinary outcome rather than an error, so the
+selection is never reached and the empty result comes back as it always did. A
+selection that keeps nothing over a target that DID resolve is refused, because
+"the wish matched nothing" and "your projection kept nothing" are different
+facts.
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
@@ -1152,13 +1179,16 @@ has happened before the selection applies.) The same holds for a tool, whose
 result is read off the cell the tool wrote. Use a selection to control what
 reaches stdout, not to control what travels.
 
-A selection also couples the call to graph quiescence. The shaped readback runs
-through the same shared read step as `cf cell get`, and that step awaits the CLI
-runtime's global idle plus storage sync before answering — while the plain call
-acknowledges at its own handling's commit. On a piece with heavy derived state,
-a shaped call can therefore wait on unrelated recomputation the handler
-triggered elsewhere in the graph. When that wait matters, shape the collect
-instead: call plain (or `--no-wait`), then
+A selection also adds a computed read after the call. The shaped readback runs
+through the same shared read step as `cf cell get`, and waits for its output
+with one `Cell.pull()`. That pull drives the output's transitive computation and
+linked-document loads through the runtime scheduler and its manager-wide
+convergence pool, so work already active in that runtime can still share the
+wait. Declared object keys are then ordered locally from the projection before
+rendering, and the keys an open projection retains beyond its declaration follow
+them in the value's own order; that step starts no graph or storage work. When
+isolating the read matters, shape the collect instead. Call plain (or
+`--no-wait`), then collect from the receipt with
 `cf cell get --cell <receipt id> --select …`.
 
 Three cases follow from that:
@@ -1489,15 +1519,19 @@ itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
 to force the source CLI.)
 
 `bin/cf` is the install, with `bin/cfsh` beside it for the interactive shell.
-Both run from source, so neither goes stale against the checkout:
+Both run from source, so neither goes stale against the checkout. One route,
+once per machine, mise or not:
 
 ```bash
-# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH.
-mise trust    # only if this checkout has not been trusted yet
-
-# everyone else (mise is recommended in README.md but not required):
 deno task install-cf              # --dry-run to see what it would do
 ```
+
+It is a real file in a directory on PATH, so every shell sees it: a login shell,
+an agent's non-interactive one, `make`, an editor's task runner. The repo's
+`mise.toml` pins Deno and declares no PATH entry, since a per-directory entry
+reaches only shells whose mise hook ran for that directory and needs
+`mise trust` in every new worktree. Where `cf` is not on PATH at all,
+`deno task cf` runs the same CLI and needs nothing.
 
 `install-cf` copies `bin/cf` and `bin/cfsh` to a directory already on your PATH
 — refusing to guess if there isn't one, since installing somewhere unreachable
@@ -1517,7 +1551,7 @@ does not strand it.
 
 Several checkouts coexisting is normal — worktrees, and a vendored labs inside
 another repo (a supported, tested layout: see `test/launcher.test.ts`). So the
-symlink above does **not** pin `cf` to the checkout you installed it from. It
+copy above does **not** pin `cf` to the checkout you installed it from. It
 selects, in order:
 
 1. **`$CF_LABS_ROOT`**, when set — the explicit override for when your cwd
@@ -1555,11 +1589,10 @@ is always `packages/cli/mod.ts`, which _is_ the CLI (it ends in
 `if (import.meta.main)` and nothing outside `packages/cli/` imports it as a
 library).
 
-Rule 2 is what mise already does for its route (`_.path` resolves relative to
-the `mise.toml` declaring it), so both install routes agree on which checkout
-you get. The consequence worth knowing: `cf` inside checkout B runs B's code
-even though you installed the link from A. That is the point, but it means a
-stack trace is the quickest way to confirm which checkout answered.
+Rule 2 is what lets one installed copy serve every checkout. The consequence
+worth knowing: `cf` inside checkout B runs B's code even though you installed
+the copy from A. That is the point, but it means a stack trace is the quickest
+way to confirm which checkout answered.
 
 ### Why not `dist/cf`
 

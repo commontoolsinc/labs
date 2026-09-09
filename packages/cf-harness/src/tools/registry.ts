@@ -1,6 +1,11 @@
 import type { BuiltinToolId } from "../contracts/tool-descriptor.ts";
 import { acquireSkillTool } from "./acquire-skill.ts";
 import { assignSlugTool } from "./assign-slug.ts";
+import {
+  loomAuthoringContextTool,
+  loomComposeTool,
+  loomInspectTool,
+} from "./loom-authoring.ts";
 import { bashTool } from "./bash.ts";
 import { browserTool } from "./browser.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
@@ -38,6 +43,9 @@ export const BUILTIN_TOOLS = [
   searchSkillsTool,
   acquireSkillTool,
   queryDocsTool,
+  loomComposeTool,
+  loomInspectTool,
+  loomAuthoringContextTool,
 ] as const;
 
 export const BUILTIN_TOOL_REGISTRY = new Map<

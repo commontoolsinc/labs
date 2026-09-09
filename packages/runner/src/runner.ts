@@ -5,6 +5,7 @@ import {
   hashOf,
   hashStringOf,
   isDeepFrozen,
+  isKeyableObjectOrArray,
   nativeFromFabricValue,
   toCompactDebugString,
   valueEqual,
@@ -19,6 +20,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
+import { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
 
 export {
   isStoredArgumentSchemaRefusal,
@@ -84,7 +86,6 @@ import {
 import { MAP_INPUT_SCHEMA } from "./builtins/map.ts";
 import {
   areNormalizedLinksSame,
-  type CellLink,
   createSigilLinkFromParsedLink,
   getDerivedInternalCell,
   getDerivedInternalCellLink,
@@ -98,7 +99,11 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
+import {
+  isRawBuiltinResult,
+  type RawBuiltinReturnType,
+  type RawNodeCause,
+} from "./module.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import {
   resolveScopeKey,
@@ -134,11 +139,9 @@ import {
   type CommitError,
   type DID,
   type IExtendedStorageTransaction,
-  type IReadOptions,
   type IStorageSubscription,
   type MemorySpace,
   type Result,
-  toThrowable,
   type Unit,
   type URI,
 } from "./storage/interface.ts";
@@ -194,7 +197,6 @@ import {
   foldStoredArgumentSlots,
   mergeSchemaDefaults,
   sanitizeDebugLabel,
-  schemaAcceptsOpaqueCellValue,
   setRunnableName,
 } from "./runner-utils.ts";
 import { normalizeSandboxResult } from "./sandbox/result-normalization.ts";
@@ -224,6 +226,23 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
  * reached only by a pattern churning through results it will not revisit.
  */
 const RESULT_SHORTCUT_LIMIT = 4096;
+
+/**
+ * Presence probes `Runner.#patternToNameBeforeRun` may spend before it stops
+ * looking and holds the run for a name-sync. Each probe is one read of the
+ * local replica, so the budget bounds the walk's cost and not its verdict: a
+ * spent budget reads as absent, and the run pays one name-sync it may not
+ * have needed. A wide argument — one whose links, and the values behind
+ * them, fan out past the budget within the walk's depth — is therefore held
+ * once per runtime per pattern identity even when its whole family is
+ * local. That is the cheaper error. Narrowing the walk to the argument's own
+ * links would skip the links a linked document's value holds, which the
+ * name-sync's argument-link-target wave exists to warm; a missed absence
+ * costs a conflicting first commit, a spurious hold costs a re-sync the
+ * client answers from coverage it already has. The gate logs a spent budget
+ * so a wide piece held for it is diagnosable.
+ */
+const NAMING_PROBE_BUDGET = 256;
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -357,32 +376,6 @@ function isReferenceOnlySchema(
     return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1));
   }
   return false;
-}
-
-/**
- * The form a resume pre-sync's cell wave syncs a cell in.
- *
- * A cell whose link carries a trivially-permissive schema (`true`/`{}`) is
- * synced as the DOCUMENT it names, not as a declaration: such a schema is
- * the absence of a bound, and a sync honoring one walks the target's whole
- * reachable graph — on a populated space, thousands of documents to resume
- * one piece. The pre-sync's job is locality: the values instantiation reads
- * must be local so their reads do not enter the commit basis cold, and the
- * doc itself provides that. A shaped or undeclared cell keeps its own sync —
- * the deep reach belongs to the argument link-target wave, which follows
- * declared schemas.
- *
- * Exported for its test: current authoring stamps declared schemas on every
- * link it writes, so a wave carrying a trivially-permissive link is vintage
- * data — deployed pieces wired by older writers — which a test cannot author
- * through the current stack.
- */
-export function documentBoundedResumeCell(cell: Cell<any>): Cell<any> {
-  const link = cell.getAsNormalizedFullLink();
-  return link.schema !== undefined &&
-      ContextualFlowControl.isTrueSchema(link.schema)
-    ? cell.asSchema(false)
-    : cell;
 }
 
 // The debug-name builders reuse the action's already-computed
@@ -1444,24 +1437,6 @@ type RunnerRunOptions = {
   sourceOrigin?: string;
 };
 
-// Placeholder standing in for an argument slot whose stored value routes
-// through a link that cannot be dereferenced in the current transaction
-// (target doc absent or not yet synced), at ANY depth of the stored graph.
-// Validation accepts it anywhere: the slot HAS a value — we just cannot read
-// it right now — so its schema check is deferred to instantiation-time
-// reactive reads, exactly like the running pattern's own reads of the same
-// slot. See `#validateArgument`.
-const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
-  "unresolved cell link": true,
-});
-
-const acceptsOpaqueCellOrUnresolvedLink = (
-  value: unknown,
-  schema: JSONSchema,
-): boolean =>
-  value === UNRESOLVED_LINK_PLACEHOLDER ||
-  schemaAcceptsOpaqueCellValue(value, schema);
-
 // The relaxed copy of a handler's argument schema, built once per schema
 // rather than once per dispatched event: `generateHandlerSchema` interns its
 // result (interned schemas are deep-frozen), so every dispatch of the same
@@ -1604,228 +1579,6 @@ function closedWorldEventRejection(
   return "Event payload rejected by the verb's closed event schema " +
     "(additionalProperties: false — an undeclared field is a rejection, " +
     `never ignored): ${failure}`;
-}
-
-const READ_NON_RECURSIVE: IReadOptions = { nonRecursive: true };
-
-/**
- * Resolve one stored link — and any links it chains through — to the RAW
- * value tree at its endpoint, reading doc bytes through `tx`. `value` is
- * `undefined` whenever no readable tree is there: an absent doc, a doc
- * record holding no value (what a meta-only write leaves behind), a path the
- * present tree does not hold, a chain that cycles. The caller draws no
- * distinction among those — this walk exists to mirror the structure the
- * materialization resolved, not to judge absences, and which of them a raw
- * read is looking at is not knowable here (a slot a pattern materializes
- * lazily reads exactly like one that never synced; the pattern-vintage gate
- * holds real stores of both).
- *
- * Steps hop by hop rather than calling link-resolution's resolver because
- * the caller needs the endpoint's raw tree to recurse into, and because a
- * raw read of a path that crosses a mid-doc link would descend into the
- * link sigil's own JSON — so path segments are walked in memory and links
- * met along the way are followed.
- *
- * `chain` carries the link addresses of the CURRENT descent; every key this
- * walk adds is removed on the way out, whichever exit is taken — sibling
- * slots routinely share targets (one profile linked from `profiles`, `mru`,
- * and `defaultProfile` at once), and a leftover key would misread the
- * second sibling as a cycle. The repeat-address guard is the walk's
- * termination backstop, and the reason it is exported: the staging
- * materialization happens to throw on the cyclic shapes reachable today
- * before any walk runs, so only a direct test can exercise termination.
- */
-export function readStoredLinkChainRaw(
-  tx: IExtendedStorageTransaction,
-  startLink: NormalizedFullLink,
-  chain: Set<string>,
-): { value: unknown; base: NormalizedFullLink } {
-  const added: string[] = [];
-  const follow = (
-    value: CellLink,
-    base: NormalizedFullLink,
-    rest: string[],
-  ) => {
-    const next = parseLink(value, base);
-    const path = [...next.path, ...rest];
-    const key = JSON.stringify([next.space, next.id, next.scope, path]);
-    if (chain.has(key)) return undefined;
-    chain.add(key);
-    added.push(key);
-    return { ...next, path };
-  };
-  try {
-    let link = startLink;
-    while (true) {
-      const { ok, error } = tx.read(
-        {
-          space: link.space,
-          id: link.id,
-          scope: link.scope,
-          type: "application/json",
-          path: ["value"],
-        },
-        READ_NON_RECURSIVE,
-      );
-      if (error !== undefined) {
-        // The same line readOrThrow draws: an absent document or a path
-        // through a primitive reads as no value here, and every other
-        // failure — a dead transaction, malformed storage — surfaces.
-        if (
-          error.name !== "NotFoundError" && error.name !== "TypeMismatchError"
-        ) {
-          throw toThrowable(error);
-        }
-        return { value: undefined, base: link };
-      }
-      if (ok.value === undefined) {
-        return { value: undefined, base: link };
-      }
-      let value: unknown = ok.value;
-      const path = [...link.path] as string[];
-      let followed: NormalizedFullLink | undefined;
-      while (path.length > 0) {
-        if (isCellLink(value)) {
-          // A link met mid-path: the rest of the path applies at its target.
-          followed = follow(value, link, path);
-          if (followed === undefined) return { value: undefined, base: link };
-          break;
-        }
-        if (!isObjectOrArray(value)) {
-          return { value: undefined, base: link };
-        }
-        value = (value as Record<string, unknown>)[path.shift()!];
-      }
-      if (followed === undefined && isCellLink(value)) {
-        followed = follow(value, link, []);
-        if (followed === undefined) return { value: undefined, base: link };
-      }
-      if (followed !== undefined) {
-        link = followed;
-        continue;
-      }
-      return { value, base: link };
-    }
-  } finally {
-    for (const key of added) chain.delete(key);
-  }
-}
-
-/** Per-validation results for completed linked subgraphs. */
-interface ArgumentOverlayContext {
-  /** Addresses on the current descent, used to terminate cycles. */
-  chain: Set<string>;
-
-  /** Results by full address and materialized view, including its defaults. */
-  completed: Map<string, Map<unknown, unknown>>;
-
-  /** Reads whose result depends on a recursion cutoff or unavailable value. */
-  incompleteReads: number;
-}
-
-/**
- * Rebuilds `materialized` so every slot whose stored value routes through a
- * link and materialized to `undefined` carries
- * {@link UNRESOLVED_LINK_PLACEHOLDER} instead. Behind a link, an absence
- * defers, whatever produced it: the value is owned elsewhere, and "not
- * replicated here yet" reads identically to "not materialized yet" — the
- * pattern-vintage gate holds real stores where the same missing slot is
- * each of those. A slot that materialized to a VALUE is never touched, so a
- * readable wrong-typed value still refuses; and an `undefined` stored
- * literally in the argument doc itself — no link involved — still judges,
- * so a doc that plainly holds nothing keeps failing a required check. A
- * deferred slot's schema check still happens, at instantiation-time
- * reactive reads (the same verdict link-resolution's `pendingHopDoc`
- * renders for lazy reads).
- *
- * The walk mirrors the materialization it repairs: from the argument doc's
- * raw bytes, following every link — across docs and spaces, to any depth —
- * via {@link readStoredLinkChainRaw}. Stored links distinguish an unreadable
- * target from a literal absence in the already-defaulted materialized view.
- * Completed subgraphs are reused by address and view within this validation;
- * a result affected by a recursion cutoff or unavailable raw-chain read stays
- * local to its descent. Shared acyclic subgraphs avoid repeated expansion,
- * while cyclic graphs retain their path-dependent cutoff behavior.
- */
-function overlayUnreadableLinkPlaceholders(
-  tx: IExtendedStorageTransaction,
-  base: NormalizedFullLink,
-  raw: unknown,
-  materialized: unknown,
-  context: ArgumentOverlayContext,
-): unknown {
-  if (isCellLink(raw)) {
-    if (materialized === undefined) return UNRESOLVED_LINK_PLACEHOLDER;
-    const link = parseLink(raw, base);
-    const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
-    if (context.chain.has(key)) {
-      context.incompleteReads++;
-      return materialized;
-    }
-    const completed = context.completed.get(key);
-    if (completed?.has(materialized)) return completed.get(materialized);
-    const incompleteBefore = context.incompleteReads;
-    context.chain.add(key);
-    try {
-      const reading = readStoredLinkChainRaw(tx, link, context.chain);
-      if (reading.value === undefined) {
-        // A raw chain can stop at an active ancestor. Its result and every
-        // enclosing result must stay local to this descent.
-        context.incompleteReads++;
-        return materialized;
-      }
-      const result = overlayUnreadableLinkPlaceholders(
-        tx,
-        reading.base,
-        reading.value,
-        materialized,
-        context,
-      );
-      if (context.incompleteReads === incompleteBefore) {
-        const views = completed ?? new Map<unknown, unknown>();
-        views.set(materialized, result);
-        context.completed.set(key, views);
-      }
-      return result;
-    } finally {
-      context.chain.delete(key);
-    }
-  }
-  if (Array.isArray(raw) && Array.isArray(materialized)) {
-    let result: unknown[] | undefined;
-    for (let i = 0; i < raw.length; i++) {
-      const child = overlayUnreadableLinkPlaceholders(
-        tx,
-        base,
-        raw[i],
-        materialized[i],
-        context,
-      );
-      if (child !== materialized[i]) {
-        result ??= materialized.slice();
-        result[i] = child;
-      }
-    }
-    return result ?? materialized;
-  }
-  if (isObjectOrArray(raw) && isObjectOrArray(materialized)) {
-    let result: Record<string, unknown> | undefined;
-    for (const [key, rawChild] of Object.entries(raw)) {
-      const child = overlayUnreadableLinkPlaceholders(
-        tx,
-        base,
-        rawChild,
-        (materialized as Record<string, unknown>)[key],
-        context,
-      );
-      if (child !== (materialized as Record<string, unknown>)[key]) {
-        result ??= { ...(materialized as Record<string, unknown>) };
-        result[key] = child;
-      }
-    }
-    return result ?? materialized;
-  }
-  return materialized;
 }
 
 /**
@@ -2117,6 +1870,27 @@ export class Runner {
   >();
 
   /**
+   * Pieces this runner has named before running them — set up elsewhere and
+   * reached through a link crossing — keyed by result: the name-sync while
+   * it is in flight, and once it has landed the identity of the pattern it
+   * landed for. A run under another pattern probes again: an upgrade can add
+   * an internal cell the crossing never delivered. Bounded like the other
+   * result shortcuts; an evicted entry costs a probe, never a wrong verdict.
+   *
+   * A name-sync that rejects lands all the same. The run then degrades to
+   * what it was before the gate existed — over what is local, its own
+   * subscriptions fetching the rest, the rejection logged as the signal —
+   * and a later run under the same pattern is not held again for this
+   * runner's lifetime, a transient rejection included. Withholding the
+   * landing would name the piece again on every run, and the deferred run's
+   * own re-check of the gate would loop on the same rejection.
+   */
+  readonly #namedFamilies = new BoundedKeyMap<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    { pending: Promise<void> } | { landed: string }
+  >(RESULT_SHORTCUT_LIMIT);
+
+  /**
    * Two-level memo of what each result cell holds: outer key the result _doc_
    * (space/id), inner key the resolved scope _instance_, value a hash of the
    * pattern's encodable form — what `#writeJavaScriptActionResult()` compares
@@ -2174,6 +1948,9 @@ export class Runner {
    */
   #dependencySyncer: DependencySyncer | undefined = undefined;
 
+  /** `NAMING_PROBE_BUDGET`, lowered by a test to reach the spent-budget hold. */
+  #namingProbeBudget = NAMING_PROBE_BUDGET;
+
   /**
    * The committer a test supplies around a commit-gated start's commit;
    * `undefined` means the runner's own.
@@ -2224,6 +2001,7 @@ export class Runner {
     readonly activeStartAttempts: Set<StartAttempt>;
     dependencySyncer: DependencySyncer | undefined;
     deferredStartCommitter: DeferredStartCommitter | undefined;
+    namingProbeBudget: number;
     createStorageSubscription(): IStorageSubscription;
     setupInternal<T, R>(
       providedTx: IExtendedStorageTransaction | undefined,
@@ -2296,6 +2074,12 @@ export class Runner {
       },
       set deferredStartCommitter(value) {
         outerThis.#deferredStartCommitter = value;
+      },
+      get namingProbeBudget() {
+        return outerThis.#namingProbeBudget;
+      },
+      set namingProbeBudget(value) {
+        outerThis.#namingProbeBudget = value;
       },
       createStorageSubscription: () => this.#createStorageSubscription(),
       setupInternal: (
@@ -2773,71 +2557,12 @@ export class Runner {
     argumentSchema: JSONSchema,
     defaults: FabricValue,
   ): void {
-    const argumentCell = this.#runtime.getCellFromLink(
-      argumentLink,
-      undefined,
+    const validationFailure = storedArgumentValidationIssue(
+      this.#runtime.getCellFromLink(argumentLink, undefined, tx),
+      argumentSchema,
+      defaults,
       tx,
     );
-    const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
-      .get();
-    const validationArgument: unknown = mergeSchemaDefaults(
-      materializedArgument,
-      defaults,
-      argumentSchema,
-      { mergeMaterializedLinks: true },
-    );
-    const validationOptions = {
-      acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
-      // An OPTIONAL key holding `undefined` carries no data, and a handler
-      // mints one without meaning to: `comments.push({ author, ... })` with
-      // no author in hand writes the key, and the codec stores that presence.
-      // Measuring it here asks whether `undefined` satisfies the property's
-      // declared type, which nothing ordinary answers yes to — and THIS
-      // refusal is permanent, because the same identity refuses identically
-      // (see `isStoredArgumentSchemaRefusal`). A pattern would be unable to
-      // update documents it wrote itself. Measured on `topics/topic.tsx`
-      // (`author`) and `lunch-poll/main.tsx` (`imageUrl`).
-      //
-      // Scoped to THIS caller rather than made the validator's rule: writing
-      // `undefined` where a number is declared is still a mistake worth
-      // rejecting at a result write, while the caller can still see it.
-      optionalUndefinedIsAbsent: true,
-    };
-    let validationFailure = validateSchemaValue(
-      argumentSchema,
-      validationArgument,
-      argumentSchema,
-      validationOptions,
-    );
-    if (validationFailure !== undefined) {
-      // Judge only what this context can actually read. The materialization
-      // above resolves the staged doc's whole link graph through this
-      // transaction, and a link chain that dead-ends at a doc the local
-      // replica cannot serve materializes as `undefined` — indistinguishable
-      // from a stored mistake, though the stored bytes are fine and every
-      // OTHER context may read them. Validating that `undefined` bricks the
-      // piece permanently (same identity, same refusal — see
-      // `isStoredArgumentSchemaRefusal`), so such slots validate as opaque
-      // and their schema check is deferred to instantiation-time reactive
-      // reads, which sync what they need. Supplied and re-staged arguments
-      // alike: a caller vouches for the value it stages, but which link
-      // targets happen to be replicated HERE was never part of that value.
-      // The overlay only ever turns `undefined` into an accepted opaque, so
-      // running it on failure alone changes no verdict — it spares the
-      // happy path a second walk of the stored graph.
-      validationFailure = validateSchemaValue(
-        argumentSchema,
-        overlayUnreadableLinkPlaceholders(
-          tx,
-          argumentLink,
-          argumentCell.withTx(tx).getRaw({ meta: ignoreReadForScheduling }),
-          validationArgument,
-          { chain: new Set(), completed: new Map(), incompleteReads: 0 },
-        ),
-        argumentSchema,
-        validationOptions,
-      );
-    }
     if (validationFailure !== undefined) {
       throw new Error(
         `${STORED_ARGUMENT_SCHEMA_REFUSAL}: ${validationFailure}`,
@@ -5219,6 +4944,309 @@ export class Runner {
   }
 
   /**
+   * The pattern to name `resultCell` with before running it, when it is a
+   * piece set up elsewhere whose execution family this replica has yet to
+   * receive: its `argument` link names a document, and that document or a
+   * document the run reads — one the argument links to, through the redirect
+   * chains those links form, or a derived internal cell of the pattern or of
+   * a sub-piece it instantiates — is absent here. A piece with no setup
+   * evidence is one the run sets up itself, family included, and returns
+   * nothing; a stored pattern pointer this session cannot resolve throws,
+   * as setup's own resolution does. A piece this runner has named is not
+   * held again once the name-sync has landed for the same pattern: whatever
+   * the store lacked, it lacks, and the run reports it as it always has.
+   */
+  #patternToNameBeforeRun(
+    patternOrModule: Pattern | Module | undefined,
+    argument: unknown,
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
+  ): { pattern: Pattern; entryKey: string } | undefined {
+    const key = this.#getDocKey(resultCell);
+    // Setup reads these through the caller's transaction too, so they can
+    // be read there: a fresh piece leaves here before anything is minted.
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
+    if (argumentLink === undefined) return undefined;
+    const resolved = this.#resolveSetupPattern(
+      patternOrModule,
+      getPatternIdentityRef(resultCell.withTx(tx)) ??
+        this.#sessionPatternPointers.get(key),
+    );
+    if (resolved === undefined) return undefined;
+    const entryKey = patternIdentityKey(resolved.entryRef);
+    const named = this.#namedFamilies.get(key);
+    if (named !== undefined && "pending" in named) {
+      return { pattern: resolved.pattern, entryKey };
+    }
+    if (named?.landed === entryKey) return undefined;
+    // A result this runner prepared under this pattern has its family here
+    // already, however much of it the store holds; a missing entry costs a
+    // probe, never a wrong verdict.
+    if (this.#locallyPreparedResults.get(key) === entryKey) return undefined;
+    // Presence probes on a read transaction of their own, so an absent
+    // document enters neither the caller's dependencies nor its commit's
+    // read set: the run that follows the name-sync reads these for real.
+    // The document itself is what is probed, not a value read through a
+    // schema, which answers an absent document with the schema's default.
+    // A cell nothing has written yet — a derived cell whose producer never
+    // ran — reads absent here too, and holds the run once; the probes stop
+    // at a budget (`NAMING_PROBE_BUDGET`), and a budget spent reads absent
+    // as well: a hold costs one name-sync, a wrong local verdict costs a
+    // conflicting commit.
+    const readTx = this.#runtime.readTx();
+    const cell = resultCell.withTx(readTx);
+    let probes = this.#namingProbeBudget;
+    let budgetSpent = false;
+    const present = (link: NormalizedFullLink): boolean => {
+      if (probes === 0) {
+        budgetSpent = true;
+        return false;
+      }
+      probes--;
+      return readTx.readOrThrow(
+        {
+          space: link.space,
+          id: link.id,
+          path: ["value"],
+          ...(link.scope !== undefined && { scope: link.scope }),
+        },
+        { meta: ignoreReadForScheduling },
+      ) !== undefined;
+    };
+    const held = { pattern: resolved.pattern, entryKey };
+    // The hold, with what decided it: a document of `stage` read absent, or
+    // the budget ran out on a probe of that stage — the case worth a log,
+    // since a piece held for its width and not for an absence looks, from
+    // outside, like any other named run.
+    const hold = (stage: string): { pattern: Pattern; entryKey: string } => {
+      if (budgetSpent) {
+        logger.debug("named-run-gate", () => [
+          "probe budget spent; holding the run for a name-sync",
+          {
+            resultCell: resultCell.getAsNormalizedFullLink().id,
+            pattern: entryKey,
+            budget: this.#namingProbeBudget,
+            stage,
+          },
+        ]);
+      }
+      return held;
+    };
+    if (!present(argumentLink)) return hold("the argument document");
+    // What the run reads through the argument: every document the caller's
+    // argument and the stored argument link to, followed through the
+    // targets those links resolve into — a coordinator's element link is a
+    // chain of redirects, and setup reads each hop. Bounded by depth, by a
+    // document being probed once, and by the probe budget.
+    const probed = new Set<string>();
+    const linksAbsent = (value: unknown, depth: number): boolean => {
+      const link = parseLink(value, resultCell);
+      if (link !== undefined) {
+        const probeKey = `${link.space}/${link.scope}/${link.id}`;
+        if (probed.has(probeKey)) return false;
+        probed.add(probeKey);
+        if (!present(link)) return true;
+        if (depth === 0) return false;
+        return linksAbsent(
+          readTx.readOrThrow(
+            {
+              space: link.space,
+              id: link.id,
+              path: ["value", ...link.path],
+              ...(link.scope !== undefined && { scope: link.scope }),
+            },
+            { meta: ignoreReadForScheduling },
+          ),
+          depth - 1,
+        );
+      }
+      if (!isKeyableObjectOrArray(value)) return false;
+      for (const field in value) {
+        if (linksAbsent((value as Record<string, unknown>)[field], depth)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (linksAbsent(argument, 4)) {
+      return hold("a document the caller's argument links to");
+    }
+    if (
+      linksAbsent(
+        readTx.readOrThrow(
+          {
+            space: argumentLink.space,
+            id: argumentLink.id,
+            path: ["value"],
+            ...(argumentLink.scope !== undefined &&
+              { scope: argumentLink.scope }),
+          },
+          { meta: ignoreReadForScheduling },
+        ),
+        4,
+      )
+    ) {
+      return hold("a document the stored argument links to");
+    }
+    // The owned cells the run reads: the pattern's derived internal cells
+    // and, through each nested sub-pattern's result spot, those of the
+    // sub-pieces the run instantiates — the same walk the resume pre-sync
+    // syncs by name.
+    const owned: Cell<any>[] = [];
+    this.#collectResumeOwnedCells(
+      resolved.pattern,
+      cell,
+      owned,
+      new Set(),
+      readTx,
+    );
+    for (const ownedCell of owned) {
+      if (!present(ownedCell.getAsNormalizedFullLink())) {
+        return hold("an owned cell");
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Names `resultCell` — the dependency pre-sync a resumed piece pays, which
+   * delivers what running `pattern` over it reads — and runs the piece once
+   * that sync has landed, in a transaction of its own. Ownership of the
+   * start begins now, as a commit-gated start's does, so a release before
+   * the run cancels it, and it spans every name the run turns out to need:
+   * a pattern pointer that moved while the sync was in flight is named in
+   * turn, under the same ownership. A run that fails is reported the way a
+   * piece-start commit failure is: loud, and to the serving runtime's
+   * observer. Returns the cancel.
+   */
+  #runAfterNamedFamilyLands<T, R>(
+    tx: IExtendedStorageTransaction,
+    patternOrModule: Pattern | Module | undefined,
+    named: { pattern: Pattern; entryKey: string },
+    argument: T,
+    resultCell: Cell<R>,
+    options: RunnerRunOptions,
+  ): Cancel {
+    const key = this.#getDocKey(resultCell);
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    const actionId = `piece-run/${resultLink.id}`;
+    const startLifecycleEpoch = this.#lifecycleEpoch;
+    const ownership = this.#createDeferredStartOwnership(resultCell);
+    const navigateContext = navigateEventContextFromRunInfo(
+      waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+    );
+    const nameFamily = (
+      toName: { pattern: Pattern; entryKey: string },
+    ): Promise<void> => {
+      const inFlight = this.#namedFamilies.get(key);
+      if (inFlight !== undefined && "pending" in inFlight) {
+        return inFlight.pending;
+      }
+      const pending = this.#syncCellsForRunningPattern(
+        resultCell,
+        toName.pattern,
+        argument,
+      ).then(
+        () => {},
+        (error: unknown) => {
+          logger.warn(
+            "runner-start",
+            "naming a piece before its run rejected",
+            [resultLink.id, error],
+          );
+        },
+      ).then(() => {
+        this.#namedFamilies.set(key, { landed: toName.entryKey });
+      });
+      this.#namedFamilies.set(key, { pending });
+      return pending;
+    };
+    const work = (async () => {
+      let toName = named;
+      for (;;) {
+        await nameFamily(toName);
+        if (ownership.isCancelled()) return;
+        const startTx = this.#runtime.edit();
+        // Minted outside any scheduler run; the run's setup and node wiring
+        // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
+        this.#runtime.stampServerRun(startTx, {
+          actionId,
+          kind: "bookkeeping",
+        });
+        if (navigateContext !== undefined) {
+          setNavigateEventContext(startTx, navigateContext);
+        }
+        const startCell = this.#runtime.getCellFromLink<R>(
+          resultLink,
+          undefined,
+          startTx,
+        );
+        let started: RunResult<R>;
+        try {
+          // A run given no pattern follows the stored pointer, which can
+          // move while the name-sync is in flight: what landed is the named
+          // pattern's family, and the pattern now pointed at may own cells
+          // it never delivered. Name that one in turn, so the caller's one
+          // handle reaches the start wherever it lands.
+          const again = this.#patternToNameBeforeRun(
+            patternOrModule,
+            argument,
+            startTx,
+            startCell,
+          );
+          if (again !== undefined) {
+            startTx.abort("Named piece's pattern moved before its run");
+            toName = again;
+            continue;
+          }
+          // The run consults the gate once more on its way in and gets the
+          // answer the re-check just got: the landing that satisfied it is
+          // recorded, and nothing runs between the two that could evict it —
+          // an eviction takes a name-sync landing for another piece, and this
+          // stretch is synchronous.
+          started = this.#runWithStartOwnership(
+            startTx,
+            patternOrModule,
+            argument,
+            startCell,
+            options,
+          );
+          if (ownership.markInstalled(started.installedCancel)) {
+            startTx.abort("Deferred runner start was cancelled");
+            return;
+          }
+          this.#runtime.prepareTxForCommit(startTx);
+        } catch (error) {
+          startTx.abort(error);
+          ownership.cancel();
+          this.#reportPieceStartCommitFailure(actionId, error);
+          throw error;
+        }
+        const { error } = await this.#commitDeferredStart(startTx, resultCell);
+        if (!error) return;
+        if (
+          this.#catchUpAndStartOnStaleRead(
+            error,
+            resultCell,
+            "start",
+            startLifecycleEpoch,
+            false,
+            ownership,
+            started.installedCancel,
+          )
+        ) {
+          return;
+        }
+        ownership.cancel();
+        this.#reportPieceStartCommitFailure(actionId, error);
+        return;
+      }
+    })();
+    this.#runtime.scheduler.trackBackgroundTask(work);
+    return ownership.cancel;
+  }
+
+  /**
    * The catch-up recovery a commit-gated start earns when its transaction
    * is refused for a STALE CONFIRMED READ under server execution — the
    * seat of the OW45 arm-B client-start fix (verification-coverage.md;
@@ -5731,6 +5759,33 @@ export class Runner {
       `providedTx=${Boolean(providedTx)}`,
     ]);
 
+    // A piece set up elsewhere, reached here through a link crossing, has
+    // arrived as its document alone: the argument document and the internal
+    // cells its setup wrote belong to whoever names it (05-queries.md), and
+    // both the setup re-check and the instantiation below read them. Name
+    // it, and run it — setup and start alike — once the name-sync has
+    // landed, in a transaction of its own.
+    const toName = this.#patternToNameBeforeRun(
+      patternOrModule,
+      argument,
+      tx,
+      resultCell,
+    );
+    if (toName !== undefined) {
+      const cancelDeferredStart = this.#runAfterNamedFamilyLands(
+        tx,
+        patternOrModule,
+        toName,
+        argument,
+        resultCell,
+        options,
+      );
+      if (!providedTx) {
+        this.#runtime.prepareTxForCommit(tx);
+        tx.commit();
+      }
+      return { resultCell, cancelDeferredStart };
+    }
     // A creation revision belongs to the run that creates the piece. A run of
     // one that is already there changes neither its source state nor its
     // origin: that is a source transition's to decide, and a run reaching a
@@ -6333,6 +6388,7 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
+    const mentionedInputsStart = performance.now();
     const seen = new Set<Cell<any>>();
     const promises = new Set<Promise<any>>();
 
@@ -6355,8 +6411,15 @@ export class Runner {
 
     syncAllMentionedCells(inputs);
     await Promise.all(promises);
+    logger.time(
+      mentionedInputsStart,
+      "start",
+      "resumeMentionedInputSyncWave",
+    );
 
+    const resultSyncStart = performance.now();
     await resultCell.sync();
+    logger.time(resultSyncStart, "start", "resumeResultSync");
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -6485,18 +6548,18 @@ export class Runner {
     ) {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
-
     // Per-cell spans: `n` in the timing stats is the number of cells this
     // resume pre-synced, total/max its round-trip cost (spans overlap, so the
     // wall cost is bounded by the enclosing `#syncCellsForRunningPattern()`
     // span).
-    await Promise.all(cells.map((cell) => {
-      const c = documentBoundedResumeCell(cell);
+    const cellSyncWaveStart = performance.now();
+    await Promise.all(cells.map((c) => {
       const cellSyncStart = performance.now();
       return Promise.resolve(c.sync()).finally(() =>
         logger.time(cellSyncStart, "start", "resumeCellSync")
       );
     }));
+    logger.time(cellSyncWaveStart, "start", "resumeCellSyncWave");
 
     // Second wave: argument LINK TARGETS. An argument document synced above
     // may hold a link to a document nothing in this pattern tree owns (the
@@ -6508,6 +6571,7 @@ export class Runner {
     // pass subscribed such targets in aborted transactions before any
     // commit). Each root's declared schema bounds its scan — see the method
     // for the exact rules and the fallback where a declaration runs out.
+    const followupSyncStart = performance.now();
     await Promise.all([
       this.#syncArgumentLinkTargets(
         argumentRoots,
@@ -6518,6 +6582,7 @@ export class Runner {
       // and it must finish before instantiation runs those children.
       this.#syncResumeListChildren(instances),
     ]);
+    logger.time(followupSyncStart, "start", "resumeFollowupSync");
 
     return true;
   }
@@ -6587,6 +6652,7 @@ export class Runner {
     }));
     let wave = 0;
     while (frontier.length > 0) {
+      const waveStart = performance.now();
       const targets: PendingTarget[] = [];
       const targetPromises: Promise<any>[] = [];
       const enqueue = (
@@ -6706,6 +6772,7 @@ export class Runner {
         }
       }
       await Promise.all(targetPromises);
+      logger.time(waveStart, "start", `${timingLabel}Wave`);
       frontier = targets;
       wave++;
     }
@@ -6798,9 +6865,10 @@ export class Runner {
         ]);
         return moving;
       }
+      const syncWaveStart = performance.now();
       await Promise.all(fresh.map((cell) => {
         const syncStart = performance.now();
-        return Promise.resolve(documentBoundedResumeCell(cell).sync())
+        return Promise.resolve(cell.sync())
           .catch((error) => {
             logger.warn("resume-list-children", () => [
               "list slot resolution sync failed; resuming without it",
@@ -6811,6 +6879,11 @@ export class Runner {
             logger.time(syncStart, "start", "resumeListChildSync")
           );
       }));
+      logger.time(
+        syncWaveStart,
+        "start",
+        "resumeListSlotResolutionSyncWave",
+      );
     }
   }
 
@@ -6938,7 +7011,7 @@ export class Runner {
               const unbound = this.#runtime.getCellFromLink(link);
               const syncStart = performance.now();
               promises.push(
-                Promise.resolve(documentBoundedResumeCell(unbound).sync())
+                Promise.resolve(unbound.sync())
                   .catch((error) => {
                     logger.warn("resume-list-children", () => [
                       "list child sync failed; resuming without it",
@@ -6970,7 +7043,7 @@ export class Runner {
                 named.add(ownedKey);
                 const ownedStart = performance.now();
                 promises.push(
-                  Promise.resolve(documentBoundedResumeCell(cell).sync())
+                  Promise.resolve(cell.sync())
                     .catch((error) => {
                       logger.warn("resume-list-children", () => [
                         "list child owned-cell sync failed; resuming without it",
@@ -6989,7 +7062,9 @@ export class Runner {
       } finally {
         planTx.abort("resume list children: read-only derivation");
       }
+      const syncWaveStart = performance.now();
       await Promise.all(promises);
+      logger.time(syncWaveStart, "start", "resumeListChildSyncWave");
       frontier = next;
     }
   }
@@ -10048,7 +10123,7 @@ export class Runner {
               },
             }
             : {}),
-        },
+        } satisfies RawNodeCause,
         resultCell,
         this.#runtime,
         outputBinding,

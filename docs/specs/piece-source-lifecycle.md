@@ -592,8 +592,19 @@ another ordinary piece that passes the root-interface compatibility check.
 
 Uploading, compiling, or publishing content-addressed pattern source does not
 change an existing piece. These operations have no prior piece contract to
-compare, so piece compatibility does not gate them. Compatibility is evaluated
-when a candidate pattern is applied to an existing piece.
+compare, so piece compatibility does not gate them. Source-update compatibility
+is evaluated when a candidate pattern is applied to an existing piece.
+
+New input bindings made by `PiecesController.link` undergo contract validation
+in the transaction that commits the binding. A producer with durable schema
+metadata must satisfy the consumer's read contract and, for writable handles,
+accept the consumer's writes. Ordinary cells and externally injected handles
+without that metadata remain dynamic bindings: destination scope checks apply,
+but no static producer payload or capability proof is available. A known Piece
+whose producer contract cannot be recovered is refused. Raw writes that bypass
+this API, such as `setRawUntyped` and `cf cell set`, can store links without its
+admission check. The presence of a stored link alone therefore does not prove
+that its producer contract was checked when it was created.
 
 The runtime can compare the previous and candidate argument schemas, result
 schemas, and retained input links. Before a manual source replacement, the

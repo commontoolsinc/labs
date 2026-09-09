@@ -1,5 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
+import { getLogger } from "@commonfabric/utils/logger";
 import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
@@ -44,7 +45,14 @@ import type { AppliedCommit } from "./engine.ts";
 import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import { logIncomingFrame, logOutgoingFrame } from "./frame-log.ts";
+import { memoryMessageFrameBytes } from "./message-compression.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
+
+const logger = getLogger("memory.v2.client", {
+  enabled: true,
+  level: "error",
+});
 
 export type Transport = {
   /** Whether this transport can exchange negotiated compression envelopes. */
@@ -338,7 +346,9 @@ export class Client {
     // observes the rejection.
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.#transport.send(encodeMemoryBoundary(message));
+    const encoded = encodeMemoryBoundary(message);
+    logOutgoingFrame(message, memoryMessageFrameBytes(encoded));
+    await this.#transport.send(encoded);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -472,18 +482,18 @@ export class Client {
     this.#helloPending = ack;
     const expectedFlags = getMemoryProtocolFlags();
     try {
-      await Promise.all([
-        this.#transport.send(encodeMemoryBoundary({
-          type: "hello",
-          protocol: MEMORY_PROTOCOL,
-          flags: {
-            ...expectedFlags,
-            messageCompressionV1: expectedFlags.messageCompressionV1 &&
-              this.#transport.supportsMessageCompression === true,
-          },
-        })),
-        ack.promise,
-      ]);
+      const hello = {
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: {
+          ...expectedFlags,
+          messageCompressionV1: expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true,
+        },
+      };
+      const encoded = encodeMemoryBoundary(hello);
+      logOutgoingFrame(hello, memoryMessageFrameBytes(encoded));
+      await Promise.all([this.#transport.send(encoded), ack.promise]);
       this.#connected = true;
       this.#noteStateChange();
     } finally {
@@ -494,13 +504,18 @@ export class Client {
   #onMessage(payload: string): void {
     let message: unknown;
     try {
+      const decodeStart = performance.now();
       message = decodeMemoryBoundary(payload);
+      logger.time(decodeStart, "receive", "decodeBoundary");
+      logIncomingFrame(message, memoryMessageFrameBytes(payload));
       // A frame whose raw text lacks every reserved reference prefix cannot
       // carry a schema reference (strings serialize verbatim — see the note
       // on encodeMemoryBoundary), so the expansion walk over its upserts is
       // skipped entirely.
       if (containsReservedSchemaRefSubstring(payload)) {
+        const schemaExpansionStart = performance.now();
         message = expandServerMessageSchemas(message);
+        logger.time(schemaExpansionStart, "receive", "schemaExpansion");
       }
     } catch (cause) {
       const error = new Error("Unable to parse memory server message", {
@@ -1122,15 +1137,20 @@ export class SpaceSession {
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.#runWatchMutation(
-      () =>
-        this.#client.request<WatchAddResult>({
+      async () => {
+        const requestStart = performance.now();
+        const result = await this.#client.request<WatchAddResult>({
           type: "session.watch.add",
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
           watches,
-        }),
+        });
+        logger.time(requestStart, "watchAdd", "request");
+        return result;
+      },
       (result) => {
+        const applyStart = performance.now();
         this.#noteResult(result.serverSeq);
         this.#watchSpecs = [
           ...new Map(
@@ -1144,11 +1164,13 @@ export class SpaceSession {
           this.#watchView.applySync(result.sync, false);
         }
         this.#scheduleAck(result.serverSeq);
-        return {
+        const mutation = {
           view: this.#watchView,
           precedingSyncs: this.#takePrecedingWatchSyncs(),
           sync: result.sync,
         };
+        logger.time(applyStart, "watchAdd", "apply");
+        return mutation;
       },
     );
   }

@@ -28,6 +28,7 @@ import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
 import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
+import type { HarnessLoomAuthoringConfig } from "../loom-authoring.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
 import type { SandboxRuntime } from "../sandbox/types.ts";
 
@@ -63,6 +64,15 @@ export interface HarnessToolContext {
    * keeps `run_pattern` and `acquire_skill` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+
+  /** Host-configured deployment target, without its identity key path. */
+  fabricSessionTarget?: {
+    /** Toolshed API base URL for the run. */
+    apiUrl: string;
+
+    /** Configured space name or DID for the run. */
+    space: string;
+  };
 
   /**
    * Opens the render gate's probe runtime; `openProbeRuntime` by default. A
@@ -157,6 +167,9 @@ export interface HarnessToolContext {
 
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
+
+  /** Host-owned Loom command routing, absent when the run has no grant. */
+  loomAuthoring?: HarnessLoomAuthoringConfig;
   currentDir: string;
   workspaceHostPath?: string;
   resolvePath(path: string): string;

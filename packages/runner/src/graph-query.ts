@@ -22,7 +22,6 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "./builder/types.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import {
-  ALL_META_RAILS,
   type BaseMemoryAddress,
   CompoundCycleTracker,
   createSchemaMemo,
@@ -30,17 +29,16 @@ import {
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
+  loadLabelSchemaDoc,
   loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
-  type MetaRail,
   type ObjectStorageManager,
   type SchemaMemo,
   SchemaObjectTraverser,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
   schemaTrackerKey,
-  sinkMetaLinkedDocKeys,
   type TraversalContext,
 } from "./traverse.ts";
 
@@ -57,7 +55,6 @@ export {
   schemaTrackerCoversSelector,
   schemaTrackerKey,
 };
-export { sinkMetaLinkedDocKeys };
 
 /** Counters a walk accumulates, for query diagnostics and benchmarks. */
 export type GraphQueryWalkStats = {
@@ -70,16 +67,6 @@ export type GraphQueryWalkStats = {
   getDocAtPathCalls: number;
   schemaMemoHits: number;
 };
-
-/**
- * The rails a crossing-reached document still chases: the ones computed
- * values are supplied through. A plain subscriber whose walk crosses into
- * a piece reads what the piece computes off `result`, and `internal`
- * carries the sub-piece manifests those computations hang off. The
- * remaining rails — pattern, argument, cfc — serve loading and running a
- * piece, which is the intent of naming one, not of reaching one.
- */
-const CROSSING_META_RAILS: readonly MetaRail[] = ["result", "internal"];
 
 export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
   coveredSelectorSkips: 0,
@@ -143,16 +130,6 @@ export type GraphQueryWalkOptions = {
     referrerKey: string | undefined,
   ) => void;
 
-  /**
-   * Receives the tracker-style key of every `internal`-rail document a
-   * crossing-reached piece links, INSTEAD of that document being loaded
-   * and delivered. The receiver owns keeping the subscription reactive to
-   * those keys — delivering one when a later commit touches it. Absent,
-   * crossings chase the internal rail eagerly, exactly as named roots
-   * always do.
-   */
-  lazyInternalSink?: (key: string, referrerKey: string) => void;
-
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
 
@@ -188,7 +165,7 @@ export class GraphQueryWalk {
     this.#manager = options.manager;
     this.#space = options.space;
     this.#identity = options.identity;
-    const { space, identity, onMissedDoc, lazyInternalSink } = options;
+    const { space, identity, onMissedDoc } = options;
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
       options.schemaTracker,
@@ -220,25 +197,38 @@ export class GraphQueryWalk {
       },
       undefined,
       undefined,
-      // A document this walk loads through a link crossing chases only the
-      // rails computed values arrive through — `result` and `internal` —
-      // so a subscriber reading THROUGH a piece still receives and stays
-      // subscribed to what the piece computes. The full family belongs to
-      // the documents a query names: `visit()` chases every rail for its
-      // named document, which is what a caller that intends to load and
-      // run one — a piece resume, a setsrc staging read — relies on.
-      // Chasing every rail at every crossing instead multiplies a wide
+      // A document this walk loads through a link crossing is delivered
+      // under the selector that reached it, without its metadata family
+      // beyond the schema document its `cfc` envelope names, which a
+      // reader of a labeled document checks its reads against. The family
+      // belongs to the documents a query names: `visit()` chases every
+      // rail for its named document, which is what a caller that intends
+      // to load and run one — a piece resume, a setsrc staging read —
+      // relies on. Chasing it at every crossing instead multiplies a wide
       // walk by each visited piece's whole doc set (pattern, argument,
-      // cfc and their recursion) for documents nothing asked to run.
-      CROSSING_META_RAILS,
-      // With a sink, the internal rail is registered rather than loaded:
-      // a crossed piece's derived cells stay subscribed without shipping
-      // every one of them now (delivery rides their next commit).
-      lazyInternalSink === undefined ? [] : ["internal"],
-      lazyInternalSink,
+      // internal and their recursion) for documents nothing asked to run.
+      false,
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
+  }
+
+  /**
+   * Tracker keys of every document whose metadata family this walk has
+   * chased: each named document a `visit()` was owed the family of, each
+   * document loaded as a member of such a family, whose own family the
+   * chase followed in turn, and each absent target a family link named,
+   * which is owed its family when it arrives. A document a caller named
+   * under its own `docKey` is reported under that key. A caller keeping
+   * watch state records these so a later re-walk of a member chases its
+   * family again.
+   */
+  get chasedFamilyKeys(): ReadonlySet<string> {
+    const keys = new Set<string>();
+    for (const key of this.#context.metaDocsVisited) {
+      keys.add(this.#keyOverrides.get(key) ?? key);
+    }
+    return keys;
   }
 
   /**
@@ -258,11 +248,13 @@ export class GraphQueryWalk {
     document: IAttestation,
     selector: SchemaPathSelector,
     docKey?: `${string}/${ScopeKey}/${string}`,
-    // Which family the visited document is owed. A document a query NAMES
-    // is a "root": every rail, eagerly. A tracked document being
-    // re-walked that no query ever named — dirty-refresh territory — is a
-    // "crossing": the same rails a mid-walk crossing gets, so a
-    // document's delivered shape does not depend on its update history.
+    // Whether the visited document is owed its metadata family. A document
+    // a query NAMES, or one delivered as a member of a named document's
+    // family, is a "root": the whole family, eagerly. A tracked document
+    // being re-walked that no query ever named or chased — dirty-refresh
+    // territory — is a "crossing": no family, exactly as when a mid-walk
+    // crossing first reached it, so a document's delivered shape does not
+    // depend on its update history.
     role: "root" | "crossing" = "root",
   ): void {
     const effectiveSelector = selector.schema === undefined
@@ -332,31 +324,17 @@ export class GraphQueryWalk {
     // selector coverage skips the traversal above: a crossing may have
     // covered this document before a root named it, and coverage proves
     // reach, not family. What a caller names, it may intend to load; what
-    // a walk merely reaches, it does not. A crossing-role visit chases the
-    // crossing rails instead, under the context's lazy routing, so a
-    // re-walk delivers the same shape the original crossing did. The
-    // chase dedupes through `metaDocsVisited` against this call's rails.
+    // a walk merely reaches, it does not, so a crossing-role visit chases
+    // nothing beyond the schema document its `cfc` envelope names. The
+    // family chase dedupes through `metaDocsVisited`.
+    const loaded = {
+      address: { ...document.address, space: this.#space },
+      value: document.value,
+    };
     if (role === "root") {
-      loadMetaLinkedDocs(
-        tx,
-        {
-          address: { ...document.address, space: this.#space },
-          value: document.value,
-        },
-        this.#context,
-        ALL_META_RAILS,
-        false,
-      );
+      loadMetaLinkedDocs(tx, loaded, this.#context);
     } else {
-      loadMetaLinkedDocs(
-        tx,
-        {
-          address: { ...document.address, space: this.#space },
-          value: document.value,
-        },
-        this.#context,
-        CROSSING_META_RAILS,
-      );
+      loadLabelSchemaDoc(tx, loaded, this.#context);
     }
   }
 
