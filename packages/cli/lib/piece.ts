@@ -402,14 +402,6 @@ export interface ResolvedPieceCallable extends CallableResolution {
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
 
-  /**
-   * Takes the warning a bootstrap that would not run writes, which is
-   * `console.warn` where a caller names none. It is the same sink
-   * `ConnectionOutput.report` is, for the same reason: a caller drawing its
-   * own screen is corrupted by a line written behind the frame.
-   */
-  report?: (message: string) => void;
-
   loadPieces?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (
     pieces: any,
@@ -2179,12 +2171,15 @@ async function tryResolveLivePieceToolCallable(
  * Load the target piece and its pieces controller for callable resolution or
  * discovery.
  *
- * Dispatch bootstraps the space root first, unconditionally whenever
- * `deps.loadPiece` is absent (the test seam is the one way around it): a verb
- * that creates a piece registers it by sending an event to the default pattern's
- * `addPiece` stream (see `newPiece`), so against an unbootstrapped root it
- * fails with "Cannot add pieces" rather than running slowly. Dispatch then
- * starts the addressed piece before resolving the requested callable.
+ * Dispatch starts the addressed piece before resolving the requested callable,
+ * and starts nothing else. The space root stays where it stands: a verb whose
+ * handler sends into the root's `addPiece` stream has the scheduler start the
+ * root at delivery — an event for a stream with no registered handler starts
+ * the piece that owns it and looks again (`ensurePieceRunningVerdict` in
+ * `packages/runner/src/ensure-piece-running.ts`). The root's start is paid by
+ * the verbs that reach it, when they do, rather than by every call. `newPiece`
+ * is the exception and ensures the root itself: its registration is the CLI's
+ * own send, made outside any handler.
  *
  * Discovery (`verbs`, `describe`) only reads the addressed piece's stored
  * callable surface and pattern metadata. It neither starts the piece nor asks
@@ -2194,10 +2189,10 @@ async function tryResolveLivePieceToolCallable(
  *
  * `cf piece call <verb> --help` takes the dispatch path: `executePieceCallable`
  * resolves the verb before it parses the arguments, so it cannot know it is
- * only rendering a page, and pays for the root start the two discovery reads
+ * only rendering a page, and pays for the piece start the two discovery reads
  * skip. That makes per-verb help the most expensive of the three reads, not
- * the cheapest; letting help skip the bootstrap means reordering resolution
- * and parsing there.
+ * the cheapest; letting help skip the start means reordering resolution and
+ * parsing there.
  */
 async function loadPieceForCallables(
   config: PieceConfig,
@@ -2211,18 +2206,6 @@ async function loadPieceForCallables(
 }> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
-
-  if (!deps.loadPiece && prepareDispatch) {
-    try {
-      await pieces.ensureDefaultPattern();
-    } catch (error) {
-      (deps.report ?? ((message: string) => console.warn(message)))(
-        `Warning: Could not ensure default pattern: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
 
   const piece = await (deps.loadPiece
     ? deps.loadPiece(
