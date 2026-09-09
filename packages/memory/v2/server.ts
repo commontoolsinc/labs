@@ -251,6 +251,10 @@ export type SlowQuery = {
   roots?: number;
   watches?: number;
 
+  /** session.watch.refresh only: the refreshed session's principal, so a
+   * slow refresh names whose watch set cost it. */
+  principal?: string;
+
   /** transact only: milliseconds the commit waited for the space
    * publication lock before evaluation began. Flush passes hold the same
    * lock, so a large value is head-of-line blocking behind fan-out rather
@@ -5308,7 +5312,21 @@ export class Server {
               }
             }
             span.setAttribute("ct.touched", touched);
+            // Per-session refresh rows (`memory/refresh/session/{untouched,
+            // touched}`) and, for a touched session, the phase rows
+            // (`memory/refresh/phase/{walk,diff,tracked,frame}` with the
+            // tracked-set rebuild split further): `memory/flush/refresh`
+            // is a whole pass over every session, so this is what says
+            // which sessions a commit cost and where in one session the
+            // time went.
             if (!touched) {
+              timing.time(
+                startedAt,
+                "memory",
+                "refresh",
+                "session",
+                "untouched",
+              );
               return await emptyCatchUp();
             }
 
@@ -5316,6 +5334,7 @@ export class Server {
             const fromSeq = session.lastSyncedSeq;
             const identity = this.#sessionScopeIdentity(session);
             const updates = new Map<string, SessionCacheEntry>();
+            const walkStartedAt = performance.now();
 
             // Evaluation exceptions — schema-closure corruption included —
             // propagate to refreshDirty's catch, which logs, skips this
@@ -5350,10 +5369,13 @@ export class Server {
               }
             }
 
+            timing.time(walkStartedAt, "memory", "refresh", "phase", "walk");
             if (updates.size === 0) {
+              timing.time(startedAt, "memory", "refresh", "session", "touched");
               return await emptyCatchUp();
             }
 
+            const diffStartedAt = performance.now();
             // The lease-holder exemption was judged on CURRENT holdership
             // above, once per pass: a former holder's foreign instances
             // are filtered like any other session's (protocol.md §2's
@@ -5406,12 +5428,14 @@ export class Server {
             for (const key of filteredKeys) {
               updates.delete(key);
             }
+            timing.time(diffStartedAt, "memory", "refresh", "phase", "diff");
             // The session cache commits only after the frame is fully
             // built: a throw during marker/adoption attachment must leave
             // the diff recomputable, or the requeued batch would elide the
             // lost frame's docs as already-snapshotted (CT-1927 review,
             // round 6).
             const commitEntities = () => {
+              const trackedStartedAt = performance.now();
               // (d′) — design §2.8 flag 2: a push pass that changes the
               // session's tracked set is a demand change; notify so the
               // demand pass sees it without waiting for the next input.
@@ -5433,17 +5457,46 @@ export class Server {
               // away releases its miss), and a retired interest must
               // leave the wake set with it — while a re-walk's new absent
               // dead-ends are wake-reactivity the next commit needs.
+              const entriesAt = performance.now();
+              const fromEntries = trackedIdsFromEntries(
+                session.entities.values(),
+              );
+              const watchesAt = performance.now();
+              timing.time(
+                entriesAt,
+                watchesAt,
+                "memory",
+                "refresh",
+                "tracked",
+                "entries",
+              );
               session.trackedIds = addOperationWatchTrackedIds(
-                trackedIdsFromEntries(session.entities.values()),
+                fromEntries,
                 session.watches,
                 {
                   principal: session.principal,
                   sessionId: session.id,
                 },
               );
+              const missedAt = performance.now();
+              timing.time(
+                watchesAt,
+                missedAt,
+                "memory",
+                "refresh",
+                "tracked",
+                "watches",
+              );
               this.#addMissedToTrackedIds(
                 session.trackedIds,
                 session.graphs.values(),
+              );
+              timing.time(
+                missedAt,
+                "memory",
+                "refresh",
+                "tracked",
+                "missed",
               );
               let changed = false;
               if (wantsDemandNotify) {
@@ -5464,6 +5517,13 @@ export class Server {
                   session.principal,
                 );
               }
+              timing.time(
+                trackedStartedAt,
+                "memory",
+                "refresh",
+                "phase",
+                "tracked",
+              );
             };
             const toSeq = Engine.serverSeq(engine);
             if (upserts.length === 0) {
@@ -5474,12 +5534,15 @@ export class Server {
               // Cubic fix keeps fromSeq pinned to the pre-refresh value).
               commitEntities();
               session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
+              timing.time(startedAt, "memory", "refresh", "session", "touched");
               return await emptyCatchUp(fromSeq, toSeq);
             }
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
               upserts: upserts.length,
+              principal: session.principal,
             });
+            const frameStartedAt = performance.now();
             const message = await finishCatchUp({
               type: "sync",
               fromSeq,
@@ -5504,8 +5567,10 @@ export class Server {
               upserts: [...upserts],
               removes: [],
             });
+            timing.time(frameStartedAt, "memory", "refresh", "phase", "frame");
             commitEntities();
             session.lastSyncedSeq = toSeq;
+            timing.time(startedAt, "memory", "refresh", "session", "touched");
             return message;
           }
 

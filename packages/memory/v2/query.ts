@@ -1,4 +1,5 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   internPathSelector,
   internSchemaAsTaggedHashString,
@@ -1677,6 +1678,13 @@ export const queryGraph = (
   };
 };
 
+// The refresh's own phase rows (`memory/refresh/walk/<phase>` on the
+// health route's timing stats, beside the server's `memory/refresh/phase/*`
+// rows): one row per phase of one graph's incremental re-evaluation, so a
+// slow pass can be read as "the closure scan" or "the re-walk" rather than
+// as one number. Recorded whether or not the logger prints.
+const refreshTiming = getLogger("memory", { enabled: false });
+
 export const refreshTrackedGraph = (
   space: string,
   engine: Engine.Engine,
@@ -1694,6 +1702,14 @@ export const refreshTrackedGraph = (
   const affectedMisses = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   const invalidations = new Map<CellScope, Set<string>>();
   const identity = identityOf(state.manager);
+  const phaseStart = performance.now();
+  let phaseAt = phaseStart;
+  // Closes the phase that began at the previous mark (or the entry).
+  const phase = (name: string) => {
+    const now = performance.now();
+    refreshTiming.time(phaseAt, now, "memory", "refresh", "walk", name);
+    phaseAt = now;
+  };
   for (const dirtyId of dirtyIds) {
     // Dirtiness arrives keyed by scope INSTANCE (M4, stage F): the dirty
     // key's scope_key segment IS the tracked doc key's middle segment, so
@@ -1732,8 +1748,10 @@ export const refreshTrackedGraph = (
     }
   }
   if (affectedDocs.size === 0 && affectedMisses.size === 0) {
+    phase("select-none");
     return null;
   }
+  phase("select");
 
   const manager = new EngineObjectManager(
     engine,
@@ -1795,6 +1813,7 @@ export const refreshTrackedGraph = (
       recordChased(key, role, evaluated);
     }
   }
+  phase("rewalk");
   // Re-evaluate the dirtied misses. A BORN target is visited — it enters
   // the tracker (and the update assembly below delivers it) — and its
   // miss retires; a still-absent one keeps its miss and attributions
@@ -1831,6 +1850,7 @@ export const refreshTrackedGraph = (
     }
   }
 
+  phase("misses");
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const key of affectedMisses.keys()) touched.add(key);
   for (const address of manager.loadedAddresses()) {
@@ -1846,6 +1866,7 @@ export const refreshTrackedGraph = (
     }
     touched.add(key);
   }
+  phase("loaded");
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
   for (const key of touched) {
@@ -1870,6 +1891,7 @@ export const refreshTrackedGraph = (
   // partially advanced; the caller marks the session for a full
   // re-evaluation, which re-diffs everything on the next successful pass
   // rather than trusting increments computed over the failure.
+  phase("snapshot");
   const staged = assembleSchemaDocClosures(
     space,
     engine,
@@ -1879,6 +1901,7 @@ export const refreshTrackedGraph = (
     updates,
     state.entities,
   );
+  phase("closure");
   for (const key of staged.trackerAdds) {
     state.tracker.add(key, REJECTING_SELECTOR);
   }
@@ -1893,6 +1916,8 @@ export const refreshTrackedGraph = (
     state.manager.invalidateIds(ids, scope);
   }
   state.manager.mergeFrom(manager);
+  phase("merge");
+  refreshTiming.time(phaseStart, "memory", "refresh", "walk", "total");
 
   stats.managerReads = manager.readCount - readCountBefore;
 
