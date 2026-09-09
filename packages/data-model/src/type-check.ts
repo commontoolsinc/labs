@@ -207,6 +207,16 @@ export function isFabricPlainContainer(
 }
 
 /**
+ * Narrows to the array arm of `FabricValue` (`FabricArray`). This asks a shape
+ * question of a value the type already says is a `FabricValue`, so an `Array`
+ * subclass instance answers yes as readily as a direct one; the looseness
+ * costs nothing, the input being out of contract either way.
+ */
+export function isFabricArray(value: FabricValue): value is FabricArray {
+  return Array.isArray(value);
+}
+
+/**
  * Indicates whether a `FabricValue` is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name states the array case because "object" alone

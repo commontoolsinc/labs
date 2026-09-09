@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  isFabricArray,
   isFabricContainerValue,
+  isFabricObjectOrArray,
+  isFabricPlainContainer,
   isFabricPlainObject,
   isKeyableObjectNotArray,
   isKeyableObjectOrArray,
@@ -20,6 +23,7 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 
 describe("type-check", () => {
   describe("isFabricContainerValue()", () => {
@@ -67,6 +71,137 @@ describe("type-check", () => {
         expect(isFabricContainerValue("a")).toBe(false);
         expect(isFabricContainerValue(true)).toBe(false);
         expect(isFabricContainerValue(42n)).toBe(false);
+      });
+    });
+  });
+
+  describe("isFabricPlainContainer()", () => {
+    describe("given a plain container arm of `FabricValue`", () => {
+      it("returns `true` for a plain object", () => {
+        expect(isFabricPlainContainer({})).toBe(true);
+        expect(isFabricPlainContainer({ a: 1, b: "two" })).toBe(true);
+      });
+
+      it("returns `true` for a null-prototype object", () => {
+        const obj = Object.create(null) as Record<string, never>;
+        expect(isFabricPlainContainer(obj)).toBe(true);
+      });
+
+      it("returns `true` for an array", () => {
+        expect(isFabricPlainContainer([])).toBe(true);
+        expect(isFabricPlainContainer([1, 2, 3])).toBe(true);
+      });
+    });
+
+    describe("given a `FabricValue` a key means nothing against", () => {
+      it("returns `false` for a `FabricInstance`", () => {
+        // The whole of the difference from `isFabricContainerValue()`, which
+        // accepts one: an instance holds its contents privately.
+
+        expect(
+          isFabricPlainContainer(FabricError.fromNativeError(new Error("x"))),
+        ).toBe(false);
+      });
+
+      it("returns `false` for a `FabricPrimitive`", () => {
+        expect(isFabricPlainContainer(new FabricBytes(new Uint8Array([1]))))
+          .toBe(false);
+        expect(isFabricPlainContainer(new FabricEpochNsec(1n))).toBe(false);
+      });
+
+      it("returns `false` for `null`", () => {
+        expect(isFabricPlainContainer(null)).toBe(false);
+      });
+
+      it("returns `false` for `undefined`", () => {
+        expect(isFabricPlainContainer(undefined)).toBe(false);
+      });
+
+      it("returns `false` for a scalar", () => {
+        expect(isFabricPlainContainer(1)).toBe(false);
+        expect(isFabricPlainContainer("a")).toBe(false);
+        expect(isFabricPlainContainer(true)).toBe(false);
+        expect(isFabricPlainContainer(42n)).toBe(false);
+      });
+    });
+  });
+
+  describe("isFabricArray()", () => {
+    it("returns `true` given a `FabricArray`", () => {
+      expect(isFabricArray([])).toBe(true);
+      expect(isFabricArray([1])).toBe(true);
+      expect(isFabricArray([{ a: "foo" }])).toBe(true);
+    });
+
+    it("returns `true` given an `Array` subclass instance", () => {
+      // The narrowing asks a shape question, not the membership one, and so
+      // is looser than `isValidFabricValue()`, which refuses this value.
+
+      class Sub extends Array {}
+      expect(isFabricArray(new Sub() as unknown as FabricValue)).toBe(true);
+    });
+
+    it("returns `false` given a type-lie value", () => {
+      const wrongTypeValue = new Set() as unknown as FabricValue;
+      expect(isFabricArray(wrongTypeValue)).toBe(false);
+    });
+
+    for (
+      const value of [
+        123,
+        "boop",
+        { z: "zorp" },
+        new FabricEpochNsec(12345n),
+        new FabricBytes(new Uint8Array([1, 2, 3, 4, 5])),
+      ]
+    ) {
+      const desc = toCompactDebugString(value);
+      it(`returns \`false\` given ${desc}`, () => {
+        expect(isFabricArray(value)).toBe(false);
+      });
+    }
+  });
+
+  describe("isFabricObjectOrArray()", () => {
+    describe("given an object-typed `FabricValue`", () => {
+      it("returns `true` for a plain object", () => {
+        expect(isFabricObjectOrArray({})).toBe(true);
+        expect(isFabricObjectOrArray({ a: 1, b: "two" })).toBe(true);
+      });
+
+      it("returns `true` for an array", () => {
+        expect(isFabricObjectOrArray([])).toBe(true);
+        expect(isFabricObjectOrArray([1, 2, 3])).toBe(true);
+      });
+
+      it("returns `true` for a `FabricSpecialObject`", () => {
+        // The whole of the difference from `isFabricContainerValue()` and
+        // `isFabricPlainContainer()`, each of which rejects at least the
+        // `FabricPrimitive`: this asks only what `typeof` would say.
+
+        expect(isFabricObjectOrArray(new FabricBytes(new Uint8Array([1]))))
+          .toBe(true);
+        expect(isFabricObjectOrArray(new FabricEpochNsec(1n))).toBe(true);
+        expect(
+          isFabricObjectOrArray(FabricError.fromNativeError(new Error("x"))),
+        ).toBe(true);
+      });
+    });
+
+    describe("given a non-object `FabricValue`", () => {
+      it("returns `false` for `null`", () => {
+        expect(isFabricObjectOrArray(null)).toBe(false);
+      });
+
+      it("returns `false` for `undefined`", () => {
+        expect(isFabricObjectOrArray(undefined)).toBe(false);
+      });
+
+      it("returns `false` for a scalar", () => {
+        expect(isFabricObjectOrArray(1)).toBe(false);
+        expect(isFabricObjectOrArray("a")).toBe(false);
+        expect(isFabricObjectOrArray(true)).toBe(false);
+        expect(isFabricObjectOrArray(42n)).toBe(false);
       });
     });
   });
