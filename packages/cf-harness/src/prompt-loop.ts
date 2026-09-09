@@ -183,6 +183,7 @@ import {
   toModelFacingWebFetchOutput,
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
+import type { CfcSandboxResultOrigin } from "./sandbox/types.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
@@ -1811,6 +1812,7 @@ interface ModelFacingToolOutputResult {
 
 interface CfcSandboxResultCarrier {
   cfcResult?: CfcSandboxResult;
+  cfcResultOrigin?: CfcSandboxResultOrigin;
 }
 
 const cfcResultFromOutput = (
@@ -1825,9 +1827,10 @@ const cfcResultFromOutput = (
 
 /**
  * The fields a tool result keeps on its artifact and does not put in front of
- * the model: the sandbox's own CFC result, and the record of what a
- * `query_docs` explore turn sent the provider. Both exist for a reader of the
- * run, and both would cost the model context it asked a tool to save it.
+ * the model: the sandbox's own CFC result with the origin that says where it
+ * came from, and the record of what a `query_docs` explore turn sent the
+ * provider. All exist for a reader of the run, and all would cost the model
+ * context it asked a tool to save it.
  */
 const stripInternalToolFields = (output: unknown): unknown => {
   if (!isObjectNotArray(output)) {
@@ -1835,6 +1838,7 @@ const stripInternalToolFields = (output: unknown): unknown => {
   }
   const {
     cfcResult: _cfcResult,
+    cfcResultOrigin: _cfcResultOrigin,
     exploreRecord: _exploreRecord,
     ...publicOutput
   } = output as

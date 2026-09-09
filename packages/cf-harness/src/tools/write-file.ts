@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
+import type { CfcSandboxResultOrigin } from "../sandbox/types.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import {
@@ -46,6 +47,19 @@ export interface WriteFileToolSuccessOutput {
    * record rather than any decision.
    */
   cfcResult?: CfcSandboxResult;
+
+  /**
+   * Where that result came from: runsc's own report, or a value the runtime
+   * synthesized because it had none.
+   *
+   * It travels with the result because it is what separates the two records
+   * a reader cannot otherwise tell apart. A synthesized denied result carries
+   * an empty label, and so does a runsc report of a public container; without
+   * the origin beside it, a reader of this artifact would read "the runtime
+   * had nothing to say" as "the container was public". Absent whenever
+   * `cfcResult` is.
+   */
+  cfcResultOrigin?: CfcSandboxResultOrigin;
 }
 
 export type WriteFileToolOutput =
@@ -81,6 +95,8 @@ export const writeFileToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         path: { type: "string" },
         mode: { type: "string", enum: [...WRITE_FILE_MODES] },
+        cfcResult: { type: "object" },
+        cfcResultOrigin: { type: "string" },
       },
       required: ["outputId", "path", "mode"],
       additionalProperties: false,
@@ -88,6 +104,28 @@ export const writeFileToolDescriptor: HarnessToolDescriptor = {
   } satisfies JSONSchema,
   tags: ["file", "write", "vm"],
 };
+
+/**
+ * The sandbox's evidence for one write, result and origin together.
+ *
+ * Together because either alone is a record a reader can misread: a result
+ * without its origin cannot be told from a synthesized one, and an origin
+ * without a result describes nothing. A sandbox that reported neither leaves
+ * neither, and the run's taint — collected at the invocation boundary, where
+ * no tool can drop it — is what says an invocation happened at all.
+ */
+const cfcEvidenceOf = (
+  result: {
+    cfcResult?: CfcSandboxResult;
+    cfcResultOrigin?: CfcSandboxResultOrigin;
+  },
+): { cfcResult?: CfcSandboxResult; cfcResultOrigin?: CfcSandboxResultOrigin } =>
+  result.cfcResult === undefined ? {} : {
+    cfcResult: result.cfcResult,
+    ...(result.cfcResultOrigin !== undefined
+      ? { cfcResultOrigin: result.cfcResultOrigin }
+      : {}),
+  };
 
 export const writeFileTool: HarnessToolDefinition<
   WriteFileToolInput,
@@ -176,18 +214,14 @@ export const writeFileTool: HarnessToolDefinition<
           detail: detailFromShellFailure(result),
           exitCode: result.exitCode,
         }),
-        ...(result.cfcResult !== undefined
-          ? { cfcResult: result.cfcResult }
-          : {}),
+        ...cfcEvidenceOf(result),
       };
     }
     return {
       outputId,
       path: resolvedPath,
       mode,
-      ...(result.cfcResult !== undefined
-        ? { cfcResult: result.cfcResult }
-        : {}),
+      ...cfcEvidenceOf(result),
     };
   },
 };

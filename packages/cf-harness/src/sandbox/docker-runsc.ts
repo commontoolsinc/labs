@@ -28,6 +28,7 @@ import {
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { HarnessCfcInvocationContext } from "../contracts/cfc-invocation-context.ts";
+import { isRepresentableIfcLabel } from "../ifc-label-shape.ts";
 import { SandboxPathEscapeError } from "./errors.ts";
 import {
   DenoProcessRunner,
@@ -255,6 +256,22 @@ const resolveCfcInvocationContextDir = (
 };
 
 /**
+ * Whether a resolution failure says the path is not there.
+ *
+ * Only two do. `NotFound` is the directory made on first write, and
+ * `NotADirectory` is a component that is a file, under which nothing can
+ * exist either. Every other failure — a permission this process lacks, a
+ * filesystem that would not answer — says the path could not be READ, and a
+ * walk that treats those the same keeps the unresolved name and compares a
+ * symlink against the mount it points into. That comparison is the guard, so
+ * a failure it cannot account for has to end the resolution rather than
+ * quietly narrow it.
+ */
+const isAbsentHostPath = (error: unknown): boolean =>
+  error instanceof Deno.errors.NotFound ||
+  error instanceof Deno.errors.NotADirectory;
+
+/**
  * A path resolved as far down as it exists, with what does not exist joined
  * back on.
  *
@@ -278,7 +295,10 @@ const realHostPathOrNearest = (path: string): string => {
   while (head !== root) {
     try {
       return joinHostPath(Deno.realPathSync(head), ...[...tail].reverse());
-    } catch {
+    } catch (error) {
+      if (!isAbsentHostPath(error)) {
+        throw error;
+      }
       tail.push(basenameHostPath(head));
       head = dirnameHostPath(head);
     }
@@ -846,6 +866,19 @@ const isRepresentableRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
   if (!clausesRepresentable) {
     return false;
   }
+  // A clause being a list is not yet a clause this can carry: its MEMBERS
+  // have to be data too. The label the sidecar yields is asked the same
+  // question everything else asks of a label, so a member no reader further
+  // on could hold makes this a taint that was not read rather than one that
+  // named nothing.
+  if (!isRepresentableIfcLabel(runscTaintLabel(taint))) {
+    return false;
+  }
+  // A clause being a list is not yet a clause this can carry: its MEMBERS
+  // have to be data too. The label the sidecar yields is asked the same
+  // question everything else asks of a label, so a member no reader further
+  // on could hold makes this a taint that was not read rather than one that
+  // named nothing.
   // With `xattrJSON` present it is the answer, and `string` beside it is a
   // rendering for a person. The two are NOT cross-checked, because doing so
   // would mean reading the rendering — and runsc renders a public container

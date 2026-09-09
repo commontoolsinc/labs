@@ -182,6 +182,28 @@ describe("inertLabelSnapshot()", () => {
     }
   });
 
+  it("carries an atom's own `__proto__` key as data", () => {
+    // Pins the shape of the copy for the one key whose write path is not
+    // ordinary: an own data property holding what the source held, on a copy
+    // whose prototype is where it started. A copy that routed this key
+    // through the inherited accessor instead would say less than the source.
+    const atom: Record<string, unknown> = { name: "finance" };
+    Object.defineProperty(atom, "__proto__", {
+      value: "spoofed",
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const snapshot = inertLabelSnapshot({ confidentiality: [atom] });
+    const copied = (snapshot?.confidentiality as Record<string, unknown>[])[0];
+
+    expect(Object.getOwnPropertyDescriptor(copied, "__proto__")?.value).toBe(
+      "spoofed",
+    );
+    expect(Object.getPrototypeOf(copied)).toBe(Object.prototype);
+  });
+
   it("refuses a clause hidden as a non-enumerable property", () => {
     // A walk over own enumerable properties never sees it, so answering with
     // the label MINUS that clause would say the container carried less than

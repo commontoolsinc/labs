@@ -537,8 +537,8 @@ Options:
   --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
   --input-cell <name>=<link>       Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name>; its shape and labels live on the cell's declared schema (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
-  --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
-  --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
+  --cfc-result-dir <path>       Absolute host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
+  --cfc-invocation-context-dir <path> Absolute host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
@@ -605,8 +605,8 @@ Environment:
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   CF_HARNESS_CFC_ENFORCEMENT_MODE Default value for --cfc-enforcement-mode (ignored on --resume-run)
   CF_CFC_MODE                   Fallback for CF_HARNESS_CFC_ENFORCEMENT_MODE
-  ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
-  ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
+  ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir; absolute, as the flag is
+  ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir; absolute, as the flag is
 `;
 
 // CFC sidecar transport dirs may be supplied by flag or by env-var fallback

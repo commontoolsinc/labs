@@ -328,28 +328,24 @@ describe("a run's sandbox taint", () => {
     }
   });
 
-  it("poisons rather than raising when recording itself fails", async () => {
+  it("records a frozen label rather than raising on the way through the merge", async () => {
     // The boundary covers the JOIN as well as the read. A label that passes
-    // every check and then fails on the way through the merge would otherwise
-    // propagate out of the sandbox call while the run stayed recorded as it
-    // was — which is to say clean.
-    const runId = `taint-${crypto.randomUUID()}`;
-    try {
-      const engine = new CfHarnessEngine({
-        sandboxRuntime: new FakeSandbox(sandboxResult(FINANCE)),
-        runId,
-        workspaceHostPath: "/tmp",
-      });
-      const clause = Object.freeze(["finance"]);
-      // Frozen input the merge will try to clone: representable, and the
-      // record it produces still has to be an answer rather than a throw.
-      await engine.invokeBuiltinTool("bash", { command: "x" });
+    // every check and then fails on the way through the merge would propagate
+    // out of the sandbox call while the run stayed recorded as it was — which
+    // is to say clean. Frozen is the input that finds a merge writing through
+    // what it was handed instead of building its own.
+    const label = Object.freeze({
+      confidentiality: Object.freeze(["finance"]),
+    }) as unknown as IFCLabel;
+    const base = sandboxResult(FINANCE);
+    const result = {
+      version: 1,
+      stdout: { ...base.stdout, label },
+      stderr: { ...base.stderr, label },
+      exitCode: { ...base.exitCode, label },
+    } as unknown as CfcSandboxResult;
 
-      expect(["known", "unknown"]).toContain(engine.sandboxTaint.kind);
-      expect(clause[0]).toBe("finance");
-    } finally {
-      forgetSandboxTaintForTesting(runId);
-    }
+    expect(await taintAfter(result)).toEqual({ kind: "known", label: FINANCE });
   });
 
   it("keeps a child's invocations out of its parent's record", async () => {
@@ -401,6 +397,25 @@ describe("a run's sandbox taint", () => {
 
   it("stays clean for a complete result reporting a public container", async () => {
     expect(await taintAfter(sandboxResult({}))).toEqual({ kind: "known" });
+  });
+
+  it("reads three observations of one container written in different orders", async () => {
+    // Property order is not a difference in what a label requires. A
+    // comparison that read it as one would see three containers where there
+    // is one, and poison a run whose evidence was complete and agreed.
+    const label = { confidentiality: ["finance"], integrity: ["ci"] };
+    const reordered = { integrity: ["ci"], confidentiality: ["finance"] };
+    const base = sandboxResult(FINANCE);
+    const result = {
+      version: 1,
+      stdout: { ...base.stdout, label },
+      stderr: { ...base.stderr, label: reordered },
+      exitCode: { ...base.exitCode, label: reordered },
+    } as unknown as CfcSandboxResult;
+
+    // Integrity is dropped by the merge, which the checked write path cannot
+    // add; the confidentiality the container carried is what lands.
+    expect(await taintAfter(result)).toEqual({ kind: "known", label: FINANCE });
   });
 
   it("poisons on a result the runtime synthesized", async () => {

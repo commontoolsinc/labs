@@ -48,6 +48,32 @@ const isInertContainer = (container: object): boolean => {
 };
 
 /**
+ * Whether a non-enumerable own key makes its container unreadable.
+ *
+ * A non-enumerable property is usually invisible to everything downstream —
+ * the merge walks own enumerable properties — so skipping it answers with
+ * what the merge would have seen. The exceptions are the keys something DOES
+ * reach by name, and dropping one of those answers with a container carrying
+ * less than the source does. That is the fail-open this exists to prevent: a
+ * shape this cannot read, not a value with one requirement fewer.
+ */
+type HiddenKeyRule = (key: string) => boolean;
+
+/** Nothing downstream reaches a nested record's properties by name. */
+const SKIP_HIDDEN: HiddenKeyRule = () => false;
+
+/** The merge reads a label's clauses by name, hidden or not. */
+const HIDDEN_LABEL_CLAUSE: HiddenKeyRule = (key) =>
+  key === "confidentiality" || key === "integrity";
+
+/**
+ * An array's elements are reached by index rather than by enumeration, so a
+ * hidden one is a member the copy would lose. `length` is the own key every
+ * array hides, and it is not a member.
+ */
+const HIDDEN_ARRAY_MEMBER: HiddenKeyRule = (key) => key !== "length";
+
+/**
  * The own enumerable DATA entries of a container, read once.
  *
  * Read once is the point. Every later step uses what this returned, so a
@@ -58,7 +84,7 @@ const isInertContainer = (container: object): boolean => {
  */
 const inertEntries = (
   container: object,
-  recognized?: ReadonlySet<string>,
+  hidden: HiddenKeyRule,
 ): readonly (readonly [string, unknown])[] | undefined => {
   const entries: (readonly [string, unknown])[] = [];
   for (const key of Reflect.ownKeys(container)) {
@@ -70,12 +96,7 @@ const inertEntries = (
       continue;
     }
     if (!descriptor.enumerable) {
-      // A key this build reads MEANING from, hidden where a walk over own
-      // enumerable properties does not go. Skipping it would answer with a
-      // label carrying less than the source does, which is the fail-open this
-      // exists to prevent: it is a shape this cannot read, not a label with
-      // one fewer requirement.
-      if (recognized?.has(key)) {
+      if (hidden(key)) {
         return undefined;
       }
       continue;
@@ -87,12 +108,6 @@ const inertEntries = (
   }
   return entries;
 };
-
-/** The keys a label carries meaning in. */
-const LABEL_CLAUSES: ReadonlySet<string> = new Set([
-  "confidentiality",
-  "integrity",
-]);
 
 /** A primitive this can carry, or `undefined` when it is not one. */
 const inertPrimitive = (
@@ -146,7 +161,10 @@ const inertJsonCopy = (
     if (!isInertContainer(container)) {
       return undefined;
     }
-    const entries = inertEntries(container);
+    const entries = inertEntries(
+      container,
+      Array.isArray(container) ? HIDDEN_ARRAY_MEMBER : SKIP_HIDDEN,
+    );
     if (entries === undefined) {
       return undefined;
     }
@@ -192,14 +210,25 @@ const inertJsonCopy = (
   return { value: first.target };
 };
 
+/** One past the largest array index ECMAScript defines. */
+const ARRAY_INDEX_LIMIT = 2 ** 32 - 1;
+
 /**
  * Writes one entry into the copy, or reports that it cannot be written.
  *
- * An array's own enumerable data keys are its indices. Anything else on one —
- * a named property hung off a list of atoms — is data the copy has nowhere to
- * put, and dropping it would answer with a value that says less than the
- * source. That is the same fail-open as a hidden clause, so it is refused
- * rather than skipped.
+ * An array's own enumerable data keys are the indices `0` upward, taken in
+ * that order. Everything else on one is a named property hung off a list of
+ * atoms, and `"4294967295"` is one of those however much it reads as a
+ * number: it is past the last index ECMAScript defines, so assigning it
+ * leaves a list that still iterates as empty. A gap is refused for the same
+ * reason a hidden member is — the copy would carry fewer members than the
+ * source, which is data the merge reads as one requirement fewer.
+ *
+ * `defineProperty` rather than assignment, so that what lands is an own data
+ * property whatever the key is. `__proto__` is the one that makes the
+ * difference matter: it is an inherited accessor, and a write path that
+ * routes through it is one whose result depends on the engine rather than on
+ * what the source held.
  */
 const assign = (
   target: Record<string, unknown> | unknown[],
@@ -208,13 +237,21 @@ const assign = (
 ): boolean => {
   if (Array.isArray(target)) {
     const index = Number(key);
-    if (!Number.isInteger(index) || index < 0 || String(index) !== key) {
+    if (
+      !Number.isInteger(index) || index < 0 || index >= ARRAY_INDEX_LIMIT ||
+      String(index) !== key || index !== target.length
+    ) {
       return false;
     }
     target[index] = value;
     return true;
   }
-  target[key] = value;
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
   return true;
 };
 
@@ -222,7 +259,7 @@ const assign = (
  * Whether `value` is an IFC label this can represent: clauses that are lists
  * of data this can carry, and nothing else carrying content. A label whose
  * `confidentiality` is a string survives an equality comparison and is then
- * dropped by the merge, leaving a family that carried a requirement recorded
+ * dropped by the merge, leaving a run that carried a requirement recorded
  * as carrying none — and one holding a cycle anywhere inside it would throw
  * out of the comparison instead.
  */
@@ -266,7 +303,7 @@ const readInertLabel = (
   if (!isObjectNotArray(value) || !isInertContainer(value)) {
     return undefined;
   }
-  const entries = inertEntries(value, LABEL_CLAUSES);
+  const entries = inertEntries(value, HIDDEN_LABEL_CLAUSE);
   if (entries === undefined) {
     // An accessor on the label itself: reading it would run code, and it
     // could answer differently the next time.

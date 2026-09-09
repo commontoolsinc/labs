@@ -3145,6 +3145,56 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
   );
 });
 
+Deno.test("write_file keeps the sandbox's evidence, origin and all, on a successful write", async () => {
+  // The origin is what separates a runsc report of a public container from a
+  // result the runtime synthesized because it had none: both carry an empty
+  // label, and a reader of this artifact has nothing else to tell them apart.
+  const cfcResult = observedCfcResult("");
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    cfcResult,
+    cfcResultOrigin: "runsc-taint",
+  }]);
+
+  const output = await writeFileTool.invoke(createContext(sandbox), {
+    path: "notes/todo.txt",
+    content: "line one\n",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:write_file:1",
+    path: "/workspace/notes/todo.txt",
+    mode: "replace",
+    cfcResult,
+    cfcResultOrigin: "runsc-taint",
+  });
+});
+
+Deno.test("write_file keeps the sandbox's evidence, origin and all, on a failed write", async () => {
+  // A command that exited non-zero may still have truncated or partly written
+  // its target, so the record of what that write was exposed to is worth as
+  // much here as on the success path — and worth as little without its origin.
+  const cfcResult = observedCfcResult("");
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "write_file: permission denied",
+    exitCode: 1,
+    cfcResult,
+    cfcResultOrigin: "synthetic",
+  }]);
+
+  const output = await writeFileTool.invoke(createContext(sandbox), {
+    path: "notes/todo.txt",
+    content: "line one\n",
+  }) as unknown as Record<string, unknown>;
+
+  assertEquals(output.cfcResult, cfcResult);
+  assertEquals(output.cfcResultOrigin, "synthetic");
+  assertEquals(output.ok, false);
+});
+
 Deno.test("write_file tool merges explicit trusted CFC labels with write inputs", async () => {
   const sandbox = new FakeSandboxRuntime();
   const trustedLabels: CfcLabelView = {

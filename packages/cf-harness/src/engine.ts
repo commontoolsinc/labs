@@ -11,6 +11,7 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { inertLabelSnapshot } from "./ifc-label-shape.ts";
@@ -24,6 +25,7 @@ import {
 } from "./sandbox-taint.ts";
 
 import {
+  canonicalizeCfcLabel,
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
@@ -326,14 +328,24 @@ const exitCodeObservationLabel = (
 /**
  * Whether two labels state the same requirement.
  *
- * Both are known representable before this runs, so serializing them cannot
- * meet a cycle, a getter, or a depth this cannot walk. That order is the
- * whole point: a label reaching `JSON.stringify` unchecked can throw out of
- * the taint reader, and an exception there leaves the run recorded as it was
- * — which is to say clean.
+ * The repository's structural equality, over the runner's canonical form of
+ * each side. The order two clauses were written in is not a difference in
+ * what a label requires, and a comparison that read it as one would refuse a
+ * valid result — three observations of one container, rendered with their
+ * properties in different orders, would look like three containers and
+ * poison the run. Clause interiors are the runner's own business, so
+ * `canonicalizeCfcLabel` settles them rather than a rule restated here.
+ *
+ * Both sides are inert snapshots before this runs, holding no cycle, no
+ * getter, and no depth past `MAX_LABEL_DEPTH`. That order is the whole point:
+ * a walk over an unchecked label can raise out of the taint reader, and an
+ * exception there leaves the run recorded as it was — which is to say clean.
  */
 const sameLabel = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
+  deepEqual(
+    canonicalizeCfcLabel((left ?? {}) as IFCLabel),
+    canonicalizeCfcLabel((right ?? {}) as IFCLabel),
+  );
 
 /**
  * The container taint a sandbox invocation reported, or `undefined` when it
@@ -903,6 +915,17 @@ export class CfHarnessEngine {
     this.#inputCells = options.inputCells ?? [];
     this.#patternRefs = options.patternRefs ?? [];
     this.#spaceDbPath = options.spaceDbPath;
+    // The root this run's artifacts actually land under, resolved the same
+    // way the store below is: an injected store is the one that writes, so
+    // its root is the one a transport directory must not sit inside. Deriving
+    // this from the config alone would leave an injected store's root
+    // unexcluded, which is the container writing where the record it is
+    // judged by is kept.
+    const effectiveArtifactRoot = options.artifactStore?.artifactRoot ??
+      this.config.artifactRoot ??
+      (options.runState?.artifactRoot !== undefined
+        ? dirname(options.runState.artifactRoot)
+        : undefined);
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -911,14 +934,8 @@ export class CfHarnessEngine {
         additionalMounts: options.additionalMounts,
         cfcResultDir: options.cfcResultDir,
         cfcInvocationContextDir: options.cfcInvocationContextDir,
-        ...((this.config.artifactRoot ??
-            (options.runState?.artifactRoot !== undefined
-              ? dirname(options.runState.artifactRoot)
-              : undefined)) !== undefined
-          ? {
-            artifactRootHostPath: this.config.artifactRoot ??
-              dirname(options.runState!.artifactRoot!),
-          }
+        ...(effectiveArtifactRoot !== undefined
+          ? { artifactRootHostPath: effectiveArtifactRoot }
           : {}),
       })
       : this.config.sandbox;

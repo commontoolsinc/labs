@@ -57,27 +57,77 @@ export type HarnessSandboxTaint =
  * the value it was read from is never consulted again.
  */
 const readTaint = (value: unknown): HarnessSandboxTaint | undefined => {
+  try {
+    return readTaintRecord(value);
+  } catch {
+    // The record is data from outside this process, and the seam it arrives
+    // through carries objects as well as parsed JSON — an accessor on it can
+    // raise. Seeding runs inside engine construction, where an exception does
+    // not read as a lost run: it takes the run down, and a caller that
+    // catches it is left with a state that still reads as clean.
+    return undefined;
+  }
+};
+
+/**
+ * Each field taken exactly once, and every later step built from the locals.
+ *
+ * The label is the one that matters most, but `kind` decides which record
+ * this is at all, so a second read of either is a second chance for the
+ * source to say something no check saw.
+ */
+const readTaintRecord = (value: unknown): HarnessSandboxTaint | undefined => {
   if (!isObjectNotArray(value)) {
     return undefined;
   }
-  if (value.kind === "unknown") {
-    return typeof value.reason === "string"
-      ? { kind: "unknown", reason: value.reason }
-      : undefined;
+  const kind = value.kind;
+  if (kind === "unknown") {
+    const reason = value.reason;
+    return typeof reason === "string" ? { kind: "unknown", reason } : undefined;
   }
-  if (value.kind !== "known") {
+  if (kind !== "known") {
     return undefined;
   }
-  if (value.label === undefined) {
+  const label = value.label;
+  if (label === undefined) {
     return { kind: "known" };
   }
-  // The SNAPSHOT, taken once. What this returns is what gets joined and
-  // stored; the value it was read from is never consulted again, so a source
-  // that answers differently the next time has nothing left to answer.
-  const label = inertLabelSnapshot(value.label);
-  return label === undefined
+  const snapshot = inertLabelSnapshot(label);
+  return snapshot === undefined
     ? undefined
-    : { kind: "known", label: label as IFCLabel };
+    : { kind: "known", label: snapshot as IFCLabel };
+};
+
+/**
+ * The state as something no later hand can change, stored and handed out.
+ *
+ * This is trusted evidence about untrusted work, and the map holding it is
+ * module-private for that reason. Handing a caller the stored object would
+ * put the accumulator back within reach of anything holding a reference to
+ * what it read — a clause pushed onto a returned label is a run recorded as
+ * carrying something no invocation reported. The structure is a small inert
+ * record, so freezing all of it costs nothing worth counting.
+ */
+const frozenTaint = (taint: HarnessSandboxTaint): HarnessSandboxTaint => {
+  if (taint.kind === "known" && taint.label !== undefined) {
+    for (const clause of Object.values(taint.label)) {
+      if (Array.isArray(clause)) {
+        deepFreeze(clause);
+      }
+    }
+    Object.freeze(taint.label);
+  }
+  return Object.freeze(taint);
+};
+
+const deepFreeze = (value: unknown): void => {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
+    return;
+  }
+  Object.freeze(value);
+  for (const entry of Object.values(value)) {
+    deepFreeze(entry);
+  }
 };
 
 const taints = new Map<string, HarnessSandboxTaint>();
@@ -85,7 +135,7 @@ const taints = new Map<string, HarnessSandboxTaint>();
 /** What is known about `runId`'s sandbox work. */
 export const sandboxTaint = (
   runId: string,
-): HarnessSandboxTaint => taints.get(runId) ?? { kind: "known" };
+): HarnessSandboxTaint => taints.get(runId) ?? frozenTaint({ kind: "known" });
 
 /**
  * Joins one invocation's container taint into the run's.
@@ -118,9 +168,9 @@ export const joinSandboxTaint = (
     current.label,
     snapshot as IFCLabel,
   ]);
-  const next: HarnessSandboxTaint = merged === undefined
-    ? { kind: "known" }
-    : { kind: "known", label: merged };
+  const next = frozenTaint(
+    merged === undefined ? { kind: "known" } : { kind: "known", label: merged },
+  );
   taints.set(runId, next);
   return next;
 };
@@ -138,7 +188,7 @@ export const poisonSandboxTaint = (
   if (current.kind === "unknown") {
     return current;
   }
-  const next: HarnessSandboxTaint = { kind: "unknown", reason };
+  const next = frozenTaint({ kind: "unknown", reason });
   taints.set(runId, next);
   return next;
 };

@@ -797,7 +797,7 @@ describe("prompt-loop address handles", () => {
       URI_A,
     );
     // Held rather than read back off the engine: what the engine exposes is
-    // the family-instrumented view of this runtime, not the runtime itself.
+    // this run's instrumented view of the runtime, not the runtime itself.
     const sandbox = new FakeSandboxRuntime();
     const engine = new CfHarnessEngine({
       sandboxRuntime: sandbox,

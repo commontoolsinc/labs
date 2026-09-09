@@ -13,14 +13,44 @@ import { join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import { runCfHarnessCli } from "../src/cli.ts";
+import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
 import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
 
 describe("CFC sidecar transport isolation", () => {
   // The harness writes the invocation context a container starts tainted
-  // from, and reads back the final taint a cell's label is minted from.
+  // from, and reads back the taint the run's evidence record is built from.
   // Neither claim survives the directory being writable by the workload it
   // describes: a container that can rewrite its own result sidecar names its
   // own taint.
+
+  it("refuses to resolve a host path it could not read", () => {
+    // The comparison is on REAL paths, so a failure to resolve one is not a
+    // path that is merely absent: keeping the unresolved name would compare a
+    // symlink against the mount it points into and find it outside. Only
+    // "not there" may be walked past.
+    const realPathSync = Deno.realPathSync;
+    // Unreadable at the transport itself and at its parent, resolvable above:
+    // the shape where walking past the failure ends in a path that resolved
+    // without ever reading the components that decide containment.
+    Deno.realPathSync = ((path: string | URL) => {
+      const asString = String(path);
+      if (asString.includes("/sidecars")) {
+        throw new Deno.errors.PermissionDenied(`unreadable: ${asString}`);
+      }
+      return asString;
+    }) as typeof Deno.realPathSync;
+    try {
+      expect(() =>
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: "/host/workspace",
+          cfcResultDir: "/host/sidecars/results",
+        })
+      ).toThrow(Deno.errors.PermissionDenied);
+    } finally {
+      Deno.realPathSync = realPathSync;
+    }
+  });
 
   it("refuses a result directory inside the workspace mount", async () => {
     const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
@@ -119,6 +149,32 @@ describe("CFC sidecar transport isolation", () => {
           workspaceHostPath: workspace,
           artifactRootHostPath: artifactRoot,
           cfcInvocationContextDir: join(artifactRoot, "invocation-context"),
+        })
+      ).toThrow(/must not be inside a directory the sandbox can write/);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("excludes the artifact root of a store the engine was handed", async () => {
+    // The store that WRITES is the one whose root holds the run's record, and
+    // an injected one wins over the configured root. Deriving the excluded
+    // root from the config alone would leave that store's root unguarded —
+    // the container writing into the directory the record it is judged by
+    // lives in.
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
+    try {
+      expect(() =>
+        new CfHarnessEngine({
+          runId: "run-injected-store",
+          workspaceHostPath: workspace,
+          artifactStore: createFileSystemHarnessArtifactStore({
+            artifactRoot,
+            runId: "run-injected-store",
+          }),
+          cfcResultDir: join(artifactRoot, "sidecars", "results"),
         })
       ).toThrow(/must not be inside a directory the sandbox can write/);
     } finally {

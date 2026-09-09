@@ -10,6 +10,7 @@ import {
 import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { MAX_LABEL_DEPTH } from "../src/ifc-label-shape.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -1678,6 +1679,11 @@ Deno.test("DockerRunscSandboxRuntime treats an unreadable taint as synthetic, no
       // a container that carried nothing.
       {},
       { string: 7 },
+      // A clause that IS a list, holding a member no reader further on could
+      // hold. The list shape alone is not the question — what the clause
+      // carries has to be data too, or the label handed on names something
+      // nothing downstream can represent.
+      { xattrJSON: { confidentiality: [nestedPastLabelDepth()] } },
     ]
   ) {
     const cfcResultDir = await Deno.makeTempDir();
@@ -1710,6 +1716,15 @@ Deno.test("DockerRunscSandboxRuntime treats an unreadable taint as synthetic, no
     }
   }
 });
+
+/** A clause member nested past the depth a label is ever read to. */
+const nestedPastLabelDepth = (): unknown => {
+  let nested: unknown = "finance";
+  for (let depth = 0; depth <= MAX_LABEL_DEPTH; depth++) {
+    nested = [nested];
+  }
+  return nested;
+};
 
 Deno.test("DockerRunscSandboxRuntime reports a readable taint as runsc's own", async () => {
   const cfcResultDir = await Deno.makeTempDir();

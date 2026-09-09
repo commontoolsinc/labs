@@ -207,6 +207,12 @@ export interface HarnessRunState {
    */
   cfcSandboxTaint?: HarnessSandboxTaint;
 
+  /**
+   * The per-cell CFC labels the run's space holds for the cells it touched.
+   * Every other artifact a run writes is the run's own record of itself; this
+   * one is read out of the space, and it is the only place a reader working
+   * from the tree can learn what a cell is labelled.
+   */
   cellLabels?: HarnessCellLabels;
 
   cellLabelsPath?: string;

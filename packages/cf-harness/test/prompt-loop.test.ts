@@ -56,6 +56,7 @@ import {
   chatViewOfRequest,
   responsesBodyFromChatFixture,
 } from "./support/responses-fixture.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -1113,6 +1114,93 @@ const toolResultFields = (content: string): Record<string, unknown> => {
   >;
   return fields;
 };
+
+Deno.test("CfHarnessPromptLoop keeps a write's CFC evidence on the artifact and out of the model's context", async () => {
+  // Two surfaces, opposite obligations. The artifact is where a reader of the
+  // run learns what the write was exposed to and whether the runtime or runsc
+  // said so; the model asked a tool to save it that context, and the pair is
+  // exactly the sort of thing that would spend it.
+  const artifactRoot = await Deno.makeTempDir({
+    dir: "/tmp",
+    prefix: "cf-harness-write-evidence-",
+  });
+  try {
+    const artifactStore = new RecordingArtifactStore(
+      artifactRoot,
+      "run-write-evidence",
+    );
+    const cfcResult = observedCfcResult("");
+    const requestBodies: string[] = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime([{
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+          cfcResult,
+          cfcResultOrigin: "runsc-taint",
+        }]),
+        runId: "run-write-evidence",
+        model: "gpt-5.4",
+        artifactStore,
+      }),
+      fetchFn: (_input, init) => {
+        requestBodies.push(String(init?.body));
+        const payload = requestBodies.length === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-write",
+                  type: "function",
+                  function: {
+                    name: "write_file",
+                    arguments: JSON.stringify({
+                      path: "notes/todo.txt",
+                      content: "line one\n",
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "done" },
+            }],
+          };
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(responsesBodyFromChatFixture(payload)),
+            { status: 200 },
+          ),
+        );
+      },
+    });
+
+    await loop.runPrompt({
+      prompt: "Write the note.",
+      promptSlotBinding: directPromptSlotBindingFor("write-evidence"),
+    });
+
+    const persisted = artifactStore.toolOutputs.find((entry) =>
+      entry.toolId === "write_file"
+    )?.output as Record<string, unknown>;
+    assertEquals(persisted.cfcResult, cfcResult);
+    assertEquals(persisted.cfcResultOrigin, "runsc-taint");
+
+    const shown = requestBodies.at(-1) ?? "";
+    assertEquals(shown.includes("cfcResultOrigin"), false);
+    assertEquals(shown.includes("cfcResult"), false);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
 
 Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant response", async () => {
   await using fixture = await createPatternSkillsFixture();
