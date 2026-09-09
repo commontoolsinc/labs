@@ -9,8 +9,8 @@
  * let a plain record present itself as an `Error`.
  *
  * Two kinds of value are recognized with no reachable class at all, which is
- * why the constructor switch has fallbacks beneath it rather than standing
- * alone: an array, by `Array.isArray()`, and an error, by `Error.isError()`.
+ * why each is asked about ahead of the constructor lookup rather than left to
+ * it: an array, by `Array.isArray()`, and an error, by `Error.isError()`.
  * Each tests an internal slot rather than a prototype, so each holds across
  * realms and through a severed prototype.
  *
@@ -23,7 +23,10 @@
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
 
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
-import { tagFromNativeBuiltinClass, tagFromFabricPrimitiveElseNull } from "./tag-from.ts";
+import {
+  tagFromFabricPrimitiveElseNull,
+  tagFromNativeBuiltinClass,
+} from "./tag-from.ts";
 import { FabricInstance, FabricPrimitive } from "./interface.ts";
 
 /**
@@ -36,11 +39,11 @@ import { FabricInstance, FabricPrimitive } from "./interface.ts";
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
  *
- * Otherwise dispatches via the value's constructor (O(1) switch in
- * `tagFromNativeClass`, which matches `Error` subclasses via `prototype
- * instanceof Error`), falling back to native error detection for values whose
- * constructor is unreachable -- a severed prototype, or another realm -- and to
- * a prototype check for null-prototype objects.
+ * An error is recognized next, by `Error.isError()`, which holds through a
+ * severed prototype and across realms; then a `FabricPrimitive`, by the tag
+ * its instance carries; then a `FabricInstance`, by class. A null-prototype
+ * object is tagged `Object`. What remains is decided by its class, read from
+ * its prototype, through `tagFromNativeBuiltinClass()`.
  */
 export function tagFromNativeValue(value: unknown): ValueTag | null {
   if (value === null || typeof value !== "object") {
@@ -74,7 +77,5 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // `Error` and silently rebuilt as one.
   const ctor = constructorOfPrototype(proto);
 
-  return (ctor === undefined)
-    ? null
-    : tagFromNativeBuiltinClass(ctor);
+  return (ctor === undefined) ? null : tagFromNativeBuiltinClass(ctor);
 }
