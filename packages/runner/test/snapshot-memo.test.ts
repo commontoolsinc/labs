@@ -16,6 +16,7 @@ import {
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { NormalizedFullLink } from "../src/link-types.ts";
 import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
 import {
   machineryRead,
@@ -207,6 +208,154 @@ describe("snapshot memo", () => {
     resolveLink(runtime, tx, link);
 
     expect(readCount()).toBe(afterSet);
+  });
+
+  it("keeps apart two paths whose segments differ only in where a boundary falls", () => {
+    // The two paths concatenate to the same characters; only their segment
+    // boundaries differ. A key that joined segments with a separator a segment
+    // may itself contain would name one entry for both.
+    const doc = runtime.getCell<Record<string, unknown>>(
+      space,
+      "boundary-doc",
+      undefined,
+      tx,
+    );
+    doc.setRaw({ "a\0b": { c: "one" }, a: { "b\0c": "two" } });
+    const base = doc.getAsNormalizedFullLink();
+
+    const first = resolveLink(runtime, tx, { ...base, path: ["a\0b", "c"] });
+    const second = resolveLink(runtime, tx, { ...base, path: ["a", "b\0c"] });
+
+    expect(first.path).toEqual(["a\0b", "c"]);
+    expect(second.path).toEqual(["a", "b\0c"]);
+  });
+
+  describe("inside an ambient-read-meta scope", () => {
+    it("serves a resolution to a second one in the same scope", () => {
+      const { holder } = linkingCell("scoped-holder", "scoped-target");
+      const link = holder.key("target").getAsNormalizedFullLink();
+
+      // Both resolutions journal their reads with the same metadata, so the
+      // second has nothing to add that the first did not.
+      let afterFirst = 0;
+      tx.runWithAmbientReadMeta(machineryRead, () => {
+        resolveLink(runtime, tx, link);
+        afterFirst = readCount();
+        resolveLink(runtime, tx, link);
+      });
+
+      expect(readCount()).toBe(afterFirst);
+    });
+
+    it("does not serve an entry made in the scope to a resolution outside it", () => {
+      const { holder } = linkingCell("escape-holder", "escape-target");
+      const link = holder.key("target").getAsNormalizedFullLink();
+
+      tx.runWithAmbientReadMeta(machineryRead, () => {
+        resolveLink(runtime, tx, link);
+      });
+      const afterScoped = readCount();
+      resolveLink(runtime, tx, link);
+
+      expect(readCount()).toBeGreaterThan(afterScoped);
+    });
+  });
+
+  describe("at a read epoch", () => {
+    /** A holder whose link the test retargets, with both targets. */
+    const retargetable = (name: string) => {
+      const first = runtime.getCell<{ value: string }>(
+        space,
+        `${name}-first`,
+        undefined,
+        tx,
+      );
+      first.set({ value: "first" });
+      const second = runtime.getCell<{ value: string }>(
+        space,
+        `${name}-second`,
+        undefined,
+        tx,
+      );
+      second.set({ value: "second" });
+      const holder = runtime.getCell<{ target: unknown }>(
+        space,
+        `${name}-holder`,
+        undefined,
+        tx,
+      );
+      holder.setRaw({ target: first.key("value").getAsLink() });
+      return {
+        link: holder.key("target").getAsNormalizedFullLink(),
+        first,
+        second,
+        retarget: () =>
+          holder.setRaw({ target: second.key("value").getAsLink() }),
+      };
+    };
+
+    const resolveAt = (epoch: number, link: NormalizedFullLink) => {
+      const previous = tx.enterReadEpoch(epoch);
+      try {
+        return resolveLink(runtime, tx, link);
+      } finally {
+        tx.exitReadEpoch(previous);
+      }
+    };
+
+    it("serves a resolution made before a write to a read at the epoch the write displaced", () => {
+      const { link, first, retarget } = retargetable("kept");
+      const epoch = tx.issueReadEpoch()!;
+      resolveLink(runtime, tx, link);
+
+      retarget();
+      const afterWrite = readCount();
+      const atEpoch = resolveAt(epoch, link);
+
+      expect(atEpoch.id).toBe(first.getAsNormalizedFullLink().id);
+      expect(readCount()).toBe(afterWrite);
+    });
+
+    it("serves a resolution made at an epoch across a later write", () => {
+      const { link, first, retarget } = retargetable("later");
+      const epoch = tx.issueReadEpoch()!;
+      retarget();
+      resolveAt(epoch, link);
+
+      retarget();
+      const afterSecondWrite = readCount();
+      const atEpoch = resolveAt(epoch, link);
+
+      expect(atEpoch.id).toBe(first.getAsNormalizedFullLink().id);
+      expect(readCount()).toBe(afterSecondWrite);
+    });
+
+    it("keeps an entry made at an epoch out of a resolution at the current instant", () => {
+      const { link, second, retarget } = retargetable("current");
+      const epoch = tx.issueReadEpoch()!;
+      retarget();
+      resolveAt(epoch, link);
+
+      expect(resolveLink(runtime, tx, link).id).toBe(
+        second.getAsNormalizedFullLink().id,
+      );
+    });
+
+    it("keeps entries of two epochs apart", () => {
+      const { link, first, second, retarget } = retargetable("two");
+      const before = tx.issueReadEpoch()!;
+      resolveLink(runtime, tx, link);
+      retarget();
+      const after = tx.issueReadEpoch()!;
+      resolveLink(runtime, tx, link);
+
+      expect(resolveAt(before, link).id).toBe(
+        first.getAsNormalizedFullLink().id,
+      );
+      expect(resolveAt(after, link).id).toBe(
+        second.getAsNormalizedFullLink().id,
+      );
+    });
   });
 
   it("keeps resolutions of two paths in one document apart", () => {
