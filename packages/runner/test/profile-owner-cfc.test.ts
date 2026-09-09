@@ -6,7 +6,10 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
+import {
+  type NormalizedFullLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
 
 const alice = await Identity.fromPassphrase(
   "runner-profile-owner-cfc-alice",
@@ -720,10 +723,9 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         seed,
       );
-      const storedProfiles = {
-        ...home.getAsNormalizedFullLink(),
-        path: ["value", "profiles"],
-      };
+      const storedProfiles = toMemorySpaceAddress(
+        home.key("profiles").getAsNormalizedFullLink(),
+      );
       seed.writeOrThrow(storedProfiles, [profileA.getAsLink()]);
       expect((await seed.commit()).error).toBeUndefined();
 
