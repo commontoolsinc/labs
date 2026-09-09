@@ -1711,8 +1711,20 @@ export function readStoredLinkChainRaw(
   }
 }
 
+/** Per-validation results for completed linked subgraphs. */
+interface ArgumentOverlayContext {
+  /** Addresses on the current descent, used to terminate cycles. */
+  chain: Set<string>;
+
+  /** Results by full address and materialized view, including its defaults. */
+  completed: Map<string, Map<unknown, unknown>>;
+
+  /** Reads whose result depends on a recursion cutoff or unavailable value. */
+  incompleteReads: number;
+}
+
 /**
- * Rebuild `materialized` so every slot whose STORED value routes through a
+ * Rebuilds `materialized` so every slot whose stored value routes through a
  * link and materialized to `undefined` carries
  * {@link UNRESOLVED_LINK_PLACEHOLDER} instead. Behind a link, an absence
  * defers, whatever produced it: the value is owned elsewhere, and "not
@@ -1728,39 +1740,56 @@ export function readStoredLinkChainRaw(
  *
  * The walk mirrors the materialization it repairs: from the argument doc's
  * raw bytes, following every link — across docs and spaces, to any depth —
- * via {@link readStoredLinkChainRaw}. The fleet incident this generalizes
- * from: a profile's `name` cell stores a link to its seed value's doc,
- * cold-start sync delivers the cell doc but not the seed doc, and the
- * one-hop overlay this walk replaced could not see past the first
- * resolution — so every home bricked with `profiles: 0: name: value does
- * not match type string` on the first pattern-identity move after the
- * profile was written.
+ * via {@link readStoredLinkChainRaw}. Stored links distinguish an unreadable
+ * target from a literal absence in the already-defaulted materialized view.
+ * Completed subgraphs are reused by address and view within this validation;
+ * a result affected by a recursion cutoff or unavailable raw-chain read stays
+ * local to its descent. Shared acyclic subgraphs avoid repeated expansion,
+ * while cyclic graphs retain their path-dependent cutoff behavior.
  */
 function overlayUnreadableLinkPlaceholders(
   tx: IExtendedStorageTransaction,
   base: NormalizedFullLink,
   raw: unknown,
   materialized: unknown,
-  chain: Set<string>,
+  context: ArgumentOverlayContext,
 ): unknown {
   if (isCellLink(raw)) {
     if (materialized === undefined) return UNRESOLVED_LINK_PLACEHOLDER;
     const link = parseLink(raw, base);
     const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
-    if (chain.has(key)) return materialized;
-    chain.add(key);
-    const reading = readStoredLinkChainRaw(tx, link, chain);
-    const result = reading.value === undefined
-      ? materialized
-      : overlayUnreadableLinkPlaceholders(
+    if (context.chain.has(key)) {
+      context.incompleteReads++;
+      return materialized;
+    }
+    const completed = context.completed.get(key);
+    if (completed?.has(materialized)) return completed.get(materialized);
+    const incompleteBefore = context.incompleteReads;
+    context.chain.add(key);
+    try {
+      const reading = readStoredLinkChainRaw(tx, link, context.chain);
+      if (reading.value === undefined) {
+        // A raw chain can stop at an active ancestor. Its result and every
+        // enclosing result must stay local to this descent.
+        context.incompleteReads++;
+        return materialized;
+      }
+      const result = overlayUnreadableLinkPlaceholders(
         tx,
         reading.base,
         reading.value,
         materialized,
-        chain,
+        context,
       );
-    chain.delete(key);
-    return result;
+      if (context.incompleteReads === incompleteBefore) {
+        const views = completed ?? new Map<unknown, unknown>();
+        views.set(materialized, result);
+        context.completed.set(key, views);
+      }
+      return result;
+    } finally {
+      context.chain.delete(key);
+    }
   }
   if (Array.isArray(raw) && Array.isArray(materialized)) {
     let result: unknown[] | undefined;
@@ -1770,7 +1799,7 @@ function overlayUnreadableLinkPlaceholders(
         base,
         raw[i],
         materialized[i],
-        chain,
+        context,
       );
       if (child !== materialized[i]) {
         result ??= materialized.slice();
@@ -1787,7 +1816,7 @@ function overlayUnreadableLinkPlaceholders(
         base,
         rawChild,
         (materialized as Record<string, unknown>)[key],
-        chain,
+        context,
       );
       if (child !== (materialized as Record<string, unknown>)[key]) {
         result ??= { ...(materialized as Record<string, unknown>) };
@@ -2803,7 +2832,7 @@ export class Runner {
           argumentLink,
           argumentCell.withTx(tx).getRaw({ meta: ignoreReadForScheduling }),
           validationArgument,
-          new Set(),
+          { chain: new Set(), completed: new Map(), incompleteReads: 0 },
         ),
         argumentSchema,
         validationOptions,

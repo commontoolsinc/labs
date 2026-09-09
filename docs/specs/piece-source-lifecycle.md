@@ -612,6 +612,13 @@ the validating transaction defers to reactive reads; a readable wrong-typed
 value is refused. Preflight does not establish that every linked value is
 available.
 
+When validation needs to distinguish unreadable links from literal absence, its
+fallback walks stored links alongside the materialized argument. It reuses
+completed subgraphs within that validation, keyed by the full normalized link
+address and materialized view so distinct defaults stay distinct. Results that
+depend on a recursion cutoff or an unavailable raw-chain read are not reused;
+cyclic graphs retain their path-dependent cutoff behavior.
+
 A source update can preserve a committed direct handle under an unchanged
 consumer input contract. The retained bytes and equivalent contracts in both
 directions must be proven; a newly introduced link cannot use this rule. The
