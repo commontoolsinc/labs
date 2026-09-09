@@ -78,7 +78,7 @@ function replaceCellsWithLinks(
     return converted;
   }
   const nativeTag = tagFromNativeValueElseNull(value);
-  if (nativeTag === VALUE_TAGS.Error) {
+  if (nativeTag === VALUE_TAGS.JsError) {
     const error = value as Error;
     const existing = seen.get(error);
     if (existing) return existing;

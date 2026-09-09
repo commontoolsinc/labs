@@ -211,12 +211,12 @@ export function cloneHelper(
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
     case VALUE_TAGS.Primitive:
-    case VALUE_TAGS.EpochNsec:
-    case VALUE_TAGS.EpochDay:
+    case VALUE_TAGS.FabricEpochNsec:
+    case VALUE_TAGS.FabricEpochDay:
     case VALUE_TAGS.FabricBytes:
     case VALUE_TAGS.FabricKeyPair:
     case VALUE_TAGS.FabricRegExp:
-    case VALUE_TAGS.Hash:
+    case VALUE_TAGS.FabricHash:
       return value;
 
     case VALUE_TAGS.FabricInstance: {

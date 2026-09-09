@@ -3835,19 +3835,20 @@ export function fabricFromNativeValue(
 > **Implementation: tag-based type dispatch.** The conversion functions
 > classify a value through `tagFromNativeValueElseNull()` (in
 > `packages/data-model/src/value-tags.ts`), which returns a tag string from the
-> `VALUE_TAGS` vocabulary -- `"Array"`, `"Object"`, `"Error"`, `"Map"`, `"Set"`,
-> `"Date"`, `"Uint8Array"`, `"RegExp"`, the primitive tags of
-> `FABRIC_PRIMITIVE_VALUE_TAGS` (one reported by each `FabricPrimitive` class),
-> `"FabricInstance"`, and `"Primitive"` -- or `null` for a value it does not
-> recognize. The conversion function then switches on the tag to route to the
-> appropriate wrapping logic. The dispatch asks its questions in a fixed order.
+> `VALUE_TAGS` vocabulary -- `"Array"`, `"Object"`, `"JsError"`, `"JsMap"`,
+> `"JsSet"`, `"JsDate"`, `"JsUint8Array"`, `"JsRegExp"`, the primitive tags of
+> `FABRIC_PRIMITIVE_VALUE_TAGS` (one reported by each `FabricPrimitive` class,
+> under a `Fabric` prefix), `"FabricInstance"`, and `"Primitive"` -- or `null`
+> for a value it does not recognize. The conversion function then switches on
+> the tag to route to the appropriate wrapping logic. The dispatch asks its
+> questions in a fixed order.
 > An array is tagged first, by `Array.isArray()`, so a subclass instance, a
 > severed-prototype array, and a cross-realm array all reach array handling and
 > are handled by the array rule of Section 1.5, rather than being rejected as
 > some unrecognized class or routed elsewhere by something the array carries.
 > A plain object is decided next, by its prototype being `Object.prototype`,
 > plain objects being the common case. A null-prototype object is tagged
-> `"Error"` if `Error.isError()` says so and otherwise `"Object"`, which
+> `"JsError"` if `Error.isError()` says so and otherwise `"Object"`, which
 > classifies more broadly than the type admits, for the same reason the array
 > tag does: it is what lets the object rule of Section 1.5 reject the value by
 > name rather than as some unrecognized class. Then the tests that hold where

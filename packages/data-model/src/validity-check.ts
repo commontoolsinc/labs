@@ -425,13 +425,13 @@ export function isValidFabricNativeObject(
   // does not, and it is what sees an error whose constructor is unreachable.
   // The one environment here that rebuilds the `Error` constructor -- SES
   // lockdown -- has the method restored before any of this runs.
-  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
-    case VALUE_TAGS.Error:
-    case VALUE_TAGS.Map:
-    case VALUE_TAGS.Set:
-    case VALUE_TAGS.Date:
-    case VALUE_TAGS.Uint8Array:
-    case VALUE_TAGS.RegExp: {
+  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.JsError : null)) {
+    case VALUE_TAGS.JsError:
+    case VALUE_TAGS.JsMap:
+    case VALUE_TAGS.JsSet:
+    case VALUE_TAGS.JsDate:
+    case VALUE_TAGS.JsUint8Array:
+    case VALUE_TAGS.JsRegExp: {
       return true;
     }
 

@@ -95,7 +95,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
-    return FABRIC_PRIMITIVE_VALUE_TAGS.Hash;
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricHash;
   }
 
   /** Defensive copy of the raw hash bytes. */
