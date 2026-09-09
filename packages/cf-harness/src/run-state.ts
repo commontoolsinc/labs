@@ -210,8 +210,11 @@ export interface HarnessRunState {
   /**
    * The per-cell CFC labels the run's space holds for the cells it touched.
    * Every other artifact a run writes is the run's own record of itself; this
-   * one is read out of the space, and it is the only place a reader working
-   * from the tree can learn what a cell is labelled.
+   * one is read out of the space, which makes it the only COMPLETE account of
+   * what the run's cells are labelled that a reader working from the tree
+   * has. A `describe_handle` output persisted beside it names label atoms
+   * too, but only for the handles a run happened to describe, and only as far
+   * as that tool renders them.
    */
   cellLabels?: HarnessCellLabels;
 
