@@ -38,10 +38,12 @@ export interface WriteFileToolSuccessOutput {
    * stripped before the model sees it — as the run's record of what the write
    * was exposed to.
    *
-   * NOT what the family's taint is read from: that is collected at the
-   * sandbox invocation boundary, precisely so a tool cannot lose it by
-   * dropping a field. This is evidence for a reader of the run, and a write
-   * whose result is absent here costs the record rather than the label.
+   * A PERSISTED EVIDENCE SURFACE, and one of two this package adds. It is
+   * NOT what the run's taint is read from: that is collected at the sandbox
+   * invocation boundary, precisely so a tool cannot lose it by dropping a
+   * field. Nothing reads this as a source of labels. It is evidence for a
+   * reader of the run, and a write whose result is absent here costs the
+   * record rather than any decision.
    */
   cfcResult?: CfcSandboxResult;
 }

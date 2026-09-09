@@ -203,6 +203,18 @@ describe("host mount paths", () => {
     ).toThrow(/workspaceHostPath must be an absolute host path/);
   });
 
+  it("refuses a relative artifact root", () => {
+    // Not a mount, but it takes part in the comparison, so it is held to the
+    // same rule as one.
+    expect(() =>
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        artifactRootHostPath: "artifacts",
+        cfcResultDir: "/elsewhere/sidecars",
+      })
+    ).toThrow(/artifactRootHostPath must be an absolute host path/);
+  });
+
   it("refuses a relative additional-mount path", () => {
     expect(() =>
       resolveDockerRunscSandboxConfig({

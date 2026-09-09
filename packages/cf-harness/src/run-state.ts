@@ -192,10 +192,18 @@ export interface HarnessRunState {
    * channel out of the container itself is one that workload can write, so
    * nothing read from inside contributes here.
    *
-   * Observability rather than authority: nothing in this package reads it as
-   * a source of labels. It is how a reader of the artifacts learns what the
-   * run's sandbox work was exposed to, and what a resumed run seeds its own
-   * state from.
+   * A PERSISTED EVIDENCE SURFACE, and one of two this package adds. Nothing
+   * here reads it as a source of labels: no value is minted from it and no
+   * decision turns on it. What it is for is a reader of the artifacts — it is
+   * how they learn what the run's sandbox work was exposed to and whether the
+   * harness could still account for all of it — and it is what a resumed run
+   * seeds its own state from.
+   *
+   * Held to the standard a label source would need even so, because the
+   * difference between "nothing was carried" and "we cannot say" is the
+   * difference between a correct label and a silently wrong one, and a record
+   * written to the weaker standard would already be wrong by the time
+   * something read it that way.
    */
   cfcSandboxTaint?: HarnessSandboxTaint;
 

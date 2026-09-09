@@ -26,10 +26,10 @@ export const MAX_LABEL_DEPTH = 64;
 /**
  * Whether `container` is a plain object or plain array and nothing more.
  *
- * The prototype check is what excludes the exotic ones: a class instance, an
- * object with an inherited `toJSON`, or a `Proxy` over either, all of which
- * can run code when read. `Object.create(null)` is admitted — it carries no
- * inherited anything, which is the property being asked about.
+ * The prototype check excludes the exotic ones: a class instance, an object
+ * with an inherited `toJSON`, or a `Proxy` over either, all of which can run
+ * code when read. `Object.create(null)` is admitted — it carries no inherited
+ * anything, which is the property being asked about.
  */
 const isInertContainer = (container: object): boolean => {
   const prototype = Object.getPrototypeOf(container);
@@ -40,99 +40,146 @@ const isInertContainer = (container: object): boolean => {
 };
 
 /**
- * The values of an inert container, read through descriptors so that an
- * accessor property is seen as one rather than invoked. An accessor is not
- * data, so its presence makes the container unreadable.
+ * The own enumerable DATA entries of a container, read once.
+ *
+ * Read once is the point. Every later step uses what this returned, so a
+ * source that answers differently the second time — a proxy whose `length`
+ * or `ownKeys` changes between reads — cannot change what was copied. An
+ * accessor is not data: reading it would run code, so its presence makes the
+ * container unreadable rather than being invoked.
  */
-const inertValues = (container: object): unknown[] => {
-  const values: unknown[] = [];
+const inertEntries = (
+  container: object,
+): readonly (readonly [string, unknown])[] | undefined => {
+  const entries: (readonly [string, unknown])[] = [];
   for (const key of Reflect.ownKeys(container)) {
+    if (typeof key !== "string") {
+      return undefined;
+    }
     const descriptor = Object.getOwnPropertyDescriptor(container, key);
     if (descriptor === undefined || !descriptor.enumerable) {
       continue;
     }
     if (!("value" in descriptor)) {
-      // An accessor: reading it would run code.
-      return [NOT_DATA];
+      return undefined;
     }
-    values.push(descriptor.value);
+    entries.push([key, descriptor.value]);
   }
-  return values;
+  return entries;
 };
 
-/** Stands for a property that is not data, and so cannot be carried. */
-const NOT_DATA = Symbol("cf-harness.not-data");
+/** A primitive this can carry, or `undefined` when it is not one. */
+const inertPrimitive = (
+  value: unknown,
+): { readonly value: unknown } | undefined => {
+  if (value === null) {
+    return { value: null };
+  }
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return { value };
+    case "number":
+      return Number.isFinite(value) ? { value } : undefined;
+    default:
+      return undefined;
+  }
+};
 
 /**
- * Whether `value` is plain JSON data this can carry: bounded in depth, free
- * of cycles, and holding nothing a serializer would refuse or silently drop.
+ * A copy of `value` as plain data, or `undefined` when it is not plain data.
  *
- * Walked with an explicit stack rather than by recursion, and bounded rather
- * than merely guarded against cycles. Both of those are about the same thing:
- * this must ANSWER for every input. A recursive walk raises `RangeError` on
- * deep input, and an exception raised while reading a container's taint
- * leaves the family recorded as it was — which is to say clean. A shape this
- * cannot read has to come back as `false`.
+ * COPIED as it is walked, rather than validated and then serialized. A
+ * verdict about mutable input is only true of the read that produced it: a
+ * proxy can pass validation and answer differently when the value is later
+ * compared or cloned, and serializing the SOURCE afterwards reads it again.
+ * Every primitive here is written into a fresh array or object during the
+ * same descriptor walk that checked it, and nothing downstream touches the
+ * original.
  *
- * The visited set holds the containers on the CURRENT path, so an object
- * appearing twice in sequence — one atom named in both clauses — is not
- * mistaken for a cycle, which is an object appearing inside itself.
- *
- * Containers are required to be INERT: a plain object or a plain array, read
- * through property descriptors. Reading `Object.values` off an arbitrary
- * object runs whatever getters or proxy traps it carries, and an inherited
- * `toJSON` runs later inside the comparison — either can raise, and a raise
- * here is the failure this exists to prevent. A label that came from
- * `JSON.parse`, which is where every real one comes from, is inert by
- * construction; anything else is a shape this cannot read.
+ * Iterative, with a visited set for cycles and a depth bound. Both are about
+ * answering for every input: recursion raises `RangeError` on deep data, and
+ * a raise while reading a container's taint leaves a run recorded as clean.
  */
-export const isRepresentableJsonValue = (value: unknown): boolean => {
-  type Frame = { value: unknown; depth: number; open: boolean };
-  const path = new Set<object>();
-  const stack: Frame[] = [{ value, depth: 0, open: true }];
-  while (stack.length > 0) {
-    const frame = stack.pop()!;
-    if (!frame.open) {
-      path.delete(frame.value as object);
-      continue;
+const inertJsonCopy = (
+  root: object,
+  depth: number,
+): { readonly value: unknown } | undefined => {
+  type Frame = {
+    readonly entries: readonly (readonly [string, unknown])[];
+    readonly target: Record<string, unknown> | unknown[];
+    readonly source: object;
+    readonly depth: number;
+    index: number;
+  };
+  const open = new Set<object>();
+  const frameFor = (container: object, atDepth: number): Frame | undefined => {
+    if (open.has(container) || atDepth >= MAX_LABEL_DEPTH) {
+      return undefined;
     }
-    const entry = frame.value;
-    if (entry === null) {
-      continue;
+    if (!isInertContainer(container)) {
+      return undefined;
     }
-    switch (typeof entry) {
-      case "string":
-      case "boolean":
-        continue;
-      case "number":
-        if (!Number.isFinite(entry)) {
-          return false;
-        }
-        continue;
-      case "object":
-        break;
-      default:
-        return false;
+    const entries = inertEntries(container);
+    if (entries === undefined) {
+      return undefined;
     }
-    const container = entry as object;
-    if (
-      path.has(container) || frame.depth >= MAX_LABEL_DEPTH ||
-      !isInertContainer(container)
-    ) {
-      return false;
-    }
-    path.add(container);
-    // A closing frame under the children, so the container leaves the current
-    // path once everything below it has been read.
-    stack.push({ value: container, depth: frame.depth, open: false });
-    const children = inertValues(container);
-    for (const child of children) {
-      if (child !== undefined) {
-        stack.push({ value: child, depth: frame.depth + 1, open: true });
-      }
-    }
+    open.add(container);
+    return {
+      entries,
+      target: Array.isArray(container) ? [] : {},
+      source: container,
+      depth: atDepth,
+      index: 0,
+    };
+  };
+  const first = frameFor(root, depth);
+  if (first === undefined) {
+    return undefined;
   }
-  return true;
+  const stack: Frame[] = [first];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame.index >= frame.entries.length) {
+      open.delete(frame.source);
+      stack.pop();
+      continue;
+    }
+    const [key, entry] = frame.entries[frame.index];
+    frame.index += 1;
+    const asPrimitive = inertPrimitive(entry);
+    if (asPrimitive !== undefined) {
+      assign(frame.target, key, asPrimitive.value);
+      continue;
+    }
+    if (typeof entry !== "object" || entry === null) {
+      return undefined;
+    }
+    const child = frameFor(entry as object, frame.depth + 1);
+    if (child === undefined) {
+      return undefined;
+    }
+    assign(frame.target, key, child.target);
+    stack.push(child);
+  }
+  return { value: first.target };
+};
+
+const assign = (
+  target: Record<string, unknown> | unknown[],
+  key: string,
+  value: unknown,
+): void => {
+  if (Array.isArray(target)) {
+    const index = Number(key);
+    // An array's own enumerable data keys are its indices; anything else on
+    // one is not data this carries.
+    if (Number.isInteger(index) && index >= 0) {
+      target[index] = value;
+    }
+    return;
+  }
+  target[key] = value;
 };
 
 /**
@@ -165,31 +212,41 @@ export const isRepresentableIfcLabel = (value: unknown): boolean =>
 export const inertLabelSnapshot = (
   value: unknown,
 ): Record<string, unknown> | undefined => {
+  try {
+    return readInertLabel(value);
+  } catch {
+    // A proxy can trap the reads this makes to decide whether it is inert —
+    // `ownKeys` and `getOwnPropertyDescriptor` among them — so the decision
+    // itself can raise. Answering `undefined` is what makes this total: every
+    // caller treats a label it cannot read as one that establishes nothing,
+    // and none can afford an exception instead.
+    return undefined;
+  }
+};
+
+const readInertLabel = (
+  value: unknown,
+): Record<string, unknown> | undefined => {
   if (!isObjectNotArray(value) || !isInertContainer(value)) {
     return undefined;
   }
+  const entries = inertEntries(value);
+  if (entries === undefined) {
+    // An accessor on the label itself: reading it would run code, and it
+    // could answer differently the next time.
+    return undefined;
+  }
   const snapshot: Record<string, unknown> = {};
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== "string") {
-      return undefined;
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !descriptor.enumerable) {
-      continue;
-    }
-    if (!("value" in descriptor)) {
-      // An accessor on the label itself: reading it would run code, and it
-      // could answer differently the next time.
-      return undefined;
-    }
-    const entry = descriptor.value;
+  for (const [key, entry] of entries) {
     if (key === "confidentiality" || key === "integrity") {
-      if (!Array.isArray(entry) || !isRepresentableJsonValue(entry)) {
+      if (!Array.isArray(entry)) {
         return undefined;
       }
-      // Deep-copied out of reach of whatever produced it, so nothing that
-      // compares or joins this label is reading the original again.
-      snapshot[key] = JSON.parse(JSON.stringify(entry));
+      const copied = inertJsonCopy(entry, 0);
+      if (copied === undefined || !Array.isArray(copied.value)) {
+        return undefined;
+      }
+      snapshot[key] = copied.value;
       continue;
     }
     if (entry !== undefined && entry !== null) {

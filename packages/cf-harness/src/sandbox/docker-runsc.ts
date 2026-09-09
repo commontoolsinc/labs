@@ -265,16 +265,11 @@ const resolveCfcInvocationContextDir = (
  * directory as outside every mount.
  */
 const realHostPathOrNearest = (path: string): string => {
+  // Every path that reaches here is validated absolute first, which is what
+  // makes the walk finite: a relative one has no root to reach, and
+  // `dirname(".")` is `"."`, so it would not have ended.
   const normalized = normalizeHostPath(path);
   const { root } = parseHostPath(normalized);
-  // A relative path has no root to walk down to: `dirname(".")` is `"."`, so
-  // the loop below would never end. Callers are held to absolute paths, and
-  // this answers rather than hanging for the ones that are not — a
-  // non-terminating walk during construction is a run that never starts and
-  // never says why.
-  if (root === "") {
-    return normalized;
-  }
   const tail: string[] = [];
   let head = normalized;
   // Every step drops a segment, so the walk is finite; it never has to test
@@ -292,33 +287,14 @@ const realHostPathOrNearest = (path: string): string => {
 };
 
 /**
- * Whether `dir` resolves inside `mountHostPath`, comparing REAL paths and
- * resolving as far down each as exists. A directory that is not there yet
- * still has to be compared against one that is; resolving neither would
- * compare a real path against a literal one, which on a host whose temporary
- * root is itself a symlink — macOS's `/var` is `/private/var` — reports every
- * directory as outside every mount.
- */
-export const isHostDirWithinMount = (
-  dir: string,
-  mountHostPath: string,
-): boolean => {
-  const step = relativeHostPath(
-    realHostPathOrNearest(mountHostPath),
-    realHostPathOrNearest(dir),
-  );
-  return step !== ".." && !step.startsWith(`..${hostSeparator}`);
-};
-
-/**
  * Refuses a CFC sidecar transport directory the sandbox can reach.
  *
  * Both sidecars are trusted: the harness writes the invocation context the
- * container starts tainted from, and reads back the final taint that
- * `ingest_sandbox_file` mints a cell's label from. Neither claim survives the
- * directory being writable by the workload it describes — a container that
- * can rewrite its own result sidecar can name its own taint, and a label
- * minted from that is one the sandbox chose.
+ * container starts tainted from, and reads back the final taint its output
+ * mediation rests on. Neither claim survives the directory being writable by
+ * the workload it describes — a container that can rewrite its own result
+ * sidecar names its own taint, and every decision downstream of that taint is
+ * then one the sandbox made.
  *
  * Comparison is on real paths, so a symlink into a mount is caught as one.
  * A path that does not exist yet cannot be under a mount that does, and is
@@ -375,6 +351,12 @@ export const resolveDockerRunscSandboxConfig = (
         `additional mount at ${mount.sandboxPath}`,
       );
     }
+  }
+  if (options.artifactRootHostPath !== undefined) {
+    validateAbsoluteHostDir(
+      options.artifactRootHostPath,
+      "artifactRootHostPath",
+    );
   }
   validateNonOverlappingMounts([
     { kind: "workspace", sandboxPath: workspaceMountPath },

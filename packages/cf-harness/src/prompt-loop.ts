@@ -4543,7 +4543,12 @@ export class CfHarnessPromptLoop {
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
-      sandboxRuntime: this.engine.sandbox,
+      // The RAW runtime, not this engine's instrumented view: a child
+      // observes its own invocations into its own state, and the parent's
+      // accumulator is the parent's own work. Handing over the wrapped
+      // runtime would report every one of the child's containers against the
+      // parent as well.
+      sandboxRuntime: this.engine.sandboxForDelegation,
       sandbox: this.engine.config.sandbox,
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,
