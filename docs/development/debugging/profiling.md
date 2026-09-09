@@ -325,6 +325,31 @@ Look for both before choosing. The perf skill carries the causes this runtime
 has actually produced, and the reasons an investigation that ends at the pattern
 has often stopped early.
 
+## What the client sent, and what came back
+
+Every rung above measures time. A read that is too wide shows up in them as a
+long span and a large upsert count, and neither says which documents were
+asked for or which arrived — the question an over-wide sync turns on.
+`CF_MEMORY_FRAME_LOG=<file>` answers it from the client's side of the wire:
+the memory client appends one JSON line per frame in either direction, with
+the frame's type and size, a watch mutation's roots and selectors, a commit's
+operations and read-set shape, and every document a response delivered with
+its size and top-level keys. Selectors repeat across roots, so each distinct
+one is written once under a hash and referenced by it after.
+
+Read it by pairing each outgoing watch with its response by `requestId`, then
+asking three things of the pair: how many roots went out, how many documents
+came back, and what those documents were — grouping the delivered documents by
+their top-level keys is what tells a piece's stored result apart from a
+rendered tree, a link, or a schema. A commit line carries its confirmed reads
+split by document kind and path depth, and the count of reads that asserted a
+document absent: a commit that walked deep into documents it had never loaded
+is visible as depth and absence together, before the server rejects it.
+
+On a `cf` invocation against the Topics board this is what separated a survey
+that produced sixty kilobytes of output from the twenty-five megabytes it
+received to produce them, and named the selectors that asked for each part.
+
 ## The server side
 
 A toolshed carries the same timing machinery as everything above, and reports it
@@ -374,7 +399,9 @@ process:
 - `logCounts` — the same per-logger counts, which is how a warning storm shows
   up as a number rather than as a log to grep.
 - `slowQueries` — the last hundred query, watch, or commit operations over
-  100 ms, with the space and the root and watch counts. `graph.query`,
+  `CF_SLOW_QUERY_THRESHOLD_MS` (100 ms unless set; a local investigation
+  sets it to `0` to record every operation), with the space and the root
+  and watch counts. `graph.query`,
   `session.watch.set` and `session.watch.add` entries attribute the traversal
   (`rootsVisited`, `rootsElapsedMs`, `slowestRoot`) and carry `managerReads`,
   the engine document reads across the whole request — the width a root

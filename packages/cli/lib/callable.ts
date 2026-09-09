@@ -48,6 +48,7 @@ import {
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -1617,6 +1618,7 @@ export async function executeResolvedCallable(
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
+    const dispatchStart = performance.now();
     const tx = await new Promise<IExtendedStorageTransaction>(
       (resolve, reject) => {
         try {
@@ -1642,6 +1644,11 @@ export async function executeResolvedCallable(
     // already-committed write hostage to every derived recomputation it
     // triggered elsewhere in the graph.
     deps.onPhase?.("committed");
+    await timeCliPhase("executeCallable.dispatch", () => {
+      // Already awaited above; recorded here so the trace carries the
+      // dispatch-to-commit span alongside the readback spans below.
+      return performance.now() - dispatchStart;
+    });
 
     const txStatus = tx.status();
     const deduplicated = txStatus.status === "error" &&
@@ -1703,7 +1710,10 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
-      const value = await receipt.pull();
+      const value = await timeCliPhase(
+        "executeCallable.receipt.pull",
+        () => receipt.pull(),
+      );
       // A value-less verb's receipt is an empty record — existence-only.
       // Presence is decided on the receipt's STORED value, never on the
       // materialized one: a `FabricInstance` crossing the cell read arrives
@@ -1726,11 +1736,9 @@ export async function executeResolvedCallable(
         // nothing, and that omission is the distinction the empty receipt
         // exists to draw.
         if (deps.selection !== undefined) {
-          result = await selectCallResult(
-            resolved,
-            receipt,
-            deps.selection,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.select",
+            () => selectCallResult(resolved, receipt, deps.selection!, deps),
           );
         }
         // Whatever the value in hand came from — the whole receipt, or the
@@ -1742,13 +1750,17 @@ export async function executeResolvedCallable(
         // has, and the bound below engages only where one does not.
         const cycle = circularResultPath(result);
         if (cycle !== undefined) {
-          result = await boundCyclicResult(
-            resolved,
-            receipt,
-            result,
-            cycle,
-            link.id,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.boundCyclic",
+            () =>
+              boundCyclicResult(
+                resolved,
+                receipt,
+                result,
+                cycle,
+                link.id,
+                deps,
+              ),
           );
         }
       }

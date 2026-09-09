@@ -208,7 +208,23 @@ const timing = getLogger("memory", { enabled: false });
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
-const SLOW_QUERY_THRESHOLD_MS = 100;
+// Operations slower than this are recorded for `/api/health/stats`. The
+// default suits a deployment, where the interesting operations are the ones
+// well past it; a local investigation of a fast machine sets
+// `CF_SLOW_QUERY_THRESHOLD_MS` lower — to `0` to record every one — so the
+// buffer carries the per-operation root, read and upsert counts for
+// operations the default would leave invisible.
+const SLOW_QUERY_THRESHOLD_MS = (() => {
+  try {
+    const raw = typeof Deno !== "undefined"
+      ? Deno.env.get("CF_SLOW_QUERY_THRESHOLD_MS")
+      : undefined;
+    const parsed = raw === undefined || raw === "" ? NaN : Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 100;
+  } catch {
+    return 100;
+  }
+})();
 const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
 // ~5 board-scale corpora (a full board evaluation retains ~6k entities).
 // Entity count is the byte proxy: what an entry holds alive is its cloned
@@ -374,7 +390,8 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query, watch, and commit operations (>100ms). */
+/** Returns the last N slow query, watch, and commit operations — those over
+ * `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
