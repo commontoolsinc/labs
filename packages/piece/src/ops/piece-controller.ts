@@ -2356,17 +2356,12 @@ function retainsInputHandleContract(
         sourceRoot: prior.root,
         targetRoot: target.root,
       });
-    if (
-      priorContracts.every((prior) =>
-        targetContracts.some((target) => sameContract(prior, target))
-      ) &&
+    return priorContracts.every((prior) =>
+      targetContracts.some((target) => sameContract(prior, target))
+    ) &&
       targetContracts.every((target) =>
         priorContracts.some((prior) => sameContract(prior, target))
-      )
-    ) return true;
-    assertContractSubset(priorContracts, targetContracts, "retained input");
-    assertContractSubset(targetContracts, priorContracts, "retained input");
-    return true;
+      );
   } catch {
     // An unprovable contract still needs the full producer-side proof.
     return false;

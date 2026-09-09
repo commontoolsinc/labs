@@ -11,10 +11,12 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPieceSourceSnapshot,
   isLink,
+  type JSONSchema,
   parseLinkOrThrow,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -324,6 +326,50 @@ export default pattern<{ avatar: string }, { avatar: Owned }>(
       expect(changed.issues.retainedLinks).toBeDefined();
       await expect(piece.setPattern(program("v3", "number"))).rejects.toThrow();
       expect(await piece.result.get()).toMatchObject({ version: "v2" });
+    });
+
+    it("requires the producer proof when a retained handle's scalar default changes", async () => {
+      const producer = runtime.getCell<string>(pieces.getSpace(), "producer");
+      const argument = runtime.getCell<{ value: unknown }>(
+        pieces.getSpace(),
+        "argument",
+      );
+      // Seed the committed binding independently of new-link admission so the
+      // consumer's unchanged contract is what permits retention.
+      const { error } = await runtime.editWithRetry((tx) => {
+        producer.withTx(tx).set("a");
+        producer.withTx(tx).setMetaRaw(
+          "schema",
+          { type: "string", enum: ["a"] },
+          rawMetaWriteAuthorization,
+        );
+        argument.withTx(tx).set({ value: producer });
+      });
+      expect(error).toBeUndefined();
+
+      const schema = (defaultValue: string): JSONSchema => ({
+        type: "object",
+        properties: {
+          value: { type: "string", asCell: ["cell"], default: defaultValue },
+        },
+        required: ["value"],
+      });
+      const priorArgumentSchema = schema("a");
+      const links = [{ path: ["value"], value: argument.getRaw()?.value }];
+      expect(isLink(links[0].value)).toBe(true);
+      const restore = (candidate: JSONSchema) =>
+        assertSuppliedLinkSchemasCompatible(
+          links,
+          candidate,
+          argument,
+          pieces,
+          { priorArgumentSchema, linksPreservedVerbatim: true },
+        );
+
+      expect(() => restore(schema("a"))).not.toThrow();
+      expect(() => restore(schema("b"))).toThrow(
+        "enum/const became more restrictive",
+      );
     });
 
     it("retains unchanged row defaults for identical source and a stopped source update", async () => {

@@ -38,6 +38,42 @@ describe("runner", () => {
     await storage.close();
   });
 
+  it("validates the argument link staged in the supplied transaction", async () => {
+    const committed = runtime.getCell(signer.did(), "committed");
+    const staged = runtime.getCell(signer.did(), "staged");
+    const piece = runtime.getCell(signer.did(), "piece");
+    const { error } = await runtime.editWithRetry((tx) => {
+      committed.withTx(tx).set({ count: 7 });
+      staged.withTx(tx).set({ count: "wrong" });
+      piece.withTx(tx).setMetaRaw(
+        "argument",
+        committed.getAsLink(),
+        rawMetaWriteAuthorization,
+      );
+    });
+    expect(error).toBeUndefined();
+    const schema = candidate({
+      type: "object",
+      properties: { count: { type: "number" } },
+      required: ["count"],
+    });
+    const tx = runtime.edit();
+    try {
+      piece.withTx(tx).setMetaRaw(
+        "argument",
+        staged.getAsLink(),
+        rawMetaWriteAuthorization,
+      );
+      expect(() => runtime.runner.validateStoredArgument(tx, piece, schema))
+        .toThrow("count: value does not match type number");
+      expect(() =>
+        runtime.runner.validateStoredArgument(runtime.readTx(), piece, schema)
+      ).not.toThrow();
+    } finally {
+      tx.abort();
+    }
+  });
+
   it("bounds shared-graph reads while refusing a readable invalid argument", async () => {
     const graphIds = new Set<string>();
     const argument = runtime.getCell(signer.did(), "argument");

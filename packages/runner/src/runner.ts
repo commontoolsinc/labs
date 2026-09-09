@@ -2399,7 +2399,7 @@ export class Runner {
     resultCell: Cell<R>,
     pattern: Pattern,
   ): void {
-    const argumentLink = getMetaLink(resultCell, "argument");
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
     if (argumentLink === undefined) return;
     const stored = this.#runtime.getCellFromLink(argumentLink, undefined, tx)
       .getRaw({ meta: ignoreReadForScheduling });
