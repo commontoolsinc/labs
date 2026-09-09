@@ -1,17 +1,34 @@
 import { expect } from "@std/expect";
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { linkRefPayloadToString } from "@commonfabric/runner/shared";
+import { Identity } from "@commonfabric/identity";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  type Cell,
+  type IExtendedStorageTransaction,
+  Runtime,
+} from "@commonfabric/runner";
+import {
+  linkRefFrom,
+  linkRefPayloadToString,
+} from "@commonfabric/runner/shared";
 
 import {
+  addToIndex,
   extractSpaceFromCellLink,
   generateWebhookId,
   generateWebhookSecret,
+  removeFromIndex,
   verifyWebhookSecret,
   webhookEntityId,
 } from "./webhooks.utils.ts";
 import env from "@/env.ts";
 import { sha256 } from "@/lib/sha2.ts";
+import {
+  createAclServer,
+  LoopbackSessionFactory,
+  TestStorageManager,
+} from "@/lib/test-support/memory-acl.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -133,6 +150,124 @@ describe("Webhook Utilities", () => {
     it("uses the cf webhook salt", async () => {
       const id = await webhookEntityId("wh_test123");
       expect(id).toBe(`of:${await sha256("cf:webhook:wh_test123")}`);
+    });
+  });
+
+  describe("service index", () => {
+    // Several sessions on one memory server, each with its own replica, so
+    // that a session can hold a copy of the index that another session's
+    // commit has made stale. That is the state in which a read outside the
+    // transaction lets a write overwrite what it never saw.
+
+    let server: MemoryV2Server.Server;
+    let factory: LoopbackSessionFactory;
+    let signer: Identity;
+    let space: ReturnType<Identity["did"]>;
+    let entityId: `of:${string}`;
+    let sessions: { runtime: Runtime; storageManager: TestStorageManager }[];
+
+    beforeEach(async () => {
+      server = createAclServer(`webhooks-index-${crypto.randomUUID()}`, "off");
+      factory = new LoopbackSessionFactory(server);
+      signer = await Identity.fromPassphrase(
+        `webhooks index ${crypto.randomUUID()}`,
+      );
+      space = signer.did();
+      entityId = `of:${await sha256("cf:webhooks-for:" + space)}`;
+      sessions = [];
+    });
+
+    afterEach(async () => {
+      for (const { runtime, storageManager } of sessions) {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+      await server.close();
+    });
+
+    /** A fresh session's synced view of the index cell. */
+    const openIndex = async (): Promise<Cell<string[]>> => {
+      const storageManager = TestStorageManager.overServer(
+        { as: signer },
+        factory,
+      );
+      const runtime = new Runtime({
+        apiUrl: new URL("https://webhooks-index-test.invalid"),
+        storageManager,
+      });
+      sessions.push({ runtime, storageManager });
+      const cell = runtime.getCellFromLink(
+        linkRefFrom({ id: entityId, space, path: ["webhooks"] }),
+      ) as Cell<string[]>;
+      await cell.sync();
+      await storageManager.synced();
+      return cell;
+    };
+
+    /** The index as a session that has seen nothing yet reads it. */
+    const durableIndex = async (): Promise<string[]> =>
+      [...(await openIndex()).get()].sort();
+
+    /** Commit one staged change to the index through `editWithRetry()`. */
+    const commit = async (
+      cell: Cell<string[]>,
+      stage: (tx: IExtendedStorageTransaction) => void,
+    ): Promise<void> => {
+      const { error } = await cell.runtime.editWithRetry(stage);
+      if (error) throw error;
+    };
+
+    it("keeps both IDs when two sessions add to the index concurrently", async () => {
+      const first = await openIndex();
+      await commit(first, (tx) => addToIndex(first, tx, "wh_seed"));
+      const second = await openIndex();
+      expect(second.get()).toEqual(["wh_seed"]);
+
+      await Promise.all([
+        commit(first, (tx) => addToIndex(first, tx, "wh_a")),
+        commit(second, (tx) => addToIndex(second, tx, "wh_b")),
+      ]);
+
+      expect(await durableIndex()).toEqual(["wh_a", "wh_b", "wh_seed"]);
+    });
+
+    it("removes both IDs when two sessions remove from the index concurrently", async () => {
+      const first = await openIndex();
+      for (const id of ["wh_a", "wh_b", "wh_c"]) {
+        await commit(first, (tx) => addToIndex(first, tx, id));
+      }
+      const second = await openIndex();
+      expect(second.get()).toEqual(["wh_a", "wh_b", "wh_c"]);
+
+      await Promise.all([
+        commit(first, (tx) => removeFromIndex(first, tx, "wh_a")),
+        commit(second, (tx) => removeFromIndex(second, tx, "wh_b")),
+      ]);
+
+      expect(await durableIndex()).toEqual(["wh_c"]);
+    });
+
+    it("does not add an ID the index already holds", async () => {
+      const index = await openIndex();
+      await commit(index, (tx) => addToIndex(index, tx, "wh_a"));
+      await commit(index, (tx) => addToIndex(index, tx, "wh_a"));
+
+      expect(await durableIndex()).toEqual(["wh_a"]);
+    });
+
+    it("reads the index through the transaction when it stages no write", async () => {
+      // Adding an ID the index holds writes nothing, so only the read itself
+      // can put the index document into the commit's read set.
+      const index = await openIndex();
+      await commit(index, (tx) => addToIndex(index, tx, "wh_a"));
+
+      const tx = index.runtime.edit();
+      addToIndex(index, tx, "wh_a");
+      const reads = [
+        ...(tx.getReadActivities?.() ?? tx.tx.getReadActivities?.() ?? []),
+      ];
+      expect(reads.map((read) => read.id)).toContain(entityId);
+      await tx.commit();
     });
   });
 });
