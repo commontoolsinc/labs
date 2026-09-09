@@ -350,7 +350,6 @@ in-flight external side effect.
 ## Test evidence
 
 - `deno task test` — package contract suite.
-- `deno task test:integration` — environment-gated real `runsc-cfc` paths.
 - Handle-table, prompt-loop-handle, cross-agent-handle, `describe_handle`,
   schema-shape, image-attachment, compaction, provenance, provider/auth,
   `run_pattern`, Fabric-session-CFC, and local-Loom-host suites — model

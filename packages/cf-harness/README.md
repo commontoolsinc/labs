@@ -308,7 +308,8 @@ What is not done yet:
     Timeline places the model-facing result beside the full fields withheld from
     it, labeled by omission rule. See [console/README.md](console/README.md)
 - [integration/](integration/)
-  - environment-gated real `runsc-cfc` integration tests
+  - the deployed-topology posture gate, which a continuous-integration job runs
+    against a toolshed it starts
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
   - staged Agent Skills support design
 - [../../docs/plans/cf-harness-codex-subscription-auth.md](../../docs/plans/cf-harness-codex-subscription-auth.md)
@@ -322,7 +323,6 @@ From [packages/cf-harness](.):
 - `deno task help`
 - `deno task run -- ...`
 - `deno task test`
-- `deno task test:integration`
 - `deno task cfc-audit <runDir | artifactRoot> [more paths...] [--json]
   [--fail-on fail|warn|inconclusive] [--corpus] [--expect-refusals]
   [--expected-posture <spec.json>] [--toolshed-url <url>]`
@@ -649,11 +649,12 @@ stream. The values travel as `x-cf-harness-*` headers and, condensed, inside the
 | `agent`     | `claude-code` or `codex`, when running inside one of their sessions  |
 | `service`   | the service that launched the harness, when one did                  |
 
-`invoker` is worked out from the environment: `CF_HARNESS_INTEGRATION=1` means
-the integration suite, `ENV=test` the unit suite, `GITHUB_ACTIONS` or `CI` a
-continuous-integration run, `OTEL_SERVICE_NAME` a service, and anything else a
-person at a terminal. A Loom run manifest sets it to `loom`, along with the
-dispatch class. `CF_HARNESS_PRINCIPAL` supplies a principal.
+`invoker` is worked out from the environment: `ENV=test` names the unit suite,
+`GITHUB_ACTIONS` or `CI` a continuous-integration run, `OTEL_SERVICE_NAME` a
+service, and anything else a person at a terminal. `CF_HARNESS_INTEGRATION=1` is
+the one a person declares, and reports `integration-test`. A Loom run manifest
+sets it to `loom`, along with the dispatch class. `CF_HARNESS_PRINCIPAL`
+supplies a principal.
 
 `agent` says which coding agent's session the harness is running inside, from
 `CLAUDECODE` for Claude Code and `CODEX_SANDBOX` for the Codex CLI, both of
@@ -2512,108 +2513,11 @@ cd packages/cf-harness
 deno task test
 ```
 
-Environment-gated integration tests:
-
-```bash
-cd packages/cf-harness
-deno task test:integration
-```
-
-No continuous-integration job dispatches that task, and it is meant to stay that
-way: `integration/engine.integration.test.ts` wants a Docker daemon carrying the
-`runsc-cfc` gVisor runtime, and
-`integration/pattern-index-live.integration.test.ts` wants a deployed pattern
-index plus a keyfile that deployment authorizes. Neither is a runner's to hold.
-Both files are type-checked by `deno task check` along with the rest of the
-package, so they answer for the interfaces they use whether or not anyone runs
-them; what they do not answer for is behavior, and a person running the task is
-the only thing that asks them to.
-
-The integration suite requires a working local Docker + `runsc-cfc` environment.
-By default it also uses the published kitchen-sink image above, unless you
-override `CF_HARNESS_INTEGRATION_IMAGE`.
-
-Every case in `engine.integration.test.ts` is skipped unless
-`CF_HARNESS_INTEGRATION=1` is set, which the task sets for you; the narrower
-opt-ins below each add a further variable. The pattern-index cases take a
-separate flag and are skipped even under that task:
-
-```bash
-cd packages/cf-harness
-CF_PATTERN_INDEX_LIVE_E2E=1 \
-CF_PATTERN_INDEX_LIVE_IDENTITY=/path/to/pattern-index.key \
-deno task test:integration
-```
-
-`CF_PATTERN_INDEX_LIVE_URL` names the deployment and defaults to the standing
-one. `CF_PATTERN_INDEX_LIVE_IDENTITY` has no default: which identity an index
-admits is a fact about that deployment, so the run fails rather than guess at a
-keyfile.
-
-To opt into a local Labs CLI smoke inside the sandbox, use a Deno 2-compatible
-image and enable the CF CLI case:
-
-```bash
-cd packages/cf-harness
-CF_HARNESS_INTEGRATION_IMAGE=registry.example/cf-harness-sandbox:deno2 \
-CF_HARNESS_INTEGRATION_CF_CLI=1 \
-deno task test:integration
-```
-
-That case mounts the current Labs checkout as `/workspace` and runs
-`deno task cf --help` inside the `runsc-cfc` sandbox. It is skipped by default
-because the published kitchen-sink image may not have the required Deno version
-or cache state.
-
-To also exercise a real host Fabric FUSE mount bind-mounted into the sandbox at
-`/fabric`, start `cf fuse mount` separately and pass the mountpoint:
-
-```bash
-cd packages/cf-harness
-CF_HARNESS_INTEGRATION_FABRIC_MOUNT=/tmp/cf deno task test:integration
-```
-
-That opt-in case verifies that cf-harness can navigate `/fabric` through
-`runsc-cfc` and read the FUSE `.status` file. Without
-`CF_HARNESS_INTEGRATION_FABRIC_MOUNT`, the Fabric mount case is skipped.
-
-To exercise label flow through a live Fabric FUSE projection, enable the
-additional CFC flow tests and provide concrete read/write projection paths under
-`/fabric`:
-
-```bash
-# In another terminal, mount FUSE with Docker traversal enabled.
-cf fuse mount /tmp/cf --allow-other --cfc-mode=observe --cfc-writeback-xattrs
-
-cd packages/cf-harness
-CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results" \
-CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc/cfc-invocations" \
-CF_HARNESS_INTEGRATION_FABRIC_MOUNT=/tmp/cf \
-CF_HARNESS_INTEGRATION_FABRIC_CFC_FLOW=1 \
-CF_HARNESS_INTEGRATION_FABRIC_CFC_READ_PATH=/fabric/home/pieces/example/result/secret \
-CF_HARNESS_INTEGRATION_FABRIC_CFC_WRITE_PATH=/fabric/home/pieces/example/result/output \
-CF_HARNESS_INTEGRATION_FABRIC_CFC_LABEL_SUBJECT=did:key:fabric \
-deno task test:integration
-```
-
-When those env vars point at a real labeled FUSE fixture, the extra tests probe
-FUSE-to-sandbox taint, command completion after a FUSE read, FUSE write
-attempts, and joins between explicit `cfcInputLabels` and a prior FUSE read. The
-result sidecar env var is required for all CFC flow assertions, and the
-invocation context sidecar env var is required for the cases that seed
-`cfcInputLabels`. Both env vars gate on being set, not on the installed Docker
-`runsc-cfc` runtime being registered against the same directories; register it
-with the matching `--cfc-invocation-context-dir` as well, or an enforcing case
-refuses at `docker create` rather than exercising the labels it seeds.
-
-The default Fabric CFC flow gate exercises the immediate result sidecar after a
-FUSE read. The stricter host-bind readback probe is opt-in with
-`CF_HARNESS_INTEGRATION_FABRIC_CFC_DURABLE_HOST_LABEL=1` because durable
-`FUSE -> sandbox -> host -> sandbox` label persistence is still a live-stack
-validation target. FUSE write assertions are also probes of the live stack:
-durable cell-label writeback depends on the runner/runtime emitting FUSE
-prepare/finalize metadata, not arbitrary direct writes to
-`trusted.cfc.contentLabel`.
+`integration/` holds one file, `fabric-session-posture-gate.test.ts`, and the
+"Deployed Topology Posture Gates" job in `.github/workflows/deno.yml` names it
+directly against a toolshed it starts. There is no package task for it: the gate
+needs a serving deployment, so `API_URL` is what admits it, and every case is
+skipped without one. That file's own header carries a local invocation.
 
 On Linux, Docker/runsc runs default to the host UID/GID. On macOS, the default
 omits `--user` because Docker Desktop bind mounts may expose host files as
