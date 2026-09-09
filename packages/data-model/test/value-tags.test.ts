@@ -47,6 +47,8 @@ import {
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  JS_TYPE_VALUE_TAGS,
+  type JsTypeValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
@@ -112,8 +114,30 @@ class UntaggedProbe extends BaseFabricPrimitive {
  */
 class RoguePrimitive extends FabricPrimitive {}
 
+/** One value of each JS primitive type, labeled, with the tag it takes. */
+const JS_PRIMITIVE_TAGS: ReadonlyArray<
+  [string, FabricValue, JsTypeValueTag]
+> = [
+  ["a bigint", 42n, VALUE_TAGS.bigint],
+  ["a boolean", true, VALUE_TAGS.boolean],
+  ["`null`", null, VALUE_TAGS.null],
+  ["a number", 42, VALUE_TAGS.number],
+  ["a string", "x", VALUE_TAGS.string],
+  ["a symbol", Symbol.for("s"), VALUE_TAGS.symbol],
+  ["`undefined`", undefined, VALUE_TAGS.undefined],
+];
+
+/**
+ * One value of each JS type `typeof` decides, labeled, with the tag it takes:
+ * the primitives above, and a function, which is no `FabricValue`.
+ */
+const JS_TYPE_TAGS: ReadonlyArray<[string, unknown, JsTypeValueTag]> = [
+  ...JS_PRIMITIVE_TAGS,
+  ["a function", () => {}, VALUE_TAGS.function],
+];
+
 /** One instance of each production primitive class, with the tag it carries. */
-const PRIMITIVE_TAGS: ReadonlyArray<
+const FABRIC_PRIMITIVE_TAGS: ReadonlyArray<
   [FabricPrimitive, FabricPrimitiveValueTag]
 > = [
   [new FabricBytes(new Uint8Array([1])), VALUE_TAGS.FabricBytes],
@@ -137,8 +161,14 @@ describe("value-tags", () => {
       expect(Object.isFrozen(VALUE_TAGS)).toBe(true);
     });
 
-    it("holds every primitive tag", () => {
+    it("holds every `FabricPrimitive` tag", () => {
       for (const [key, tag] of Object.entries(FABRIC_PRIMITIVE_VALUE_TAGS)) {
+        expect(VALUE_TAGS[key as keyof typeof VALUE_TAGS]).toBe(tag);
+      }
+    });
+
+    it("holds every JS type tag", () => {
+      for (const [key, tag] of Object.entries(JS_TYPE_VALUE_TAGS)) {
         expect(VALUE_TAGS[key as keyof typeof VALUE_TAGS]).toBe(tag);
       }
     });
@@ -153,8 +183,29 @@ describe("value-tags", () => {
     });
   });
 
+  describe("JS_TYPE_VALUE_TAGS", () => {
+    it("is frozen", () => {
+      expect(Object.isFrozen(JS_TYPE_VALUE_TAGS)).toBe(true);
+    });
+
+    for (const [label, value, tag] of JS_TYPE_TAGS) {
+      it(`names the tag of ${label} by its \`typeof\` name, or \`null\``, () => {
+        expect(tag).toBe((value === null) ? "null" : typeof value);
+      });
+    }
+
+    it("holds the tag of each JS type and nothing else", () => {
+      // The sample table is the domain only while it covers every type, so
+      // the two are held equal rather than the table being trusted.
+
+      expect(new Set(JS_TYPE_TAGS.map(([, , tag]) => tag))).toEqual(
+        new Set(Object.values(JS_TYPE_VALUE_TAGS)),
+      );
+    });
+  });
+
   describe("tagFromFabricPrimitive()", () => {
-    for (const [value, tag] of PRIMITIVE_TAGS) {
+    for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
         expect(tagFromFabricPrimitive(value)).toBe(tag);
       });
@@ -165,16 +216,16 @@ describe("value-tags", () => {
       // are held equal rather than the table being trusted.
 
       const tabled = new Set(
-        PRIMITIVE_TAGS.map(([value]) => value.constructor),
+        FABRIC_PRIMITIVE_TAGS.map(([value]) => value.constructor),
       );
       expect(tabled).toEqual(new Set(codecClasses()));
     });
 
     it("returns a distinct tag for each registered primitive class", () => {
-      const tags = PRIMITIVE_TAGS.map(([value]) =>
+      const tags = FABRIC_PRIMITIVE_TAGS.map(([value]) =>
         tagFromFabricPrimitive(value)
       );
-      expect(new Set(tags).size).toBe(PRIMITIVE_TAGS.length);
+      expect(new Set(tags).size).toBe(FABRIC_PRIMITIVE_TAGS.length);
     });
 
     it("returns every primitive tag across the registered classes", () => {
@@ -182,7 +233,7 @@ describe("value-tags", () => {
       // sides: a tag no class reports, or a class reporting a tag outside
       // the subset, fails here.
 
-      const tags = PRIMITIVE_TAGS.map(([value]) =>
+      const tags = FABRIC_PRIMITIVE_TAGS.map(([value]) =>
         tagFromFabricPrimitive(value)
       );
       expect(new Set(tags)).toEqual(
@@ -231,7 +282,7 @@ describe("value-tags", () => {
   });
 
   describe("tagFromFabricPrimitiveElseNull()", () => {
-    for (const [value, tag] of PRIMITIVE_TAGS) {
+    for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
         expect(tagFromFabricPrimitiveElseNull(value)).toBe(tag);
       });
@@ -271,15 +322,11 @@ describe("value-tags", () => {
   });
 
   describe("tagFromFabricValue()", () => {
-    it("returns `Primitive` for each scalar arm", () => {
-      expect(tagFromFabricValue(null)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValue(undefined)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValue(true)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValue(42)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValue("x")).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValue(42n)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValue(Symbol.for("s"))).toBe(VALUE_TAGS.Primitive);
-    });
+    for (const [label, value, tag] of JS_PRIMITIVE_TAGS) {
+      it(`returns \`${tag}\` for ${label}`, () => {
+        expect(tagFromFabricValue(value)).toBe(tag);
+      });
+    }
 
     it("returns `Array` for an array", () => {
       expect(tagFromFabricValue([])).toBe(VALUE_TAGS.Array);
@@ -300,7 +347,7 @@ describe("value-tags", () => {
       expect(tagFromFabricValue(obj)).toBe(VALUE_TAGS.Object);
     });
 
-    for (const [value, tag] of PRIMITIVE_TAGS) {
+    for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
         expect(tagFromFabricValue(value)).toBe(tag);
       });
@@ -333,23 +380,18 @@ describe("value-tags", () => {
   });
 
   describe("tagFromFabricValueElseNull()", () => {
-    it("returns `Primitive` for each scalar arm", () => {
-      expect(tagFromFabricValueElseNull(null)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValueElseNull(undefined)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValueElseNull(false)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValueElseNull(0)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValueElseNull("")).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValueElseNull(0n)).toBe(VALUE_TAGS.Primitive);
-      expect(tagFromFabricValueElseNull(Symbol.for("s")))
-        .toBe(VALUE_TAGS.Primitive);
-    });
+    for (const [label, value, tag] of JS_PRIMITIVE_TAGS) {
+      it(`returns \`${tag}\` for ${label}`, () => {
+        expect(tagFromFabricValueElseNull(value)).toBe(tag);
+      });
+    }
 
     it("returns `Array` for an array and `Object` for a plain object", () => {
       expect(tagFromFabricValueElseNull([1])).toBe(VALUE_TAGS.Array);
       expect(tagFromFabricValueElseNull({ a: 1 })).toBe(VALUE_TAGS.Object);
     });
 
-    for (const [value, tag] of PRIMITIVE_TAGS) {
+    for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
         expect(tagFromFabricValueElseNull(value)).toBe(tag);
       });
@@ -408,6 +450,12 @@ describe("value-tags", () => {
   });
 
   describe("tagFromNativeValueElseNull()", () => {
+    for (const [label, value, tag] of JS_TYPE_TAGS) {
+      it(`returns \`${tag}\` for ${label}`, () => {
+        expect(tagFromNativeValueElseNull(value)).toBe(tag);
+      });
+    }
+
     it("returns `JsError` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [
         ["Error", new Error("test")],
@@ -500,10 +548,6 @@ describe("value-tags", () => {
     it("returns `null` for class instances", () => {
       class Custom {}
       expect(tagFromNativeValueElseNull(new Custom())).toBe(null);
-    });
-
-    it("returns `Primitive` for functions", () => {
-      expect(tagFromNativeValueElseNull(() => {})).toBe(VALUE_TAGS.Primitive);
     });
 
     describe("an own `constructor` property does not decide the class", () => {
@@ -623,9 +667,9 @@ describe("value-tags", () => {
         expect(tagFromNativeValueElseNull(new Custom())).toBe(null);
       });
 
-      it("returns `Primitive` for a function carrying `toJSON()`", () => {
+      it("returns `function` for a function carrying `toJSON()`", () => {
         const fn = Object.assign(() => {}, { toJSON: () => "converted" });
-        expect(tagFromNativeValueElseNull(fn)).toBe(VALUE_TAGS.Primitive);
+        expect(tagFromNativeValueElseNull(fn)).toBe(VALUE_TAGS.function);
       });
     });
   });

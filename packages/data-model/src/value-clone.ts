@@ -210,7 +210,13 @@ export function cloneHelper(
   switch (tagFromNativeValueElseNull(value)) {
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
-    case VALUE_TAGS.Primitive:
+    case VALUE_TAGS.bigint:
+    case VALUE_TAGS.boolean:
+    case VALUE_TAGS.null:
+    case VALUE_TAGS.number:
+    case VALUE_TAGS.string:
+    case VALUE_TAGS.symbol:
+    case VALUE_TAGS.undefined:
     case VALUE_TAGS.FabricEpochNsec:
     case VALUE_TAGS.FabricEpochDay:
     case VALUE_TAGS.FabricBytes:
