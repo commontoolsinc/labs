@@ -405,8 +405,11 @@ describe("publish()", () => {
     expect(manifest!.entries[0]!.unit).toBe(
       "packages/memory/test/space.test.ts",
     );
-    // The failure at c1 that c2 went on to fix is a catch on main.
-    expect(manifest!.entries[0]!.inputs.mainCatches).toBe(1);
+    // The failure at c1 that c2 went on to fix is a catch on main, and
+    // a catch there is weighted by where it happened. The 1.5 is
+    // `CATCH_WEIGHT_MAIN` written out: comparing against the dial would
+    // hold just as well for a dial of zero and a catch never counted.
+    expect(manifest!.entries[0]!.inputs.catches).toBe(1.5);
   });
 
   it("leaves out an identity no suite claims, and says how many", async () => {

@@ -1,6 +1,5 @@
 /**
- * The predicates deciding whether a value belongs to the `FabricValue` type,
- * and the narrowings that ask a shape question about one that already does.
+ * The predicates deciding whether a value belongs to the `FabricValue` type.
  * The single-level predicate has a throwing form beside it, which decides
  * exactly what the predicate decides and exists to say why the answer was no.
  *
@@ -10,23 +9,22 @@
  * Frozen-ness is a separate question and deliberately not asked here, so a
  * structurally-valid unfrozen value is a member.
  *
- * The narrowings are looser than membership on purpose. They are asked of a
- * value whose type already claims to be a `FabricValue`, and answer only
- * whether it may be read by name; where one accepts something membership
- * refuses, the difference is stated on that narrowing rather than here.
+ * Each of these takes an `unknown`, that being what a caller holds before
+ * membership is settled. The narrowings that ask a shape question of a value
+ * already typed as a `FabricValue` are in `type-check.ts`, and are looser than
+ * membership on purpose.
  */
 
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isInertArray } from "@commonfabric/utils/arrays";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   constructorOfObject,
   isInertPlainObject,
 } from "@commonfabric/utils/objects";
-import {
-  isPlainObject,
-  unsafeObjectKeyIn,
-} from "@commonfabric/utils/types";
+import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
+import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 import {
   type FabricNativeObject,
   type FabricPlainObject,
@@ -34,11 +32,9 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 import { tagFromNativeBuiltinClass } from "./tag-from.ts";
 import { isFabricPlainObject } from "./type-check.ts";
-import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting

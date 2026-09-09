@@ -153,21 +153,8 @@ const NOT_A_TEST_SURFACE: ReadonlyArray<{ path: string; reason: string }> = [
  * An entry that stops applying fails as well, so a file that gets
  * registered or deleted takes its line with it.
  */
-const UNREGISTERED_SURFACES: ReadonlyArray<{ path: string; reason: string }> = [
-  {
-    path: "packages/cf-harness/integration/engine.integration.test.ts",
-    reason:
-      "reached only by the package's own `test:integration` task, which " +
-      "nothing dispatches",
-  },
-  {
-    path:
-      "packages/cf-harness/integration/pattern-index-live.integration.test.ts",
-    reason:
-      "reached only by the package's own `test:integration` task, which " +
-      "nothing dispatches",
-  },
-];
+const UNREGISTERED_SURFACES: ReadonlyArray<{ path: string; reason: string }> =
+  [];
 
 /** One thing the check found. */
 export interface Finding {

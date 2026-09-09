@@ -21,6 +21,7 @@
  */
 
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessLoomAuthoringConfig } from "./loom-authoring.ts";
 import type { CfHarnessEngine } from "./engine.ts";
 import type {
   HarnessFabricSessionConfig,
@@ -113,6 +114,9 @@ export interface HarnessSessionConfig {
    */
   spaceDbPath?: string;
 
+  /** Explicit host-owned backing for durable Loom authoring. */
+  loomAuthoring?: HarnessLoomAuthoringConfig;
+
   patternIndex?: HarnessPatternIndexConfig;
   skillsSh?: HarnessSkillsShConfig;
 
@@ -155,6 +159,7 @@ export const harnessSessionToolBacking = (
   config: HarnessSessionConfig,
 ): HarnessToolBackingAvailability => ({
   fabricSessionAvailable: config.fabricSession !== undefined,
+  loomAuthoringAvailable: config.loomAuthoring !== undefined,
   patternIndexAvailable: config.patternIndex !== undefined,
   skillsShSearchAvailable: config.skillsSh !== undefined,
   skillsShAcquisitionAvailable: config.skillsSh !== undefined,
@@ -257,6 +262,9 @@ export const harnessSessionEngineOptions = (
       : {}),
     ...(config.spaceDbPath !== undefined
       ? { spaceDbPath: config.spaceDbPath }
+      : {}),
+    ...(config.loomAuthoring !== undefined
+      ? { loomAuthoring: config.loomAuthoring }
       : {}),
     ...(config.patternIndex !== undefined
       ? { patternIndex: config.patternIndex }

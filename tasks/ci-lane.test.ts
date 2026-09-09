@@ -78,7 +78,7 @@ function manifestOf(entries: readonly Partial<ManifestEntry>[]): Manifest {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
       ...entry,
@@ -888,7 +888,7 @@ describe("running a lane's work", () => {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1.5,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
     };
@@ -1505,9 +1505,10 @@ describe("what a lane records about itself", () => {
         {
           manifest: () =>
             Promise.resolve({
-              // A gate the change did not touch, costing most of a lane:
-              // `always` outranks the budget, so the lane takes it and
-              // reports what that cost rather than dropping it.
+              // A manifest that knows one gate, which leaves every
+              // other unit in the tree unknown and therefore mandatory.
+              // The lane takes them all and says what that cost rather
+              // than dropping work.
               manifest: manifestOf([{
                 test: { k: "format", s: "repo", n: "deno-fmt" },
                 suite: "repo-gates",

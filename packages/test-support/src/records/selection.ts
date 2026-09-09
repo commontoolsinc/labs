@@ -22,9 +22,6 @@ export interface ScoreInputs {
   /** Catches, weighted by where each happened. */
   catches: number;
 
-  /** How many of those were on `main`, which measure escapes as well. */
-  mainCatches: number;
-
   /** The day of the most recent catch, absent when there are none. */
   lastCatch?: string;
 
@@ -182,9 +179,6 @@ export interface Manifest {
   /** How many item-level identities the store knows, and their digest. */
   known: { count: number; digest: string };
 
-  /** The newest coverage attribution map, published on its own cadence. */
-  attributionMap?: string;
-
   coverageBaselines: CoverageBaseline[];
 }
 
@@ -253,8 +247,8 @@ function parseIdentity(value: unknown): TestIdentity | undefined {
 function parseInputs(value: unknown): ScoreInputs | undefined {
   if (!isRecord(value)) return undefined;
   if (
-    !isFiniteNumber(value.catches) || !isFiniteNumber(value.mainCatches) ||
-    !isFiniteNumber(value.sources) || !isFiniteNumber(value.churn)
+    !isFiniteNumber(value.catches) || !isFiniteNumber(value.sources) ||
+    !isFiniteNumber(value.churn)
   ) {
     return undefined;
   }
@@ -263,7 +257,6 @@ function parseInputs(value: unknown): ScoreInputs | undefined {
   }
   const inputs: ScoreInputs = {
     catches: value.catches,
-    mainCatches: value.mainCatches,
     sources: value.sources,
     churn: value.churn,
   };
@@ -487,12 +480,6 @@ export function parseManifest(value: unknown): Manifest | undefined {
   ) {
     return undefined;
   }
-  if (
-    value.attributionMap !== undefined &&
-    !isNonEmptyString(value.attributionMap)
-  ) {
-    return undefined;
-  }
   // One identity may not appear twice: the packer removes an identity
   // from the selectable set as it takes it, and a duplicate would let a
   // later pass take it again.
@@ -502,7 +489,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
     if (seen.has(key)) return undefined;
     seen.add(key);
   }
-  const manifest: Manifest = {
+  return {
     schema: MANIFEST_SCHEMA_VERSION,
     generatedAt: value.generatedAt,
     seed: value.seed,
@@ -518,10 +505,6 @@ export function parseManifest(value: unknown): Manifest | undefined {
     known: { count: value.known.count, digest: value.known.digest },
     coverageBaselines,
   };
-  if (value.attributionMap !== undefined) {
-    manifest.attributionMap = value.attributionMap;
-  }
-  return manifest;
 }
 
 /** Serializes a manifest for the store. */

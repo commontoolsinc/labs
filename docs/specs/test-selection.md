@@ -51,12 +51,19 @@ A failure on the default branch cannot be judged when it happens. Every
 push there is a distinct commit with one run, so a test that is flaky
 there never contradicts itself, and counting each such failure as a catch
 would make the least valuable test in the repository look like the most
-valuable. Such a failure waits for the next run on that branch: still
-failing is the same breakage continuing and nothing new is learned;
-passing means the change between the two commits fixed it, which is what
-the test caught. Telling a fix apart from a failure that healed itself
-needs the coverage attribution map, and without one the judgement errs
-toward calling a failure a catch.
+valuable. Such a failure waits for the next run on that branch. Still
+failing is the same breakage continuing, and nothing new is learned.
+Passing at the same commit is the test disagreeing with itself, and counts
+as a flake observation. Passing at a later commit counts as a catch: the
+change between the two commits fixed what the test found. A run of
+failures ended by one pass counts one catch, dated to the first of them,
+so a week of the branch being red is worth one catch and not seven.
+
+Nothing separates a failure a change fixed from one that healed itself, so
+a test flaky on the default branch is credited for its own noise. The
+judgement errs toward crediting a test rather than away from it. An
+overstated score costs run time, and an understated one costs a test its
+place.
 
 ### Where a catch happened
 
@@ -161,8 +168,9 @@ cannot act on.
   selected.
 - An identity above `FLAKE_EXCLUSION_RATE` is not selected.
 
-Either comes back the moment the change touches what it covers, since that
-is very likely a fix and has to be allowed to prove itself.
+Either comes back the moment the change edits the test itself, or its
+suite maps the change onto its unit, since that is very likely a fix and
+has to be allowed to prove itself.
 
 Two rules force a test in.
 
@@ -173,8 +181,10 @@ Two rules force a test in.
   data and that a renamed test is an unknown identity until an alias line
   lands.
 - **What the change touches must run.** A changed test file's identities
-  are mandatory. A changed source file resolves through the coverage
-  attribution map to the identities that execute its lines.
+  are mandatory. A unit that is not a file, such as a type-check group or
+  a binary, is one its suite maps the change onto, because only the suite
+  knows what its unit covers. Nothing else about a changed source file
+  forces a test in. Which tests run for it is what the score decides.
 
 ## The manifest
 

@@ -331,6 +331,24 @@ describe("score", () => {
       expect(state.pendingMain).toEqual([]);
     });
 
+    it("counts one catch for a run of failures one change ended", () => {
+      // A test red across several commits on the default branch has one
+      // thing wrong with it, and the change that makes it green fixed
+      // that one thing.
+      const state = stateFrom([
+        saw("fail", { day: "2026-08-17", commit: "c0" }),
+        saw("fail", { day: "2026-08-18", commit: "c1" }),
+        saw("fail", { day: "2026-08-19", commit: "c2" }),
+        saw("pass", { commit: "c3" }),
+      ]);
+      expect(state.mainCatches).toBe(1);
+      expect(state.lastCatch).toBe("2026-08-17");
+      expect(state.pendingMain).toEqual([]);
+      // One catch and nothing else: the run resolved, so none of the
+      // failures in it is also flake evidence.
+      expect(flakeRate(state, "2026-08-20")).toBe(0);
+    });
+
     it("reads a green rerun of the same commit as a flake", () => {
       // The two runs can arrive in separate batches, so the same-commit
       // check inside one batch does not see this pair.
@@ -344,16 +362,6 @@ describe("score", () => {
       ]);
       expect(state.mainCatches).toBe(0);
       expect(flakeRate(state, "2026-08-21")).toBe(1);
-    });
-
-    it("reads a failure nothing fixed as a flake", () => {
-      const folded = foldObservations([
-        saw("fail", { day: "2026-08-19", commit: "c0" }),
-        saw("pass", { commit: "c1" }),
-      ], { coveredChanged: () => false });
-      const state = folded.states.get(KEY)!;
-      expect(state.mainCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-20")).toBe(1);
     });
   });
 
@@ -425,14 +433,12 @@ describe("score", () => {
     it("keeps an old proven test ahead of one with no record", () => {
       const proven = {
         catches: 4,
-        mainCatches: 0,
         lastCatch: "2024-08-20",
         sources: 2,
         churn: 0,
       };
       const unproven = {
         catches: 0,
-        mainCatches: 0,
         sources: 0,
         churn: 0,
       };
@@ -446,7 +452,6 @@ describe("score", () => {
         value(
           {
             catches,
-            mainCatches: 0,
             lastCatch: "2026-08-20",
             sources: 1,
             churn: 0,
@@ -461,7 +466,7 @@ describe("score", () => {
     it("decays a catch slowly and never below the freshness floor", () => {
       const at = (lastCatch: string) =>
         value(
-          { catches: 4, mainCatches: 0, lastCatch, sources: 0, churn: 0 },
+          { catches: 4, lastCatch, sources: 0, churn: 0 },
           "2026-08-20",
         );
       expect(at("2026-08-13")).toBeGreaterThan(at("2026-04-20"));

@@ -6,11 +6,21 @@ import config from "../../console/felt.config.ts";
 describe("felt.config", () => {
   const consoleRoot = fromFileUrl(new URL("../../console", import.meta.url));
 
-  /** Every script a served page asks the browser to load. */
+  /**
+   * Where each page is served, so its script paths — written RELATIVE to the
+   * page (`console/src/mount.ts`: the console may be fronted under a host's
+   * prefix) — resolve to what the server is asked for.
+   */
+  const servedAt: Readonly<Record<string, string>> = {
+    "index.html": "/",
+    "live.html": "/live/session",
+  };
+
+  /** Every script a served page asks the browser to load, as a server path. */
   const scriptsNamedBy = (page: string): readonly string[] => {
     const markup = Deno.readTextFileSync(join(consoleRoot, "public", page));
     return [...markup.matchAll(/<script[^>]+src="([^"]+)"/g)].map((match) =>
-      match[1]
+      new URL(match[1], `http://console${servedAt[page]}`).pathname
     );
   };
 
@@ -24,6 +34,23 @@ describe("felt.config", () => {
     for (const page of ["index.html", "live.html"]) {
       for (const script of scriptsNamedBy(page)) {
         expect(emitted).toContain(script);
+      }
+    }
+  });
+
+  it("names every asset relative to the page, never from the origin's root", () => {
+    // A root-absolute `/scripts/...` or `/styles/...` works only when the
+    // console is the whole origin. Fronted under a host's prefix (loom's
+    // /harness-console) it resolves against the host instead and the page
+    // loads nothing; the CSP's `base-uri 'none'` rules out a <base> fix.
+    for (const page of ["index.html", "live.html"]) {
+      const markup = Deno.readTextFileSync(join(consoleRoot, "public", page));
+      const references = [...markup.matchAll(/(?:src|href)="([^"]+)"/g)].map((
+        match,
+      ) => match[1]);
+      expect(references.length).toBeGreaterThan(0);
+      for (const reference of references) {
+        expect(reference.startsWith("/")).toBe(false);
       }
     }
   });

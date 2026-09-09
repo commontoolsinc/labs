@@ -1,6 +1,31 @@
+/**
+ * Membership in the `FabricValue` type, asked one level deep and asked all the
+ * way down, plus the plain-record question asked as membership. The one-level
+ * question also has a throwing form, whose group is mostly about the reasons
+ * it gives, what it accepts being what the predicate accepts -- and which is
+ * cross-checked, value for value, against the refusal
+ * `shallowFabricFromNativeValue()` performs today, that being the refusal it
+ * is there to stand in for.
+ *
+ * The two depths ask the same question at different scopes, and the cases are
+ * arranged around where that difference tells.
+ *
+ * Frozen-ness is deliberately not part of membership, and a group here says so
+ * outright -- the two are easy to conflate when nearly every `FabricValue`
+ * in circulation happens to be frozen. Cycles are handled rather than refused.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { codecClasses } from "@/fabric-primitives/index.ts";
+import type { FabricValue } from "@/interface.ts";
+import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
+import { tagFromNativeValue } from "@/native-type-tags.ts";
+import { isFabricPlainObject } from "@/type-check.ts";
 import {
   assertValidFabricValueLayer,
   isValidFabricNativeObject,
@@ -8,20 +33,10 @@ import {
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
-import {
-  isFabricPlainObject,
-} from "@/type-check.ts";
-import type { FabricValue } from "@/interface.ts";
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
-import { tagFromNativeValue } from "@/native-type-tags.ts";
-import { codecClasses } from "@/fabric-primitives/index.ts";
-import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
-import { FabricError } from "@/fabric-instances/FabricError.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
-describe("type-check", () => {
+describe("validity-check", () => {
   describe("isValidFabricValueLayer()", () => {
     describe("given a scalar `FabricValue`", () => {
       it("returns `true` for a boolean", () => {

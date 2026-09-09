@@ -24,6 +24,7 @@ import {
 } from "@commonfabric/test-support/records";
 import {
   DIALS,
+  dialValue,
   EXCLUDED_FROM_COVERAGE_GATE,
   LANE_BUDGET_SECONDS,
   LANES,
@@ -94,13 +95,9 @@ export function dialLines(): string[] {
   const lines: string[] = [];
   const width = Math.max(...DIALS.map((dial) => dial.name.length));
   for (const dial of DIALS) {
-    const shown = Array.isArray(dial.value)
-      ? dial.value.join(", ")
-      : dial.value === undefined
-      ? "off"
-      : String(dial.value);
     lines.push(
-      `${pad(dial.name, width)}  ${shown} ${dial.unit} (${dial.setBy})`,
+      `${pad(dial.name, width)}  ${dialValue(dial)} ${dial.unit} ` +
+        `(${dial.setBy})`,
     );
     lines.push(`${" ".repeat(width)}  ${dial.why}`);
     lines.push("");
@@ -208,8 +205,7 @@ export function explainLines(
     `${key}`,
     `  suite ${entry.suite}, in ${entry.unit}`,
     `  score ${entry.score.toFixed(3)}, costing ${entry.cost.toFixed(3)}s`,
-    `  ${entry.inputs.catches.toFixed(1)} weighted catches, ` +
-    `${entry.inputs.mainCatches} of them on main, across ` +
+    `  ${entry.inputs.catches.toFixed(1)} weighted catches, across ` +
     `${entry.inputs.sources} sources`,
     entry.inputs.lastCatch === undefined
       ? "  it has never caught anything"

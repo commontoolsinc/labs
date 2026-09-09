@@ -95,11 +95,21 @@ places and the second overrides the first. Deno names a case's class after
 the module that registered the test, so the case a `describe` registers
 carries the file of every leaf beneath it, and the report joins itself: a
 leaf is named as its describe chain, and its file is the one whose
-registered name is the longest prefix of that chain. That source
-disappears the moment anything wraps `Deno.test`, because every class then
-names the wrapper. The registration preload is such a wrapper, and it
-replaces what it takes: it writes a name-to-file map into the spool, and
-ingestion lays that over what the report says.
+registered name is the longest prefix of that chain. What the class names
+is the nearest frame of this repository's own code below the runner, so
+that source holds only while nothing of ours sits between a test file and
+the registrar. The `describe` and `it` the import map resolves to are
+therefore the real ones wherever they would have nothing to do, and a
+module that does register on a file's behalf — a fixture runner, a clock
+harness — takes the class name with it.
+
+The registration preload is such a module, and it replaces what it takes:
+it writes a name-to-file map into the spool, and ingestion lays that over
+what the report says. The map holds each name `Deno.test` was called with
+and, for a file written with `describe` and `it`, the whole chain of each
+leaf. A suite title two files share says nothing about either and is
+dropped from the merged map; a leaf's whole chain is what usually
+survives that.
 
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
@@ -145,6 +155,15 @@ fixture is data rather than a test of this repository. A test that drives
 such a harness as a child process hands it an empty
 `CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
 empty value is recording off, the same as an unset one.
+
+A check that no lane can be asked to run is not recorded. A record is one
+execution of one test, and every history built from records — flake rate,
+duration, and what a pull request selects — answers whether to run that
+test again. A check reading the artifacts of every job in its own run
+exists only as part of a whole run, so there is nothing to select and no
+suite in the test topology to claim its identity. The pull request
+coverage gate is the one such check; a gate resolving a merge base
+against a base ref is not, and records normally.
 
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the
