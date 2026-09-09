@@ -33,7 +33,10 @@
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { isAbsolute, relative } from "@std/path";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import { SANDBOX_OUTPUT_DIR_ENV } from "../sandbox/output-root.ts";
+import {
+  SANDBOX_OUTPUT_DIR_ENV,
+  sandboxOutputRootIsIntact,
+} from "../sandbox/output-root.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface IngestSandboxFileToolInput {
@@ -173,13 +176,12 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
     if (typeof input.path !== "string" || input.path.trim().length === 0) {
       return errorOutput("ingest_sandbox_file requires a path");
     }
-    const outputRoot = context.sandboxOutputRootHostPath;
-    if (outputRoot === undefined) {
+    const root = context.sandboxOutputRoot;
+    if (root === undefined) {
       return errorOutput(
         `ingest_sandbox_file has no output directory of this run's own to ` +
           `read from, and reads from nowhere else: ${
-            context.sandboxOutputRootFailure ??
-              "this run established none"
+            context.sandboxOutputRootFailure ?? "this run established none"
           }`,
       );
     }
@@ -193,7 +195,18 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
         }`,
       );
     }
-    const resolved = await realPathWithin(outputRoot, hostPath);
+    // The directory this reads from must still be the directory the family
+    // made. A name can be re-pointed — and the mount's own name cannot be, but
+    // checking the identity costs one `stat` and does not depend on that
+    // being true.
+    if (!await sandboxOutputRootIsIntact(root)) {
+      return errorOutput(
+        `ingest_sandbox_file found something other than the directory this ` +
+          `run created at its output path, so nothing in it can be ` +
+          `attributed to this run. Nothing was read.`,
+      );
+    }
+    const resolved = await realPathWithin(root.hostPath, hostPath);
     // A path that cannot be resolved is reported as the file it names, not as
     // one outside the directory: the usual reason is that nothing is there,
     // and answering "outside" would send a caller looking for an escape it
@@ -208,15 +221,34 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
     if (resolved.kind === "outside") {
       return errorOutput(
         `ingest_sandbox_file only reads files under this run's output ` +
-          `directory (${context.sandboxOutputRootSandboxPath}, named by ` +
+          `directory (${context.sandboxOutputMountPath}, named by ` +
           `$${SANDBOX_OUTPUT_DIR_ENV} inside the sandbox). Being in the ` +
           `workspace does not establish that this run produced a file; only ` +
           `that directory does, and a link out of it leads back to one that ` +
           `does not. Write the file there and ingest it from there.`,
       );
     }
+    // A hard link is a second name for a file this family never wrote: the
+    // sandbox can make one from the workspace without reading the bytes, so
+    // the taint need not cover what they require. Real-path containment
+    // cannot tell the two directory entries apart, and a link count above one
+    // is what does. The dedicated mount already makes such a link fail across
+    // filesystems; this refuses the case where it did not.
     let bytes: Uint8Array;
     try {
+      const stat = await Deno.stat(resolved.realPath);
+      if (!stat.isFile) {
+        throw new Deno.errors.NotSupported(
+          `not a regular file: ${input.path}`,
+        );
+      }
+      if (stat.nlink !== null && stat.nlink > 1) {
+        return errorOutput(
+          `ingest_sandbox_file refuses a file with more than one name: a ` +
+            `second link to it exists outside this run's output directory, ` +
+            `so its bytes are not something this run's sandbox work produced.`,
+        );
+      }
       bytes = await Deno.readFile(resolved.realPath);
     } catch (error) {
       return errorOutput(

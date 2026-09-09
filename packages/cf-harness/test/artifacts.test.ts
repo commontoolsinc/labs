@@ -236,7 +236,16 @@ Deno.test({
         JSON.parse(await Deno.readTextFile(capabilitySnapshotPath)),
         persistedState.capabilitySnapshot,
       );
-      assertEquals(persistedState, {
+      // The run family's output directory is identified by device and inode,
+      // which are this filesystem's to choose, so it is asserted on its own
+      // rather than pinned in the snapshot below.
+      assertEquals(
+        persistedState.sandboxOutputRoot?.hostPath,
+        join(artifactRoot, "run-artifacts", "sandbox-out"),
+      );
+      const { sandboxOutputRoot: _outputRoot, ...persistedStateRest } =
+        persistedState;
+      assertEquals(persistedStateRest, {
         runId: "run-artifacts",
         status: "pending",
         createdAt: "2026-04-15T21:00:00.000Z",

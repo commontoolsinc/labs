@@ -65,6 +65,7 @@ describe("the run family's output directory", () => {
     // schedule running out.
 
     const workspace = await Deno.makeTempDir({ prefix: "cf-harness-root-" });
+    const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
     const runId = `output-root-${crypto.randomUUID()}`;
     try {
       const engine = new CfHarnessEngine({
@@ -72,6 +73,7 @@ describe("the run family's output directory", () => {
         runId,
         model: "gpt-5.4",
         workspaceHostPath: workspace,
+        artifactRoot,
       });
       const loop = new CfHarnessPromptLoop({
         apiKey: "test-key",
@@ -83,12 +85,13 @@ describe("the run family's output directory", () => {
         loop.runPrompt({ prompt: "Say hi.", signal: AbortSignal.abort() }),
       ).rejects.toThrow();
 
-      const root = sandboxOutputRootHostPath(workspace, runId);
+      const root = sandboxOutputRootHostPath(artifactRoot, runId);
       expect((await Deno.stat(root)).isDirectory).toBe(true);
-      expect(engine.getRunState().sandboxOutputRoot).toBe(root);
+      expect(engine.getRunState().sandboxOutputRoot?.hostPath).toBe(root);
     } finally {
       forgetWorkspaceTaintForTesting(runId);
       await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(artifactRoot, { recursive: true });
     }
   });
 
@@ -97,12 +100,14 @@ describe("the run family's output directory", () => {
     // rather than making one of its own — and finds it already there.
 
     const workspace = await Deno.makeTempDir({ prefix: "cf-harness-root-" });
+    const artifactRoot = await Deno.makeTempDir({ prefix: "cf-harness-art-" });
     const runId = `output-root-${crypto.randomUUID()}`;
     try {
       const parent = new CfHarnessEngine({
         sandboxRuntime: new SilentSandbox(),
         runId,
         workspaceHostPath: workspace,
+        artifactRoot,
       });
       await parent.ensureSandboxOutputRoot();
 
@@ -117,16 +122,18 @@ describe("the run family's output directory", () => {
           depth: 1,
         },
         workspaceHostPath: workspace,
+        artifactRoot,
       });
       await child.ensureSandboxOutputRoot();
 
-      expect(child.getRunState().sandboxOutputRoot).toBe(
-        sandboxOutputRootHostPath(workspace, runId),
+      expect(child.getRunState().sandboxOutputRoot?.hostPath).toBe(
+        sandboxOutputRootHostPath(artifactRoot, runId),
       );
       expect(child.sandboxOutputRootFailure).toBeUndefined();
     } finally {
       forgetWorkspaceTaintForTesting(runId);
       await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(artifactRoot, { recursive: true });
     }
   });
 });
@@ -237,6 +244,36 @@ describe("CFC sidecar transport isolation", () => {
       await Deno.remove(workspace, { recursive: true });
       await Deno.remove(sidecars, { recursive: true });
     }
+  });
+
+  it("refuses a relative result directory from the environment", async () => {
+    // The flag is validated at the CLI, but the environment fallback reaches
+    // the resolver directly — and everything below it walks the path apart,
+    // which a relative path has no root to walk to.
+
+    const previous = Deno.env.get("CF_HARNESS_RUNSC_CFC_RESULT_DIR");
+    Deno.env.set("CF_HARNESS_RUNSC_CFC_RESULT_DIR", "sidecars/results");
+    try {
+      expect(() =>
+        resolveDockerRunscSandboxConfig({ workspaceHostPath: "/host/project" })
+      )
+        .toThrow(/cfcResultDir must be an absolute host path/);
+    } finally {
+      if (previous === undefined) {
+        Deno.env.delete("CF_HARNESS_RUNSC_CFC_RESULT_DIR");
+      } else {
+        Deno.env.set("CF_HARNESS_RUNSC_CFC_RESULT_DIR", previous);
+      }
+    }
+  });
+
+  it("refuses a relative result directory passed to the resolver directly", () => {
+    expect(() =>
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcResultDir: "sidecars/results",
+      })
+    ).toThrow(/cfcResultDir must be an absolute host path/);
   });
 
   it("refuses a relative --cfc-result-dir rather than resolving it", async () => {

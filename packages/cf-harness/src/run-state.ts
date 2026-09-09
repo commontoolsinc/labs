@@ -10,6 +10,7 @@ import {
   type HarnessCfcModelContext,
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
+import type { HarnessSandboxOutputRoot } from "./sandbox/output-root.ts";
 import type { HarnessWorkspaceTaint } from "./workspace-taint.ts";
 import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
@@ -200,12 +201,15 @@ export interface HarnessRunState {
   cfcWorkspaceTaint?: HarnessWorkspaceTaint;
 
   /**
-   * The run family's sandbox output directory on the host. The one directory
-   * whose creation the harness vouches for, and so the only one
-   * `ingest_sandbox_file` reads from. Absent until it is established, and for
-   * a run with no workspace to put one in.
+   * The run family's sandbox output directory: where it is on the host and
+   * which directory it is. The one directory whose creation the harness
+   * vouches for, and so the only one `ingest_sandbox_file` reads from. The
+   * identity is what a resume checks the recorded path against, so a
+   * directory something else made in the meantime is refused rather than
+   * read. Absent until it is established, and for a run with no artifact root
+   * to put one under.
    */
-  sandboxOutputRoot?: string;
+  sandboxOutputRoot?: HarnessSandboxOutputRoot;
 
   /**
    * The per-cell CFC labels the run's space holds for the cells it touched.
@@ -278,7 +282,7 @@ export interface CreateHarnessRunStateOptions {
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   cfcWorkspaceTaint?: HarnessWorkspaceTaint;
-  sandboxOutputRoot?: string;
+  sandboxOutputRoot?: HarnessSandboxOutputRoot;
   cellLabels?: HarnessCellLabels;
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
@@ -398,7 +402,7 @@ export const createHarnessRunState = (
       ? { cfcWorkspaceTaint: structuredClone(options.cfcWorkspaceTaint) }
       : {}),
     ...(options.sandboxOutputRoot !== undefined
-      ? { sandboxOutputRoot: options.sandboxOutputRoot }
+      ? { sandboxOutputRoot: { ...options.sandboxOutputRoot } }
       : {}),
     ...(options.cellLabels !== undefined
       ? { cellLabels: structuredClone(options.cellLabels) }

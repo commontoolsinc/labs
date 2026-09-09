@@ -17,6 +17,7 @@ import type {
   HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
+import type { HarnessSandboxOutputRoot } from "../sandbox/output-root.ts";
 import type { HarnessWorkspaceTaint } from "../workspace-taint.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import type { HarnessExploreQueryRunner } from "../docs-corpus/explore.ts";
@@ -68,15 +69,15 @@ export interface HarnessToolContext {
   workspaceTaint: HarnessWorkspaceTaint;
 
   /**
-   * The run family's sandbox output directory on the host, once established.
-   * The only directory `ingest_sandbox_file` reads from, because it is the
-   * only one whose creation the harness vouches for. Undefined for a run
-   * with no workspace, which can ingest nothing.
+   * The run family's sandbox output directory, once established: where it is
+   * and which directory it is. The only directory `ingest_sandbox_file` reads
+   * from, because it is the only one whose creation the harness vouches for.
+   * Undefined for a run that established none, which can ingest nothing.
    */
-  sandboxOutputRootHostPath?: string;
+  sandboxOutputRoot?: HarnessSandboxOutputRoot;
 
-  /** The same directory as the sandbox addresses it, for saying so. */
-  sandboxOutputRootSandboxPath: string;
+  /** Where that directory appears inside the sandbox, for saying so. */
+  sandboxOutputMountPath: string;
 
   /**
    * Why this run family has no output directory, when it has none: a

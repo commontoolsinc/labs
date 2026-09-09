@@ -16,9 +16,12 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import { familySandboxRuntime } from "./sandbox/family-sandbox.ts";
 import {
   createSandboxOutputRoot,
+  type HarnessSandboxOutputRoot,
+  restoreSandboxOutputRoot,
   SANDBOX_OUTPUT_DIR_ENV,
+  SANDBOX_OUTPUT_MOUNT_NAME,
+  SANDBOX_OUTPUT_MOUNT_PATH,
   sandboxOutputRootHostPath,
-  sandboxOutputRootSandboxPath,
 } from "./sandbox/output-root.ts";
 import {
   type HarnessWorkspaceTaint,
@@ -570,7 +573,7 @@ export class CfHarnessEngine {
   readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #patternRefs: readonly HarnessPatternRefSpec[];
   readonly #spaceDbPath?: string;
-  readonly #hostMounts: readonly HostSandboxMount[];
+  #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   /**
    * The run family this engine belongs to: the root run's id, which a
@@ -580,14 +583,16 @@ export class CfHarnessEngine {
    */
   readonly #familyRunId: string;
 
-  /** The family's output directory on the host, when a workspace is known. */
+  /**
+   * The family's output directory on the host, when the run has an artifact
+   * root to put one under. Deliberately not in the workspace: the workspace
+   * is mounted read-write, so a name inside it is a name the workload can
+   * re-point.
+   */
   readonly #sandboxOutputRootHostPath?: string;
 
-  /** The same directory as the sandbox addresses it. */
-  readonly #sandboxOutputRootSandboxPath: string;
-
-  /** Whether this engine has established the family's output directory. */
-  #sandboxOutputRootReady = false;
+  /** The directory's recorded identity, once it has been established. */
+  #sandboxOutputRoot?: HarnessSandboxOutputRoot;
 
   /** Why the family has no usable output directory, once that is settled. */
   #sandboxOutputRootFailure?: string;
@@ -816,6 +821,18 @@ export class CfHarnessEngine {
         cfcInvocationContextDir: options.cfcInvocationContextDir,
       })
       : this.config.sandbox;
+    // Both are needed before the sandbox exists: the family's output
+    // directory is a mount the sandbox is built with, not a directory found
+    // inside one it already has.
+    const constructionLineage = options.runState?.lineage ?? options.lineage;
+    const familyRunId = constructionLineage?.rootRunId ?? runId;
+    const artifactRootHostPath = this.config.artifactRoot ??
+      (options.runState?.artifactRoot !== undefined
+        ? dirname(options.runState.artifactRoot)
+        : undefined);
+    const sandboxOutputRootHost = artifactRootHostPath === undefined
+      ? undefined
+      : sandboxOutputRootHostPath(artifactRootHostPath, familyRunId);
     // Capture the engine-owned docker-runsc config so we can refuse to *run*
     // enforce-mode sandbox work — capability probes or tools — whose sandbox
     // lacks the CFC sidecar transports (the check fires at run start, not
@@ -828,8 +845,30 @@ export class CfHarnessEngine {
       ? sandboxConfig
       : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
+    // The output directory enters the sandbox as its own read-write mount.
+    // A delegated child is handed its parent's runtime, which already carries
+    // it, and computes the same paths from the same family id.
+    const sandboxConfigWithOutput = sandboxConfig === undefined ||
+        sandboxOutputRootHost === undefined
+      ? sandboxConfig
+      : {
+        ...sandboxConfig,
+        additionalMounts: [
+          ...sandboxConfig.additionalMounts,
+          {
+            kind: "host-bind" as const,
+            name: SANDBOX_OUTPUT_MOUNT_NAME,
+            hostPath: sandboxOutputRootHost,
+            sandboxPath: SANDBOX_OUTPUT_MOUNT_PATH,
+            readOnly: false,
+          },
+        ],
+      };
     const sandbox = options.sandboxRuntime ??
-      new DockerRunscSandboxRuntime(sandboxConfig!, options.processRunner);
+      new DockerRunscSandboxRuntime(
+        sandboxConfigWithOutput!,
+        options.processRunner,
+      );
     this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
       options.workspaceHostPath;
     this.workspaceMountPath = normalizeSandboxRoot(
@@ -839,14 +878,8 @@ export class CfHarnessEngine {
     // family by the root it belonged to, not by its own id, or it would come
     // back as a family of one and read none of its parent's evidence.
     const lineage = options.runState?.lineage ?? options.lineage;
-    this.#familyRunId = lineage?.rootRunId ?? runId;
-    this.#sandboxOutputRootHostPath = this.workspaceHostPath === undefined
-      ? undefined
-      : sandboxOutputRootHostPath(this.workspaceHostPath, this.#familyRunId);
-    this.#sandboxOutputRootSandboxPath = sandboxOutputRootSandboxPath(
-      this.workspaceMountPath,
-      this.#familyRunId,
-    );
+    this.#familyRunId = familyRunId;
+    this.#sandboxOutputRootHostPath = sandboxOutputRootHost;
     // Every invocation carries the output directory, so a workload names it
     // the same way the ingest does and neither spells it out — and every one
     // reports what it left, so no tool can lose the family's evidence.
@@ -861,7 +894,7 @@ export class CfHarnessEngine {
     this.#sandboxForDelegation = sandbox;
     this.sandbox = familySandboxRuntime(
       sandbox,
-      { [SANDBOX_OUTPUT_DIR_ENV]: this.#sandboxOutputRootSandboxPath },
+      { [SANDBOX_OUTPUT_DIR_ENV]: SANDBOX_OUTPUT_MOUNT_PATH },
       (result) => this.#recordSandboxEvidence(result),
     );
     this.#hostMounts = sandboxConfig !== undefined
@@ -888,6 +921,23 @@ export class CfHarnessEngine {
         readOnly: false,
       }]
       : [];
+    // The output mount is a host mount whether or not this engine built the
+    // runtime: a delegated child is handed its parent's sandbox and still has
+    // to map the mount's sandbox path back to the host to read out of it.
+    if (
+      sandboxOutputRootHost !== undefined &&
+      !this.#hostMounts.some((mount) =>
+        mount.sandboxPath === SANDBOX_OUTPUT_MOUNT_PATH
+      )
+    ) {
+      this.#hostMounts = [...this.#hostMounts, {
+        kind: "host-bind",
+        name: SANDBOX_OUTPUT_MOUNT_NAME,
+        hostPath: sandboxOutputRootHost,
+        sandboxPath: SANDBOX_OUTPUT_MOUNT_PATH,
+        readOnly: false,
+      }];
+    }
     this.artifactStore = options.artifactStore ??
       ((this.config.artifactRoot ?? options.runState?.artifactRoot) !==
           undefined
@@ -1094,7 +1144,7 @@ export class CfHarnessEngine {
   }
 
   getRunState(): HarnessRunState {
-    return structuredClone(this.#runState);
+    return structuredClone(this.#syncFamilyTaint());
   }
 
   /**
@@ -1457,22 +1507,50 @@ export class CfHarnessEngine {
           "may have written cannot be established",
       )
       : joinWorkspaceTaint(this.#familyRunId, taint);
-    // Recorded onto the run without advancing its clock or forcing a write:
-    // this is a mirror of the family's state for a reader, and the tool call
-    // that ran the invocation timestamps and persists itself. Reading the
-    // clock here would make the run's timestamps depend on how many
-    // containers a tool happened to start.
-    this.#runState = setHarnessWorkspaceTaint(
-      this.#runState,
-      next,
-      this.#runState.updatedAt,
-    );
+    // The family map is the state; every record picks it up on its way out
+    // (`#syncFamilyTaint`), so nothing is written here. Reading the clock
+    // here would also make the run's timestamps depend on how many containers
+    // a tool happened to start.
+    void next;
     return Promise.resolve();
   }
 
   /** What is known about the family's sandbox work, and how completely. */
   get workspaceTaint(): HarnessWorkspaceTaint {
     return workspaceTaint(this.#familyRunId);
+  }
+
+  /**
+   * Brings this run's record up to date with the family's taint, on the way
+   * out to a reader or to disk.
+   *
+   * The state that decides is the family's, and the engine that learns
+   * something is whichever one ran the container. A delegated child updating
+   * only its own record leaves its parent's saying the family was clean — and
+   * the parent's record is what a later resume reads. Synchronizing at every
+   * export is what makes "the family saw this" true of every record the
+   * family writes, rather than of the one engine that was there.
+   */
+  #syncFamilyTaint(): HarnessRunState {
+    const taint = workspaceTaint(this.#familyRunId);
+    // A family that has seen nothing yet says nothing: the default state is
+    // "known, and nothing accumulated", which is what an absent field already
+    // means. Recording it would put a line in every run's record that carries
+    // no information, and make the field's presence stop meaning anything.
+    if (taint.kind === "known" && taint.label === undefined) {
+      return this.#runState;
+    }
+    if (
+      JSON.stringify(taint) === JSON.stringify(this.#runState.cfcWorkspaceTaint)
+    ) {
+      return this.#runState;
+    }
+    this.#runState = setHarnessWorkspaceTaint(
+      this.#runState,
+      taint,
+      this.#runState.updatedAt,
+    );
+    return this.#runState;
   }
 
   /**
@@ -1492,39 +1570,65 @@ export class CfHarnessEngine {
    * either way: it reads only from a directory this family made.
    */
   async ensureSandboxOutputRoot(): Promise<void> {
-    if (this.#sandboxOutputRootReady || this.#sandboxOutputRootFailure) {
+    if (
+      this.#sandboxOutputRoot !== undefined || this.#sandboxOutputRootFailure
+    ) {
       return;
     }
     const hostPath = this.#sandboxOutputRootHostPath;
     if (hostPath === undefined) {
-      this.#sandboxOutputRootFailure = "this run has no workspace to hold one";
+      this.#sandboxOutputRootFailure =
+        "this run has no artifact root to hold one, and the output directory " +
+        "is deliberately not in the workspace, which the sandbox can write";
       return;
     }
+    const recorded = this.#runState.sandboxOutputRoot;
     try {
-      if (this.#runState.lineage?.role === "subagent") {
-        const stat = await Deno.stat(hostPath).catch(() => undefined);
-        if (stat?.isDirectory !== true) {
-          throw new Error(
-            "the run family's output directory is missing, so this child " +
-              `cannot write where its parent reads: ${hostPath}`,
-          );
-        }
-      } else {
-        await createSandboxOutputRoot(hostPath);
-      }
+      // A run that already recorded one — a resume, or a delegated child
+      // whose parent made it — restores it rather than making it again.
+      // Creating would refuse its own directory as somebody else's; restoring
+      // checks it is still the directory that was recorded.
+      this.#sandboxOutputRoot = recorded !== undefined
+        ? await restoreSandboxOutputRoot(recorded)
+        : this.#runState.lineage?.role === "subagent"
+        ? await restoreSandboxOutputRoot(
+          await this.#familyRootFromDisk(hostPath),
+        )
+        : await createSandboxOutputRoot(hostPath);
     } catch (error) {
       this.#sandboxOutputRootFailure = error instanceof Error
         ? error.message
         : String(error);
       return;
     }
-    this.#sandboxOutputRootReady = true;
+    // Without advancing the run's clock: establishing the directory is setup
+    // the run does before it does anything, and reading the clock here would
+    // make every later timestamp depend on whether the run had one to make.
     this.#runState = patchHarnessRunState(
       this.#runState,
-      { sandboxOutputRoot: hostPath },
-      this.#now(),
+      { sandboxOutputRoot: this.#sandboxOutputRoot },
+      this.#runState.updatedAt,
     );
     await this.persistRunState();
+  }
+
+  /**
+   * A child's view of the directory its parent made: read from disk, because
+   * the parent's identity record lives in the parent's run state and the
+   * child shares only the path. Restoring it re-reads and re-checks, so what
+   * the child ends up pinned to is what it can itself see.
+   */
+  async #familyRootFromDisk(
+    hostPath: string,
+  ): Promise<HarnessSandboxOutputRoot> {
+    const stat = await Deno.stat(hostPath).catch(() => undefined);
+    if (stat?.isDirectory !== true || stat.dev === null || stat.ino === null) {
+      throw new Error(
+        "the run family's output directory is missing, so this child cannot " +
+          `write where its parent reads: ${hostPath}`,
+      );
+    }
+    return { hostPath, dev: stat.dev, ino: stat.ino };
   }
 
   /** Why this family cannot ingest, or `undefined` while it can. */
@@ -1600,7 +1704,7 @@ export class CfHarnessEngine {
   }
 
   async persistRunState(): Promise<string | undefined> {
-    return await this.artifactStore?.persistRunState(this.#runState);
+    return await this.artifactStore?.persistRunState(this.#syncFamilyTaint());
   }
 
   /**
@@ -2312,12 +2416,34 @@ export class CfHarnessEngine {
     }
   }
 
+  /**
+   * Whether `path` is the run family's output directory or something inside
+   * it.
+   *
+   * The output directory sits under the artifact root, so the reservation
+   * that keeps tools out of the run's own artifacts would otherwise keep
+   * them out of the one directory the run exists to have them write into.
+   * The reservation protects the record a run writes ABOUT itself; this
+   * directory is the run's output, and the model is told to put files there
+   * by name.
+   */
+  #isWithinSandboxOutputRoot(path: string): boolean {
+    const root = this.#sandboxOutputRootHostPath;
+    if (root === undefined) {
+      return false;
+    }
+    const normalizedRoot = normalizeHostPath(root);
+    const normalizedPath = normalizeHostPath(path);
+    return normalizedPath === normalizedRoot ||
+      isHostPathWithinRoot(normalizedRoot, normalizedPath);
+  }
+
   async #isHostPathWithinArtifactRoot(
     path: string,
     options: { allowMissing?: boolean } = {},
   ): Promise<boolean> {
     const root = this.artifactStore?.artifactRoot;
-    if (root === undefined) {
+    if (root === undefined || this.#isWithinSandboxOutputRoot(path)) {
       return false;
     }
     const normalizedRoot = normalizeHostPath(root);
@@ -2340,7 +2466,7 @@ export class CfHarnessEngine {
     options: { allowMissing?: boolean } = {},
   ): Promise<boolean> {
     const root = this.artifactStore?.artifactRoot;
-    if (root === undefined) {
+    if (root === undefined || this.#isWithinSandboxOutputRoot(path)) {
       return false;
     }
     const normalizedRoot = normalizeHostPath(root);
@@ -2450,14 +2576,13 @@ export class CfHarnessEngine {
       handleValueOrigins: this.config.handleValueOrigins,
       handleTable: this.handleTable,
       workspaceTaint: this.workspaceTaint,
-      ...(this.#sandboxOutputRootReady &&
-          this.#sandboxOutputRootHostPath !== undefined
-        ? { sandboxOutputRootHostPath: this.#sandboxOutputRootHostPath }
+      ...(this.#sandboxOutputRoot !== undefined
+        ? { sandboxOutputRoot: this.#sandboxOutputRoot }
         : {}),
       ...(this.#sandboxOutputRootFailure !== undefined
         ? { sandboxOutputRootFailure: this.#sandboxOutputRootFailure }
         : {}),
-      sandboxOutputRootSandboxPath: this.#sandboxOutputRootSandboxPath,
+      sandboxOutputMountPath: SANDBOX_OUTPUT_MOUNT_PATH,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),

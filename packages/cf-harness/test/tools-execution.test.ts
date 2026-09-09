@@ -237,7 +237,7 @@ const createContext = (
     cfcEnforcementMode,
     workspaceHostPath,
     workspaceTaint: { kind: "known" },
-    sandboxOutputRootSandboxPath: "/workspace/.cf-harness/out/run-1",
+    sandboxOutputMountPath: "/cf-harness/out",
     skillRegistry,
     skillActivations,
     allowedSkillScripts,

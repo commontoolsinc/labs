@@ -338,9 +338,15 @@ export const resolveDockerRunscSandboxConfig = (
     { kind: "workspace", sandboxPath: workspaceMountPath },
     ...additionalMounts,
   ]);
-  const cfcResultDir = optionalNonEmptyString(
+  const rawCfcResultDir = optionalNonEmptyString(
     options.cfcResultDir ?? readEnvVar(CFC_RESULT_DIR_ENV),
   );
+  // Absolute FIRST, and on the environment fallback as much as on the flag.
+  // Everything below walks the path apart, and a relative one has no root to
+  // walk to: `dirname(".")` is `"."`, so the walk would never end.
+  const cfcResultDir = rawCfcResultDir === undefined
+    ? undefined
+    : validateAbsoluteHostDir(rawCfcResultDir, "cfcResultDir");
   const cfcInvocationContextDir = resolveCfcInvocationContextDir(options);
   // Every host directory this sandbox mounts read-write, including the
   // workspace that holds the run family's output directory.
@@ -747,6 +753,31 @@ const hasNonEmptyXattrValue = (value: unknown): boolean => {
   return value !== undefined && value !== null;
 };
 
+/**
+ * Whether the sidecar's raw taint is a shape this can represent.
+ *
+ * `runscTaintLabel` keeps a clause only when it is an array, so a taint whose
+ * `confidentiality` is a string — or anything else that is not a list of
+ * atoms — would be silently reduced to the empty label while
+ * `isPublicRunscTaint` still reported it as non-public. The result would be a
+ * container carrying a requirement, rendered as one carrying none. A shape
+ * this cannot read is not evidence about the container; it is a sidecar this
+ * build does not understand.
+ */
+const isRepresentableRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
+  if (taint.xattrJSON === undefined) {
+    return typeof taint.string === "string" || taint.string === undefined;
+  }
+  if (!isObjectNotArray(taint.xattrJSON)) {
+    return false;
+  }
+  return Object.entries(taint.xattrJSON).every(([clause, value]) =>
+    (clause === "confidentiality" || clause === "integrity")
+      ? Array.isArray(value)
+      : !hasNonEmptyXattrValue(value)
+  );
+};
+
 const runscTaintLabel = (taint: RunscCfcLabelSidecar): IFCLabel => {
   const xattr = isObjectNotArray(taint.xattrJSON) ? taint.xattrJSON : {};
   return {
@@ -800,6 +831,13 @@ const cfcResultFromRunscSidecar = (
   }
 
   const cfcTaint = parsed.cfcTaint;
+  if (!isRepresentableRunscTaint(cfcTaint)) {
+    return syntheticCfcResult(
+      "runsc_cfc_sidecar_unreadable_taint",
+      "runsc CFC result sidecar reported a taint shape this build cannot read",
+      { containerId: expectedContainerID },
+    );
+  }
   const label = runscTaintLabel(cfcTaint);
   const details: Record<string, CfcSandboxJsonValue> = {
     containerId: expectedContainerID,

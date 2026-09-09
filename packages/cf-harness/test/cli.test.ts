@@ -5328,9 +5328,12 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
   const mounts = engine?.sandbox.describe().cfc?.mounts;
-  assertEquals(mounts?.length, 2);
+  // Workspace, the fabric mount this test threads, and the run family's own
+  // output directory, which every run with an artifact root carries.
+  assertEquals(mounts?.length, 3);
   assertEquals(mounts?.[1]?.kind, "fabric-fuse");
   assertEquals(mounts?.[1]?.sandboxPath, "/fabric");
+  assertEquals(mounts?.[2]?.sandboxPath, "/cf-harness/out");
   assertEquals(
     runPromptOptions?.systemPrompt?.includes(
       "A Common Fabric space is mounted at /fabric",

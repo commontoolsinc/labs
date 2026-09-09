@@ -1782,6 +1782,14 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
       artifactPath: "/tmp/original.json",
     }],
     failureRecords: [],
+    // Resumed from a record that says nothing about what its earlier sandbox
+    // invocations were exposed to, which is not the same as saying they saw
+    // nothing.
+    cfcWorkspaceTaint: {
+      kind: "unknown",
+      reason:
+        "this run was resumed from a record that says nothing about what its earlier sandbox invocations were exposed to",
+    },
   });
 });
 
