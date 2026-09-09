@@ -94,6 +94,8 @@ const handlePinToChat = handler<
 });
 
 export type ChatOutput = {
+  [NAME]: string;
+  [UI]: VNode;
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
@@ -157,15 +159,8 @@ export const TitleGenerator = pattern<
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
     const model = new Writable<string>("anthropic:claude-sonnet-4-5");
-    const mentionableWish = wish<MentionablePiece[]>({
-      query: "#mentionable",
-    });
-    const mentionable = resultOf(mentionableWish.result);
-    const recentWish = wish<{ [NAME]: string }[]>({ query: "#recent" });
-    const recentPieces = resultOf(recentWish.result);
-
-    const latest = computed(() => recentPieces[0]);
-    const latestName = computed(() => recentPieces[0]?.[NAME] ?? "latest");
+    const mentionable =
+      wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 
     const {
       addMessage,
@@ -183,9 +178,6 @@ export default pattern<ChatInput, ChatOutput>(
         messages,
         tools,
         model,
-        context: computed(() => ({
-          [latestName]: latest,
-        })) as any,
       },
     );
 

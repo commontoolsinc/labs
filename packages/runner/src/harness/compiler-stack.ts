@@ -17,17 +17,19 @@
  * - Add new compiler-stack values HERE and reach them through
  *   `compilerStack()` after an `ensureCompilerStack()` on the owning flow.
  */
+
 import ts from "typescript";
 export { ts };
 export {
   CommonFabricTransformerPipeline,
+  createReactiveErrorTransformer,
   isLegacyInjectedEnvelope,
-  ReactiveErrorTransformer,
   transformCfDirective,
 } from "@commonfabric/ts-transformers";
 export {
+  collectDataFileNames,
   collectImportSpecifiers,
   getTypeScriptEnvironmentTypes,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-export { resolveProgram } from "@commonfabric/js-compiler/typescript";
+export { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";

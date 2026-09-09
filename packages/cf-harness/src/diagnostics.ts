@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import { ProcessTimeoutError } from "./sandbox/process-runner.ts";
 import type {
@@ -10,10 +11,7 @@ import type {
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
-import {
-  BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
-  BROWSER_HOST_COMMAND_DENIED_PREFIX,
-} from "./tools/browser-host-command-policy.ts";
+import type { BrowserToolOutput } from "./tools/browser.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import type { HarnessModelProviderId } from "./config.ts";
 import type { ReadSkillResourceToolOutput } from "./tools/read-skill-resource.ts";
@@ -125,6 +123,7 @@ export type HarnessFailureKind =
   | "not_a_file"
   | "permission_denied"
   | "tool_not_allowed"
+  | "invalid_tool_call"
   | "workspace_path_confusion"
   | "timeout"
   | "sandbox_exec_mismatch"
@@ -133,9 +132,11 @@ export type HarnessFailureKind =
 
 export type HarnessFailureSource =
   | "capability_snapshot"
+  | "cell_labels"
   | "policy_snapshot"
   | "policy_trace"
   | "policy_event"
+  | "tool_call"
   | "tool_output"
   | "run_error";
 
@@ -217,9 +218,6 @@ const createEmptyCapabilitySnapshot = (
   cfc,
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const isCfcEnforcementMode = (
   value: unknown,
 ): value is CfcEnforcementMode =>
@@ -230,10 +228,10 @@ const isFailedDelegateTaskOutput = (
   output: unknown,
 ): output is DelegateTaskToolOutput => {
   if (
-    !isRecord(output) ||
+    !isObjectNotArray(output) ||
     output.type !== "cf-harness.delegate-task-output" ||
     typeof output.outputId !== "string" ||
-    !isRecord(output.subagent)
+    !isObjectNotArray(output.subagent)
   ) {
     return false;
   }
@@ -267,7 +265,23 @@ const parseCapabilityProbeOutput = (
   return snapshot;
 };
 
-const cfcAbsenceBehaviorForMode = (
+/**
+ * What a mode does with an observation whose trusted mediation metadata is
+ * absent.
+ *
+ * This is the one derivation of that policy. It is both published — as
+ * `HarnessCfcCapabilitySnapshot.cfc.absenceBehavior`, which is how a reader
+ * of a run's artifacts learns what the run would do — and enacted, by the
+ * model-facing output path that decides whether such an observation reaches
+ * the model. Deriving those separately lets a mode describe one policy and
+ * follow another, so they share this function rather than agreeing by hand.
+ *
+ * Both enforcing modes fail closed. AH-CFC-6 admits no weaker answer: absence
+ * of metadata must not read as an unlabeled successful observation, and
+ * `enforce-explicit` is a statement about invocation authority (AH-CFC-9),
+ * not a license to expose an unmediated one.
+ */
+export const cfcAbsenceBehaviorForMode = (
   mode: CfcEnforcementMode,
 ): HarnessCfcAbsenceBehavior => {
   switch (mode) {
@@ -276,8 +290,13 @@ const cfcAbsenceBehaviorForMode = (
     case "observe":
       return "observe-only";
     case "enforce-explicit":
-      return "permissive-if-absent";
     case "enforce-strict":
+      return "fail-closed-if-absent";
+    default:
+      // A mode this build does not know, which a resumed or injected run
+      // state can carry. The type says it cannot happen and the value can, so
+      // the unknown answer is the closed one: an enforcement mode nobody here
+      // recognizes is not a licence to expose.
       return "fail-closed-if-absent";
   }
 };
@@ -294,19 +313,6 @@ const cfcSubstrateStatusFor = (options: {
   }
   return options.mode === "enforce-strict" ? "missing" : "not-attested";
 };
-
-const describeSandbox = (
-  sandbox: SandboxRuntime,
-  cwd: string,
-): SandboxRuntimeDescription =>
-  sandbox.describe?.() ?? {
-    kind: sandbox.kind,
-    defaultWorkingDirectory: sandbox.defaultWorkingDirectory(),
-    cfc: {
-      runtimeRequested: sandbox.kind === "docker-runsc-cfc",
-      workspaceMountPath: cwd,
-    },
-  };
 
 const findMountDescription = (
   mounts: readonly SandboxRuntimeMountDescription[] | undefined,
@@ -404,8 +410,8 @@ const parseFabricStatusProbeOutput = (
   }
   try {
     const parsed = JSON.parse(payload);
-    const cfc = isRecord(parsed) ? parsed.cfc : undefined;
-    const mode = isRecord(cfc) ? cfc.mode : undefined;
+    const cfc = isObjectNotArray(parsed) ? parsed.cfc : undefined;
+    const mode = isObjectNotArray(cfc) ? cfc.mode : undefined;
     return {
       statusProbe: "present",
       ...(isCfcEnforcementMode(mode) ? { attestedMode: mode } : {}),
@@ -459,11 +465,10 @@ const createFabricWriteGovernance = (options: {
 
 const createCfcCapabilitySnapshot = (
   sandbox: SandboxRuntime,
-  cwd: string,
   options: CollectHarnessCapabilitySnapshotOptions,
 ): HarnessCfcCapabilitySnapshot => {
   const mode = options.cfcEnforcementMode ?? "enforce-explicit";
-  const sandboxDescription = describeSandbox(sandbox, cwd);
+  const sandboxDescription = sandbox.describe();
   return {
     enforcementMode: mode,
     absenceBehavior: cfcAbsenceBehaviorForMode(mode),
@@ -503,7 +508,11 @@ export const collectHarnessCapabilitySnapshot = async (
   at = new Date().toISOString(),
   options: CollectHarnessCapabilitySnapshotOptions = {},
 ): Promise<HarnessCapabilitySnapshot> => {
-  const cfc = createCfcCapabilitySnapshot(sandbox, cwd, options);
+  // The description is captured once and persisted into the CFC policy
+  // snapshot, so a reading taken later cannot repair it. Take the reading
+  // first, and let the description carry it.
+  await sandbox.probeCfcTransportReadiness?.();
+  const cfc = createCfcCapabilitySnapshot(sandbox, options);
   const result = await sandbox.runShell({
     command: CAPABILITY_PROBE_SCRIPT,
     cwd,
@@ -681,22 +690,6 @@ export const classifyBashToolFailure = (
   capabilitySnapshot?: HarnessCapabilitySnapshot,
   toolId = "bash",
 ): HarnessFailureRecord | undefined => {
-  if (
-    toolId === "bash-no-sandbox" &&
-    output.exitCode === BROWSER_HOST_COMMAND_DENIED_EXIT_CODE &&
-    output.stderr.startsWith(BROWSER_HOST_COMMAND_DENIED_PREFIX)
-  ) {
-    return createHarnessFailureRecord({
-      kind: "tool_not_allowed",
-      source: "tool_output",
-      detail: output.stderr,
-      at,
-      toolId,
-      outputId: output.outputId as ToolOutputId,
-      command: input.command,
-      exitCode: output.exitCode,
-    });
-  }
   if (output.exitCode !== 127) {
     return undefined;
   }
@@ -740,14 +733,8 @@ export const classifyBuiltinToolFailure = (
         capabilitySnapshot,
         toolId,
       );
-    case "bash-no-sandbox":
-      return classifyBashToolFailure(
-        input as BashToolInput,
-        output as BashToolOutput,
-        at,
-        undefined,
-        toolId,
-      );
+    case "browser":
+      return classifyBrowserToolFailure(output, at);
     case "read_file":
     case "view_image":
     case "edit_file":
@@ -776,6 +763,43 @@ export const classifyBuiltinToolFailure = (
   }
 };
 
+/**
+ * Which browser-tool errors count as harness failures. `invalid_input` is the
+ * model asking for something outside the action vocabulary, recorded as
+ * `tool_not_allowed`. `lease_unavailable` and `host_unavailable` are the
+ * run's environment failing the tool. A `command_failed` is an ordinary
+ * page-level outcome (a ref that no longer exists, a navigation that failed)
+ * the model is expected to react to, so it is not recorded as a failure.
+ */
+const classifyBrowserToolFailure = (
+  output: unknown,
+  at: string,
+): HarnessFailureRecord | undefined => {
+  if (!isBrowserToolErrorOutput(output) || output.code === "command_failed") {
+    return undefined;
+  }
+  return createHarnessFailureRecord({
+    kind: output.code === "invalid_input"
+      ? "tool_not_allowed"
+      : "harness_error",
+    source: "tool_output",
+    detail: output.message,
+    at,
+    toolId: "browser",
+    outputId: output.outputId as ToolOutputId,
+    ...(output.exitCode !== undefined ? { exitCode: output.exitCode } : {}),
+  });
+};
+
+const isBrowserToolErrorOutput = (
+  output: unknown,
+): output is Extract<BrowserToolOutput, { status: "error" }> =>
+  isObjectNotArray(output) &&
+  (output as { status?: unknown }).status === "error" &&
+  typeof (output as { code?: unknown }).code === "string" &&
+  typeof (output as { message?: unknown }).message === "string" &&
+  typeof (output as { outputId?: unknown }).outputId === "string";
+
 const classifyWebFetchToolFailure = (
   output: unknown,
   at: string,
@@ -797,11 +821,11 @@ const classifyWebFetchToolFailure = (
 const isFailedSkillResourceOutput = (
   output: unknown,
 ): output is ReadSkillResourceToolOutput =>
-  isRecord(output) &&
+  isObjectNotArray(output) &&
   output.type === "cf-harness.read-skill-resource-output" &&
   output.status === "error" &&
   typeof output.outputId === "string" &&
-  isRecord(output.error) &&
+  isObjectNotArray(output.error) &&
   typeof output.error.message === "string";
 
 const classifySkillResourceToolFailure = (
@@ -929,7 +953,6 @@ export const classifyHarnessRunError = (
   }
   const kind = normalized.includes("unknown builtin tool") ||
       normalized.includes("did not return an outputid") ||
-      normalized.includes("failed to parse tool arguments") ||
       normalized.includes("chat completion response did not include a message")
     ? "harness_error"
     : "unknown";
@@ -960,6 +983,10 @@ const FAILURE_PRIORITY: Record<HarnessFailureKind, number> = {
   file_not_found: 25,
   sandbox_exec_mismatch: 20,
   harness_error: 10,
+  // A call the model wrote wrong and can write again ranks below every
+  // failure the run itself suffered, so it becomes the primary failure only
+  // when nothing else went wrong.
+  invalid_tool_call: 5,
   unknown: 0,
 };
 

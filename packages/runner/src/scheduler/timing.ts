@@ -1,8 +1,9 @@
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import type { ActionStats } from "../telemetry.ts";
 import type { Action } from "./types.ts";
 
 export interface ActionTimingState {
-  readonly actionStats: Map<string, ActionStats>;
+  readonly actionStats: BoundedKeyMap<string, ActionStats>;
   readonly getActionId: (action: Action) => string;
 }
 
@@ -20,15 +21,18 @@ export function recordActionTime(
     existing.averageTime = existing.totalTime / existing.runCount;
     existing.lastRunTime = elapsed;
     existing.lastRunTimestamp = now;
-  } else {
-    state.actionStats.set(actionId, {
-      runCount: 1,
-      totalTime: elapsed,
-      averageTime: elapsed,
-      lastRunTime: elapsed,
-      lastRunTimestamp: now,
-    });
+    // Setting it again moves it to the young end, so the map ages entries by
+    // when their action last ran.
+    state.actionStats.set(actionId, existing);
+    return;
   }
+  state.actionStats.set(actionId, {
+    runCount: 1,
+    totalTime: elapsed,
+    averageTime: elapsed,
+    lastRunTime: elapsed,
+    lastRunTimestamp: now,
+  });
 }
 
 export function getActionStats(

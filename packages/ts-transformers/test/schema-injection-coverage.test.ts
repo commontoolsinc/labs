@@ -1,7 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import type { TransformationDiagnostic } from "../src/core/mod.ts";
-import { transformSource, validateSource } from "./utils.ts";
+
+import ts from "typescript";
+
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
   callSchemas,
@@ -12,6 +12,7 @@ import {
   parseModule,
   patternSchemas,
 } from "./transformed-ast.ts";
+import { transformSource, validateSource } from "./utils.ts";
 
 // Unit coverage for schema-injection.ts. These tests drive the whole
 // transformer pipeline with `/// <cts-enable />` pattern sources that exercise
@@ -40,9 +41,9 @@ function allEmittedSchemaValues(root: ts.SourceFile): unknown[] {
 // deno-lint-ignore no-explicit-any
 type Obj = Record<string, any>;
 
-// ---------------------------------------------------------------------------
+//
 // pattern<Input, Output> — property type schemas
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("pattern schema encodes primitive property types and a required array", async () => {
   const source = [
@@ -166,9 +167,9 @@ Deno.test("pattern output schema encodes a VNode UI slot as a $ref", async () =>
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // handler — event/state schemas and asCell markers
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("handler<E, S> injects two schemas and marks a written Cell state field with asCell writeonly", async () => {
   const source = [
@@ -199,9 +200,9 @@ Deno.test("handler inline form injects the event schema from the annotated param
   assertEquals((event.properties as Obj).label.type, "string");
 });
 
-// ---------------------------------------------------------------------------
+//
 // lift — many call-site forms
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("lift<T, R> injects input and result schemas from type arguments", async () => {
   const source = [
@@ -251,9 +252,9 @@ Deno.test("lift(toSchema<T>(), fn) transfers the authored input schema into the 
   assertEquals((input.properties as Obj).label.type, "string");
 });
 
-// ---------------------------------------------------------------------------
-// cell(...) factory — value inference, scope, explicit type argument
-// ---------------------------------------------------------------------------
+//
+// cell(...) factory — value inference and explicit type argument
+//
 
 Deno.test("cell(value) infers a widened schema from the seed value and injects it as the second argument", async () => {
   const source = [
@@ -279,9 +280,9 @@ Deno.test("cell<T>() with an explicit type argument injects the T schema", async
   assertEquals((schema.properties as Obj).name.type, "string");
 });
 
-// ---------------------------------------------------------------------------
+//
 // wish(...) — schema injected as trailing argument
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("wish<T>() injects a schema argument for the wished type", async () => {
   const source = [
@@ -294,170 +295,9 @@ Deno.test("wish<T>() injects a schema argument for the wished type", async () =>
   assertEquals((schema.properties as Obj).answer.type, "number");
 });
 
-// ---------------------------------------------------------------------------
-// llmDialog(...) — presented-result schema injected into the options object
-// ---------------------------------------------------------------------------
-
-Deno.test("llmDialog<T>({...}) injects a resultSchema for presentResult", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { llmDialog } from "commonfabric";',
-    "const dialog = llmDialog<{ answer: number }>({ messages: [] });",
-  ].join("\n");
-  const output = await t(source);
-  const [schema] = emittedSchemas(parseModule(output));
-  assertEquals((schema.properties as Obj).answer.type, "number");
-  assertStringIncludes(output, "resultSchema:");
-});
-
-Deno.test("untyped llmDialog without presentResult does not inject a resultSchema", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { llmDialog } from "commonfabric";',
-    "const dialog = llmDialog({ messages: [] });",
-  ].join("\n");
-  const output = await t(source);
-  assertEquals(emittedSchemas(parseModule(output)).length, 0);
-  assertEquals(output.includes("resultSchema:"), false);
-});
-
-Deno.test("llmDialog preserves an authored resultSchema", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { llmDialog } from "commonfabric";',
-    'const authored = { type: "object" } as const;',
-    "const dialog = llmDialog<{ answer: number }>({ messages: [], resultSchema: authored });",
-  ].join("\n");
-  const output = await t(source);
-  assertEquals(emittedSchemas(parseModule(output)).length, 0);
-  assertEquals(output.match(/resultSchema:/g)?.length, 1);
-  assertStringIncludes(output, "resultSchema: authored");
-});
-
-Deno.test("llmDialog lets variable and spread options override the generated resultSchema", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { llmDialog } from "commonfabric";',
-    'const authored = { type: "object" } as const;',
-    "const options = { messages: [], resultSchema: authored };",
-    "const variable = llmDialog<{ answer: number }>(options);",
-    "const spread = llmDialog<{ answer: number }>({ ...options });",
-  ].join("\n");
-  const output = await transformSource(source, {
-    types: COMMONFABRIC_TYPES,
-    typeCheck: true,
-  });
-  const calls = callsNamed(parseModule(output), "llmDialog");
-  assertEquals(calls.length, 2);
-
-  for (const call of calls) {
-    const options = call.arguments[0];
-    assert(options && ts.isObjectLiteralExpression(options));
-    const [generatedDefault, authoredOptions] = options.properties;
-    assert(generatedDefault && ts.isPropertyAssignment(generatedDefault));
-    assertEquals(generatedDefault.name.getText(), "resultSchema");
-    assert(authoredOptions && ts.isSpreadAssignment(authoredOptions));
-    assertEquals(authoredOptions.expression.getText(), "options");
-  }
-});
-
-Deno.test("llmDialog injects resultSchema into non-literal options", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { llmDialog } from "commonfabric";',
-    "const options = { messages: [] };",
-    "const spread = llmDialog<{ answer: number }>(options);",
-  ].join("\n");
-  const output = await t(source);
-  const schemas = emittedSchemas(parseModule(output));
-  assertEquals(schemas.length, 1);
-  assertEquals((schemas[0]!.properties as Obj).answer.type, "number");
-  assertStringIncludes(output, "...options");
-  assertEquals(output.match(/resultSchema:/g)?.length, 1);
-});
-
-Deno.test("malformed zero-argument llmDialog receives recovery options", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { llmDialog } from "commonfabric";',
-    "// @ts-expect-error Exercise transformer recovery for an incomplete call.",
-    "const empty = llmDialog<{ label: string }>();",
-  ].join("\n");
-  const output = await transformSource(source, {
-    types: COMMONFABRIC_TYPES,
-    typeCheck: true,
-  });
-  const [schema] = emittedSchemas(parseModule(output));
-  assertEquals((schema.properties as Obj).label.type, "string");
-  assertEquals(output.match(/resultSchema:/g)?.length, 1);
-});
-
-Deno.test("streamData<T>({...}) injects an event schema", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { streamData } from "commonfabric";',
-    'const request = streamData<{ id: string; value: number }>({ url: "/events" });',
-  ].join("\n");
-  const output = await t(source);
-  const [schema] = emittedSchemas(parseModule(output));
-  const properties = schema.properties as Obj;
-  assertEquals(properties.id.type, "string");
-  assertEquals(properties.value.type, "number");
-  assertStringIncludes(output, "schema:");
-});
-
-Deno.test("streamData diagnoses a missing event type", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { streamData } from "commonfabric";',
-    'const request = streamData({ url: "/events" });',
-  ].join("\n");
-  const diagnostics: TransformationDiagnostic[] = [];
-  const output = await transformSource(source, {
-    types: COMMONFABRIC_TYPES,
-    pipelineDiagnostics: diagnostics,
-  });
-  assertEquals(output.includes("schema:"), false);
-  assertEquals(
-    diagnostics.map((diagnostic) => diagnostic.type),
-    ["stream-data:missing-type-argument"],
-  );
-});
-
-Deno.test("streamData injects schema into non-literal parameters", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { streamData } from "commonfabric";',
-    'const params = { url: "/events" };',
-    "const spread = streamData<{ id: string }>(params);",
-  ].join("\n");
-  const output = await t(source);
-  const schemas = emittedSchemas(parseModule(output));
-  assertEquals(schemas.length, 1);
-  assertEquals((schemas[0]!.properties as Obj).id.type, "string");
-  assertStringIncludes(output, "...params");
-  assertEquals(output.match(/schema:/g)?.length, 1);
-});
-
-Deno.test("malformed zero-argument streamData receives recovery parameters", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { streamData } from "commonfabric";',
-    "// @ts-expect-error Exercise transformer recovery for an incomplete call.",
-    "const empty = streamData<{ value: number }>();",
-  ].join("\n");
-  const output = await transformSource(source, {
-    types: COMMONFABRIC_TYPES,
-    typeCheck: true,
-  });
-  const [schema] = emittedSchemas(parseModule(output));
-  assertEquals((schema.properties as Obj).value.type, "number");
-  assertEquals(output.match(/schema:/g)?.length, 1);
-});
-
-// ---------------------------------------------------------------------------
+//
 // generateObject — schema property injected into the options object
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("generateObject<T>({...}) injects a schema property into the existing options literal", async () => {
   const source = [
@@ -473,33 +313,9 @@ Deno.test("generateObject<T>({...}) injects a schema property into the existing 
   assertStringIncludes(output, "schema:");
 });
 
-Deno.test("aliased generateObjectStream<T> injects the structured result schema", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import { generateObjectStream as objectStream } from "commonfabric";',
-    'const r = objectStream<{ title: string }>({ prompt: "hi" });',
-  ].join("\n");
-  const output = await t(source);
-  const [schema] = emittedSchemas(parseModule(output));
-  assertEquals((schema.properties as Obj).title.type, "string");
-  assertStringIncludes(output, "schema:");
-});
-
-Deno.test("namespace generateObjectStream<T> injects the structured result schema", async () => {
-  const source = [
-    "/// <cts-enable />",
-    'import * as cf from "commonfabric";',
-    'const r = cf.generateObjectStream<{ score: number }>({ prompt: "hi" });',
-  ].join("\n");
-  const output = await t(source);
-  const [schema] = emittedSchemas(parseModule(output));
-  assertEquals((schema.properties as Obj).score.type, "number");
-  assertStringIncludes(output, "schema:");
-});
-
-// ---------------------------------------------------------------------------
+//
 // sqliteQuery — rowSchema injected
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("sqliteQuery<Row>({...}) injects a rowSchema property from the Row type argument", async () => {
   const source = [
@@ -516,9 +332,9 @@ Deno.test("sqliteQuery<Row>({...}) injects a rowSchema property from the Row typ
   assertStringIncludes(output, "rowSchema:");
 });
 
-// ---------------------------------------------------------------------------
+//
 // Reactive conditionals: when / unless / ifElse prepend generated schemas
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("when(condition, value) prepends condition, value and result schemas", async () => {
   const source = [
@@ -570,9 +386,9 @@ Deno.test("ifElse(condition, ifTrue, ifFalse) prepends four schemas for its 3-ar
   assert(numSchemas >= 3, `expected >=3 number schemas, got ${numSchemas}`);
 });
 
-// ---------------------------------------------------------------------------
+//
 // lift-applied (derive) chains: object-literal input, direct projection
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("lift-applied object-literal input builds a schema from composed reactive cell types", async () => {
   const source = [
@@ -625,9 +441,9 @@ Deno.test("lift-applied empty-object input lowers the no-capture placeholder to 
   assert(inputArg && inputArg.kind === ts.SyntaxKind.FalseKeyword);
 });
 
-// ---------------------------------------------------------------------------
+//
 // pattern — single type argument (result inferred), one schema argument
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("pattern<Input> with a single type argument infers the result schema from the callback", async () => {
   const source = [
@@ -667,9 +483,9 @@ Deno.test("pattern(fn, inputSchema) keeps the author input schema and appends an
   assertStringIncludes(output, '{ type: "object" } as const,');
 });
 
-// ---------------------------------------------------------------------------
+//
 // handler inline single-argument form — event/state inference
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("handler(fn) with no type args infers both event and state schemas from annotations", async () => {
   const source = [
@@ -702,9 +518,9 @@ Deno.test("handler(fn) with an underscore-prefixed unused event param yields a f
   assertEquals(values[0], false);
 });
 
-// ---------------------------------------------------------------------------
-// cell scope: call form cell.perSession(...), and PerSession contextual scope
-// ---------------------------------------------------------------------------
+//
+// cell scope: the `new Writable.perX(seed)` accessor forms
+//
 
 Deno.test("new Writable.perUser(seed) reads the user scope and injects it into the schema", async () => {
   const source = [
@@ -734,9 +550,9 @@ Deno.test("new Writable.perSpace(seed) reads the space scope and injects it into
   assertEquals(schema.type, "boolean");
 });
 
-// ---------------------------------------------------------------------------
+//
 // lift result recovery: direct property / element-access projection
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("lift property projection recovers the result schema from the projected field type", async () => {
   const source = [
@@ -766,9 +582,9 @@ Deno.test("lift element-access projection recovers the result schema from the in
   assertEquals(result.type, "string");
 });
 
-// ---------------------------------------------------------------------------
+//
 // pattern result diagnostics
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("pattern with an inferred any/unknown result reports pattern:any-result-schema", async () => {
   const source = [
@@ -777,7 +593,6 @@ Deno.test("pattern with an inferred any/unknown result reports pattern:any-resul
     "export default pattern((s: { x: number }) => s as any);",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   assert(
@@ -788,9 +603,9 @@ Deno.test("pattern with an inferred any/unknown result reports pattern:any-resul
   );
 });
 
-// ---------------------------------------------------------------------------
-// handler<E, S> with only one usable type argument bails out
-// ---------------------------------------------------------------------------
+//
+// handler event-schema optionality
+//
 
 Deno.test("handler event schema encodes an optional field as not required", async () => {
   const source = [
@@ -807,9 +622,9 @@ Deno.test("handler event schema encodes an optional field as not required", asyn
   assert(!((event.required as string[] | undefined) ?? []).includes("amount"));
 });
 
-// ---------------------------------------------------------------------------
+//
 // generateObject — options variations
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("generateObject<T>() with no options builds a fresh options object carrying the schema", async () => {
   const source = [
@@ -838,9 +653,9 @@ Deno.test("generateObject<T>(spreadOptions) spreads a non-literal options expres
   assertStringIncludes(output, "...opts");
 });
 
-// ---------------------------------------------------------------------------
-// sqliteQuery — method form and no-options form
-// ---------------------------------------------------------------------------
+//
+// sqliteQuery — no-options and untyped forms
+//
 
 Deno.test("sqliteQuery<Row>() with no options builds a fresh options object carrying rowSchema", async () => {
   const source = [
@@ -867,9 +682,9 @@ Deno.test("untyped sqliteQuery(options) injects no rowSchema", async () => {
   assertEquals(emittedSchemas(parseModule(output)).length, 0);
 });
 
-// ---------------------------------------------------------------------------
+//
 // contextual cell scope from a Scoped<> / PerX<> annotation
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("cell(value) assigned to a PerSession<T> variable reads the session scope from the annotation", async () => {
   const source = [
@@ -906,9 +721,9 @@ Deno.test("cell(value) assigned to a PerSpace<T> variable reads the space scope 
   assertEquals(schema.scope, "space");
 });
 
-// ---------------------------------------------------------------------------
+//
 // pattern result: inferred unknown output field reports pattern-result:unknown-type
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("pattern with an inferred unknown output field reports pattern-result:unknown-type", async () => {
   const source = [
@@ -918,7 +733,6 @@ Deno.test("pattern with an inferred unknown output field reports pattern-result:
     "export default pattern((s: { x: number }) => ({ out: opaque() }));",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   const paths = diagnostics.filter((d) =>
@@ -934,9 +748,9 @@ Deno.test("pattern with an inferred unknown output field reports pattern-result:
   assertStringIncludes(paths[0]!.message, "out");
 });
 
-// ---------------------------------------------------------------------------
+//
 // lift result shape: tuple, enum literal, and nested arrays
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("lift<T, R> encodes a tuple result as an array schema with a positional item type set", async () => {
   const source = [
@@ -974,9 +788,9 @@ Deno.test("lift<T, R> encodes a nested array-of-objects result schema", async ()
   assertEquals(((result.items as Obj).properties as Obj).id.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // cell-for scope wrapping via .asSchema(...)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("scoped cell-for value schema carries the scope marker", async () => {
   const source = [
@@ -991,9 +805,9 @@ Deno.test("scoped cell-for value schema carries the scope marker", async () => {
   assertEquals(schema.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // new cell constructor: value inference, explicit type argument
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("new Writable(value) infers a widened schema from the seed and injects it as the second argument", async () => {
   const source = [
@@ -1034,9 +848,9 @@ Deno.test("new Writable<T>() with an explicit type argument and no value injects
   assertEquals((schema.properties as Obj).n.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // contextual scope from a raw Scoped<T, scope> brand (no PerX alias)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("cell(value) typed as raw Scoped<T, scope> reads the scope from the SCOPE_BRAND property", async () => {
   const source = [
@@ -1051,9 +865,9 @@ Deno.test("cell(value) typed as raw Scoped<T, scope> reads the scope from the SC
   assertEquals(schema.scope, "session");
 });
 
-// ---------------------------------------------------------------------------
+//
 // lift<T, R>(fn)(input): type arguments on the inner lift drive both schemas
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("lift<T, R>(fn)(input) reads the schemas from the inner lift type arguments", async () => {
   const source = [
@@ -1067,9 +881,9 @@ Deno.test("lift<T, R>(fn)(input) reads the schemas from the inner lift type argu
   assertEquals(result.type, "string");
 });
 
-// ---------------------------------------------------------------------------
+//
 // chained lift-applied (derive) inputs: recover the upstream result type
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("chained lift-applied recovers the input schema from the upstream lift's inferred result", async () => {
   const source = [
@@ -1103,9 +917,9 @@ Deno.test("chained lift-applied whose upstream is a single-field object recovers
   assertEquals(input.type, "object");
 });
 
-// ---------------------------------------------------------------------------
+//
 // scope brand recovery when the scope is a union of literal scope values
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("cell typed as Scoped<T, union-of-scopes> recovers the first concrete scope from the brand union", async () => {
   const source = [
@@ -1120,12 +934,13 @@ Deno.test("cell typed as Scoped<T, union-of-scopes> recovers the first concrete 
   assertEquals(schema.scope, "user");
 });
 
-// ---------------------------------------------------------------------------
-// lift factory captured in a variable, then applied — recover the result type
-// through the factory's callback
-// ---------------------------------------------------------------------------
+//
+// lift factory application
+//
 
 Deno.test("applying a captured lift factory recovers the downstream input schema from the factory callback result", async () => {
+  // lift factory captured in a variable, then applied — recover the result type
+  // through the factory's callback
   const source = [
     "/// <cts-enable />",
     'import { lift } from "commonfabric";',
@@ -1141,9 +956,9 @@ Deno.test("applying a captured lift factory recovers the downstream input schema
   assertEquals(result.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // pattern result: unknown paths are walked into nested objects and arrays
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("pattern result reports a nested unknown output field with a dotted path", async () => {
   const source = [
@@ -1153,7 +968,6 @@ Deno.test("pattern result reports a nested unknown output field with a dotted pa
     "export default pattern((s: { x: number }) => ({ nested: { deep: op() } }));",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   const d = diagnostics.find((d) => d.type === "pattern-result:unknown-type");
@@ -1170,7 +984,6 @@ Deno.test("pattern result reports an unknown array element with an array path su
     "export default pattern((s: { x: number }) => ({ items: [op()] }));",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   const d = diagnostics.find((d) => d.type === "pattern-result:unknown-type");
@@ -1179,12 +992,16 @@ Deno.test("pattern result reports an unknown array element with an array path su
   assertStringIncludes(d!.message, "items[]");
 });
 
-// ---------------------------------------------------------------------------
-// idempotency / author-supplied skips: a builder that already carries its
-// schema is left untouched
-// ---------------------------------------------------------------------------
+//
+// An author-supplied schema is left untouched
+//
+// Each of these already carries a schema of its own, so injection has
+// nothing to add and must add nothing.
+//
 
 Deno.test("new Writable(value, schema) with two arguments is left untouched", async () => {
+  // idempotency / author-supplied skips: a builder that already carries its
+  // schema is left untouched
   const source = [
     'import { Writable } from "commonfabric";',
     "export default function T() {",
@@ -1238,9 +1055,9 @@ Deno.test("untyped sqliteQuery already carrying a rowSchema is left untouched", 
   assertEquals((output.match(/rowSchema:/g) ?? []).length, 1);
 });
 
-// ---------------------------------------------------------------------------
+//
 // new scoped cell with no value: scope from accessor, value type from context
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("new Writable.perSession() with no value derives the value type from the contextual scope annotation", async () => {
   const source = [
@@ -1264,12 +1081,13 @@ Deno.test("new Writable.perSession() with no value derives the value type from t
   assertEquals((ctor!.arguments![0] as ts.Identifier).text, "undefined");
 });
 
-// ---------------------------------------------------------------------------
-// lift-applied projection recovery: property-access and element-access forms
-// on a downstream callback whose parameter type is recovered from upstream
-// ---------------------------------------------------------------------------
+//
+// lift-applied projection recovery
+//
 
 Deno.test("lift-applied element-access projection recovers the result schema from the indexed field", async () => {
+  // lift-applied projection recovery: property-access and element-access forms
+  // on a downstream callback whose parameter type is recovered from upstream
   const source = [
     "/// <cts-enable />",
     'import { lift } from "commonfabric";',
@@ -1298,9 +1116,9 @@ Deno.test("lift-applied property-access projection recovers the result schema fr
   assertEquals(result.type, "number");
 });
 
-// ---------------------------------------------------------------------------
+//
 // handler state Cell that is read marks the schema field asCell readonly
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("handler<E, S> marks a read-only Cell state field with asCell readonly", async () => {
   const source = [
@@ -1317,13 +1135,14 @@ Deno.test("handler<E, S> marks a read-only Cell state field with asCell readonly
   assertEquals((state.properties as Obj).total.asCell, ["readonly"]);
 });
 
-// ---------------------------------------------------------------------------
-// lift-applied whose untyped callback calls Cell methods on a Cell input:
-// the input schema is recovered from the cell-like fallback type and marked
-// asCell readonly
-// ---------------------------------------------------------------------------
+//
+// lift-applied input recovery through Cell.get
+//
 
 Deno.test("lift-applied untyped callback using Cell.get on a Cell input recovers a cell-like input schema", async () => {
+  // lift-applied whose untyped callback calls Cell methods on a Cell input: the
+  // input schema is recovered from the cell-like fallback type and marked
+  // asCell readonly
   const source = [
     "/// <cts-enable />",
     'import { cell, lift } from "commonfabric";',

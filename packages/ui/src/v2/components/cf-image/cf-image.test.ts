@@ -6,6 +6,7 @@
  * for a Blob, so the tests drive `_coerceBytes`, the `willUpdate` object-URL
  * lifecycle, `render`, and cleanup directly.
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFImage } from "./index.ts";

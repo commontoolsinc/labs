@@ -1,4 +1,4 @@
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ProfileHome from "./profile-home.tsx";
 
 export default pattern(() => {
@@ -143,7 +143,7 @@ export default pattern(() => {
   const assert_removed_element = assert(() => profile.elements.length === 0);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_state },
       // CT-1748: a freshly-visited profile starts in the read-only
       // presentation, not the edit form.

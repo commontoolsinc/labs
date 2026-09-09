@@ -3,6 +3,7 @@
  *
  * Uses d3-shape for path generation and Lit's svg template tag.
  */
+
 import { svg, type TemplateResult } from "lit";
 // @ts-types="@types/d3-shape"
 import {

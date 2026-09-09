@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, NAME } from "../src/builder/types.ts";
+import { type Cell, type FactoryInput, NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -159,13 +159,17 @@ describe("Pattern Runner - Regressions", () => {
 
     const createNote = handler<
       void,
-      { notes: Array<ReturnType<typeof notePattern>> }
+      { notes: Cell<Array<ReturnType<typeof notePattern>>> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { notes: { type: "array", asCell: ["cell"] } },
+      },
       (_, { notes }) => {
         const newNote = notePattern({ title: "Stream Created Note" });
         notes.push(newNote);
       },
-      { proxy: true },
     );
 
     const notebookLikePattern = pattern<{
@@ -244,7 +248,7 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    const runner = runtime.runner as any;
+    const runner = runtime.runner.accessForTestingOnly;
     runner.setupInternal(tx, echoPattern, { title: "draft" }, resultCell);
     const key = runner.getDocKey(resultCell);
     expect(runner.locallyPreparedResults.has(key)).toBe(true);
@@ -266,7 +270,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
   });
 
-  it("normalizes nested toJSON values before raw runner writes in v2", async () => {
+  it("normalizes nested builder artifacts before raw runner writes in v2", async () => {
     await commitTx();
     await runtime.dispose();
     await storageManager.close();
@@ -281,13 +285,15 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
     bindBuilder();
 
+    // Shaped like a builder artifact: a function carrying its own
+    // `toEncodableForm`, which is the member the write path keys on.
     const initialRecipe = Object.assign(() => {}, {
-      toJSON() {
+      toEncodableForm() {
         return { name: "initial recipe" };
       },
     });
     const resultRecipe = Object.assign(() => {}, {
-      toJSON() {
+      toEncodableForm() {
         return { name: "result recipe" };
       },
     });
@@ -297,7 +303,7 @@ describe("Pattern Runner - Regressions", () => {
       resultSchema: {},
       derivedInternalCells: [{
         partialCause: "recipe",
-        schema: { default: initialRecipe.toJSON() },
+        schema: { default: initialRecipe.toEncodableForm() },
       }],
       result: {
         internalRecipe: {

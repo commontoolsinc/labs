@@ -16,7 +16,13 @@
  * - `withheld` is per-reader (each reader's own audit count);
  * - the cleared result cell resolves at scope "user" (isolated instance per
  *   reader on one shared link);
- * - the non-clearance query remains space-scoped (unchanged).
+ * - the two readers' cleared request hashes DIFFER, while the non-clearance
+ *   query keeps ONE shared hash (non-clearance queries unchanged);
+ * - two SESSIONS of one reader (alice's Identity in two harness sessions —
+ *   two browser tabs) SHARE the user-granularity cleared result and its
+ *   request hash: the session joins the request identity only BELOW user
+ *   scope (RULED 2026-08-22, verification-coverage.md OW53), so a
+ *   user-scoped cleared read stays session-blind in both arms.
  *
  * No toolshed or browser required (Deno workers + in-process storage server).
  */
@@ -24,6 +30,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { Identity } from "@commonfabric/identity";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -52,22 +59,35 @@ async function queryState(
   session: MultiRuntimeSession,
   key: string,
 ): Promise<QueryState> {
-  return ((await session.read([key])) ?? {}) as QueryState;
+  return ((await session.read([key])) ?? {}) as unknown as QueryState;
 }
 
 describe("sqlite read-time clearance across runtimes", () => {
   let harness: MultiRuntimeHarness;
   let alice: MultiRuntimeSession;
   let bob: MultiRuntimeSession;
+  let aliceTab2: MultiRuntimeSession;
 
   beforeAll(async () => {
+    // One Identity in two harness sessions = one user with two concurrent
+    // sessions (two browser tabs) — the construction the session-identity
+    // ruling's user-scoped arm is pinned against below.
+    const aliceIdentity = await Identity.fromPassphrase(
+      "multi-runtime-harness alice",
+      { implementation: "noble" },
+    );
     harness = await MultiRuntimeHarness.create({
       programPath: PROGRAM_PATH,
       rootPath: ROOT_PATH,
-      sessions: ["alice", "bob"],
+      sessions: [
+        { label: "alice", identity: aliceIdentity },
+        "bob",
+        { label: "alice-tab2", identity: aliceIdentity },
+      ],
     });
     alice = harness.session("alice");
     bob = harness.session("bob");
+    aliceTab2 = harness.session("alice-tab2");
   });
 
   afterAll(async () => {
@@ -213,5 +233,41 @@ describe("sqlite read-time clearance across runtimes", () => {
       ["rows"],
       "a non-clearance result must not carry a withheld field",
     );
+  });
+
+  it("shares one user-granularity cleared cell across two sessions of one user", async () => {
+    // The unchanged arm of the session-identity ruling (RULED 2026-08-22,
+    // verification-coverage.md OW53): at USER granularity the session never
+    // joins the request identity, so alice's second session resolves the
+    // SAME user-scoped cleared cell and the SAME reader-keyed hash — the
+    // sharing IS the contract (one cleared cell per
+    // query-and-reader-at-matching-granularity). A fix that joined the
+    // session above user scope would split these hashes; this step is the
+    // live-topology guard against that regression, in both arms (OFF: both
+    // tabs hash their own — identical — ambient reader; ON: one served
+    // user-granularity identity).
+    const aliceDid = alice.identity.did();
+    assertEquals(aliceTab2.identity.did(), aliceDid, "one user, two tabs");
+
+    await harness.waitFor(
+      "alice's second session settles on her cleared rows",
+      async () => {
+        const state = await queryState(aliceTab2, "qClear");
+        return state.rows?.length === 2;
+      },
+    );
+    const tab2Clear = await queryState(aliceTab2, "qClear");
+    assertEquals(
+      tab2Clear.rows.map((r) => r.body),
+      ["alice-1", "alice-2"],
+      "the second session sees exactly alice's rows",
+    );
+    assertEquals(tab2Clear.withheld, 1, "alice's withheld count, both tabs");
+
+    // One shared user-scoped instance — same base entity and same scope.
+    const aliceLink = await alice.link(["qClear"]);
+    const tab2Link = await aliceTab2.link(["qClear"]);
+    assertEquals(tab2Link.scope, "user", "tab2's cleared result scope");
+    assertEquals(tab2Link.id, aliceLink.id, "one base entity across tabs");
   });
 });

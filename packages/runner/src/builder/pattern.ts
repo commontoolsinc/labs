@@ -1,5 +1,26 @@
-import { isRecord } from "@commonfabric/utils/types";
+import type { JSONSchemaObj } from "@commonfabric/api";
+import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { type AliasBinding } from "../alias-binding.ts";
+import { isCell, setCellUnlinkedSpace } from "../cell.ts";
+import type { ImplementationIdentity } from "../cfc/types.ts";
+import { createRef } from "../create-ref.ts";
+import { defineAuthoredDebugAccessors } from "../harness/authored-debug-source.ts";
+import {
+  externalizeSchema,
+  getStableInternalPathSegment,
+  KeepAsCell,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
+import { Runtime } from "../runtime.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import {
   ARRAY_SUBSCHEMA_KEYS,
   RECORD_SUBSCHEMA_KEYS,
@@ -7,8 +28,31 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "../schema-walk.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
+import { toURI } from "../uri-utils.ts";
+import {
+  REPLAYABLE_BUILTIN_REFS,
+  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
+} from "./builtin-replayability.ts";
+import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import { toJSONMethod } from "./json-member.ts";
+import {
+  applyArgumentIfcToResult,
+  applyInputIfcToOutput,
+  connectInputAndOutputs,
+} from "./node-utils.ts";
+import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
+import { reactive } from "./reactive.ts";
+import {
+  type CellAliasResolver,
+  moduleToEncodableForm,
+  patternToEncodableForm,
+  withAliasBindings,
+} from "./to-encodable-form.ts";
+import { traverseValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -32,53 +76,21 @@ import {
   type Schema,
   type SchemaWithoutCell,
   SELF,
+  type toEncodableForm,
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
-import { reactive } from "./reactive.ts";
-import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
-import {
-  applyArgumentIfcToResult,
-  applyInputIfcToOutput,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
-import {
-  type CellAliasResolver,
-  moduleToJSON,
-  patternToJSON,
-  toJSONWithAliasBindings,
-} from "./json-utils.ts";
-import { traverseValue } from "./traverse-utils.ts";
-import {
-  REPLAYABLE_BUILTIN_REFS,
-  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
-} from "./builtin-replayability.ts";
-import {
-  getStableInternalPathSegment,
-  KeepAsCell,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
-import { type AliasBinding } from "../sigil-types.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
-import { isCell, setCellUnlinkedSpace } from "../cell.ts";
-import { createRef } from "../create-ref.ts";
-import { toURI } from "../uri-utils.ts";
-import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import { Runtime } from "../runtime.ts";
-import type { ImplementationIdentity } from "../cfc/types.ts";
-import {
-  IExtendedStorageTransaction,
-  MemorySpace,
-} from "../storage/interface.ts";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 /** Declare a pattern
  *
  * @param fn A function that creates the pattern graph
- * @param argumentSchema An optional JSONSchema for the pattern inputs
+ * @param argumentSchema An optional JSONSchema for the pattern inputs. A
+ *   pattern that takes no inputs may pass `false` (the JSON Schema that
+ *   matches nothing) -- but do not copy that shape into a pattern that does
+ *   take inputs: a `false` argument schema silently drops every argument
+ *   supplied at run time, so each input reads as `undefined` with no error.
+ *   A pattern with inputs needs a real argument schema here (the position
+ *   cannot be skipped when a `resultSchema` is also passed).
  * @param resultSchema An optional JSONSchema for the pattern outputs
  *
  * @returns A pattern node factory that also serializes as pattern.
@@ -233,7 +245,7 @@ export function patternFromFrame<T, R>(
  * on it.
  */
 export function assertNoReservedCauseKeys(cause: unknown): void {
-  if (isRecord(cause) && "$generated" in cause) {
+  if (isObjectOrArray(cause) && "$generated" in cause) {
     throw new Error(
       `Cannot use cause ${
         toCompactDebugString(cause)
@@ -299,7 +311,7 @@ function factoryFromPattern<T, R>(
   });
 
   // First from results
-  if (isRecord(outputs) && !isCell(outputs)) {
+  if (isObjectOrArray(outputs) && !isCell(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
       if (isCell(value)) {
         const exported = value.export();
@@ -319,7 +331,7 @@ function factoryFromPattern<T, R>(
   allCells.forEach((cell) => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
-      if (isRecord(node.inputs)) {
+      if (isObjectOrArray(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
             isReactive(input) && input.export().cell === cell &&
@@ -380,7 +392,7 @@ function factoryFromPattern<T, R>(
       return;
     }
 
-    const isStream = isRecord(value) && value.$stream === true;
+    const isStream = isObjectOrArray(value) && value.$stream === true;
     let partialCause: JSONValue;
     if (name === undefined) {
       partialCause = nextAnonymousPartialCause(isStream);
@@ -495,9 +507,18 @@ function factoryFromPattern<T, R>(
       }
     }
 
-    const sanitizedSchema = cellReference.schema !== undefined
+    const rawSanitizedSchema = cellReference.schema !== undefined
       ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
       : undefined;
+    // The binding's schema position emits like a link's: a reference under
+    // the flag, keeping FabricValue-bearing schema content (defaults) out
+    // of the otherwise plain binding record; inline otherwise, and inline
+    // whenever decomposition refuses or the schema is a bare boolean.
+    const sanitizedSchema = rawSanitizedSchema !== undefined &&
+        typeof rawSanitizedSchema === "object" &&
+        getContentAddressedSchemasConfig()
+      ? externalizeSchema(rawSanitizedSchema as JSONSchemaObj)
+      : rawSanitizedSchema;
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
       if (!deepEqual(partialCause, cellReference.partialCause)) {
@@ -526,7 +547,7 @@ function factoryFromPattern<T, R>(
     }
   };
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithAliasBindings(
+  const result = withAliasBindings(
     outputs ?? {},
     resolveCellAlias,
     true,
@@ -549,17 +570,17 @@ function factoryFromPattern<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
-    const module = toJSONWithAliasBindings(
+    const module = withAliasBindings(
       node.module,
       resolveCellAlias,
       false,
     ) as unknown as Module;
-    const inputs = toJSONWithAliasBindings(
+    const inputs = withAliasBindings(
       node.inputs,
       resolveCellAlias,
       false,
     )!;
-    const outputs = toJSONWithAliasBindings(
+    const outputs = withAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,
@@ -567,7 +588,7 @@ function factoryFromPattern<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
-  const pattern: Pattern & toJSON = {
+  const pattern: Pattern & toEncodableForm & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
     resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
@@ -575,7 +596,9 @@ function factoryFromPattern<T, R>(
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
     // pattern afterwards (see factory.ts:exportsCallback)
-    toJSON: () => patternToJSON(patternFactory),
+    toEncodableForm: () => patternToEncodableForm(patternFactory),
+    // What `JSON.stringify(SomePattern)` returns, which pattern source uses.
+    toJSON: () => patternToEncodableForm(patternFactory),
   };
 
   const makePatternFactory = (
@@ -583,14 +606,15 @@ function factoryFromPattern<T, R>(
     defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
-      (inputs: FactoryCallInput<T>): Reactive<R> => {
-        const module: Module & toJSON = {
+      (inputs: FactoryInput<T>): Reactive<R> => {
+        const module: Module & toEncodableForm & toJSON = {
           type: "pattern",
           implementation: factory,
           ...(factory.defaultScope !== undefined
             ? { defaultScope: factory.defaultScope }
             : {}),
-          toJSON: () => moduleToJSON(module),
+          toJSON: toJSONMethod,
+          toEncodableForm: () => moduleToEncodableForm(module),
         };
 
         const outputs = reactive<R>();
@@ -617,9 +641,15 @@ function factoryFromPattern<T, R>(
       {
         ...pattern,
         ...(defaultScope !== undefined ? { defaultScope } : {}),
-        toJSON: () => patternToJSON(factory),
-      } as Pattern & toJSON,
+        toEncodableForm: () => patternToEncodableForm(factory),
+        toJSON: () => patternToEncodableForm(factory),
+      } as Pattern & toEncodableForm & toJSON,
     ) as PatternFactory<T, R>;
+
+    // A pattern carries provenance on the factory itself rather than on a
+    // separate implementation. Install the same lazy sidecar accessors used by
+    // lift and handler implementations before the factory can be hardened.
+    defineAuthoredDebugAccessors(factory);
 
     // `asScope` / `inSpace` mint fresh factory objects; record them as
     // derivation copies so identity facts resolve through to the root factory
@@ -671,7 +701,7 @@ function asCellGrantsWritableHere(
   for (const entry of schema.asCell) {
     const kind = typeof entry === "string"
       ? entry
-      : isRecord(entry)
+      : isObjectOrArray(entry)
       ? entry.kind
       : undefined;
     if (typeof kind !== "string" || !READ_ONLY_CELL_KINDS.has(kind)) {
@@ -695,7 +725,7 @@ function asCellGrantsWritableHere(
  */
 function schemaMayGrantWritableHandles(schema: unknown): boolean {
   if (Array.isArray(schema)) return schema.some(schemaMayGrantWritableHandles);
-  if (!isRecord(schema)) return false;
+  if (!isObjectOrArray(schema)) return false;
   if (asCellGrantsWritableHere(schema)) return true;
   if ("$ref" in schema || "$dynamicRef" in schema) return true;
   return Object.values(schema).some(schemaMayGrantWritableHandles);
@@ -751,13 +781,13 @@ const UNMODELED_SCHEMA_KEYWORDS: readonly string[] = [
  * loses nothing. A cell is tagged iff:
  * - it has at least one writer (a node listing its root under
  *   `node.outputs`) — zero-writer cells are seeded state, never tagged — and
- *   no writer disqualifies (`writerDisqualifies`): handler wrappers,
- *   writable-proxy modules, effects, raw/isolated modules, and builtin refs
- *   not proven replayable by name (see `builtin-replayability.ts`);
+ *   no writer disqualifies (`writerDisqualifies`): handler wrappers, effects,
+ *   raw/isolated modules, and builtin refs not proven replayable by name (see
+ *   `builtin-replayability.ts`);
  * - its root is never handed WRITABLE into another node
  *   (`collectInputDisqualifiedRoots`): read-only handler captures no longer
  *   disqualify, but `asCell` bindings granting a write-capable handle,
- *   schema-less / writable-proxy handlers, sub-pattern arguments,
+ *   schema-less handlers, sub-pattern arguments,
  *   op-sub-pattern builtin inputs (map/filter/flatMap), and every input of a
  *   non-replayable node (`llmDialog` writes through its inputs) still do;
  * - it is not a stream.
@@ -803,9 +833,7 @@ function assignComputedCellKinds(
   // `instantiatePassthroughNode`), with no code that could write elsewhere.
   const writerDisqualifies = (module: NodeRef["module"]): boolean => {
     if (!isModule(module)) return true; // Opaque module value: assume the worst.
-    if (module.wrapper === "handler" || module.writableProxy === true) {
-      return true;
-    }
+    if (module.wrapper === "handler") return true;
     if (module.isEffect === true) return true;
     switch (module.type) {
       case "javascript":
@@ -826,12 +854,13 @@ function assignComputedCellKinds(
   // and collects the cell roots the handler could WRITE through: roots
   // covered by a subschema that may grant a non-read-only `asCell` handle.
   // Read-only captures (no possible grant in the covering subschema) collect
-  // nothing — in a schema-carrying, non-writableProxy handler, write
-  // capability flows only through `asCell` handles, so a plain value binding
-  // cannot be written through. Any subtree the walk cannot align (boolean or
-  // missing subschema with a possible grant, unmodeled schema keywords,
-  // value/schema shape mismatch) conservatively collects ALL roots in that
-  // value subtree.
+  // nothing — a plain value binding reaches the body as a view whose own traps
+  // refuse a write. `h()` converting a `$`-prefixed JSX binding back into a
+  // handle is the exception, and the accepted result-surface consequence in
+  // `docs/specs/computed-cell-identity.md` is where that is reasoned about. Any
+  // subtree the walk cannot align (boolean or missing subschema with a possible
+  // grant, unmodeled schema keywords, value/schema shape mismatch)
+  // conservatively collects ALL roots in that value subtree.
   const collectWritablyBoundRoots = (
     value: unknown,
     schema: unknown,
@@ -844,7 +873,7 @@ function assignComputedCellKinds(
     if (!schemaMayGrantWritableHandles(schema)) return;
     const collectAll = () =>
       collectCellRoots(value).forEach((root) => out.add(root));
-    if (!isRecord(schema) || Array.isArray(schema)) {
+    if (!isObjectNotArray(schema)) {
       // A grant may exist but the schema is not a plain object (unreachable
       // for booleans, which never grant): fail safe.
       collectAll();
@@ -907,11 +936,17 @@ function assignComputedCellKinds(
       }
       return;
     }
-    if (isRecord(target) && !isReactive(target)) {
-      const properties =
-        isRecord(schema.properties) && !Array.isArray(schema.properties)
-          ? schema.properties
-          : undefined;
+    // TODO(danfuzz): `isObjectOrArray` admits a `FabricInstance`, whose
+    // `Object.entries` are empty, so it takes this branch and collects
+    // nothing instead of falling to the fail-safe `collectAll()` below. A
+    // cell root reachable only through the instance's codec contents is
+    // then never disqualified from the `computed` tag — the ack-and-drop
+    // this function exists to prevent. (A `FabricPrimitive` passes the same
+    // gate, harmlessly: it holds no cell roots.)
+    if (isObjectOrArray(target) && !isReactive(target)) {
+      const properties = isObjectNotArray(schema.properties)
+        ? schema.properties
+        : undefined;
       for (const [key, child] of Object.entries(target)) {
         const childSchema = properties !== undefined && key in properties
           ? properties[key]
@@ -944,15 +979,15 @@ function assignComputedCellKinds(
       // Handlers capture their closure under `$ctx` (builder/module.ts binds
       // `{ $ctx, $event }` against an argumentSchema of shape
       // `{ properties: { $event, $ctx } }`, see generateHandlerSchema).
-      // Without a schema — or with the legacy writable proxy — every capture
-      // is writable.
-      if (module.writableProxy === true) return all();
+      // Without a schema, every capture is writable.
       const schema = module.argumentSchema;
-      const properties = isRecord(schema) && !Array.isArray(schema) &&
-          isRecord(schema.properties) && !Array.isArray(schema.properties)
+      const properties = isObjectNotArray(schema) &&
+          isObjectNotArray(schema.properties)
         ? schema.properties
         : undefined;
-      if (properties === undefined || !isRecord(node.inputs)) return all();
+      if (properties === undefined || !isObjectOrArray(node.inputs)) {
+        return all();
+      }
       const roots = new Set<OpaqueCell<any>>();
       for (const [key, bound] of Object.entries(node.inputs)) {
         if (key === "$ctx" && properties[key] !== undefined) {
@@ -966,7 +1001,6 @@ function assignComputedCellKinds(
       }
       return roots;
     }
-    if (module.writableProxy === true) return all(); // Defensive: only handlers carry it today.
     if (module.isEffect === true) return all();
     switch (module.type) {
       case "javascript":
@@ -1014,7 +1048,7 @@ function assignComputedCellKinds(
     if (writers.some(writerDisqualifies)) return;
     if (disqualified.has(root)) return;
     const { value } = root.export();
-    if (isRecord(value) && value.$stream === true) return;
+    if (isObjectOrArray(value) && value.$stream === true) return;
     const descriptor = derivedInternalCells.find((candidate) =>
       deepEqual(candidate.partialCause, partialCause)
     );
@@ -1126,9 +1160,7 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
-    ...(parent?.sourceLocationContext && {
-      sourceLocationContext: parent.sourceLocationContext,
-    }),
+    ...(parent?.moduleEvaluation && { moduleEvaluation: true as const }),
     ...frame,
   };
 
@@ -1179,9 +1211,7 @@ export function pushFrameFromCause(
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
-    ...(parent?.sourceLocationContext && {
-      sourceLocationContext: parent.sourceLocationContext,
-    }),
+    ...(parent?.moduleEvaluation && { moduleEvaluation: true as const }),
     ...(inHandler && { inHandler: true }),
     ...(frameKind && { frameKind }),
     ...(eventTime !== undefined && { eventTime }),
@@ -1230,7 +1260,7 @@ function schemaWithDefault(
   if (schema === false) {
     return { not: true, default: value as JSONValue };
   }
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     return schema.default === undefined
       ? { ...schema, default: value as JSONValue }
       : schema;

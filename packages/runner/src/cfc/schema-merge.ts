@@ -1,15 +1,20 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
+
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
-import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
+/** Every `ifc` key the runtime understands. {@link IfcKey} names one of them. */
 const IFC_KEYS = [
   "confidentiality",
   "integrity",
@@ -29,6 +34,16 @@ const IFC_KEYS = [
   "uiContract",
 ] as const;
 
+/**
+ * One of the `ifc` keys the runtime understands.
+ *
+ * A consumer that has to treat the keys differently from one another states a
+ * decision for each of them, and a mapped type over this union does not compile
+ * until it has. Adding a key here is what tells such a consumer that a new one
+ * arrived.
+ */
+export type IfcKey = typeof IFC_KEYS[number];
+
 const asSchemaObject = (
   schema: JSONSchema,
   path: string,
@@ -36,7 +51,7 @@ const asSchemaObject = (
   if (schema === true) {
     return {};
   }
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     throw new Error(`unsupported schema form at ${path || "/"}`);
   }
   return schema as JSONSchemaObj;
@@ -69,7 +84,7 @@ type WriterIdentityClaim = {
 };
 
 const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
-  isRecord(value) && isRecord(value.__ctWriterIdentityOf);
+  isObjectNotArray(value) && isObjectNotArray(value.__ctWriterIdentityOf);
 
 // The per-input provenance fields a verified write may have stamped onto a
 // writer-identity claim. New claims carry only the content-addressed
@@ -306,18 +321,78 @@ const mergeIfc = (
 // descending them (`includeDefs`). This walk does not resolve `$ref`, so a
 // definition referenced but not inlined is only seen through `$defs`.
 const branchContainsIfc = (schema: JSONSchema): boolean => {
-  if (!isRecord(schema)) return false;
+  if (!isObjectOrArray(schema)) return false;
   if ((schema as JSONSchemaObj).ifc !== undefined) return true;
   return forEachSubschema(schema, (child) => branchContainsIfc(child), {
     includeDefs: true,
   });
 };
 
+/**
+ * The two scalar `type` strings whose VALUE-sets overlap: every JSON-Schema
+ * integer is a number (the runner's own `schemaTypeMatchesValue` matches a
+ * concrete `5` against BOTH), so `integer` and `number` are NOT value-disjoint
+ * even though the strings differ. This is the ONLY such pair among the seven
+ * JSON types — {null, boolean, object, array, string} are mutually
+ * value-exclusive and each is exclusive with the numerics — so excluding this
+ * one pair makes {@link syntacticallyTypeDisjoint} sound by its own criterion
+ * (review F1 on PR #6178, 2026-08-21).
+ */
+const NUMERIC_TYPE_STRINGS: ReadonlySet<string> = new Set([
+  "integer",
+  "number",
+]);
+
+/**
+ * Syntactic, conservative type-disjointness (RULING 5, CFC owner,
+ * 2026-08-21): both branches carry an explicit scalar `type` string, the
+ * strings name VALUE-disjoint types, and NEITHER branch is itself a
+ * combinator at its root. Everything unprovable — a missing `type`, a type
+ * array, a boolean schema, a nested combinator, or the value-overlapping
+ * `integer`/`number` pair — is NOT disjoint: treating "cannot prove
+ * non-overlap" as disjoint would reopen the policy dodge (a labeled value
+ * also matching an unlabeled sibling and reading unlabeled), the second of
+ * #3263's two protected cases. Disjointness is decided over VALUE-sets, not
+ * type STRINGS (F1); no semantic subtyping reasoning beyond the one fixed
+ * numeric-subtype pair, by ruling.
+ */
+const syntacticallyTypeDisjoint = (
+  left: JSONSchema,
+  right: JSONSchema,
+): boolean => {
+  if (!isObjectOrArray(left) || !isObjectOrArray(right)) return false;
+  const leftObject = left as JSONSchemaObj;
+  const rightObject = right as JSONSchemaObj;
+  if (
+    leftObject.anyOf !== undefined || leftObject.oneOf !== undefined ||
+    leftObject.allOf !== undefined || rightObject.anyOf !== undefined ||
+    rightObject.oneOf !== undefined || rightObject.allOf !== undefined
+  ) {
+    return false;
+  }
+  if (
+    typeof leftObject.type !== "string" ||
+    typeof rightObject.type !== "string" ||
+    leftObject.type === rightObject.type
+  ) {
+    return false;
+  }
+  // The one value-set subtype pair: an `integer` value is also a `number`,
+  // so a concrete value can satisfy both branches — not disjoint.
+  if (
+    NUMERIC_TYPE_STRINGS.has(leftObject.type) &&
+    NUMERIC_TYPE_STRINGS.has(rightObject.type)
+  ) {
+    return false;
+  }
+  return true;
+};
+
 const assertNoDivergentIfcBranches = (
   schema: JSONSchema,
   path = "",
 ): void => {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return;
   }
   const object = schema as JSONSchemaObj;
@@ -328,13 +403,31 @@ const assertNoDivergentIfcBranches = (
   ].filter((value) => value !== undefined);
 
   for (const [kind, branches] of branchGroups) {
-    if (branches.some(branchContainsIfc)) {
-      throw new Error(
-        `ifc inside divergent ${kind} branches is unsupported at ${
-          path || "/"
-        }`,
+    const ifcBranchCount = branches.filter(branchContainsIfc).length;
+    if (ifcBranchCount === 0) continue;
+    // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a
+    // SINGLE ifc-carrying branch whose every sibling is syntactically
+    // type-disjoint from it is the POLICY CARRIER of an anyOf/oneOf
+    // presence union — the wish builtin's optional-result shape,
+    // `anyOf[{type:"undefined"}, <ifc view>]` — and merges: there is no
+    // ambiguity (one carrier) and no dodge (no sibling a labeled value
+    // could also match). Everything else stays refused: more than one
+    // carrier is #3263's original ambiguity; a non-disjoint sibling is the
+    // policy dodge; and allOf is conjunctive — type-disjoint siblings are
+    // unsatisfiable-by-construction there, so no carrier reading exists.
+    // The recursion below still descends INTO the admitted carrier, so
+    // divergence nested deeper refuses exactly as before.
+    if (kind !== "allOf" && ifcBranchCount === 1) {
+      const carrierIndex = branches.findIndex(branchContainsIfc);
+      const carrier = branches[carrierIndex]!;
+      const siblingsDisjoint = branches.every((sibling, index) =>
+        index === carrierIndex || syntacticallyTypeDisjoint(carrier, sibling)
       );
+      if (siblingsDisjoint) continue;
     }
+    throw new Error(
+      `ifc inside divergent ${kind} branches is unsupported at ${path || "/"}`,
+    );
   }
 
   // Recurse over the shared keyword vocabulary so a divergent-ifc shape
@@ -354,26 +447,32 @@ const assertNoDivergentIfcBranches = (
   });
 };
 
-// A stream slot is a runtime-materialized capability marker, not stored
-// document data — see the additive-required exemption in `mergeRequired`.
-//
-// Only the field's IMMEDIATE OUTER slot decides what it is, so read the first
-// `asCell` entry (mirroring the canonical stream test in link-utils.ts and
-// schema.ts, which both key on `getAsCellValues(schema).at(0)`). A bare
-// `.includes("stream")` was wrong twice: it exempted `["cell", "stream"]` — a
-// CELL of a stream, whose outer slot is a cell and which therefore holds
-// preservable data — and it missed the scoped-descriptor dialect
-// (`[{ kind: "stream", scope: … }]`), which is a string only under the legacy
-// form. `getAsCellKind` normalizes both dialects.
-const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
-  ContextualFlowControl.getAsCellKind(
-    ContextualFlowControl.getAsCellValues(schema).at(0),
-  ) === "stream";
+export interface MergeCfcSchemaEnvelopeOptions {
+  /**
+   * Logical paths generated as outputs by the running module. A path covers
+   * every required descendant below it; `[]` therefore exempts the whole
+   * document, as it does for a pattern result projection that setup rewrites
+   * in full. Required fields outside these paths still need defaults to
+   * preserve older documents.
+   */
+  generatedOutputPaths?: readonly (readonly string[])[];
+}
+
+const generatedOutputCovers = (
+  options: MergeCfcSchemaEnvelopeOptions,
+  path: readonly string[],
+): boolean =>
+  options.generatedOutputPaths?.some((outputPath) =>
+    outputPath.length <= path.length &&
+    outputPath.every((segment, index) => segment === path[index])
+  ) ?? false;
 
 const mergeRequired = (
   existing: readonly string[] | undefined,
   candidate: readonly string[] | undefined,
   mergedProperties: Readonly<Record<string, JSONSchema>>,
+  path: readonly string[],
+  options: MergeCfcSchemaEnvelopeOptions,
 ): readonly string[] | undefined => {
   if (existing === undefined && candidate === undefined) {
     return undefined;
@@ -384,22 +483,14 @@ const mergeRequired = (
       continue;
     }
     const property = mergedProperties[name];
-    // A newly-required field must carry a default so an old document that
-    // predates the field can still be read (the default synthesizes the
-    // missing value). This guard is about PRESERVABLE DOCUMENT DATA, so it
-    // does not apply to a stream slot: `asCell: ["stream"]` is a
-    // runtime-materialized capability marker, not stored data. Pattern setup
-    // re-materializes every stream marker on each run, so an old doc that
-    // lacks one has no value to preserve and there is no meaningful default a
-    // `Stream<…>` field could declare. Without this exemption, materializing a
-    // handler-rich pattern (e.g. home.tsx) over a doc that predates its
-    // handlers fails additive-required — the estuary cold-start-setup-repair
-    // cascade, where each defaulted DATA field just unmasked the next
-    // required-no-default handler.
-    if (isStreamSlot(property)) {
+    // A generated output is materialized by the module in this transaction,
+    // so it has no older value to preserve. Inputs and ordinary document writes
+    // remain default-gated: an older document may genuinely lack their newly
+    // required field.
+    if (generatedOutputCovers(options, [...path, name])) {
       continue;
     }
-    if (!isRecord(property) || property.default === undefined) {
+    if (!isObjectOrArray(property) || property.default === undefined) {
       // Typed so the CFC prepare catch can tag this as the recoverable
       // schema-migration class (see migration-reason.ts) without sniffing the
       // message. The message text stays human-readable and unchanged.
@@ -411,6 +502,11 @@ const mergeRequired = (
   return merged;
 };
 
+// TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on either
+// side, and the spread copies zero properties from one — so two fabric
+// defaults merge to `{}`, and a plain-record `existing` plus a fabric
+// `candidate` silently drops the candidate's value. Wants a
+// `FabricSpecialObject` test taking the `candidate` arm.
 const mergeDefaults = (
   existing: JSONSchemaObj["default"],
   candidate: JSONSchemaObj["default"],
@@ -421,7 +517,7 @@ const mergeDefaults = (
   if (candidate === undefined) {
     return existing;
   }
-  if (isReadonlyRecord(existing) && isReadonlyRecord(candidate)) {
+  if (isReadonlyObjectOrArray(existing) && isReadonlyObjectOrArray(candidate)) {
     return { ...existing, ...candidate };
   }
   return candidate;
@@ -431,6 +527,8 @@ const mergeSchemaNode = (
   existing: JSONSchema,
   candidate: JSONSchema,
   path = "",
+  logicalPath: readonly string[] = [],
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): JSONSchema => {
   const left = asSchemaObject(existing, path);
   const right = asSchemaObject(candidate, path);
@@ -483,7 +581,13 @@ const mergeSchemaNode = (
     const rightClaim = right.properties?.[key] ?? rightAdditional;
     mergedProperties[key] = leftClaim !== undefined &&
         rightClaim !== undefined
-      ? mergeSchemaNode(leftClaim, rightClaim, `${path}/${key}`)
+      ? mergeSchemaNode(
+        leftClaim,
+        rightClaim,
+        `${path}/${key}`,
+        [...logicalPath, key],
+        options,
+      )
       : (rightClaim ?? leftClaim)!;
   }
 
@@ -496,6 +600,8 @@ const mergeSchemaNode = (
       leftAdditional,
       rightAdditional,
       `${path}/*`,
+      [...logicalPath, "*"],
+      options,
     );
   } else if (right.additionalProperties !== undefined) {
     mergedAdditionalProperties = right.additionalProperties;
@@ -503,7 +609,13 @@ const mergeSchemaNode = (
 
   let mergedItems = left.items;
   if (left.items !== undefined && right.items !== undefined) {
-    mergedItems = mergeSchemaNode(left.items, right.items, `${path}/*`);
+    mergedItems = mergeSchemaNode(
+      left.items,
+      right.items,
+      `${path}/*`,
+      [...logicalPath, "*"],
+      options,
+    );
   } else if (right.items !== undefined) {
     mergedItems = right.items;
   }
@@ -535,7 +647,13 @@ const mergeSchemaNode = (
       const rightSlot = slotClaim(right, index);
       slots.push(
         leftSlot !== undefined && rightSlot !== undefined
-          ? mergeSchemaNode(leftSlot, rightSlot, `${path}/${index}`)
+          ? mergeSchemaNode(
+            leftSlot,
+            rightSlot,
+            `${path}/${index}`,
+            [...logicalPath, String(index)],
+            options,
+          )
           : (rightSlot ?? leftSlot)!,
       );
     }
@@ -563,7 +681,13 @@ const mergeSchemaNode = (
       ? { additionalProperties: mergedAdditionalProperties }
       : {}),
     ifc: mergeIfc(left.ifc, right.ifc, path),
-    required: mergeRequired(left.required, right.required, mergedProperties),
+    required: mergeRequired(
+      left.required,
+      right.required,
+      mergedProperties,
+      logicalPath,
+      options,
+    ),
     default: mergeDefaults(left.default, right.default),
   };
 };
@@ -571,8 +695,56 @@ const mergeSchemaNode = (
 export const mergeCfcSchemaEnvelopes = (
   existing: JSONSchema,
   candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): JSONSchema => {
   assertNoDivergentIfcBranches(existing);
   assertNoDivergentIfcBranches(candidate);
-  return internSchema(mergeSchemaNode(existing, candidate));
+  return internSchema(mergeSchemaNode(existing, candidate, "", [], options));
+};
+
+/** Why a stored envelope and a candidate envelope cannot be merged. */
+export interface CfcSchemaMergeIssue {
+  /** The merge's own human-readable reason, verbatim. */
+  message: string;
+
+  /**
+   * True when the rejection is the additive-required migration class — an old
+   * document predating a now-required field that declares no default. This is
+   * the class the runnability backstop rolls forward on
+   * (see {@link CfcSchemaMigrationError}); everything else is a hard
+   * incompatibility that no roll-forward recovers.
+   */
+  migration: boolean;
+}
+
+/**
+ * Would {@link mergeCfcSchemaEnvelopes} accept this candidate over this stored
+ * envelope? `undefined` means yes.
+ *
+ * Why this exists: replacing a live piece's pattern source used to discover an
+ * unmergeable envelope only by attempting the swap and taking a low-level
+ * rejection from the setup commit. That is the failure `cf piece setsrc
+ * --check` is supposed to predict, so the preflight drives THIS seam — the
+ * same merge the commit runs, called in dry-run — rather than a second
+ * implementation of the rules that would drift out of agreement with
+ * enforcement and start green-lighting swaps the deploy then refuses.
+ *
+ * Pure: no transaction, no writes, because the merge itself is.
+ */
+export const cfcSchemaMergeIssue = (
+  existing: JSONSchema,
+  candidate: JSONSchema,
+): CfcSchemaMergeIssue | undefined => {
+  try {
+    mergeCfcSchemaEnvelopes(existing, candidate);
+    return undefined;
+  } catch (error) {
+    if (error instanceof CfcSchemaMigrationError) {
+      return { message: error.message, migration: true };
+    }
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      migration: false,
+    };
+  }
 };

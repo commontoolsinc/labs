@@ -1,9 +1,35 @@
 import { ConsoleEvent } from "@astral/astral";
+import { basename } from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
+import {
+  FragmentWriter,
+  repositoryRelativePath,
+} from "@commonfabric/test-support/records";
+
 import { Manifest } from "./manifest.ts";
 import { summarize } from "./utils.ts";
 import { BrowserController } from "./browser.ts";
 import { Reporter } from "./reporter.ts";
 import { TestFileResults, TestResultError } from "./interface.ts";
+
+// The record scope of the harnessed package: the last segment of its
+// manifest's name, or the directory's own name when no manifest names it.
+// deno.json is read first because Deno resolves it first when both exist.
+async function packageScope(): Promise<string> {
+  for (const manifest of ["deno.json", "deno.jsonc"]) {
+    try {
+      const parsed = parseJsonc(await Deno.readTextFile(manifest)) as {
+        name?: string;
+      };
+      if (typeof parsed.name === "string" && parsed.name.length > 0) {
+        return parsed.name.split("/").at(-1) ?? parsed.name;
+      }
+    } catch {
+      // The next candidate or the fallback answers instead.
+    }
+  }
+  return basename(Deno.cwd());
+}
 
 export class Runner {
   manifest: Manifest;
@@ -22,45 +48,66 @@ export class Runner {
     );
   }
 
-  // Runs all tests in the browser. Return value
-  // indicates whether all tests have passed successfully or not.
+  /** Runs all tests in the browser, returning whether all of them passed. */
   async run(): Promise<boolean> {
     this.reporter.onRunStart();
 
-    for (const tsTestPath of this.manifest.tests) {
-      const results: TestFileResults = {
-        fileName: tsTestPath,
-        tests: [],
-      };
-      this.results.push(results);
+    // One browser-kind record per completed test, spooled as results
+    // arrive so a killed run keeps everything that finished. The scope is
+    // the harnessed package, read from the manifest of the working
+    // directory the consuming task runs in; the directory's own name is
+    // the fallback for a package without one. A file that fails to import
+    // produces no per-test results and so records nothing; the run's
+    // failure stays visible in CI.
+    const recordsFragment = FragmentWriter.openForRun();
+    const scope = await packageScope();
 
-      try {
-        await this.browser.load(tsTestPath);
-      } catch (e: unknown) {
-        this.reporter.onLoadError(tsTestPath, e as TestResultError);
-        await this.browser.close();
-        return false;
-      }
+    try {
+      for (const tsTestPath of this.manifest.tests) {
+        const results: TestFileResults = {
+          fileName: tsTestPath,
+          tests: [],
+        };
+        this.results.push(results);
 
-      const testCount = await this.browser.getTestCount();
-      this.reporter.onFileStart(tsTestPath, testCount);
-
-      // Run tests while there's work to do
-      while (true) {
-        const testResult = await this.browser.runNextTest();
-        if (!testResult) {
-          break;
+        try {
+          await this.browser.load(tsTestPath);
+        } catch (e: unknown) {
+          this.reporter.onLoadError(tsTestPath, e as TestResultError);
+          return false;
         }
-        results.tests.push(testResult);
-        this.reporter.onTestCompleted(testResult);
-      }
-      this.reporter.onFileEnd(tsTestPath);
-    }
 
-    const summary = summarize(this.results);
-    this.reporter.onRunEnd(summary);
-    await this.browser.close();
-    return summary.failed.length === 0;
+        const testCount = await this.browser.getTestCount();
+        this.reporter.onFileStart(tsTestPath, testCount);
+
+        // Run tests while there's work to do
+        while (true) {
+          const testResult = await this.browser.runNextTest();
+          if (!testResult) {
+            break;
+          }
+          results.tests.push(testResult);
+          this.reporter.onTestCompleted(testResult);
+          recordsFragment?.append({
+            line: "record",
+            test: { k: "browser", s: scope, n: testResult.name },
+            outcome: testResult.error === null ? "pass" : "fail",
+            durationMs: Math.round(testResult.duration),
+            file: repositoryRelativePath(tsTestPath),
+          });
+        }
+        this.reporter.onFileEnd(tsTestPath);
+      }
+
+      const summary = summarize(this.results);
+      this.reporter.onRunEnd(summary);
+      return summary.failed.length === 0;
+    } finally {
+      recordsFragment?.close();
+      // The manifest's directories are removed once this returns, so the
+      // browser closes first, whichever way the run ended.
+      await this.browser.close();
+    }
   }
 
   onConsole(e: ConsoleEvent) {

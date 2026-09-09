@@ -26,6 +26,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import HabitTracker from "./habit-tracker.tsx";
@@ -244,7 +245,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // Initial state
       { assertion: assert_initial_no_habits },
       { assertion: assert_initial_no_logs },

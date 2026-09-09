@@ -1,6 +1,7 @@
-import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
 import { SHADOWED_FACTORY_BINDINGS } from "@commonfabric/utils/sandbox-contract";
+import ts from "typescript";
+
+import { TransformationContext, Transformer } from "../core/mod.ts";
 
 export class ModuleScopeShadowingTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {

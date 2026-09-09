@@ -1,6 +1,6 @@
 import { env, Page, waitForCondition } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -41,7 +41,7 @@ describe("cfc group chat demo integration test", () => {
     identity = await Identity.generate({ implementation: "noble" });
     secondIdentity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });
@@ -53,12 +53,13 @@ describe("cfc group chat demo integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     const piece = await cc.create(program, { start: true });
     pieceId = piece.id;
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });
 
@@ -129,6 +130,13 @@ describe("cfc group chat demo integration test", () => {
       "#host-message-draft",
       "Fake hello from Alice",
     );
+    // Wait for the send button to ENABLE before clicking, exactly like the
+    // trusted sends below (S-G, rootcause §2b): `hostSendDisabled` derives
+    // from the draft, and under the server-execution ON arm that derivation
+    // is a served round trip — clicking an interim-disabled cf-button
+    // retargets the click to the host element and the send never fires.
+    // Correct under the OFF arm too (the enable is just immediate there).
+    await waitForDisabled(page, "#host-send-button", false);
     await clickCfButton(page, "#host-send-button");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
@@ -193,6 +201,13 @@ describe("cfc group chat demo integration test", () => {
       "Hello from Bob",
     );
     await waitForRuntimeIdle(page);
+    // Wait for the send button to ENABLE before clicking, exactly like
+    // Alice's send above (S-G, rootcause §2b): `sendDisabled` derives from
+    // the draft, and under the server-execution ON arm that derivation is
+    // a served round trip — clicking an interim-disabled cf-button
+    // retargets the click to the host element and the send never fires.
+    // Correct under the OFF arm too (the enable is just immediate there).
+    await waitForDisabled(page, "#trusted-send-button", false);
     await clickCfButton(page, "#trusted-send-button");
     await waitForText(
       page,

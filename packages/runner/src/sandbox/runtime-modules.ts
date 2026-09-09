@@ -1,8 +1,9 @@
-import { createBuilder } from "../builder/factory.ts";
-import { StaticCache } from "@commonfabric/static";
-import turndown from "turndown";
-import { freezeSandboxValue } from "./hardening.ts";
 import * as cfcModule from "@commonfabric/api/cfc-authoring";
+import type { StaticCache } from "@commonfabric/static";
+import turndown from "turndown";
+
+import { createBuilder } from "../builder/factory.ts";
+import { freezeSandboxValue } from "./hardening.ts";
 export type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
 export {
   isRuntimeModuleIdentifier,
@@ -47,8 +48,9 @@ export function getRuntimeModuleExports() {
     "commontools": commontools,
     // commontools/schema only exports types, no runtime values needed
     "commontools/schema": {},
-    // __esModule lets this load in the AMD loader
-    // when finding the "default"
+    // __esModule marks this namespace as ESM-shaped, so an importer compiled
+    // with esModuleInterop (`__importDefault`) reads `default` rather than
+    // wrapping the whole namespace.
     "turndown": { default: turndown, __esModule: true },
     "@commontools/html": commontools,
     "@commontools/builder": commontools,

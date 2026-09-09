@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/calendar/event-detail.test.tsx --verbose
  */
-import { action, assert, NAME, pattern } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS } from "commonfabric";
 import EventDetail from "./event-detail.tsx";
 
 export default pattern(() => {
@@ -83,7 +83,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state ===
       { assertion: assert_name },
       { assertion: assert_initial_title },

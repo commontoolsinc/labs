@@ -10,6 +10,7 @@ import {
   getCapabilitySummaryCallbackArgument,
   getLiftAppliedInputAndCallback,
   getPatternBuilderCallbackArgument,
+  resolveCallbackFunctionExpression,
 } from "../../src/ast/mod.ts";
 import { getWithPatternHoistablePatternCall } from "../../src/ast/call-kind.ts";
 
@@ -71,6 +72,27 @@ function findInitializer(
 
   if (!found) {
     throw new Error(`Initializer for ${declarationName} not found`);
+  }
+
+  return found;
+}
+
+function findFirstArrowFunction(sourceFile: ts.SourceFile): ts.ArrowFunction {
+  let found: ts.ArrowFunction | undefined;
+
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isArrowFunction(node)) {
+      found = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  if (!found) {
+    throw new Error("Arrow function not found");
   }
 
   return found;
@@ -214,6 +236,29 @@ Deno.test("classifyArrayMethodCallSite does not mark custom lowered *WithPattern
     classifyArrayCallbackContainerCall(expression, checker),
     undefined,
   );
+});
+
+Deno.test("an authored *WithPattern call on an untyped receiver keeps no call kind", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare const collection: any;
+
+    const value = collection.mapWithPattern((n: number) => n + 1);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  // The method resolves to no symbol on \`any\`, but the node is authored
+  // (parser-ranged), so the synthetic-spelling fallback must not claim it —
+  // only calls the transformer itself emitted classify by spelling alone.
+  assertEquals(detectCallKind(expression, checker), undefined);
+  assertEquals(classifyArrayMethodCallSite(expression, checker), {
+    family: "map",
+    lowered: true,
+    ownership: "plain",
+  });
 });
 
 Deno.test("array method classification ignores prototype-key names", () => {
@@ -461,4 +506,67 @@ Deno.test("detectCallKind ignores a builder-named import from a foreign module",
   }
 
   assertEquals(detectCallKind(expression, checker), undefined);
+});
+
+Deno.test("resolveCallbackFunctionExpression sees through a `satisfies` cast", () => {
+  // `satisfies T` states a constraint and leaves the value alone, so it hides
+  // a callback no more than `as T` or parentheses do. Callers that ask "is
+  // this argument the callback?" must answer yes through every one of those
+  // spellings, and callers that go on to use the returned node as an anchor
+  // need the authored arrow itself, not a wrapper standing in front of it.
+  const { sourceFile, checker } = createProgram(`
+    type Handler = (event: { word: string }, state: { count: number }) => void;
+
+    const value = ((event, state) => {}) satisfies Handler;
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isSatisfiesExpression(expression)) {
+    throw new Error("Expected satisfies expression initializer");
+  }
+
+  assertEquals(
+    resolveCallbackFunctionExpression(expression, checker),
+    findFirstArrowFunction(sourceFile),
+  );
+});
+
+Deno.test("resolveCallbackFunctionExpression sees through a `satisfies`-wrapped alias initializer", () => {
+  // The alias is annotated `any`, so the type carries no call signatures and
+  // the only route to the callback is the syntactic one: identifier to
+  // variable initializer, then through the wrapper.
+  const { sourceFile, checker } = createProgram(`
+    type Handler = (event: { word: string }, state: { count: number }) => void;
+
+    const callback: any = ((event, state) => {}) satisfies Handler;
+
+    const value = callback;
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isIdentifier(expression)) {
+    throw new Error("Expected identifier initializer");
+  }
+
+  assertEquals(
+    resolveCallbackFunctionExpression(expression, checker),
+    findFirstArrowFunction(sourceFile),
+  );
+});
+
+Deno.test("resolveCallbackFunctionExpression takes the shared helper's whole wrapper set", () => {
+  // A PartiallyEmittedExpression cannot arise here — the pipeline transforms
+  // authored source through `ts.transform`, never as part of TypeScript's
+  // emit — so this pins a choice rather than guards a reachable path:
+  // classification reads the same wrapper set as every other resolver in the
+  // package, and narrowing it back to a local subset fails here first. The
+  // node is built directly because nothing in the corpus produces one.
+  const { sourceFile, checker } = createProgram(`
+    const value = (event, state) => {};
+  `);
+
+  const arrow = findFirstArrowFunction(sourceFile);
+  const wrapped = ts.factory.createPartiallyEmittedExpression(arrow);
+
+  assertEquals(resolveCallbackFunctionExpression(wrapped, checker), arrow);
 });

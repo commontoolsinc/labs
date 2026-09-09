@@ -1,4 +1,12 @@
-import { action, assert, handler, NAME, pattern, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  handler,
+  NAME,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import BacklinksIndex, {
   type MentionableCell,
   type MentionablePiece,
@@ -38,7 +46,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_registry_is_mentionable },
       { action: action_add_mention },
       { assertion: assert_mention_populates_backlink },

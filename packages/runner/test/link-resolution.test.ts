@@ -1,15 +1,20 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { type JSONSchema } from "../src/builder/types.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import {
+  areNormalizedLinksSame,
+  isSigilLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { areNormalizedLinksSame, isSigilLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseAliasBinding, parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -83,12 +88,16 @@ describe("link-resolution", () => {
         undefined,
         rawTx,
       );
-      expect(rawLinked.getRawUntyped()).toEqual(sourceCell.getAsLink());
+      // The stored link elides what it shares with the slot it sits in, so
+      // the expected form has to be taken relative to that same base.
+      expect(rawLinked.getRawUntyped()).toEqual(
+        sourceCell.getAsLink({ base: rawLinked }),
+      );
       expect(rawTx.getCfcState().dereferenceTraces).toEqual([]);
       rawTx.abort();
     });
 
-    it("should follow a simple alias", () => {
+    it("should follow a simple write redirect", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
         "should follow a simple alias 1",
@@ -96,19 +105,20 @@ describe("link-resolution", () => {
         tx,
       );
       testCell.set({ value: 42 });
-      // `cell` only satisfies the AliasBinding constraint (name or
-      // partialCause); parseAliasBinding resolves against the base link.
-      const binding = { $alias: { cell: "result" as const, path: ["value"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
+        {
+          ...testCell.getAsNormalizedFullLink(),
+          path: ["value"],
+          overwrite: "redirect",
+        },
         "writeRedirect",
       );
       expect(tx.readValueOrThrow(result)).toBe(42);
     });
 
-    it("should follow nested aliases", () => {
+    it("should follow nested write redirects", () => {
       const innerCell = runtime.getCell<{ inner: number }>(
         space,
         "should follow nested aliases 1",
@@ -125,11 +135,14 @@ describe("link-resolution", () => {
       outerCell.setRaw({
         outer: innerCell.key("inner").getAsWriteRedirectLink(),
       });
-      const binding = { $alias: { cell: "result" as const, path: ["outer"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseAliasBinding(binding, outerCell.getAsNormalizedFullLink()),
+        {
+          ...outerCell.getAsNormalizedFullLink(),
+          path: ["outer"],
+          overwrite: "redirect",
+        },
         "writeRedirect",
       );
       expect(
@@ -143,7 +156,7 @@ describe("link-resolution", () => {
       expect(tx.readValueOrThrow(result)).toBe(10);
     });
 
-    it("should allow aliases in aliased paths", () => {
+    it("should allow write redirects in redirected paths", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should allow aliases in aliased paths 1",
@@ -158,13 +171,14 @@ describe("link-resolution", () => {
           b: { c: 1 },
         },
       });
-      const binding = {
-        $alias: { cell: "result" as const, path: ["a", "a", "c"] },
-      };
       const result = resolveLink(
         runtime,
         tx,
-        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
+        {
+          ...testCell.getAsNormalizedFullLink(),
+          path: ["a", "a", "c"],
+          overwrite: "redirect",
+        },
         "writeRedirect",
       );
       expect(
@@ -246,7 +260,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual(schema);
+      expect(resolvedSchema(resolved.schema)).toEqual(schema);
     });
 
     it("should adjust schema for nested paths", () => {
@@ -288,7 +302,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           name: { type: "string" },
@@ -453,7 +467,7 @@ describe("link-resolution", () => {
       const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of cell1.nested
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           value: { type: "string" },
@@ -509,7 +523,7 @@ describe("link-resolution", () => {
       const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of an array item
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           id: { type: "number" },
@@ -558,7 +572,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("ref").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual(destinationSchema);
+      expect(resolvedSchema(resolved.schema)).toEqual(destinationSchema);
     });
 
     it("should treat empty schema objects as permissive links", () => {
@@ -653,7 +667,7 @@ describe("link-resolution", () => {
       const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of the array item
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           deep: { type: "string" },
@@ -694,7 +708,7 @@ describe("link-resolution", () => {
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
 
-      expect(resolved.schema).toEqual(schemaWithAdditional);
+      expect(resolvedSchema(resolved.schema)).toEqual(schemaWithAdditional);
     });
 
     it("should handle schemas with both top-level and nested links", () => {
@@ -739,7 +753,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("ref").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual(schema2);
+      expect(resolvedSchema(resolved.schema)).toEqual(schema2);
     });
 
     it("should remove schema when remaining path field is not in schema", () => {
@@ -782,7 +796,7 @@ describe("link-resolution", () => {
       // First verify the link to targetCell has the schema
       const dataLink = parseLink(sourceCell.key("data"), sourceCell)!;
       const dataResolved = resolveLink(runtime, tx, dataLink);
-      expect(dataResolved.schema).toEqual(schema);
+      expect(resolvedSchema(dataResolved.schema)).toEqual(schema);
 
       // Now resolve a path that goes through the link to "length".
       // The resolver will:

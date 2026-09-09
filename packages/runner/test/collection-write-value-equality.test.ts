@@ -1,3 +1,11 @@
+/**
+ * `addUnique` and `removeByValue` match a plain (non-cell) argument against the
+ * stored elements by content. These cases pin what "same content" means for the
+ * values an own-property walk gets wrong: a `FabricSpecialObject` keeps its
+ * state in private `#fields`, and the weird numbers whose identity `===` does
+ * not capture.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -6,12 +14,6 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import { JSONSchema } from "../src/builder/types.ts";
-
-// `addUnique` and `removeByValue` match a plain (non-cell) argument against the
-// stored elements by content. These cases pin what "same content" means for the
-// values an own-property walk gets wrong: a `FabricSpecialObject` keeps its
-// state in private `#fields`, and the weird numbers whose identity `===` does
-// not capture.
 
 const signer = await Identity.fromPassphrase("collection-write-value-equality");
 const space = signer.did();

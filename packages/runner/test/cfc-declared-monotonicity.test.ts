@@ -1,16 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 import {
   cfcCanonicalClauseDigest,
+  type CfcConfClause,
   type CfcDeclaredMonotonicityMode,
   collectDeclaredMonotonicityViolations,
 } from "../src/cfc/mod.ts";
-import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");
@@ -89,6 +92,22 @@ const SCHEMA_MINT_XY = {
   required: ["out"],
 } as const satisfies JSONSchema;
 
+const SCHEMA_INTEGRITY_X = {
+  type: "object",
+  properties: {
+    out: { type: "string", ifc: { integrity: [ATOM_X] } },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_EMPTY_INTEGRITY = {
+  type: "object",
+  properties: {
+    out: { type: "string", ifc: { integrity: [] } },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
 type PersistedEntry = {
   path: string[];
   origin?: string;
@@ -108,7 +127,9 @@ const makeRuntime = (opts: {
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
-    cfcEnforcementMode: opts.cfcEnforcementMode ?? "enforce-explicit",
+    ...(opts.cfcEnforcementMode !== undefined
+      ? { cfcEnforcementMode: opts.cfcEnforcementMode }
+      : {}),
     ...(opts.cfcFlowLabels !== undefined
       ? { cfcFlowLabels: opts.cfcFlowLabels }
       : {}),
@@ -164,14 +185,13 @@ const commitWrite = async (
 /**
  * Rewrite the stored declared labelMap entries of an existing doc, keeping
  * the real schemaHash (so the next prepare's stored-schema load succeeds).
- * Runs on a SEPARATE `disabled`-enforcement runtime over the same storage:
- * tests seed stored ["cfc"] metadata via an ungated path-[] full-document
- * write (the shape hydration delivers), and a doc that already carries
- * metadata trips the missing-schema-input reason on enforcing runtimes.
- * The caller owns the seeder runtime and must dispose it only AFTER its last
- * read of the doc — disposing a runtime tears down subscription state shared
- * through the storage manager, and the doc becomes unreadable from the other
- * runtime (verified empirically while pinning this suite).
+ * Runs on a SEPARATE runtime over the same storage: tests seed stored
+ * ["cfc"] metadata via an ungated path-[] full-document write, which the
+ * shape hydration delivers.
+ * The caller owns the seeder runtime, and both runtimes here share one
+ * caller-owned StorageManager: each is torn down with
+ * `dispose({ closeStorage: false })` so neither closes the store the other is
+ * still reading through, and the test closes it once itself.
  */
 const rewriteStoredEntries = async (
   seeder: Runtime,
@@ -205,11 +225,10 @@ const rewriteStoredEntries = async (
 };
 
 describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
-  // ------------------------------------------------------------------
-  // Characterization: what the re-mint does TODAY, with no gate dial.
-  // These pin the `off`/`observe` byte-compat contract.
-  // ------------------------------------------------------------------
   describe("current behavior (characterization — the off/observe contract)", () => {
+    // Characterization: what the re-mint does TODAY, with no gate dial.
+    // These pin the `off`/`observe` byte-compat contract.
+
     it("(a) a schema dropping a confidentiality clause is rejected by the schema merge", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({ storageManager });
@@ -238,7 +257,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A, CLAUSE_B]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -266,7 +285,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           "confidentiality cannot be weakened",
         );
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -303,7 +322,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(after?.label.integrity).toEqual([ATOM_X, ATOM_Y]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -332,7 +351,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -344,11 +363,15 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       // ratchet fold, a peer's write. Under cfcFlowLabels:"persist" the
       // re-mint derives from the schema alone and DROPS the extra clause.
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager, cfcFlowLabels: "persist" });
-      const seeder = makeRuntime({
+      const runtime = makeRuntime({
         storageManager,
-        cfcEnforcementMode: "disabled",
+        // At this rung the writer-fit check flags the second commit and lets
+        // it land. That commit carries the clause the re-mint drops, and the
+        // assertion below reads the entry it persisted.
+        cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "persist",
       });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -387,23 +410,20 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         // CLAUSE_B silently dropped: the non-monotone declared re-mint.
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A]);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
 
     it("with flow labels off, the Wave-2 grow-only ratchet folds the stronger stored entry back in", async () => {
-      // The dual pin: under the default cfcFlowLabels:"off" the legacy
-      // ratchet merges prior confidentiality into the fresh entry, so the
-      // confidentiality half of §8.12.1 cannot regress on this path — which
-      // is why the gate's confidentiality tests run under flow persist.
+      // The dual pin: under cfcFlowLabels:"off" the legacy ratchet merges
+      // prior confidentiality into the fresh entry, so the confidentiality
+      // half of §8.12.1 cannot regress on this path — which is why the
+      // gate's confidentiality tests run under flow persist.
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const runtime = makeRuntime({ storageManager, cfcFlowLabels: "off" });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -443,17 +463,16 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           expect.arrayContaining([CLAUSE_A, CLAUSE_B]),
         );
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
   });
 
-  // ------------------------------------------------------------------
-  // The dial: cfcDeclaredMonotonicity, mirroring cfcWriteFloor exactly.
-  // ------------------------------------------------------------------
   describe("the cfcDeclaredMonotonicity dial", () => {
+    // The dial: cfcDeclaredMonotonicity, mirroring cfcWriteFloor exactly.
+
     it("the enforce pin cannot be weakened mid-transaction", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({
@@ -473,7 +492,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(tx.getCfcState().declaredMonotonicityMode).toBe("enforce");
         await tx.commit();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -492,8 +511,11 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cell.set({ out: "v1" });
         tx.prepareCfc();
         expect(tx.getCfcState().prepare.status).toBe("prepared");
-        // A no-op re-set of the same mode does not invalidate.
-        tx.setCfcDeclaredMonotonicityMode("off");
+        // A no-op re-set of the mode the transaction already carries does
+        // not invalidate.
+        tx.setCfcDeclaredMonotonicityMode(
+          tx.getCfcState().declaredMonotonicityMode,
+        );
         expect(tx.getCfcState().prepare.status).toBe("prepared");
         tx.setCfcDeclaredMonotonicityMode("enforce");
         const prepare = tx.getCfcState().prepare;
@@ -504,18 +526,17 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         ).toBe(true);
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
   });
 
-  // ------------------------------------------------------------------
-  // The exception seam: the per-tx privileged widening exemption
-  // (§8.12.7 route 2b; design doc §4). Setter discipline only here —
-  // the gate-facing semantics are in the enforce block below.
-  // ------------------------------------------------------------------
   describe("the widening-exemption seam (setter discipline)", () => {
+    // The exception seam: the per-tx privileged widening exemption
+    // (§8.12.7 route 2b; design doc §4). Setter discipline only here —
+    // the gate-facing semantics are in the enforce block below.
+
     const EXEMPTION = () => ({
       space: signer.did(),
       id: "of:some-doc",
@@ -533,7 +554,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -552,7 +573,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -581,7 +602,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -608,7 +629,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         ).toThrow(/already set/);
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -638,7 +659,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -670,15 +691,13 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         ).toBe(true);
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
   });
 
-  // ------------------------------------------------------------------
   // Shared scenario builders for the gate-behavior blocks below.
-  // ------------------------------------------------------------------
 
   /**
    * Seeded-drop scenario: commit v1 under `schema`, then rewrite the stored
@@ -701,15 +720,16 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
   }) => {
     const runtime = makeRuntime({
       storageManager: opts.storageManager,
+      // At this rung the writer-fit check flags the second commit and lets it
+      // land. That commit carries the clause the seeded entry adds, and the
+      // callers read the error and the entries it produced.
+      cfcEnforcementMode: "enforce-explicit",
       cfcFlowLabels: opts.flowLabels ?? "persist",
       ...(opts.dial !== undefined
         ? { cfcDeclaredMonotonicity: opts.dial }
         : {}),
     });
-    const seeder = makeRuntime({
-      storageManager: opts.storageManager,
-      cfcEnforcementMode: "disabled",
-    });
+    const seeder = makeRuntime({ storageManager: opts.storageManager });
     try {
       const first = await commitWrite(runtime, opts.name, opts.schema, {
         out: "v1",
@@ -739,16 +759,15 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         prepare: tx.getCfcState().prepare,
       };
     } finally {
-      await runtime.dispose();
-      await seeder.dispose();
+      await runtime.dispose({ closeStorage: false });
+      await seeder.dispose({ closeStorage: false });
       await opts.storageManager.close();
     }
   };
 
-  // ------------------------------------------------------------------
-  // The gate under enforce: §8.12.1 weakenings fail closed.
-  // ------------------------------------------------------------------
   describe("enforce: non-monotone declared re-mints fail closed", () => {
+    // The gate under enforce: §8.12.1 weakenings fail closed.
+
     it("a dropped confidentiality clause rejects, naming doc, path and direction", async () => {
       const result = await seededRemintScenario({
         storageManager: StorageManager.emulate({ as: signer }),
@@ -807,10 +826,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cfcFlowLabels: "persist",
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(runtime, "dm-enf-untouched", schema, {
           out: "v1",
@@ -850,8 +866,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A, CLAUSE_B]);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -869,10 +885,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cfcFlowLabels: "persist",
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -934,8 +947,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           ),
         ).toBe(true);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -975,16 +988,15 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.integrity).toEqual([ATOM_X]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
   });
 
-  // ------------------------------------------------------------------
-  // The gate under enforce: §8.12.1 tightenings pass.
-  // ------------------------------------------------------------------
   describe("enforce: monotone tightenings pass", () => {
+    // The gate under enforce: §8.12.1 tightenings pass.
+
     it("an added clause passes and persists", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({
@@ -1014,7 +1026,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           expect.arrayContaining([CLAUSE_A, CLAUSE_B]),
         );
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1055,6 +1067,50 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       expect(entry?.label.integrity).toEqual([ATOM_X]);
     });
 
+    it("removing the final integrity atom clears the declared entry", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-tight-empty-integ",
+          SCHEMA_INTEGRITY_X,
+          { out: "v1" },
+        );
+        expect(first.error).toBeUndefined();
+        expect(
+          declaredEntryAt(
+            persistedEntriesFor(storageManager, first.docId),
+            ["out"],
+          ),
+        ).toEqual({
+          path: ["out"],
+          label: { integrity: [ATOM_X] },
+          origin: "declared",
+        });
+        const second = await commitWrite(
+          runtime,
+          "dm-tight-empty-integ",
+          SCHEMA_EMPTY_INTEGRITY,
+          { out: "v2" },
+        );
+        expect(second.error).toBeUndefined();
+        expect(second.docId).toBe(first.docId);
+        expect(
+          declaredEntryAt(
+            persistedEntriesFor(storageManager, second.docId),
+            ["out"],
+          ),
+        ).toBeUndefined();
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
     it("multiple stored declared entries at one path are joined before the integrity check", async () => {
       // Stored duplicates at one path can arrive from peers/hydration. The
       // stored declared CLAIM at the path is their join — keeping an atom
@@ -1067,10 +1123,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         storageManager,
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -1100,8 +1153,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.integrity).toEqual([ATOM_X]);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1128,10 +1181,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         storageManager,
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -1159,8 +1209,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(message).toContain(JSON.stringify("integrity-z"));
         expect(message).not.toContain(`atom ${JSON.stringify(ATOM_X)} added`);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1193,16 +1243,15 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A]);
         expect(entry?.label.integrity).toEqual([ATOM_X]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
   });
 
-  // ------------------------------------------------------------------
-  // §8.12.8 component scoping: only declared↔declared is ever compared.
-  // ------------------------------------------------------------------
   describe("component scoping (§8.12.8)", () => {
+    // §8.12.8 component scoping: only declared↔declared is ever compared.
+
     it("legacy (origin-less) stored entries are not gated", async () => {
       // A seeded LEGACY entry whose integrity the fresh declared mint does
       // not cover: were the gate to compare against it, [X] ⊄ [Y] would
@@ -1243,10 +1292,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // ------------------------------------------------------------------
-  // off/observe: byte-compat with the characterization block.
-  // ------------------------------------------------------------------
   describe("off/observe byte-compat", () => {
+    // off/observe: byte-compat with the characterization block.
+
     it("off: the seeded weakening persists exactly as characterized, no diagnostic", async () => {
       const result = await seededRemintScenario({
         storageManager: StorageManager.emulate({ as: signer }),
@@ -1322,7 +1370,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           ),
         ).toBe(true);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1361,17 +1409,16 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
             `dial=${dial}`,
           ).toBe(false);
         } finally {
-          await runtime.dispose();
+          await runtime.dispose({ closeStorage: false });
           await storageManager.close();
         }
       }
     });
   });
 
-  // ------------------------------------------------------------------
-  // The exemption seam consumed by the gate (§8.12.7 route 2b semantics).
-  // ------------------------------------------------------------------
   describe("enforce: the widening exemption", () => {
+    // The exemption seam consumed by the gate (§8.12.7 route 2b semantics).
+
     const withExemption = (
       clauseDigest: string,
       path: string[] = ["out"],
@@ -1471,10 +1518,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cfcFlowLabels: "persist",
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(runtime, "dm-ex-paths", schema, {
           out: "v1",
@@ -1511,8 +1555,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(message).toContain("at /aux");
         expect(message).not.toContain("at /out");
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1546,18 +1590,17 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           String((result.error as Error | undefined)?.message),
         ).toContain("declared-monotonicity integrity");
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
   });
 
-  // ------------------------------------------------------------------
-  // Reason dedup on degenerate duplicate entries (direct unit call: the
-  // walk mints one declared entry per path and dedups atoms, so the
-  // duplicate arms are reachable only through the exported function).
-  // ------------------------------------------------------------------
   describe("violation-reason dedup (unit)", () => {
+    // Reason dedup on degenerate duplicate entries (direct unit call: the
+    // walk mints one declared entry per path and dedups atoms, so the
+    // duplicate arms are reachable only through the exported function).
+
     it("reports each violated clause and added atom once across duplicate entries", () => {
       const violations = collectDeclaredMonotonicityViolations({
         space: signer.did(),
@@ -1596,11 +1639,79 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // ------------------------------------------------------------------
-  // Non-taint: the gate's stored-entry reads ride the internal-verifier
-  // meta and must not enter the consumed set.
-  // ------------------------------------------------------------------
+  describe("a personal space's owner (the §8.10.3 witness relation)", () => {
+    // The gate's witness is `clauseSubsumes(proposed, stored)`, the same
+    // §8.10.3 kernel the ceiling gates use, so the personal-space reading
+    // reaches here too — proposed sits in the CEILING position and stored in
+    // the LABEL position. Pinned because a change to that kernel changes
+    // what this gate calls monotone.
+
+    const OWNER = "did:key:zMonoOwner";
+    const userAtom = {
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: OWNER,
+    };
+    const personalSpaceAtom = {
+      type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+      owner: OWNER,
+    };
+    const confidentialityViolations = (
+      stored: CfcConfClause,
+      proposed: CfcConfClause,
+    ): string[] =>
+      collectDeclaredMonotonicityViolations({
+        space: signer.did(),
+        docId: "of:spelling-doc",
+        storedEntries: [{
+          path: ["out"],
+          origin: "declared",
+          label: { confidentiality: [stored] },
+        }],
+        proposedEntries: [{
+          path: ["out"],
+          origin: "declared",
+          label: { confidentiality: [proposed] },
+        }],
+      }).filter((v) => v.includes("confidentiality violation"));
+
+    it("narrowing a declared personal space to its owner is monotone", () => {
+      // The owner is one of the space's readers, so naming the owner alone
+      // is the tightening direction.
+      expect(confidentialityViolations(personalSpaceAtom, userAtom))
+        .toEqual([]);
+    });
+
+    it("widening a declared owner to their personal space is a violation", () => {
+      // The direction the gate exists to catch: a declared policy naming one
+      // person re-minted as an atom whose audience is the space's readers.
+      expect(confidentialityViolations(userAtom, personalSpaceAtom))
+        .toHaveLength(1);
+    });
+
+    it("re-spelling a declared owner as a space principal is a violation", () => {
+      const spaceAtom = {
+        type: "https://commonfabric.org/cfc/atom/Space",
+        id: OWNER,
+      };
+      expect(confidentialityViolations(userAtom, spaceAtom)).toHaveLength(1);
+      expect(confidentialityViolations(personalSpaceAtom, spaceAtom))
+        .toHaveLength(1);
+    });
+
+    it("a different owner is a violation", () => {
+      const otherUser = {
+        type: "https://commonfabric.org/cfc/atom/User",
+        subject: "did:key:zMonoOther",
+      };
+      expect(confidentialityViolations(personalSpaceAtom, otherUser))
+        .toHaveLength(1);
+    });
+  });
+
   describe("non-taint", () => {
+    // Non-taint: the gate's stored-entry reads ride the internal-verifier
+    // meta and must not enter the consumed set.
+
     it("the observe-mode gate adds nothing to the prepared consumed set", async () => {
       const consumedReadsFor = async (
         dial: CfcDeclaredMonotonicityMode,
@@ -1608,13 +1719,14 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         const storageManager = StorageManager.emulate({ as: signer });
         const runtime = makeRuntime({
           storageManager,
+          // At this rung the writer-fit check flags the second commit and
+          // lets it land, so the transaction reaches the prepared decision
+          // this reads.
+          cfcEnforcementMode: "enforce-explicit",
           cfcFlowLabels: "persist",
           cfcDeclaredMonotonicity: dial,
         });
-        const seeder = makeRuntime({
-          storageManager,
-          cfcEnforcementMode: "disabled",
-        });
+        const seeder = makeRuntime({ storageManager });
         try {
           const first = await commitWrite(
             runtime,
@@ -1656,8 +1768,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           tx.abort();
           return consumed;
         } finally {
-          await runtime.dispose();
-          await seeder.dispose();
+          await runtime.dispose({ closeStorage: false });
+          await seeder.dispose({ closeStorage: false });
           await storageManager.close();
         }
       };

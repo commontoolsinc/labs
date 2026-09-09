@@ -1,6 +1,9 @@
-// Tests for the GCP REST helpers: the service-account JWT is signed correctly
-// (verified with the matching public key), and jobs.query responses parse. No
-// network — signing and parsing are exercised directly.
+/**
+ * Tests for the GCP REST helpers: the service-account JWT is signed correctly
+ * (verified with the matching public key), and jobs.query responses parse. No
+ * network — signing and parsing are exercised directly.
+ */
+
 import { assertEquals, assertThrows } from "@std/assert";
 import { bqRows, METADATA_TOKEN_URL, saAssertion } from "./gcp.ts";
 

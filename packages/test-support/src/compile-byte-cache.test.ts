@@ -21,6 +21,10 @@ const SPAN = {
   endColumn: 6,
 };
 const POLICY_MANIFEST = { policyDigest: "sha256:policy", manifest: {} };
+const BUILDER_SOURCE_SITES = {
+  formatVersion: 1 as const,
+  sites: { named: { line: 3, col: 4, bindingName: "named" } },
+};
 
 describe("ProcessModuleByteCache", () => {
   it("returns stored bytes by identity and reports a full set", () => {
@@ -52,6 +56,7 @@ describe("ProcessModuleByteCache", () => {
         js: "JS_B",
         sourceMap: "MAP_B",
         patternCoverageSpans: [SPAN],
+        builderSourceSites: BUILDER_SOURCE_SITES,
         policyManifests: [POLICY_MANIFEST],
       },
     ]);
@@ -60,6 +65,7 @@ describe("ProcessModuleByteCache", () => {
       js: "JS_B",
       sourceMap: "MAP_B",
       patternCoverageSpans: [SPAN],
+      builderSourceSites: BUILDER_SOURCE_SITES,
       policyManifests: [POLICY_MANIFEST],
     });
     cache.clear();
@@ -90,6 +96,7 @@ describe("ProcessModuleByteCache", () => {
       js: "JS_Y",
       sourceMap: "MAP_Y",
       patternCoverageSpans: [SPAN],
+      builderSourceSites: BUILDER_SOURCE_SITES,
       policyManifests: [POLICY_MANIFEST],
     });
     a.put("v2", "z", { js: "JS_Z" });
@@ -103,6 +110,7 @@ describe("ProcessModuleByteCache", () => {
       js: "JS_Y",
       sourceMap: "MAP_Y",
       patternCoverageSpans: [SPAN],
+      builderSourceSites: BUILDER_SOURCE_SITES,
       policyManifests: [POLICY_MANIFEST],
     });
     expect(b.get("v2", "z")).toEqual({ js: "JS_Z" });
@@ -141,12 +149,50 @@ describe("ProcessModuleByteCache", () => {
       { key: `${RT}\0nojs` }, // missing js
       { key: `${RT}\0badspans`, js: "NO", patternCoverageSpans: ["bad"] },
       { key: `${RT}\0badspanstype`, js: "NO", patternCoverageSpans: "bad" },
+      {
+        key: `${RT}\0badsites`,
+        js: "NO",
+        builderSourceSites: { formatVersion: 2 },
+      },
       { key: `${RT}\0badmanifests`, js: "NO", policyManifests: "bad" },
       null,
       "garbage",
     ] as unknown[]);
     expect(cache.get(RT, "ok")).toEqual({ js: "GOOD" });
     expect(cache.stats().entries).toBe(1);
+  });
+
+  it("restore rejects malformed builder source sidecars", () => {
+    const malformedSidecars: unknown[] = [
+      null,
+      [],
+      { formatVersion: 2, sites: {} },
+      { formatVersion: 1, sites: null },
+      { formatVersion: 1, sites: [] },
+      { formatVersion: 1, sites: { "": { line: 1, col: 0 } } },
+      { formatVersion: 1, sites: { named: null } },
+      { formatVersion: 1, sites: { named: { line: 1.5, col: 0 } } },
+      { formatVersion: 1, sites: { named: { line: 0, col: 0 } } },
+      { formatVersion: 1, sites: { named: { line: 1, col: 0.5 } } },
+      { formatVersion: 1, sites: { named: { line: 1, col: -1 } } },
+      {
+        formatVersion: 1,
+        sites: { named: { line: 1, col: 0, bindingName: 42 } },
+      },
+      {
+        formatVersion: 1,
+        sites: { named: { line: 1, col: 0, bindingName: "" } },
+      },
+    ];
+    const cache = new ProcessModuleByteCache();
+
+    cache.restore(malformedSidecars.map((builderSourceSites, index) => ({
+      key: `${RT}\0bad-sidecar-${index}`,
+      js: "NO",
+      builderSourceSites,
+    })));
+
+    expect(cache.stats().entries).toBe(0);
   });
 });
 

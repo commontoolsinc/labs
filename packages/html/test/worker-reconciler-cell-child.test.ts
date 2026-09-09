@@ -1,13 +1,30 @@
-import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
+/**
+ * Covers what the worker reconciler does with a child that is a `Cell`: which
+ * updates it can apply to the node already standing, and where it has to build
+ * a new one instead.
+ *
+ * These tests assert on the ops that reach the document rather than on what the
+ * document ends up holding, because reusing a node and rebuilding an identical
+ * one leave the same result and cost very different amounts. Where the ordering
+ * of children is what is under test, `applyOps` replays those ops into a model
+ * so an assertion can name the order instead of inferring it from op counts.
+ */
 
-import type { VDomOp } from "../src/vdom-ops.ts";
+import { assertEquals } from "@std/assert";
+
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
-import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import {
+  type CfcLabelView,
+  cfcLabelViewSymbol,
+} from "@commonfabric/runner/cfc";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -23,6 +40,48 @@ function createOpsCollector() {
     hasOp: (opType: string) => allOps.some((op) => op.op === opType),
     getOpsOfType: (opType: string) => allOps.filter((op) => op.op === opType),
   };
+}
+
+/**
+ * Replays emitted ops into a model of the document, so a test can assert the
+ * order children ended up in rather than only the ops that got them there.
+ * Follows the applicator in the one respect that decides ordering: inserting a
+ * node that is already attached moves it rather than copying it.
+ */
+function applyOps(ops: readonly VDomOp[]) {
+  const childrenOf = new Map<number, number[]>();
+  const parentOf = new Map<number, number>();
+
+  const detach = (id: number) => {
+    const parent = parentOf.get(id);
+    if (parent === undefined) return;
+    const siblings = childrenOf.get(parent);
+    if (siblings) siblings.splice(siblings.indexOf(id), 1);
+  };
+
+  for (const op of ops) {
+    if (op.op === "create-element" || op.op === "create-text") {
+      childrenOf.set(op.nodeId, []);
+    } else if (op.op === "insert-child") {
+      detach(op.childId);
+      let siblings = childrenOf.get(op.parentId);
+      if (!siblings) {
+        siblings = [];
+        childrenOf.set(op.parentId, siblings);
+      }
+      const before = op.beforeId === null
+        ? -1
+        : siblings.indexOf(op.beforeId as number);
+      if (before < 0) siblings.push(op.childId);
+      else siblings.splice(before, 0, op.childId);
+      parentOf.set(op.childId, op.parentId);
+    } else if (op.op === "remove-node") {
+      detach(op.nodeId);
+      parentOf.delete(op.nodeId);
+    }
+  }
+
+  return { childrenOf, parentOf };
 }
 
 Deno.test("worker reconciler - cell child optimization", async (t) => {
@@ -41,9 +100,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
   // Define MockCell extending CellImpl
   class MockCell extends (CellImplConstructor as any) {
-    private subscribers = new Set<(value: any) => void>();
+    value: any;
+    #subscribers = new Set<(value: any) => void>();
 
-    constructor(public value: any) {
+    constructor(value: any) {
       // Pass dummy args to super to satisfy it
       // CellImpl(runtime, tx, link, synced, causeContainer, kind)
       super(runtime, undefined, undefined, false, undefined, "cell");
@@ -51,25 +111,41 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     }
 
     sink(callback: (value: any) => void) {
-      this.subscribers.add(callback);
+      this.#subscribers.add(callback);
       // Ensure callback is called asynchronously to match Reconciler expectations?
       // Actually reconciler doesn't rely on async usually for initial render.
       // But let's be safe and do it synchronously as it worked for others.
       callback(this.value);
       return () => {
-        this.subscribers.delete(callback);
+        this.#subscribers.delete(callback);
       };
     }
 
     set(newValue: any) {
       this.value = newValue;
-      for (const sub of this.subscribers) {
+      for (const sub of this.#subscribers) {
         sub(newValue);
       }
     }
 
     isStream() {
       return false;
+    }
+
+    /**
+     * Returns `undefined`: a mock carries no metadata, and the inherited read
+     * throws on a link-less cell.
+     */
+    getMetaRaw(): undefined {
+      return undefined;
+    }
+
+    /**
+     * Resolves to itself, since a mock names no link; a step that needs
+     * otherwise overrides it on the instance.
+     */
+    resolveAsCell(): MockCell | Cell<unknown> {
+      return this;
     }
   }
 
@@ -121,6 +197,444 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       nestedTextCell.set("nested ignored");
       await t.settle();
       assertEquals(collector.getOps(), []);
+    },
+  );
+
+  await t.step(
+    "keeps existing rows when a child Cell's array grows by one",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      // A fresh object each call: a recomputed list hands the reconciler new
+      // VNodes that carry the same content, which is what keys it by content.
+      const row = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "li",
+        props: { "data-row": id },
+        children: [id],
+      });
+
+      const listCell = new MockCell([row("a"), row("b")]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ul",
+        props: {},
+        children: [listCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      const rowsOf = (ops: VDomOp[]) =>
+        ops.filter((op) => "tagName" in op && op.tagName === "li");
+      const initialRows = rowsOf(collector.getOpsOfType("create-element"));
+      assertEquals(initialRows.length, 2, "both rows render initially");
+      const keptIds = initialRows.map((op) => "nodeId" in op ? op.nodeId : -1);
+
+      collector.clear();
+      listCell.set([row("a"), row("b"), row("c")]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").length,
+        0,
+        "appending a row must not remove the array wrapper or any row",
+      );
+      const created = rowsOf(collector.getOpsOfType("create-element"));
+      assertEquals(
+        created.length,
+        1,
+        "only the appended row is created; the first two are reused",
+      );
+      // Naming the ids pins reuse rather than a coincidence of counts: the two
+      // original rows would fail this if they were rebuilt under fresh ids.
+      const appendedIds = created.map((op) => "nodeId" in op ? op.nodeId : -1);
+      const rowIds = new Set([...keptIds, ...appendedIds]);
+      const rowInserts = collector.getOpsOfType("insert-child")
+        .filter((op) => "childId" in op && rowIds.has(op.childId))
+        .map((op) => "childId" in op ? op.childId : -1);
+      assertEquals(
+        rowInserts,
+        appendedIds,
+        "only the appended row is placed; the rows already there do not move",
+      );
+    },
+  );
+
+  await t.step(
+    "reuses every row when a child Cell's array is reordered",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const row = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "li",
+        props: { "data-row": id },
+        children: [id],
+      });
+
+      const listCell = new MockCell([row("a"), row("b"), row("c")]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ul",
+        props: {},
+        children: [listCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      const idOfRow = new Map<string, number>();
+      for (const op of collector.getOpsOfType("create-element")) {
+        if ("tagName" in op && op.tagName === "li" && "nodeId" in op) {
+          // Rows are created in order, so the nth create is the nth row.
+          idOfRow.set("abc"[idOfRow.size], op.nodeId);
+        }
+      }
+      assertEquals(idOfRow.size, 3, "three rows render initially");
+
+      collector.clear();
+      listCell.set([row("c"), row("b"), row("a")]);
+      await t.settle();
+
+      // Reversing keys nothing differently -- each row still hashes to what it
+      // did -- so a keyed reconciler moves rows and builds none.
+      assertEquals(
+        collector.getOpsOfType("create-element").length,
+        0,
+        "reordering builds no new row",
+      );
+      assertEquals(
+        collector.getOpsOfType("remove-node").length,
+        0,
+        "reordering removes no row",
+      );
+
+      // Reversing three rows needs two moves: one row can hold its place.
+      const inserted = collector.getOpsOfType("insert-child");
+      assertEquals(inserted.length, 2, "a reversal moves all but one row");
+      for (const op of inserted) {
+        assertEquals(
+          "childId" in op && [...idOfRow.values()].includes(op.childId),
+          true,
+          "every move names a row that already existed",
+        );
+      }
+    },
+  );
+
+  await t.step(
+    "leaves a row added to a transcluded list unstamped",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const row = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "li",
+        props: { "data-row": id },
+        children: [id],
+      });
+
+      // A cell of another space transcludes: its wrapper carries the stamp and
+      // everything below inherits it.
+      const listCell = new MockCell([row("a")]);
+      Object.defineProperty(listCell, "space", {
+        get: () => "did:key:zOtherSpaceForTransclusion",
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ul",
+        props: {},
+        children: [listCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      const wrapperOps = collector.getOpsOfType("create-element").filter((op) =>
+        "tagName" in op && op.tagName === "span"
+      );
+      assertEquals(
+        wrapperOps.length === 1 && "space" in wrapperOps[0],
+        true,
+        "the wrapper carries the stamp for the transcluded subtree",
+      );
+      assertEquals(
+        collector.getOpsOfType("create-element").filter((op) =>
+          "tagName" in op && op.tagName === "li"
+        ).every((op) => !("space" in op)),
+        true,
+        "the first row inherits it rather than repeating it",
+      );
+
+      collector.clear();
+      listCell.set([row("a"), row("b")]);
+      await t.settle();
+
+      const appended = collector.getOpsOfType("create-element").filter((op) =>
+        "tagName" in op && op.tagName === "li"
+      );
+      assertEquals(appended.length, 1, "one row is added");
+      assertEquals(
+        appended.every((op) => !("space" in op)),
+        true,
+        "a row added later inherits the stamp the same way the first did",
+      );
+    },
+  );
+
+  await t.step(
+    "leaves rows in the order the array names them, after any permutation",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const row = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "li",
+        props: { "data-row": id },
+        children: [id],
+      });
+
+      const initial = ["a", "b", "c", "d", "e"];
+      const listCell = new MockCell(initial.map(row));
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ul",
+        props: {},
+        children: [listCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      // Rows are created in array order, so the nth `li` created is the nth id.
+      const nodeIdOf = new Map<string, number>();
+      collector.getOpsOfType("create-element")
+        .filter((op) => "tagName" in op && op.tagName === "li")
+        .forEach((op, i) => {
+          if ("nodeId" in op) nodeIdOf.set(initial[i], op.nodeId);
+        });
+      assertEquals(nodeIdOf.size, 5, "five rows render initially");
+
+      // Skipping an op for a row that need not move is only correct if the
+      // rows still land in the named order, which counting ops cannot show.
+      for (
+        const order of [
+          ["e", "d", "c", "b", "a"],
+          ["c", "a", "e", "b", "d"],
+          ["b", "c", "d", "e", "a"],
+          ["a", "b", "c", "d", "e"],
+        ]
+      ) {
+        listCell.set(order.map(row));
+        await t.settle();
+
+        const { childrenOf, parentOf } = applyOps(collector.getOps());
+        const wrapper = parentOf.get(nodeIdOf.get(order[0])!);
+        assertEquals(
+          childrenOf.get(wrapper!),
+          order.map((id) => nodeIdOf.get(id)!),
+          `rows end up ordered ${order.join("")}`,
+        );
+      }
+
+      assertEquals(
+        collector.getOpsOfType("create-element").filter((op) =>
+          "tagName" in op && op.tagName === "li"
+        ).length,
+        5,
+        "no permutation builds a row a second time",
+      );
+    },
+  );
+
+  await t.step(
+    "drops only the removed row when a child Cell's array shrinks",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const row = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "li",
+        props: { "data-row": id },
+        children: [id],
+      });
+
+      const listCell = new MockCell([row("a"), row("b"), row("c")]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ul",
+        props: {},
+        children: [listCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+      collector.clear();
+
+      listCell.set([row("a"), row("c")]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").length,
+        1,
+        "only the dropped row is removed",
+      );
+      assertEquals(
+        collector.getOpsOfType("create-element").length,
+        0,
+        "the surviving rows are reused",
+      );
+      assertEquals(
+        collector.getOpsOfType("insert-child").length,
+        0,
+        "the survivors were already in order, so none of them move",
+      );
+
+      // Emptying the list keeps the wrapper, so refilling it reuses that too.
+      collector.clear();
+      listCell.set([]);
+      await t.settle();
+      assertEquals(
+        collector.getOpsOfType("remove-node").length,
+        2,
+        "clearing removes the remaining rows",
+      );
+
+      collector.clear();
+      listCell.set([row("a")]);
+      await t.settle();
+      assertEquals(
+        collector.getOpsOfType("create-element").filter((op) =>
+          "tagName" in op && op.tagName === "span"
+        ).length,
+        0,
+        "refilling an emptied list does not rebuild the wrapper",
+      );
+    },
+  );
+
+  await t.step(
+    "replaces an authored element when a child Cell becomes an array",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      // Shares the array wrapper's tag, so only the wrapper marker tells the
+      // reconciler this span is the author's element and not a list container.
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "span",
+        props: { id: "authored" },
+        children: ["one"],
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      const authored = collector.getOpsOfType("create-element").find((op) =>
+        "tagName" in op && op.tagName === "span"
+      );
+      const authoredId = authored && "nodeId" in authored
+        ? authored.nodeId
+        : -1;
+
+      collector.clear();
+      childCell.set([{
+        type: "vnode",
+        name: "li",
+        props: {},
+        children: ["a"],
+      }]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === authoredId
+        ),
+        true,
+        "an authored span must not be adopted as the array wrapper",
+      );
+    },
+  );
+
+  await t.step(
+    "stops treating a wrapper as one once an authored node takes it over",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const childCell = new MockCell([{
+        type: "vnode",
+        name: "li",
+        props: {},
+        children: ["a"],
+      }]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      // The wrapper is a span, so this authored span takes it over in place.
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "authored" },
+        children: ["one"],
+      });
+      await t.settle();
+
+      const adopted = collector.getOpsOfType("create-element").find((op) =>
+        "tagName" in op && op.tagName === "span"
+      );
+      const adoptedId = adopted && "nodeId" in adopted ? adopted.nodeId : -1;
+
+      collector.clear();
+      childCell.set([{
+        type: "vnode",
+        name: "li",
+        props: {},
+        children: ["b"],
+      }]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === adoptedId
+        ),
+        true,
+        "a span carrying authored props must not be reused as a wrapper",
+      );
     },
   );
 
@@ -1208,11 +1722,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
       await t.settle();
 
-      const textOps = collector.getOpsOfType("update-text");
+      // A text child is keyed by its own content, so the one that changed is a
+      // different child rather than the same child holding new text: it is
+      // created and the old one removed. The five that did not change are
+      // reused, and reuse of an unchanged text child rewrites nothing.
       assertEquals(
-        textOps.some((op) => "text" in op && op.text === "4"),
-        true,
-        "same-shape split vote-count text should update",
+        collector.getOpsOfType("update-text").length,
+        0,
+        "text children that did not change should not be rewritten",
       );
       assertEquals(
         collector.getOps().some((op) =>
@@ -1680,31 +2197,72 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
-    "updates same-key subpattern UI payloads without reinserting",
+    "updates same-key subpatterns and retargets unchanged UI",
     async () => {
       const collector = createOpsCollector();
+      // A public-only ceiling, so that the one output labeled confidential
+      // below is refused by the real render policy while the unlabeled ones
+      // render as before.
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
+        renderConfidentialityCeiling: { atoms: [] },
       });
+      // A subpattern's output reaches the reconciler as a cell, and a cell
+      // keys by the link it names rather than by the payload behind it. That
+      // is what holds this child's key still while its payload changes, which
+      // is the situation under test.
       const subpatternOutput = (node: WorkerVNode): WorkerRenderNode => ({
         [UI]: node,
-        toJSON: () => "stable-subpattern-output",
       } as unknown as WorkerRenderNode);
+
+      const initialOutput = subpatternOutput({
+        type: "vnode",
+        name: "span",
+        props: { "data-row": "same", "data-count": "1" },
+        children: ["one"],
+      });
+      const outputCell = new MockCell(initialOutput);
+      let resolvedOutputId = "of:fid1:nested-pattern";
+      // The one output the render policy refuses: while the resolved output
+      // is this one, it carries a confidentiality label no public-only
+      // ceiling admits; otherwise it carries none.
+      const deniedOutputId = "of:fid1:retargeted-to-blocked";
+      const deniedLabelView: CfcLabelView = {
+        version: 1,
+        entries: [{ path: [], label: { confidentiality: ["secret"] } }],
+      };
+      outputCell.getAsNormalizedFullLink = () => ({
+        id: "of:fid1:stable-link-container",
+        space: signer.did(),
+        path: [],
+        scope: "space",
+      });
+      const resolvedOutputCell = {
+        getAsNormalizedFullLink: () => ({
+          id: resolvedOutputId,
+          space: signer.did(),
+          path: [],
+          scope: "space",
+        }),
+        resolveAsCell() {
+          return this;
+        },
+        getMetaRaw: (field: string) =>
+          field === "patternIdentity"
+            ? { identity: "nested-pattern", symbol: "default" }
+            : undefined,
+        [cfcLabelViewSymbol]: () =>
+          resolvedOutputId === deniedOutputId ? deniedLabelView : undefined,
+      } as unknown as Cell<unknown>;
+      outputCell.resolveAsCell = () => resolvedOutputCell;
 
       const rootCell = new MockCell(
         {
           type: "vnode",
           name: "div",
           props: {},
-          children: [
-            subpatternOutput({
-              type: "vnode",
-              name: "span",
-              props: { "data-row": "same", "data-count": "1" },
-              children: ["one"],
-            }),
-          ],
-        } satisfies WorkerVNode,
+          children: [outputCell],
+        } as unknown as WorkerVNode,
       );
 
       reconciler.mount(rootCell as unknown as Cell<unknown>);
@@ -1717,24 +2275,63 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         throw new Error("Expected initial span to be created");
       }
       const spanNodeId = spanCreate.nodeId;
+      const nestedPatternBinding = collector.getOps().find((op) =>
+        op.op === "set-piece-boundary" && op.nodeId === spanNodeId
+      );
+      assertEquals(
+        nestedPatternBinding && "cellRef" in nestedPatternBinding
+          ? nestedPatternBinding.cellRef.id
+          : undefined,
+        "of:fid1:nested-pattern",
+        "nested pattern root should carry its whole result cell",
+      );
       collector.clear();
 
-      rootCell.set(
-        {
+      resolvedOutputId = "of:fid1:retargeted-with-same-ui";
+      outputCell.set(initialOutput);
+      await t.settle();
+
+      const unchangedUiBinding = collector.getOps().find((op) =>
+        op.op === "set-piece-boundary" && op.nodeId === spanNodeId
+      );
+      assertEquals(
+        unchangedUiBinding && "cellRef" in unchangedUiBinding
+          ? unchangedUiBinding.cellRef.id
+          : undefined,
+        "of:fid1:retargeted-with-same-ui",
+        "an unchanged UI object should still follow a changed result cell",
+      );
+      assertEquals(
+        collector.getOps().some((op) =>
+          op.op === "create-element" || op.op === "remove-node"
+        ),
+        false,
+        "retargeting unchanged UI should keep its existing element",
+      );
+
+      collector.clear();
+      resolvedOutputId = "of:fid1:retargeted-nested-pattern";
+
+      outputCell.set(
+        subpatternOutput({
           type: "vnode",
-          name: "div",
-          props: {},
-          children: [
-            subpatternOutput({
-              type: "vnode",
-              name: "span",
-              props: { "data-row": "same", "data-count": "2" },
-              children: ["two"],
-            }),
-          ],
-        } satisfies WorkerVNode,
+          name: "span",
+          props: { "data-row": "same", "data-count": "2" },
+          children: ["two"],
+        }),
       );
       await t.settle();
+
+      const retargetedBinding = collector.getOps().find((op) =>
+        op.op === "set-piece-boundary" && op.nodeId === spanNodeId
+      );
+      assertEquals(
+        retargetedBinding && "cellRef" in retargetedBinding
+          ? retargetedBinding.cellRef.id
+          : undefined,
+        "of:fid1:retargeted-nested-pattern",
+        "a reused pattern root should follow a changed result-cell target",
+      );
 
       assertEquals(
         collector.getOpsOfType("create-element").some((op) =>
@@ -1765,6 +2362,94 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         ),
         true,
         "same-key child text should update",
+      );
+
+      collector.clear();
+      outputCell.set(
+        {
+          type: "vnode",
+          name: "span",
+          props: { "data-row": "plain" },
+          children: ["plain vnode"],
+        } satisfies WorkerVNode,
+      );
+      await t.settle();
+      assertEquals(
+        collector.getOps().some((op) =>
+          op.op === "clear-piece-boundary" && op.nodeId === spanNodeId
+        ),
+        true,
+        "the marker should leave a reused root when it stops being a pattern",
+      );
+
+      const blockedCandidate = subpatternOutput({
+        type: "vnode",
+        name: "cf-cfc-blocked",
+        props: { "data-row": "blocked" },
+        children: ["blocked"],
+      });
+      resolvedOutputId = deniedOutputId;
+      outputCell.set(blockedCandidate);
+      await t.settle();
+
+      resolvedOutputId = "of:fid1:allowed-after-block";
+      outputCell.set(blockedCandidate);
+      await t.settle();
+      collector.clear();
+
+      resolvedOutputId = deniedOutputId;
+      outputCell.set(blockedCandidate);
+      await t.settle();
+
+      assertEquals(
+        collector.hasOp("set-piece-boundary"),
+        false,
+        "a blocked placeholder should not carry the hidden piece boundary",
+      );
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "key" in op && op.key === "data-cfc-blocked" &&
+          "value" in op && op.value === "true"
+        ),
+        true,
+        "a same-UI retarget should still re-run the render policy",
+      );
+    },
+  );
+
+  await t.step(
+    "does not mark an ordinary UI-shaped computed cell as a piece",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      const uiShapedDataCell = new MockCell({
+        [UI]: {
+          type: "vnode",
+          name: "span",
+          props: {},
+          children: ["ordinary data"],
+        },
+      });
+      uiShapedDataCell.getAsNormalizedFullLink = () => ({
+        id: "of:fid1:ordinary-ui-shaped-data",
+        space: signer.did(),
+        path: [],
+        scope: "space",
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [uiShapedDataCell],
+      } as unknown as WorkerVNode);
+
+      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      await t.settle();
+
+      assertEquals(
+        collector.hasOp("set-piece-boundary"),
+        false,
+        "UI-shaped data without pattern provenance is not a piece",
       );
     },
   );

@@ -1,15 +1,18 @@
-import { env, waitForCondition } from "@commonfabric/integration";
+import { assert, assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { assert } from "@std/assert";
+
+import { Identity } from "@commonfabric/identity";
+import { env, waitForCondition } from "@commonfabric/integration";
+
 import { ShellIntegration } from "../../integration/shell-utils.ts";
 import { clickPierce, pierce } from "./shadow-dom.ts";
 
 const { FRONTEND_URL } = env;
 
-// Tests the manual logging in via passphrase.
-// Other tests should use the `shell.login(identity)`
-// utility to directly provide an identity.
 describe("shell login tests", () => {
+  // Tests the manual logging in via passphrase. Other tests should use the
+  // `shell.login(identity)` utility to directly provide an identity.
+
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -58,6 +61,45 @@ describe("shell login tests", () => {
     assert(!result.beforeKeyStore.hasRegister);
     assert(!result.afterKeyStore.hasLoading);
     assert(result.afterKeyStore.hasRegister);
+  });
+
+  it("logs in while the app is still unpublished", async () => {
+    // The shell publishes `globalThis.app` at the end of its bootstrap, after
+    // the key store opens and Navigation is installed, so a driver that
+    // navigates or reloads and logs in straight away can arrive before the app
+    // is published. The property installed below is that window with the timing
+    // taken out of it: the first read of `globalThis.app` answers `undefined`,
+    // and every read after it answers the root element. Logging in through that
+    // property means waiting for the boundary rather than reading through it.
+
+    const identity = await Identity.generate({ implementation: "noble" });
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: "common-knowledge" },
+    });
+
+    await page.evaluate(() => {
+      let published: unknown = globalThis.app;
+      let unread = true;
+      Object.defineProperty(globalThis, "app", {
+        configurable: true,
+        get() {
+          if (!unread) return published;
+          unread = false;
+          return undefined;
+        },
+        set(value: unknown) {
+          published = value;
+        },
+      });
+    });
+
+    await shell.login(identity);
+
+    const state = await shell.state();
+    assertEquals(state?.identityDid, identity.did());
   });
 
   it("can create a new user via passphrase", async () => {

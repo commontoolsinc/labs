@@ -1,0 +1,36 @@
+trial 1: A settled at value 1; entityId = {"/":"fid1:W7UXR1fKl13jTjkah2eWsOR2seXL4l4PkmQUKMH6rFE"}
+trial 1: B hydrated in 0ms
+trial 1: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:B4KyupgByt_D3WvHDlFwYykrILxQKXkVBvGkQX4kpPs","space":"did:key:z6MkkQr6bt4mwNgfvy34Gnkq9aCaPjZrqNpjhyjFZXy7cM5G","scope":"space"}}},"value":1}
+trial 1: preClick=1 final=2 verdict=REVERT windowMs=9 obs=[1,2,1,2] clickToFirstEcho=9ms
+trial 2: A settled at value 1; entityId = {"/":"fid1:2RnHWiCpsZ2XT0p86yPI9F4S2tlTcaL3Lfp76nkrn4M"}
+trial 2: B hydrated in 0ms
+trial 2: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:TEjtnSFrJXiQ5padrgaZD1Ubm1dlzAkG6SruqQv9BXc","space":"did:key:z6MktKRjB2FRTCsU9LMKwipgH56gkyr2THsaZ7HWxdjFtZqy","scope":"space"}}},"value":1}
+trial 2: preClick=1 final=2 verdict=REVERT windowMs=10 obs=[1,2,1,2] clickToFirstEcho=8ms
+trial 3: A settled at value 1; entityId = {"/":"fid1:YqlwC4iKRIDvH1FA_QQ_97HgDc7zTNsUkNaxwgvEIcI"}
+trial 3: B hydrated in 0ms
+trial 3: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:0HxK-b8vfDlg4IbP7LA6MEzVMJoFgPA7CWWIT1oMlHc","space":"did:key:z6MknP6qs7ESQUzhVrGV2k4Cbutt2Am9rvCj5oANu1CLFF2k","scope":"space"}}},"value":1}
+trial 3: preClick=1 final=2 verdict=REVERT windowMs=10 obs=[1,2,1,2] clickToFirstEcho=7ms
+trial 4: A settled at value 1; entityId = {"/":"fid1:PxtTQjL_p_motJY4lfosb4gL-XTgpZsR8GGP8gU2j4o"}
+trial 4: B hydrated in 0ms
+trial 4: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:7RiXxUw_gGK3sPKA5Auj7PabCIZzwSm9toHHMdejP3A","space":"did:key:z6MkkQsY1vLbZPPAj9UCJw9Zv2HoEqXqRDU88cuZYB4wbK4A","scope":"space"}}},"value":1}
+trial 4: preClick=1 final=2 verdict=REVERT windowMs=10 obs=[1,2,1,2] clickToFirstEcho=10ms
+trial 5: A settled at value 1; entityId = {"/":"fid1:S3R2O202l8xkeOkrt00jsHz70PHilNoB3ikAKJgcDWw"}
+trial 5: B hydrated in 0ms
+trial 5: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:5FxRZfgtdeyaVZKzR36-MhzKZy7DHQp0YC5T6JmVc3Q","space":"did:key:z6MkoxxNhFuW4dQ19rKR9tKiZktnDdNwJGp4kTkxCQeNVMZ1","scope":"space"}}},"value":1}
+trial 5: preClick=1 final=2 verdict=REVERT windowMs=11 obs=[1,2,1,2] clickToFirstEcho=8ms
+trial 6: A settled at value 1; entityId = {"/":"fid1:cbqENJRJgjW9aEQ3Rf9NP5e1LaNYUwaM7xs9LnmImKo"}
+trial 6: B hydrated in 0ms
+trial 6: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:DyOzyHW6MjlrrPirML2lIYbkY6aoVPS5BklgGhm8-qw","space":"did:key:z6MksH9uXN44Eez2kurWjNsfCN7bDmEB4ZJ2ozcsz1oSc6mQ","scope":"space"}}},"value":1}
+trial 6: preClick=1 final=2 verdict=REVERT windowMs=11 obs=[1,2,1,2] clickToFirstEcho=7ms
+trial 7: A settled at value 1; entityId = {"/":"fid1:EYS5CBEQghvPvWZFL1I7VSTyop_Jcy3QjbXLtEBY4zk"}
+trial 7: B hydrated in 0ms
+trial 7: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:GXCu8hv5u7kjySOYyzqvSU-a6-0dG2jUuzTjlXn4V7s","space":"did:key:z6Mkgpq5fpkBgcEeLyGHLdkBW7MCHMxvA35zTwtCrPXxSqvn","scope":"space"}}},"value":1}
+trial 7: preClick=1 final=2 verdict=REVERT windowMs=11 obs=[1,2,1,2] clickToFirstEcho=8ms
+trial 8: A settled at value 1; entityId = {"/":"fid1:rU16nACM8SgshDEuY_srpGCi6kGrmCWTpD6X3Hkhaa8"}
+trial 8: B hydrated in 0ms
+trial 8: B preClick get = {"increment":{"/":{"link@1":{"path":[],"id":"of:fid1:fLY4PXQEsTyvT3AjNF9R8HKW1TBdf_pzb10be_uWTtw","space":"did:key:z6MktV8rbUcfXdV8K3VndKmMta8EpLH17SNJUQqMLacBXkAU","scope":"space"}}},"value":0}
+SES_UNHANDLED_REJECTION: [Error: Document of:fid1:gqApGg0pwSYg3SmZ--aRq-DMvzD1oVX_-lLgGPMIRP0 was delivered with a broken schema ref: cid:fid1:Ta0kc8o3CgADqHy1XDcZOwhC-LqkN0YoKEQ99mC01Pg is not delivered and verified in this replica. Every delivered document's refs must resolve within the delivered set (docs/specs/content-addressed-schemas.md).]
+trial 8: preClick=0 final=2 verdict=clean obs=[0,1,2] clickToFirstEcho=29ms
+
+[atfloor-instrument] summary:
+  trials=8 reverts=7 windows: 9,10,10,10,11,11,11 ms

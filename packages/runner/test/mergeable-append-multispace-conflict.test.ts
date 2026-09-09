@@ -1,5 +1,5 @@
 // Probe + regression for the residual profile-append-during-rehydration loss
-// (docs/development/mergeable-collection-writes.md "Residual" section), distilled
+// (docs/features/mergeable-collection-writes.md "Residual" section), distilled
 // to the essential runtime mechanism and made deterministic:
 //
 //   A single event handler that, in ONE multi-space transaction, mergeable-appends
@@ -28,41 +28,12 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("mergeable-append-multispace");
 const space = signer.did();
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-  private sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 // A child pattern instantiated in its own anonymous inSpace space, plus a host
 // that holds the home `items` list and an `addItem` handler that pushes a
@@ -136,7 +107,7 @@ function waitForEventCommit(
 async function readDurableItemCount(
   server: MemoryV2Server.Server,
 ): Promise<number> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -174,12 +145,12 @@ async function readDurableItemCount(
 
 describe("mergeable append in a multi-space commit survives a transient storm", () => {
   let server: MemoryV2Server.Server;
-  let manager: SharedServerStorageManager;
+  let manager: EmulatedStorageManager;
   let rt: Runtime;
 
   beforeEach(() => {
     server = newSharedServer();
-    manager = SharedServerStorageManager.connectTo(server, { as: signer });
+    manager = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: manager,

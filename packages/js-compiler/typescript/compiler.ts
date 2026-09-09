@@ -1,4 +1,8 @@
-import { Program, ProgramResolver, Source } from "../interface.ts";
+import * as path from "@std/path";
+
+import type { BuilderSourceSitesV1 } from "@commonfabric/ts-transformers/runtime-contract";
+import { getLogger } from "@commonfabric/utils/logger";
+import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 import type {
   CompilerHost,
   CompilerOptions,
@@ -12,13 +16,10 @@ import type {
   StringLiteralLike,
 } from "typescript";
 import ts from "typescript";
-import * as path from "@std/path";
-import { getLogger } from "@commonfabric/utils/logger";
-import { yieldToEventLoop } from "@commonfabric/utils/sleep";
-import { getCompilerOptions, TARGET } from "./options.ts";
-import { parseSourceMap } from "../source-map.ts";
+
+import { Program, ProgramResolver, Source } from "../interface.ts";
 import type { SourceMap } from "../interface.ts";
-import { resolveProgram } from "./resolver.ts";
+import { parseSourceMap } from "../source-map.ts";
 import {
   Checker,
   type DiagnosticMessageTransformer,
@@ -26,6 +27,8 @@ import {
   TransformerDiagnosticInfo,
   TransformerError,
 } from "./diagnostics/mod.ts";
+import { getCompilerOptions, TARGET } from "./options.ts";
+import { resolveProgram } from "./resolver.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -71,21 +74,21 @@ function surfaceTransformerWarnings(
 type TypeLibs = Record<string, string>;
 
 class VirtualFs implements ModuleResolutionHost {
-  private readonly types: Record<string, string>;
-  private readonly fsRead: Record<string, string>;
-  private readonly fsWrite: Record<string, string> = Object.create(null);
-  private readonly debug: boolean;
+  readonly #types: Record<string, string>;
+  readonly #fsRead: Record<string, string>;
+  readonly #fsWrite: Record<string, string> = Object.create(null);
+  readonly #debug: boolean;
   constructor(
     input: Program,
     typeLib: TypeLibs,
     debug?: boolean,
   ) {
-    this.fsRead = input.files.reduce((acc, file) => {
+    this.#fsRead = input.files.reduce((acc, file) => {
       acc[file.name] = file.contents;
       return acc;
     }, Object.create(null));
-    this.types = typeLib;
-    this.debug = !!debug;
+    this.#types = typeLib;
+    this.#debug = !!debug;
   }
 
   writeFile(fileName: unknown, content: unknown) {
@@ -99,7 +102,7 @@ class VirtualFs implements ModuleResolutionHost {
       "vfs",
       () => `writeFile - ${fileName} (${content.length} chars)`,
     );
-    this.fsWrite[fileName] = content;
+    this.#fsWrite[fileName] = content;
   }
 
   getCurrentDirectory(): string {
@@ -112,13 +115,13 @@ class VirtualFs implements ModuleResolutionHost {
   }
 
   fileExists(fileName: string): boolean {
-    const exists = !!this.innerRead(fileName);
+    const exists = !!this.#innerRead(fileName);
     vfsLogger.debug("vfs", () => `fileExists - ${fileName}: ${exists}`);
     return exists;
   }
 
   readFile(fileName: string): string | undefined {
-    const content = this.innerRead(fileName);
+    const content = this.#innerRead(fileName);
     vfsLogger.debug(
       "vfs",
       () =>
@@ -134,15 +137,15 @@ class VirtualFs implements ModuleResolutionHost {
   }
 
   getWrites(): Record<string, string> {
-    return this.fsWrite;
+    return this.#fsWrite;
   }
 
-  private innerRead(fileName: string): string | undefined {
+  #innerRead(fileName: string): string | undefined {
     let innerRecord;
     if (fileName.startsWith(VFS_TYPES_DIR)) {
-      innerRecord = this.types;
+      innerRecord = this.#types;
     } else {
-      innerRecord = this.fsRead;
+      innerRecord = this.#fsRead;
     }
     const content = innerRecord[fileName];
     vfsLogger.debug(
@@ -154,8 +157,8 @@ class VirtualFs implements ModuleResolutionHost {
 }
 
 class TypeScriptHost extends VirtualFs implements CompilerHost {
-  private allowedRuntimeModules: string[];
-  private specifierAliases?: ReadonlyMap<string, string>;
+  #allowedRuntimeModules: string[];
+  #specifierAliases?: ReadonlyMap<string, string>;
   constructor(
     source: Program,
     typeLibs: TypeLibs,
@@ -163,8 +166,8 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
     specifierAliases?: ReadonlyMap<string, string>,
   ) {
     super(source, typeLibs, DEBUG_VIRTUAL_FS);
-    this.allowedRuntimeModules = allowedRuntimeModules;
-    this.specifierAliases = specifierAliases;
+    this.#allowedRuntimeModules = allowedRuntimeModules;
+    this.#specifierAliases = specifierAliases;
   }
 
   getDefaultLibFileName(_options: CompilerOptions): string {
@@ -215,7 +218,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
   ): readonly ResolvedModuleWithFailedLookupLocations[] {
     return moduleLiterals.map((literal) => {
       const name = literal.text;
-      const aliased = this.specifierAliases?.get(name);
+      const aliased = this.#specifierAliases?.get(name);
       if (aliased !== undefined) {
         return {
           resolvedModule: {
@@ -239,7 +242,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
       // e.g. `@commonfabric/foo`. If a type definition was provided
       // with the same identifier with a `.d.ts` extension, that will be used
       // for types, leaving the module implementation resolution to runtime.
-      if (this.allowedRuntimeModules.includes(name)) {
+      if (this.#allowedRuntimeModules.includes(name)) {
         return {
           resolvedModule: {
             resolvedFileName: `${name}.d.ts`,
@@ -260,12 +263,14 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
 export interface TransformerPipelineResult {
   factories: ts.TransformerFactory<ts.SourceFile>[];
   getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+  getBuilderSourceSites?: () => ReadonlyMap<string, BuilderSourceSitesV1>;
   getPolicyManifests?: () => ReadonlyMap<string, readonly unknown[]>;
 }
 
 export interface CompiledTypeScriptModule {
   js: string;
   sourceMap?: SourceMap;
+  builderSourceSites?: BuilderSourceSitesV1;
   policyManifests?: readonly unknown[];
 }
 
@@ -281,6 +286,7 @@ export type BeforeTransformersResult =
 export interface TypeScriptCompilerOptions {
   // Skip type checking.
   noCheck?: boolean;
+
   /**
    * The program is DURABLE STORED pattern source being reloaded — bytes
    * nobody can re-author, recompiled by a toolchain newer than the one that
@@ -293,15 +299,18 @@ export interface TypeScriptCompilerOptions {
    * directive.
    */
   storedSource?: boolean;
+
   // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
+
   /**
    * Maps an import specifier (verbatim text) to a program file name. Used for
    * scheme-prefixed specifiers that the path-join and runtime-module rules
    * cannot resolve. The target must be a file in the program.
    */
   specifierAliases?: ReadonlyMap<string, string>;
+
   // Transformations to run before JS transforms.
   // Can return either an array of transformer factories (simple case)
   // or a TransformerPipelineResult with factories and getDiagnostics.
@@ -316,9 +325,9 @@ export interface TypeScriptCompilerOptions {
 }
 
 export class TypeScriptCompiler {
-  private typeLibs: TypeLibs;
+  #typeLibs: TypeLibs;
   constructor(typeLibs: TypeLibs) {
-    this.typeLibs = Object.keys(typeLibs).reduce((libs, libName) => {
+    this.#typeLibs = Object.keys(typeLibs).reduce((libs, libName) => {
       libs[`${VFS_TYPES_DIR}${libName}.d.ts`] = typeLibs[libName];
       return libs;
     }, {} as TypeLibs);
@@ -352,7 +361,7 @@ export class TypeScriptCompiler {
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
   ): Map<string, CompiledTypeScriptModule> {
-    const steps = this.compileToModulesSteps(program, inputOptions);
+    const steps = this.#compileToModulesSteps(program, inputOptions);
     for (;;) {
       const next = steps.next();
       if (next.done) return next.value;
@@ -375,7 +384,7 @@ export class TypeScriptCompiler {
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
   ): Promise<Map<string, CompiledTypeScriptModule>> {
-    const steps = this.compileToModulesSteps(program, inputOptions);
+    const steps = this.#compileToModulesSteps(program, inputOptions);
     for (;;) {
       const next = steps.next();
       if (next.done) return next.value;
@@ -397,7 +406,7 @@ export class TypeScriptCompiler {
    * aggregated across files before being checked — matching the single-call
    * shape. Only the event-loop yield points differ.
    */
-  private *compileToModulesSteps(
+  *#compileToModulesSteps(
     program: Program,
     inputOptions: TypeScriptCompilerOptions,
   ): Generator<void, Map<string, CompiledTypeScriptModule>, void> {
@@ -420,7 +429,7 @@ export class TypeScriptCompiler {
 
     const host = new TypeScriptHost(
       program,
-      this.typeLibs,
+      this.#typeLibs,
       runtimeModules,
       inputOptions.specifierAliases,
     );
@@ -471,6 +480,7 @@ export class TypeScriptCompiler {
       beforeTransformers,
       sourceCollector,
       getDiagnostics,
+      getBuilderSourceSites,
       getPolicyManifests,
     } = createTransformers(
       tsProgram,
@@ -539,6 +549,7 @@ export class TypeScriptCompiler {
       sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
+    const builderSourceSites = getBuilderSourceSites?.();
     const policyManifests = getPolicyManifests?.();
     const result = new Map<string, CompiledTypeScriptModule>();
     for (const [outName, contents] of Object.entries(writes)) {
@@ -546,9 +557,13 @@ export class TypeScriptCompiler {
       const stem = outName.replace(/\.js$/, "");
       const sourceName = sourceByStem.get(stem);
       if (sourceName === undefined) continue;
+      const sourceSites = builderSourceSites?.get(sourceName);
       result.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
+        ...(sourceSites === undefined
+          ? {}
+          : { builderSourceSites: sourceSites }),
         ...(policyManifests?.get(sourceName)?.length
           ? { policyManifests: policyManifests.get(sourceName) }
           : {}),
@@ -579,7 +594,7 @@ export class TypeScriptCompiler {
 
     const host = new TypeScriptHost(
       program,
-      this.typeLibs,
+      this.#typeLibs,
       runtimeModules,
       inputOptions.specifierAliases,
     );
@@ -620,11 +635,15 @@ export class TypeScriptCompiler {
     }
 
     // Transform + emit, collecting (not throwing) transformer diagnostics.
-    const { beforeTransformers, getDiagnostics, getPolicyManifests } =
-      createTransformers(
-        tsProgram,
-        inputOptions,
-      );
+    const {
+      beforeTransformers,
+      getDiagnostics,
+      getBuilderSourceSites,
+      getPolicyManifests,
+    } = createTransformers(
+      tsProgram,
+      inputOptions,
+    );
     const { diagnostics: emitDiagnostics } = tsProgram.emit(
       undefined,
       undefined,
@@ -659,15 +678,20 @@ export class TypeScriptCompiler {
       sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
+    const builderSourceSites = getBuilderSourceSites?.();
     const policyManifests = getPolicyManifests?.();
     const modules = new Map<string, CompiledTypeScriptModule>();
     for (const [outName, contents] of Object.entries(writes)) {
       if (!outName.endsWith(".js")) continue;
       const sourceName = sourceByStem.get(outName.replace(/\.js$/, ""));
       if (sourceName === undefined) continue;
+      const sourceSites = builderSourceSites?.get(sourceName);
       modules.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
+        ...(sourceSites === undefined
+          ? {}
+          : { builderSourceSites: sourceSites }),
         ...(policyManifests?.get(sourceName)?.length
           ? { policyManifests: policyManifests.get(sourceName) }
           : {}),
@@ -702,10 +726,14 @@ function createTransformers(
   beforeTransformers: ts.TransformerFactory<ts.SourceFile>[];
   sourceCollector?: SourceCollector;
   getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+  getBuilderSourceSites?: () => ReadonlyMap<string, BuilderSourceSitesV1>;
   getPolicyManifests?: () => ReadonlyMap<string, readonly unknown[]>;
 } {
   let factories: ts.TransformerFactory<ts.SourceFile>[] = [];
   let getDiagnostics: (() => readonly TransformerDiagnosticInfo[]) | undefined;
+  let getBuilderSourceSites:
+    | (() => ReadonlyMap<string, BuilderSourceSitesV1>)
+    | undefined;
   let getPolicyManifests:
     | (() => ReadonlyMap<string, readonly unknown[]>)
     | undefined;
@@ -719,6 +747,7 @@ function createTransformers(
       // New: TransformerPipelineResult with factories and getDiagnostics
       factories = result.factories;
       getDiagnostics = result.getDiagnostics;
+      getBuilderSourceSites = result.getBuilderSourceSites;
       getPolicyManifests = result.getPolicyManifests;
     }
   }
@@ -726,6 +755,7 @@ function createTransformers(
   const out: ReturnType<typeof createTransformers> = {
     beforeTransformers: factories,
     getDiagnostics,
+    getBuilderSourceSites,
     getPolicyManifests,
   };
 

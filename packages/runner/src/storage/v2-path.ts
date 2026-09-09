@@ -1,6 +1,6 @@
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { FabricValue } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export type ReadPathOptions = {
   allowArrayLength?: boolean;
@@ -17,6 +17,12 @@ const hasOwnPathSegment = (
   segment: string | number,
 ): boolean => Object.hasOwn(value, segment);
 
+// TODO(danfuzz): both descents below treat a `FabricSpecialObject` as a
+// record with no own keys, so any path into a `FabricInstance`'s codec
+// contents reports absent / `undefined`. That answer is right for a
+// `FabricPrimitive` (a leaf) but accidental for an instance — and it
+// disagrees with `getAtPath` in `traverse.ts`, whose `in`-based descent
+// resolves the same address through the instance's prototype surface.
 export const hasValueAtPath = (
   root: FabricValue | undefined,
   path: readonly string[],
@@ -39,7 +45,7 @@ export const hasValueAtPath = (
       current = current[index];
       continue;
     }
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       return false;
     }
     const record = current as Record<string, unknown>;
@@ -73,7 +79,7 @@ export const readValueAtPath = (
       current = current[index];
       continue;
     }
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       return undefined;
     }
     const record = current as Record<string, unknown>;

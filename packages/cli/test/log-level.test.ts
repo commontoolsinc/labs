@@ -68,7 +68,6 @@ Deno.test("extractLogLevel leaves payload args after -- untouched", () => {
   // `--log-level error` after `--` is a schema-derived flag for the target
   // handler, not a CLI directive; eating it would silently drop handler input.
   const { level, args } = extractLogLevel([
-    "piece",
     "call",
     "h",
     "--",
@@ -76,14 +75,13 @@ Deno.test("extractLogLevel leaves payload args after -- untouched", () => {
     "error",
   ]);
   assertEquals(level, undefined);
-  assertEquals(args, ["piece", "call", "h", "--", "--log-level", "error"]);
+  assertEquals(args, ["call", "h", "--", "--log-level", "error"]);
 });
 
 Deno.test("extractLogLevel consumes the leading flag and keeps the payload one", () => {
   const { level, args } = extractLogLevel([
     "--log-level",
     "debug",
-    "piece",
     "call",
     "h",
     "--",
@@ -91,7 +89,7 @@ Deno.test("extractLogLevel consumes the leading flag and keeps the payload one",
     "error",
   ]);
   assertEquals(level, "debug");
-  assertEquals(args, ["piece", "call", "h", "--", "--log-level", "error"]);
+  assertEquals(args, ["call", "h", "--", "--log-level", "error"]);
 });
 
 Deno.test("extractLogLevel does not pair a flag with a value across --", () => {

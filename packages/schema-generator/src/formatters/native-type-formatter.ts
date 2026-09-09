@@ -1,17 +1,43 @@
 import ts from "typescript";
-import type { MutableJSONSchema } from "@commonfabric/api";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type MutableJSONSchema,
+} from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 
 const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // This schema is embedded in the code, so we can have simpler links.
   VNode: { $ref: "https://commonfabric.org/schemas/vnode.json" },
-  Date: { type: "string", format: "date-time" },
+  // A `Date` is stored as a `FabricEpochNsec` and a `Uint8Array` as a
+  // `FabricBytes`, so both are objects at the fabric boundary, and a value
+  // stored as one reads back intact through `"object"`. (`{ type: "string" }`
+  // does not: the read projects to `undefined`, which is what the `Date`
+  // mapping used to do to every value read through the schema its own TS type
+  // generates.) These deliberately stay `"object"` rather than adopting the
+  // `FabricPrimitive` type names below: a field authored against a NATIVE TS
+  // type can hold a raw native value on the way into the fabric boundary, and
+  // the `FabricPrimitive` types validate by prototype only.
+  Date: { type: "object" },
+  RegExp: { type: "object" },
+  Uint8Array: { type: "object" },
+  // Fields authored against the `FabricPrimitive` classes themselves emit
+  // the `FabricPrimitive` schema vocabulary (`FABRIC_PRIMITIVE_SCHEMA_TYPES` in
+  // `@commonfabric/api`): a value matches by prototype, not by structure.
+  // Guarded in `supportsType` by the `FabricSpecialObject` brand so an
+  // unrelated user type sharing a name keeps its structural schema.
+  FabricBytes: { type: "FabricBytes" },
+  FabricEpochDay: { type: "FabricEpochDay" },
+  FabricEpochNsec: { type: "FabricEpochNsec" },
+  FabricHash: { type: "FabricHash" },
+  FabricKeyPair: { type: "FabricKeyPair" },
+  FabricRegExp: { type: "FabricRegExp" },
+  // A `URL` converts to a plain string, so this one is accurate as written.
   URL: { type: "string", format: "uri" },
   ArrayBuffer: true,
   ArrayBufferLike: true,
   SharedArrayBuffer: true,
   ArrayBufferView: true,
-  Uint8Array: true,
   Uint8ClampedArray: true,
   Int8Array: true,
   Uint16Array: true,
@@ -27,9 +53,47 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   JSONSchema: true,
 };
 
+/**
+ * The readable value of a `SqliteDb` handle: the descriptor
+ * `{ id, tables, rev }` (`docs/specs/sqlite-builtin/01-api.md`). The handle
+ * type is a nominal brand — a single `unique symbol` member — so the shape its
+ * members describe is empty, and a schema derived from them shapes every read
+ * of the handle down to `{}`.
+ *
+ * `tables` holds the author-declared table schemas, arbitrary JSON Schema
+ * whose per-column `ifc` labels are what a pattern reads to write a query
+ * against the database, so it passes through unfiltered. The handle also
+ * carries fields outside the descriptor the runtime resolves for itself
+ * (`scope`, `owner`); `additionalProperties: true` is what keeps a read
+ * through this schema from dropping them.
+ */
+const SQLITE_DATABASE_SCHEMA: MutableJSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    tables: { type: "object", additionalProperties: true },
+    rev: { type: "number" },
+  },
+  additionalProperties: true,
+};
+
+/**
+ * Escaped-name prefix TypeScript gives a property keyed by the exported
+ * `SQLITE_DB_BRAND` unique symbol (`packages/api/index.ts`). Claiming the
+ * handle by its brand rather than by the name `SqliteDatabase` keeps an
+ * unrelated user type of that name on its structural schema — and, unlike the
+ * name-keyed entries above, leaves the branded type its ordinary `$defs`
+ * hoisting, so every `SqliteDb` position keeps referring to one descriptor.
+ */
+const SQLITE_DB_BRAND_PREFIX = "__@SQLITE_DB_BRAND@";
+
 const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
+const FABRIC_PRIMITIVE_TYPE_NAMES: ReadonlySet<string> = new Set(
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+);
 const LIB_DECLARED_NATIVE_TYPES = new Set([
   "Date",
+  "RegExp",
   "URL",
   "ArrayBuffer",
   "ArrayBufferLike",
@@ -57,14 +121,20 @@ const LIB_DECLARED_NATIVE_TYPES = new Set([
  */
 export class NativeTypeFormatter implements TypeFormatter {
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    const typeName = NativeTypeFormatter.getTypeName(type);
+    if (NativeTypeFormatter.declaresSqliteDbBrand(type)) {
+      return true;
+    }
+    const typeName = NativeTypeFormatter.#getTypeName(type);
     if (!NativeTypeFormatter.isNativeType(typeName)) {
       return false;
     }
     if (
       typeName !== undefined && LIB_DECLARED_NATIVE_TYPES.has(typeName)
     ) {
-      return NativeTypeFormatter.hasLibraryDeclaration(type, context);
+      return NativeTypeFormatter.#hasLibraryDeclaration(type, context);
+    }
+    if (NativeTypeFormatter.isFabricPrimitiveTypeName(typeName)) {
+      return NativeTypeFormatter.declaresFabricSpecialObjectBrand(type);
     }
     return true;
   }
@@ -73,8 +143,10 @@ export class NativeTypeFormatter implements TypeFormatter {
     type: ts.Type,
     _context: GenerationContext,
   ): MutableJSONSchema {
-    const typeName = NativeTypeFormatter.getTypeName(type);
-    const schema = NATIVE_TYPE_SCHEMAS[typeName!];
+    const typeName = NativeTypeFormatter.#getTypeName(type);
+    const schema = NativeTypeFormatter.declaresSqliteDbBrand(type)
+      ? SQLITE_DATABASE_SCHEMA
+      : NATIVE_TYPE_SCHEMAS[typeName!];
     // TODO(danfuzz): `structuredClone()` mangles non-JSON `FabricValue`s —
     // harmless while `NATIVE_TYPE_SCHEMAS` are plain JSON, but a problem once
     // schema-generator covers the full `FabricValue` spectrum. See the matching
@@ -83,7 +155,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     return (typeof schema === "boolean" ? schema : structuredClone(schema!));
   }
 
-  private static getTypeName(type: ts.Type): string | undefined {
+  static #getTypeName(type: ts.Type): string | undefined {
     // Prefer direct symbol name; fall back to target symbol for TypeReference
     const symbol = type.symbol;
     let name = symbol?.name;
@@ -123,7 +195,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     return name;
   }
 
-  private static getTypeSymbol(type: ts.Type): ts.Symbol | undefined {
+  static #getTypeSymbol(type: ts.Type): ts.Symbol | undefined {
     if (type.symbol) return type.symbol;
 
     const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
@@ -135,11 +207,47 @@ export class NativeTypeFormatter implements TypeFormatter {
     return type.aliasSymbol;
   }
 
-  private static hasLibraryDeclaration(
+  /**
+   * Whether the name is one of the `FabricPrimitive` schema-vocabulary names.
+   */
+  public static isFabricPrimitiveTypeName(
+    typeName: string | undefined,
+  ): boolean {
+    return typeName !== undefined && FABRIC_PRIMITIVE_TYPE_NAMES.has(typeName);
+  }
+
+  /**
+   * Whether the type carries the `FabricSpecialObject` nominal brand
+   * (directly or by inheritance). This is what makes a type named e.g.
+   * `FabricBytes` actually BE the `FabricPrimitive` class rather than an
+   * unrelated user type that happens to share the name. Both this formatter's
+   * `supportsType` and named-type hoisting (`getNamedTypeKey`,
+   * `type-utils.ts`) classify by it, so an unbranded name-sharer keeps its
+   * structural schema AND its normal `$defs` hoisting.
+   */
+  public static declaresFabricSpecialObjectBrand(type: ts.Type): boolean {
+    return type.getProperty(FABRIC_SPECIAL_OBJECT_BRAND) !== undefined;
+  }
+
+  /**
+   * Whether the type carries the `SqliteDb` handle's nominal brand, and so IS
+   * the database handle whose readable value is the `{ id, tables, rev }`
+   * descriptor rather than a type that happens to be named for it.
+   */
+  public static declaresSqliteDbBrand(type: ts.Type): boolean {
+    // Members are only resolved for object types, so no other type reaching
+    // this formatter pays for the check.
+    if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+    return type.getProperties().some((property) =>
+      (property.escapedName as string).startsWith(SQLITE_DB_BRAND_PREFIX)
+    );
+  }
+
+  static #hasLibraryDeclaration(
     type: ts.Type,
     context: GenerationContext,
   ): boolean {
-    const symbol = NativeTypeFormatter.getTypeSymbol(type);
+    const symbol = NativeTypeFormatter.#getTypeSymbol(type);
     return symbol?.declarations?.some((declaration) => {
       const sourceFile = declaration.getSourceFile();
       const program = (
@@ -160,7 +268,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     }) ?? false;
   }
 
-  // We expose this so type-utils can skip generating $defs for these
+  /** Returns whether `typeName` names a native type, which gets no `$defs`. */
   public static isNativeType(typeName: string | undefined): boolean {
     return typeName !== undefined && NATIVE_TYPE_NAMES.has(typeName);
   }

@@ -25,6 +25,7 @@ import {
   resultOf,
   TILE_UI,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -200,7 +201,7 @@ interface PatternInput {
 export interface PatternOutput {
   notes: Note[];
   noteCount: number;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(() => {

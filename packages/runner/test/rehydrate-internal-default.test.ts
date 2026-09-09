@@ -1,64 +1,50 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Cell, type Pattern } from "../src/builder/types.ts";
-import { Runtime } from "../src/runtime.ts";
-import { getMetaLink, parseLink } from "../src/link-utils.ts";
-import { trustExecutable } from "./support/trusted-builder.ts";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { JSONValue } from "@commonfabric/runner/shared";
+import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import { Cell, type Pattern } from "../src/builder/types.ts";
 import { isPrimitiveCellLink } from "../src/link-types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { trustExecutable } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// Two storage managers that share ONE in-memory server (the persistence
-// boundary) but keep SEPARATE client caches. This models a reload: the second
-// runtime starts cold and must fetch persisted docs from the server, rather
-// than reading the first runtime's warm cache.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  constructor(as: Identity, server: MemoryV2Server.Server) {
-    super({ as, memoryHost: new URL("memory://") }, () => server);
-  }
-  // The shared server is owned by the test, not by either manager. Closing one
-  // manager must not close the server out from under the other; close only this
-  // manager's client by invoking the grandparent (plain StorageManager) close.
-  override close(): Promise<void> {
-    const baseClose = Object.getPrototypeOf(EmulatedStorageManager.prototype)
-      .close as (this: EmulatedStorageManager) => Promise<void>;
-    return baseClose.call(this);
-  }
-}
-
-// Regression coverage for CT-1666.
-//
-// A pattern's derived internal cell carries a build-time default (in home.tsx,
-// `const activeTab = new Writable("spaces").for("activeTab")` →
-// `derivedInternalCells = [{ partialCause: "activeTab", schema: { default: "spaces" } }]`).
-// After the user picks a
-// value ("profile") and it is persisted, re-running the pattern must NOT revert
-// the cell to the build-time default.
-//
-// `Runner.applySetupState` reads the persisted internal value and merges the
-// build-time default UNDER it (persisted wins). But the internal cell lives in
-// a separate content-addressed doc reached only via the result cell's meta link
-// — not through the schema/value graph — so the run's awaited sync gate
-// (`syncCellsForRunningPattern`) did not load it. The fix makes that gate sync
-// the `internal`/`argument` meta docs, so the persisted value is loaded before
-// the pattern (re)starts and renders.
-//
-// `activeTab` is intentionally internal-only here (never exported in `result`),
-// matching home.tsx where it is bound only to `<cf-tabs $value={activeTab}>`.
-//
-// A fresh runtime sharing the same emulated store rehydrates from a cold client
-// cache, exercising the load path the gate is responsible for.
 describe("rehydrate internal default (CT-1666)", () => {
+  // Regression coverage for CT-1666.
+  //
+  // A pattern's derived internal cell carries a build-time default (in
+  // home.tsx, `const activeTab = new Writable("spaces").for("activeTab")` →
+  // `derivedInternalCells = [{ partialCause: "activeTab", schema: { default:
+  // "spaces" } }]`). After the user picks a value ("profile") and it is
+  // persisted, re-running the pattern must NOT revert the cell to the
+  // build-time default.
+  //
+  // `Runner.#applySetupState` reads the persisted internal value and merges the
+  // build-time default UNDER it (persisted wins). But the internal cell lives
+  // in a separate content-addressed doc reached only via the result cell's meta
+  // link — not through the schema/value graph — so the run's awaited sync gate
+  // (`Runner.#syncCellsForRunningPattern()`) did not load it. The fix makes
+  // that gate sync the `internal`/`argument` meta docs, so the persisted value
+  // is loaded before the pattern (re)starts and renders.
+  //
+  // `activeTab` is intentionally internal-only here (never exported in
+  // `result`), matching home.tsx where it is bound only to `<cf-tabs
+  // $value={activeTab}>`.
+  //
+  // A fresh runtime sharing the same emulated store rehydrates from a cold
+  // client cache, exercising the load path the gate is responsible for.
+
   let server: MemoryV2Server.Server;
-  let sm1: SharedServerStorageManager;
-  let sm2: SharedServerStorageManager;
+  let sm1: EmulatedStorageManager;
+  let sm2: EmulatedStorageManager;
 
   const pattern: Pattern = {
     argumentSchema: {},
@@ -110,17 +96,14 @@ describe("rehydrate internal default (CT-1666)", () => {
     throw new Error(`Missing internal manifest entry for ${partialCause}`);
   };
 
+  // Two storage managers that share ONE in-memory server (the persistence
+  // boundary) but keep SEPARATE client caches. This models a reload: the second
+  // runtime starts cold and must fetch persisted docs from the server, rather
+  // than reading the first runtime's warm cache.
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    sm1 = new SharedServerStorageManager(signer, server);
-    sm2 = new SharedServerStorageManager(signer, server);
+    server = newSharedServer();
+    sm1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    sm2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await sm1?.close();

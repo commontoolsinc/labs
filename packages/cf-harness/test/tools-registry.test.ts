@@ -13,7 +13,7 @@ import { WRITE_FILE_MODES } from "../src/tools/write-file.ts";
 Deno.test("builtin tool registry includes the agreed first-pass tool floor", () => {
   assertEquals(BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId), [
     "bash",
-    "bash-no-sandbox",
+    "browser",
     "read_file",
     "view_image",
     "web_fetch",
@@ -22,8 +22,19 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "edit_file",
     "write_file",
     "delegate_task",
+    "run_pattern",
+    "assign_slug",
+    "describe_handle",
+    "search_patterns",
+    "record_feedback",
+    "search_skills",
+    "acquire_skill",
+    "query_docs",
+    "loom_compose",
+    "loom_inspect",
+    "loom_authoring_context",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 10);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 21);
   assertEquals(
     [...DEFAULT_PARENT_TOOL_IDS],
     [
@@ -34,6 +45,7 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ] satisfies BuiltinToolId[],
   );
 });

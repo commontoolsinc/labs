@@ -5,7 +5,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import {
   executeWorkerRequest,
   formatConsoleMessage,
@@ -52,11 +52,11 @@ try {
     formatConsoleMessage(
       {
         metadata: { space: TEST_DID, pieceId: PIECE_ID },
-        args: [{ rawIdentity: "secret" }],
+        args: [{ encodedIdentity: "secret" }],
       } as never,
       TEST_DID as never,
     ),
-    [`Piece(${PIECE_ID})`, `{"rawIdentity":"<REDACTED>"}`],
+    [`Piece(${PIECE_ID})`, `{"encodedIdentity":"<REDACTED>"}`],
   );
   assertEquals(
     formatConsoleMessage(
@@ -111,8 +111,8 @@ try {
       type: WorkerIPCMessageType.Initialize,
       data: {
         did: identity.did(),
-        toolshedUrl: "memory://worker-handler-test",
-        rawIdentity: identity.serialize(),
+        toolshedUrl: "https://background-piece-service.invalid",
+        encodedIdentity: realmValueFromKeyPair(identity.keyPair),
       },
     },
     handlers,
@@ -178,7 +178,7 @@ try {
       key: (key: string) => key === "bgUpdater" ? updater : undefined,
     };
     let getCalls = 0;
-    const manager = {
+    const pieces = {
       runtime: {
         getCellFromEntityId: (space: string) => {
           assertEquals(space, TEST_DID);
@@ -191,7 +191,7 @@ try {
           "activeEntry" in overrides ? overrides.activeEntry : { active: true },
         );
       },
-      get: () => {
+      getPieceCell: () => {
         getCalls++;
         return Promise.resolve(loadedPiece);
       },
@@ -199,7 +199,7 @@ try {
     setWorkerStateForTesting({
       initialized: true,
       spaceId: TEST_DID as never,
-      manager: manager as never,
+      pieces: pieces as never,
       runtime: {
         idle: overrides.idle ?? (() => Promise.resolve()),
       } as never,
@@ -217,7 +217,7 @@ try {
   assertEquals(state.sends.length, 4);
 
   setWorkerStateForTesting({
-    manager: {} as never,
+    pieces: {} as never,
     spaceId: undefined as never,
   });
   await assertRejects(

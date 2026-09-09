@@ -15,265 +15,14 @@ function errorsOfType(
 }
 
 Deno.test(
-  "wish factories inside computed callbacks are rejected",
-  async () => {
-    const source = `
-      import { computed, pattern, resultOf, wish } from "commonfabric";
-
-      export default pattern(() => {
-        const result = computed(() => {
-          const request = wish<string[]>({ query: "#items" });
-          return resultOf(request.result).length;
-        });
-        return { result };
-      });
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    assertEquals(
-      errorsOfType(
-        diagnostics,
-        "compute-context:local-reactive-use",
-      ).length,
-      1,
-    );
-  },
-);
-
-Deno.test(
-  "wish factories in standalone helpers remain available for schema injection",
-  async () => {
-    const source = `
-      import { wish } from "commonfabric";
-
-      export function buildWish<T>(query: string) {
-        return wish<T>({ query });
-      }
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    assertEquals(
-      errorsOfType(
-        diagnostics,
-        "compute-context:local-reactive-use",
-      ).length,
-      0,
-    );
-  },
-);
-
-Deno.test(
-  "wish factories cannot be hidden behind runtime callbacks or helpers",
-  async () => {
-    const source = `
-      import {
-        action,
-        computed,
-        handler,
-        pattern,
-        resultOf,
-        type WishState,
-        wish,
-      } from "commonfabric";
-
-      declare function externalWish<T>(query: string): WishState<T>;
-      declare function externalWishUnion<T>(
-        query: string,
-      ): WishState<T> | null;
-
-      function buildRequest(query: string) {
-        return wish<string>({ query }).result;
-      }
-
-      function buildElementRequest(query: string) {
-        return wish<string>({ query })["result"];
-      }
-
-      const invalidHandler = handler<void, {}>(() => {
-        wish<string>({ query: "#handler" });
-      });
-
-      export default pattern(() => {
-        const invalidAction = action(() => {
-          wish<string>({ query: "#action" });
-        });
-        const invalidComputed = computed(() =>
-          resultOf(buildRequest("#computed"))
-        );
-        const invalidElement = computed(() =>
-          resultOf(buildElementRequest("#element"))
-        );
-        const invalidExternal = computed(() =>
-          resultOf(externalWish<string>("#external").result)
-        );
-        const invalidExternalUnion = computed(() =>
-          externalWishUnion<string>("#external-union")
-        );
-        return {
-          invalidAction,
-          invalidComputed,
-          invalidElement,
-          invalidExternal,
-          invalidExternalUnion,
-          invalidHandler,
-        };
-      });
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    assertEquals(
-      errorsOfType(
-        diagnostics,
-        "compute-context:local-reactive-use",
-      ).length,
-      6,
-    );
-  },
-);
-
-Deno.test(
-  "methods on an existing Wish state do not create another Wish factory",
-  async () => {
-    const source = `
-      import {
-        computed,
-        pattern,
-        type WishState,
-        wish,
-      } from "commonfabric";
-
-      function getFind(request: WishState<string>) {
-        return request.candidates.find;
-      }
-
-      export default pattern(() => {
-        const request = wish<string>({ query: "#note" });
-        const registry = wish<{
-          submitQuery: (input: { query: string }) => void;
-        }>({ query: "#registry" });
-        const submitHandler = registry.result.submitQuery;
-        const match = computed(() =>
-          request.candidates.find((candidate) => candidate === "selected")
-        );
-        const labels = computed(() =>
-          request.candidates.map((candidate) => candidate.toUpperCase())
-        );
-        const helperMatch = computed(() =>
-          getFind(request)((candidate) => candidate === "selected")
-        );
-        const submitted = computed(() =>
-          submitHandler({ query: "#selected" })
-        );
-        return { match, labels, helperMatch, submitted };
-      });
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    assertEquals(
-      errorsOfType(
-        diagnostics,
-        "compute-context:local-reactive-use",
-      ).length,
-      0,
-    );
-  },
-);
-
-Deno.test(
-  "wish factories returned through callable helpers are rejected",
-  async () => {
-    const source = `
-      import { computed, pattern, wish } from "commonfabric";
-
-      type Callable = (options: { query: string }) => unknown;
-
-      function makeWish(): Callable {
-        return wish as Callable;
-      }
-
-      const factories = { create: wish as Callable };
-      const elementAlias = factories["create"];
-
-      function makePropertyWish(): Callable {
-        return factories.create;
-      }
-
-      function makeElementWish(): Callable {
-        return elementAlias;
-      }
-
-      export default pattern(() => {
-        const invalid = computed(() =>
-          makeWish()({ query: "#hidden" })
-        );
-        const invalidProperty = computed(() =>
-          makePropertyWish()({ query: "#hidden-property" })
-        );
-        const invalidElement = computed(() =>
-          makeElementWish()({ query: "#hidden-element" })
-        );
-        return { invalid, invalidProperty, invalidElement };
-      });
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    assertEquals(
-      errorsOfType(
-        diagnostics,
-        "compute-context:local-reactive-use",
-      ).length,
-      3,
-    );
-  },
-);
-
-Deno.test(
-  "non-Wish callable shapes and recursive helpers remain allowed",
-  async () => {
-    const source = `
-      import { computed, pattern } from "commonfabric";
-
-      function first(): number {
-        return second();
-      }
-
-      function second(): number {
-        return first();
-      }
-
-      export default pattern(() => {
-        const inline = computed(() => (() => 42)());
-        const unresolved = computed(() => missingCallable());
-        const recursive = computed(() => first());
-        return { inline, unresolved, recursive };
-      });
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    assertEquals(
-      errorsOfType(
-        diagnostics,
-        "compute-context:local-reactive-use",
-      ).length,
-      0,
-    );
-  },
-);
-
-// validateComputationExpression -> findProblematicAccess: a reactive property
-// access used in a bare statement-position arithmetic computation is at a
-// restricted (non-lowerable) site, so it is rejected with
-// pattern-context:computation. findProblematicAccess locates the first
-// property access ('input.a') and names it in the message.
-Deno.test(
   "computation over reactive property in statement position names the access",
   async () => {
+    // validateComputationExpression -> findProblematicAccess: a reactive
+    // property access used in a bare statement-position arithmetic computation
+    // is at a restricted (non-lowerable) site, so it is rejected with
+    // pattern-context:computation. findProblematicAccess locates the first
+    // property access ('input.a') and names it in the message.
+
     const source = `      import { pattern } from "commonfabric";
 
       export default pattern<{ a: number }>((input) => {
@@ -290,13 +39,14 @@ Deno.test(
   },
 );
 
-// validateLocalReactiveAliasUsage: an if-statement condition that reads a
-// reactive value created locally inside the enclosing computed() callback is
-// rejected with compute-context:local-reactive-use, and the message tells the
-// author to move the use into a nested computed().
 Deno.test(
   "if-condition over locally created computed result is rejected",
   async () => {
+    // validateLocalReactiveAliasUsage: an if-statement condition that reads a
+    // reactive value created locally inside the enclosing computed() callback
+    // is rejected with compute-context:local-reactive-use, and the message
+    // tells the author to move the use into a nested computed().
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -322,12 +72,13 @@ Deno.test(
   },
 );
 
-// validateLocalReactiveAliasUsage while/for/switch statement heads: reading a
-// locally created reactive value in a while/for/switch head is rejected the
-// same way as an if-condition.
 Deno.test(
   "while/for/switch heads over locally created computed results are rejected",
   async () => {
+    // validateLocalReactiveAliasUsage while/for/switch statement heads: reading
+    // a locally created reactive value in a while/for/switch head is rejected
+    // the same way as an if-condition.
+
     const whileSource = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -387,12 +138,13 @@ Deno.test(
   },
 );
 
-// findProblematicUse member-access branch: a topmost property access rooted at
-// a locally created reactive value (`local.flag`) is itself the culprit, so
-// reading it in an if-condition is rejected.
 Deno.test(
   "member access on a locally created reactive result is rejected",
   async () => {
+    // findProblematicUse member-access branch: a topmost property access rooted
+    // at a locally created reactive value (`local.flag`) is itself the culprit,
+    // so reading it in an if-condition is rejected.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ obj: { flag: boolean } }>(({ obj }) => {
@@ -417,12 +169,13 @@ Deno.test(
   },
 );
 
-// findProblematicUse call branch: a `.get()`/`.key()`/`.for()` chain on a
-// locally created reactive value is a provenance-preserving opaque-source call,
-// so using it in an if-condition is rejected as a local reactive use.
 Deno.test(
   "opaque-source call on a locally created reactive result is rejected",
   async () => {
+    // findProblematicUse call branch: a `.get()`/`.key()`/`.for()` chain on a
+    // locally created reactive value is a provenance-preserving opaque-source
+    // call, so using it in an if-condition is rejected as a local reactive use.
+
     const source =
       `      import { computed, pattern, Cell } from "commonfabric";
 
@@ -448,12 +201,14 @@ Deno.test(
   },
 );
 
-// checkExpression skips a missing expression: a for-statement with no condition
-// (`for (;;)`) passes an undefined condition to checkExpression, which returns
-// early. The loop body still reports the local reactive use inside it.
 Deno.test(
   "for-statement without a condition still reports the local reactive use",
   async () => {
+    // checkExpression skips a missing expression: a for-statement with no
+    // condition (`for (;;)`) passes an undefined condition to checkExpression,
+    // which returns early. The loop body still reports the local reactive use
+    // inside it.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -479,13 +234,14 @@ Deno.test(
   },
 );
 
-// findProblematicUse nested-function skip: when the checked expression contains
-// a nested callback (an array-method arrow), the walk does not descend into
-// that nested function, but still finds the local reactive use in the
-// surrounding condition.
 Deno.test(
   "condition with a nested callback still reports the local reactive use",
   async () => {
+    // findProblematicUse nested-function skip: when the checked expression
+    // contains a nested callback (an array-method arrow), the walk does not
+    // descend into that nested function, but still finds the local reactive use
+    // in the surrounding condition.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ items: number[] }>(({ items }) => {
@@ -510,12 +266,13 @@ Deno.test(
   },
 );
 
-// memberBodyReadsReactiveValue: a toJSON method whose body reads a reactive
-// input captured from the enclosing pattern still freezes a snapshot at store
-// time, so the object member creation is rejected.
 Deno.test(
-  "toJSON member reading a reactive input is rejected",
+  "toJSON member on a pattern object literal is rejected",
   async () => {
+    // validateObjectMemberCreation: `toJSON` is an ordinary member name, so a
+    // method carrying it is rejected like any other object-literal method --
+    // the data model stores no function-valued member whatever it is called.
+
     const source = `      import { pattern, UI } from "commonfabric";
 
       export default pattern<{ name: string }>(({ name }) => {
@@ -531,16 +288,17 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
-    assertGreater(errors.length, 0, "Expected an error for reactive toJSON");
+    assertGreater(errors.length, 0, "Expected an error for a toJSON member");
   },
 );
 
-// validateStandaloneFunction: a standalone (module-scope) function that calls a
-// reactive-origin builder like computed() is rejected, since standalone
-// functions cannot capture reactive closures.
 Deno.test(
   "standalone function calling computed() is rejected",
   async () => {
+    // validateStandaloneFunction: a standalone (module-scope) function that
+    // calls a reactive-origin builder like computed() is rejected, since
+    // standalone functions cannot capture reactive closures.
+
     const source = `      import { computed } from "commonfabric";
 
       export function makeDoubled(n: number) {
@@ -559,12 +317,13 @@ Deno.test(
   },
 );
 
-// validateStandaloneFunction reactive-array-method branch: a standalone
-// function that calls a reactive array method (.map on a Cell array) is
-// rejected, and the message names the offending method family.
 Deno.test(
   "standalone function calling a reactive array method is rejected",
   async () => {
+    // validateStandaloneFunction reactive-array-method branch: a standalone
+    // function that calls a reactive array method (.map on a Cell array) is
+    // rejected, and the message names the offending method family.
+
     const source = `      import { Cell } from "commonfabric";
 
       export function run(items: Cell<number[]>) {
@@ -583,12 +342,13 @@ Deno.test(
   },
 );
 
-// validateCallbackSelfContainment with a parameter default initializer that
-// references an enclosing callable: the initializer is visited and the capture
-// is flagged.
 Deno.test(
   "callback parameter default initializer capturing a helper is flagged",
   async () => {
+    // validateCallbackSelfContainment with a parameter default initializer that
+    // references an enclosing callable: the initializer is visited and the
+    // capture is flagged.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -608,13 +368,15 @@ Deno.test(
   },
 );
 
-// isCallableReference non-callable-capture path: a captured uninitialized local
-// (a `let` with a non-function type, no initializer) is neither a call use-site
-// nor an inference-checkable binding, so the validator classifies it as
-// non-callable and does NOT emit a callable-capture diagnostic for it.
 Deno.test(
   "capturing a non-callable uninitialized local is not flagged",
   async () => {
+    // isCallableReference non-callable-capture path: a captured uninitialized
+    // local (a `let` with a non-function type, no initializer) is neither a
+    // call use-site nor an inference-checkable binding, so the validator
+    // classifies it as non-callable and does NOT emit a callable-capture
+    // diagnostic for it.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -638,14 +400,16 @@ Deno.test(
   },
 );
 
-// isSyntacticCallable parameter-type branch -> isCallableTypeNode: a callback
-// whose parameter is explicitly typed as a function type (with no initializer,
-// so the type node is inspected rather than an initializer) is callable, and
-// capturing that parameter inside a nested computed callback is flagged. This
-// exercises isCallableTypeNode's plain function-type branch.
 Deno.test(
   "callback capturing a function-typed parameter is flagged",
   async () => {
+    // isSyntacticCallable parameter-type branch -> isCallableTypeNode: a
+    // callback whose parameter is explicitly typed as a function type (with no
+    // initializer, so the type node is inspected rather than an initializer) is
+    // callable, and capturing that parameter inside a nested computed callback
+    // is flagged. This exercises isCallableTypeNode's plain function-type
+    // branch.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -666,12 +430,13 @@ Deno.test(
   },
 );
 
-// isCallableTypeNode parenthesized-type branch: a parameter typed with a
-// parenthesized function type unwraps to the inner function type and is
-// recognized as callable, so capturing it is flagged.
 Deno.test(
   "callback capturing a parenthesized-function-typed parameter is flagged",
   async () => {
+    // isCallableTypeNode parenthesized-type branch: a parameter typed with a
+    // parenthesized function type unwraps to the inner function type and is
+    // recognized as callable, so capturing it is flagged.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -690,12 +455,13 @@ Deno.test(
   },
 );
 
-// isCallableTypeNode union-type branch: a parameter typed as a union that
-// contains a function type has at least one callable member, so capturing it is
-// flagged.
 Deno.test(
   "callback capturing a union-function-typed parameter is flagged",
   async () => {
+    // isCallableTypeNode union-type branch: a parameter typed as a union that
+    // contains a function type has at least one callable member, so capturing
+    // it is flagged.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -715,12 +481,13 @@ Deno.test(
   },
 );
 
-// isCallableTypeNode intersection-type branch: a parameter typed as an
-// intersection that contains a function type has a callable member, so
-// capturing it is flagged.
 Deno.test(
   "callback capturing an intersection-function-typed parameter is flagged",
   async () => {
+    // isCallableTypeNode intersection-type branch: a parameter typed as an
+    // intersection that contains a function type has a callable member, so
+    // capturing it is flagged.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -740,12 +507,13 @@ Deno.test(
   },
 );
 
-// isCallableTypeNode Function-reference branch: a parameter typed as the global
-// Function type is recognized as callable by its type reference name, so
-// capturing it is flagged.
 Deno.test(
   "callback capturing a Function-typed parameter is flagged",
   async () => {
+    // isCallableTypeNode Function-reference branch: a parameter typed as the
+    // global Function type is recognized as callable by its type reference
+    // name, so capturing it is flagged.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
@@ -764,12 +532,13 @@ Deno.test(
   },
 );
 
-// report() dedup: when a single captured helper is referenced multiple times in
-// one callback, the callable-capture diagnostic is emitted only once (keyed by
-// identifier text), exercising the diagnosticsSeen guard.
 Deno.test(
   "a helper captured multiple times is reported once",
   async () => {
+    // report() dedup: when a single captured helper is referenced multiple
+    // times in one callback, the callable-capture diagnostic is emitted only
+    // once (keyed by identifier text), exercising the diagnosticsSeen guard.
+
     const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {

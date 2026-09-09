@@ -46,15 +46,22 @@ export function render(value: unknown, { json }: { json?: boolean } = {}) {
 
 // Helper function to safely stringify objects with circular references
 export function safeStringify(obj: unknown, maxDepth = 8): string {
-  const seen = new WeakSet();
+  const ancestors: object[] = [];
+  const seen = new WeakSet<object>();
 
   // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
-  // `.get()`-path today, but will in the not-too-distant future; at that point
-  // this `Object.entries` pre-walk plus `JSON.stringify` silently loses any
-  // `FabricPrimitive`/`FabricInstance` (class instances don't survive JSON).
-  // Mark ahead of that.
-  const stringify = (value: unknown, depth = 0): unknown => {
-    if (depth > maxDepth) {
+  // `.get()`-path today, but will in the not-too-distant future. Neither type
+  // has a JSON representation yet, so `JSON.stringify` renders its private
+  // state as an empty object. Add an explicit representation when schemas
+  // begin admitting them here.
+  const replacer = function (this: unknown, _key: string, value: unknown) {
+    while (
+      ancestors.length > 0 && ancestors[ancestors.length - 1] !== this
+    ) {
+      ancestors.pop();
+    }
+
+    if (ancestors.length > maxDepth) {
       return "<max depth reached>";
     }
 
@@ -62,30 +69,19 @@ export function safeStringify(obj: unknown, maxDepth = 8): string {
       return { $bigint: value.toString() };
     }
 
-    if (value === null || typeof value !== "object") {
-      return value;
+    if (value !== null && typeof value === "object") {
+      if (seen.has(value)) {
+        return "<circular reference>";
+      }
+      seen.add(value);
+      ancestors.push(value);
     }
 
-    if (seen.has(value)) {
-      return "<circular reference>";
-    }
-
-    seen.add(value);
-
-    if (Array.isArray(value)) {
-      return value.map((item) => stringify(item, depth + 1));
-    }
-
-    const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value)) {
-      result[key] = stringify(val, depth + 1);
-    }
-
-    return result;
+    return value;
   };
 
   try {
-    return JSON.stringify(stringify(obj), null, 2) ?? "null";
+    return JSON.stringify(obj, replacer, 2) ?? "null";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not serialize JSON output: ${message}`);

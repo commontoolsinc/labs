@@ -1,11 +1,12 @@
-import { css, html } from "lit";
-import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
-import { BaseElement } from "../../core/base-element.ts";
 import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
+import { consume } from "@lit/context";
+import { css, html } from "lit";
+import { property } from "lit/decorators.js";
+
+import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
   type CFTheme,

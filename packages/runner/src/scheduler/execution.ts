@@ -1,6 +1,5 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
-import type { SpaceScopeAndURI } from "./types.ts";
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
@@ -13,7 +12,9 @@ import type {
   ReactivityLog,
   SettleIterationStats,
   SettleStats,
+  SpaceScopeAndURI,
 } from "./types.ts";
+import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
 
 export interface SettlingTracker {
   windowStart: number;
@@ -91,25 +92,43 @@ export function recordExecuteEnd(
   };
 }
 
-export function markNonSettlingEpisode(
+/**
+ * Summarizes the tracker's current busy window without touching its state, so
+ * a caller can report every non-settling episode rather than only the first.
+ */
+export function summarizeNonSettlingWindow(
   tracker: SettlingTracker,
   now = performance.now(),
-): ExecuteEndUpdate["nonSettlingTelemetry"] | undefined {
-  if (tracker.nonSettlingDetected) return undefined;
-
+): NonNullable<ExecuteEndUpdate["nonSettlingTelemetry"]> {
   const windowStart = tracker.windowStart || now;
   const inFlightBusyTime = tracker.isExecuting
     ? Math.max(0, now - tracker.lastExecuteStart)
     : 0;
   const busyTime = tracker.busyTime + inFlightBusyTime;
   const windowDuration = Math.max(1, now - windowStart);
-  tracker.nonSettlingDetected = true;
 
   return {
     busyTime,
     windowDuration,
     busyRatio: Math.min(1, busyTime / windowDuration),
   };
+}
+
+/**
+ * Latches the tracker's non-settling flag, returning the window summary for the
+ * episode that set it and `undefined` for every episode after it. The flag
+ * lives on the tracker, which the scheduler replaces when a continuation
+ * begins, so the latch spans a run of settle passes rather than the runtime.
+ */
+export function markNonSettlingEpisode(
+  tracker: SettlingTracker,
+  now = performance.now(),
+): ExecuteEndUpdate["nonSettlingTelemetry"] | undefined {
+  if (tracker.nonSettlingDetected) return undefined;
+
+  const summary = summarizeNonSettlingWindow(tracker, now);
+  tracker.nonSettlingDetected = true;
+  return summary;
 }
 
 export function buildPullInitialSeeds(state: {
@@ -129,19 +148,28 @@ export type SchedulerSettleResult = {
   maxSettleIterations: number;
   backoffApplied: boolean;
   backoffActionCount: number;
+
   /** Actions deferred by convergence backoff in this settle pass. */
   backoffActions: readonly Action[];
+
   backoffUntil?: number;
+
   /** Iterations that actually ran work (excludes the final settled check). */
   iterationsRun: number;
+
   /** Wall-clock of the settle loop, measured unconditionally. */
   settleDurationMs: number;
+
   /** Number of actions in the final non-empty settle work set. */
   workSetSize: number;
+
   settleStats?: SettleStats;
 };
 
 export interface SchedulerSettleLoopState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly getCollectSettleStats: () => boolean;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
@@ -160,8 +188,10 @@ export interface SchedulerSettleLoopState {
     IMemorySpaceAddress[]
   >;
   readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
+
   /** Refresh transient demand such as a head event's current invalid closure. */
   readonly refreshPassScopedDemand?: (demand: Set<Action>) => void;
+
   readonly getActionId: (action: Action) => string;
   readonly isThrottled: (action: Action) => boolean;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
@@ -169,6 +199,13 @@ export interface SchedulerSettleLoopState {
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly isLiveAction: (action: Action) => boolean;
   readonly runAction: (action: Action) => Promise<unknown>;
+
+  /** The serving posture's cooperative macrotask yield between runs
+   * (server-execution v2 stage C tuning T3, cooperative-yield.ts):
+   * returns a promise to await when the current slice is spent, else
+   * undefined. Installed only on a serving runtime — absent (inert) on
+   * the OFF arm and on flag-ON clients. */
+  readonly yieldBetweenRuns?: () => Promise<void> | undefined;
 }
 
 export function recordSettleActionRun(
@@ -241,8 +278,10 @@ export interface BudgetBackoffPlan {
 
 export function planBudgetBackoff(state: {
   readonly workSet: ReadonlySet<Action>;
+
   /** Transient demand roots, such as a head event's preflight closure. */
   readonly passScopedDemand?: ReadonlySet<Action>;
+
   readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;
   readonly isLiveAction: (action: Action) => boolean;

@@ -1,17 +1,18 @@
+import { resolve } from "@std/path";
+
+import { StaticCache } from "@commonfabric/static";
 import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
-import { StaticCacheFS } from "@commonfabric/static";
-import { resolve } from "@std/path";
 import ts from "typescript";
 
+import type { TransformationDiagnostic } from "../src/mod.ts";
 import {
   batchTypeCheckFixtures,
   loadFixture,
   transformFixture,
 } from "./utils.ts";
-import type { TransformationDiagnostic } from "../src/mod.ts";
 
 interface FixtureConfig {
   directory: string;
@@ -99,7 +100,7 @@ const configs: FixtureConfig[] = [
   },
 ];
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 const commonfabricSchema = await staticCache.getText(
   "types/commonfabric-schema.d.ts",

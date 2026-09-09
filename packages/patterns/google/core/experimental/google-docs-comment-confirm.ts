@@ -192,8 +192,7 @@ export const executeAction = handler<
 
     // Update local state - mark as accepted
     const currentStates = commentStates.get() ?? {};
-    commentStates.set({
-      ...currentStates,
+    commentStates.update({
       [pendingAction.commentId]: {
         ...(currentStates[pendingAction.commentId] ?? { regenerateNonce: 0 }),
         status: "accepted",

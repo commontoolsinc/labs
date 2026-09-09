@@ -25,6 +25,7 @@ import {
   resultOf,
   TILE_UI,
   UI,
+  type VNode,
   wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -266,12 +267,14 @@ interface PatternInput {
 
 /** Calendar change detector for tracking schedule changes. #calendarChanges */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   changes: ScheduleChange[];
   criticalChanges: ScheduleChange[];
   urgentChanges: ScheduleChange[];
   normalChanges: ScheduleChange[];
   hasChanges: boolean;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {

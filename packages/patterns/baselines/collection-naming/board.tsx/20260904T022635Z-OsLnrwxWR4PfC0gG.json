@@ -1,0 +1,288 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "ItemDemand": {
+        "properties": {
+          "createdAt": {
+            "type": "number"
+          },
+          "title": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "NamesMap": {
+        "additionalProperties": {
+          "type": "unknown"
+        },
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "description": "What the board holds: its item list and its member namespace.",
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The board's durable item list, in filing order. `addItem` appends here; a\nwhole-array write forfeits the mergeability the append keeps.",
+        "items": {
+          "$ref": "#/$defs/ItemDemand"
+        },
+        "type": "array"
+      },
+      "names": {
+        "$ref": "#/$defs/NamesMap",
+        "asCell": [
+          "cell"
+        ],
+        "default": {},
+        "description": "The board's member namespace: each name to the item it names, held as an\nunread reference. `addItem` writes one key per create and `backfillNames`\none key per member it names; nothing rewrites the map whole. Reads as\nempty on a board from before it numbered anything, in the default form\n`NamesMap` explains."
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "collection-naming/board.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AddItemEvent": {
+        "properties": {
+          "agentName": {
+            "description": "The agent making this mutation. Fabric records the human principal\nbehind the key; this names which agent acted under it. Required, and\nchecked rather than stored: a create that could be unsigned is a\ntolerance the verb could never withdraw.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The item's initial body, stored verbatim.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The item's title, trimmed before it is stored. Must be non-empty.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "agentName"
+        ],
+        "type": "object"
+      },
+      "BackfillNamesEvent": {
+        "properties": {
+          "agentName": {
+            "description": "The agent running the backfill, checked as `addItem` checks it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentName"
+        ],
+        "type": "object"
+      },
+      "ItemDemand": {
+        "properties": {
+          "createdAt": {
+            "type": "number"
+          },
+          "title": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "ItemIndexRow": {
+        "properties": {
+          "createdAt": {
+            "default": 0,
+            "description": "When the item was filed (epoch milliseconds).",
+            "type": "number"
+          },
+          "member": {
+            "description": "The item, written as a reference and never read through here.",
+            "type": "unknown"
+          },
+          "name": {
+            "default": "",
+            "description": "The board's name for the item. Defaulted so a board holding members from\nbefore it numbered anything still reads whole: a member the board has\nnot named reads as the empty string.",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "The item's title, as stored.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member",
+          "title",
+          "createdAt",
+          "name"
+        ],
+        "type": "object"
+      },
+      "NamesMap": {
+        "additionalProperties": {
+          "type": "unknown"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "NamesTableRow": {
+        "properties": {
+          "member": {
+            "description": "The member. `unknown` because it is written as a reference and only ever\ncompared; anything wider would read the member back whole.",
+            "type": "unknown"
+          },
+          "name": {
+            "description": "The member's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member",
+          "name"
+        ],
+        "type": "object"
+      },
+      "NamingDeclaration": {
+        "properties": {
+          "compact": {
+            "description": "Whether the collection offers the compact spelling that joins its name to\na member's with a hyphen. Only a collection whose member names cannot\ncontain a hyphen may say so.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The collection's own name, which a binding uses to reach it. Absent when\nthe collection makes no claim about what it is bound as.",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/$defs/NamingPolicy",
+            "description": "The policy the names are held to."
+          }
+        },
+        "required": [
+          "policy",
+          "compact"
+        ],
+        "type": "object"
+      },
+      "NamingPolicy": {
+        "properties": {
+          "allocator": {
+            "description": "What a name is made of: a monotonic sequence, a random code, a string a\nperson chose, or a derivation from the member's own content.",
+            "enum": [
+              "sequence",
+              "random",
+              "human",
+              "derived"
+            ]
+          },
+          "permanent": {
+            "description": "Whether a name, once assigned, is never retired or reassigned.",
+            "type": "boolean"
+          },
+          "reuse": {
+            "description": "Whether a retired name may be given to another member.",
+            "type": "boolean"
+          },
+          "unique": {
+            "description": "Whether a name is unique across the collection's whole history, or only\namong its current members.",
+            "enum": [
+              "history",
+              "current"
+            ]
+          }
+        },
+        "required": [
+          "unique",
+          "permanent",
+          "reuse",
+          "allocator"
+        ],
+        "type": "object"
+      }
+    },
+    "description": "A board of items that names its members. Survey the board with one bounded\nread of `index`, whose rows carry each item's name; follow a row's `member`\nfor the item itself. File with `addItem`, which allocates the next name in\nthe same write as the append and returns the row, name included. A board\nthat held items before it numbered anything runs `backfillNames` once.",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addItem": {
+        "$ref": "#/$defs/AddItemEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "File an item: allocate its name and append it, atomically."
+      },
+      "backfillNames": {
+        "$ref": "#/$defs/BackfillNamesEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Name every unnamed member in filing order. Idempotent."
+      },
+      "index": {
+        "default": [],
+        "description": "The survey surface: one row per item, scalars copied, name included.",
+        "items": {
+          "$ref": "#/$defs/ItemIndexRow"
+        },
+        "type": "array"
+      },
+      "itemCount": {
+        "description": "How many items the board holds.",
+        "type": "number"
+      },
+      "items": {
+        "description": "The board's items, in filing order, through the shape the board demands\nof them.",
+        "items": {
+          "$ref": "#/$defs/ItemDemand"
+        },
+        "type": "array"
+      },
+      "names": {
+        "$ref": "#/$defs/NamesMap",
+        "default": {},
+        "description": "The namespace itself: each name to the item it names. A slug pointing\nhere is what makes a member addressable as `<board>/<name>`. Published\nunder the default its input carries."
+      },
+      "namesTable": {
+        "default": [],
+        "description": "The names table, one row per named member, which every item the board\ncreates reads its own name from. Published so an item composed outside\n`addItem` can be wired to the same table.",
+        "items": {
+          "$ref": "#/$defs/NamesTableRow"
+        },
+        "type": "array"
+      },
+      "naming": {
+        "$ref": "#/$defs/NamingDeclaration",
+        "description": "What the board declares about its names, for a consumer deciding whether\na name may be held rather than an identity."
+      }
+    },
+    "required": [
+      "items",
+      "index",
+      "names",
+      "namesTable",
+      "naming",
+      "itemCount",
+      "addItem",
+      "backfillNames",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

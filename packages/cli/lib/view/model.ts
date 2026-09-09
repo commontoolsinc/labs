@@ -10,7 +10,7 @@
 
 /**
  * Lexical/semantic classification of a contiguous run of source text. Drives
- * colour selection in {@link ../theme.ts}. Derived from the TypeScript token
+ * color selection in {@link ../theme.ts}. Derived from the TypeScript token
  * kind, refined by the identifier's syntactic role in the AST.
  */
 export type TokenClass =
@@ -21,7 +21,7 @@ export type TokenClass =
   | "storageKeyword" // const/let/var/function/type/interface/class
   | "operator"
   | "punctuation"
-  | "bracket" // (){}[] — coloured by nesting depth, see `bracketDepth`
+  | "bracket" // (){}[] — colored by nesting depth, see `bracketDepth`
   | "string"
   | "template"
   | "number"
@@ -51,31 +51,44 @@ export type TokenClass =
 /** Which representation of the underlying source the pager is displaying. */
 export type ViewMode = "source" | "rendered";
 
-/** A coloured run of text on a single logical (pre-wrap) source line. */
+/** A colored run of text on a single logical (pre-wrap) source line. */
 export interface Span {
   /** 0-based column where this span starts on its line. */
   readonly col: number;
+
   readonly text: string;
   readonly cls: TokenClass;
-  /** Nesting depth for `bracket` spans, used for rainbow colouring. */
+
+  /** Nesting depth for `bracket` spans, used for rainbow coloring. */
   readonly bracketDepth?: number;
+
   /** Symbol name to resolve only at this position, not by matching span text. */
   readonly exactDefinitionName?: string;
+
   /** Single-line spelling used when displaying an exact definition target. */
   readonly exactDefinitionDisplayName?: string;
-  /** Rich-text modifiers used by rendered document views. */
+
+  /** Bold, one of the rich-text modifiers rendered document views use. */
   readonly bold?: boolean;
+
+  /** Italic, likewise. */
   readonly italic?: boolean;
+
+  /** Underline, likewise. */
   readonly underline?: boolean;
+
+  /** Strikethrough, likewise. */
   readonly strikethrough?: boolean;
 }
 
-/** One logical display line and its coloured spans. */
+/** One logical display line and its colored spans. */
 export interface Line {
   readonly text: string;
   readonly spans: readonly Span[];
+
   /** Full-row background tint for diff views (added/removed lines). */
   readonly bg?: "add" | "del";
+
   /** The rendered text omits source content that a changed diff line must show. */
   readonly renderedSourceHidden?: boolean;
 }
@@ -103,17 +116,20 @@ export type StructureKind =
   | "comment" // a `//` or `/* */` comment
   | "hunk"; // a `@@ … @@` hunk in a diff view
 
-/** A field of a JSON schema, summarised for display. */
+/** A field of a JSON schema, summarized for display. */
 export interface SchemaField {
   readonly name: string;
+
   /** Compact type, e.g. `string`, `string[]`, `object`, `boolean`. */
   readonly type: string;
+
   readonly required: boolean;
+
   /** Nested fields for object types / array-of-object item types. */
   readonly fields?: readonly SchemaField[];
 }
 
-/** A JSON schema (an object-literal `… satisfies JSONSchema`), summarised. */
+/** A JSON schema (an object-literal `… satisfies JSONSchema`), summarized. */
 export interface SchemaMeta {
   readonly rootType: string;
   readonly required: readonly string[];
@@ -136,19 +152,27 @@ export type NodeMeta =
   | { readonly kind: "schema"; readonly schema: SchemaMeta }
   | {
     readonly kind: "contract";
+
     /** Builder family: `pattern`, `lift`, `handler`, `computed`, … */
     readonly builder: string;
+
     readonly synthetic: boolean;
+
     /** Callback parameters — the captured input cells, e.g. `{ token }`. */
     readonly captures: readonly string[];
+
     readonly input?: SchemaMeta;
     readonly output?: SchemaMeta;
+
     /** Keys of the returned object literal, when discernible. */
     readonly returns?: readonly string[];
+
     /** Explicit type arguments, e.g. `fetchJson<{ connections: … }>`. */
     readonly typeArgs?: readonly string[];
+
     /** Keys of the non-schema object argument, e.g. fetchJson's `{ url, … }`. */
     readonly args?: readonly string[];
+
     /** Names of builders/patterns called inside the body. */
     readonly innerBuilders: readonly string[];
   }
@@ -156,6 +180,7 @@ export type NodeMeta =
     readonly kind: "closure";
     readonly params: readonly string[];
     readonly returns?: readonly string[];
+
     /** Syntactic type signature, e.g. `(fn: Function)` or `({ x }) → boolean`,
      * present only when the source carries explicit parameter/return types. */
     readonly signature?: string;
@@ -169,6 +194,7 @@ export type NodeMeta =
     readonly kind: "type";
     readonly form: "interface" | "alias";
     readonly members: readonly TypeMember[];
+
     /** For non-literal type aliases (unions, references), the type text. */
     readonly aliasText?: string;
   }
@@ -185,32 +211,45 @@ export type NodeMeta =
  */
 export interface StructureNode {
   readonly kind: StructureKind;
+
   /** Short human label, e.g. `pattern FetchPage` or `schema {token}`. */
   readonly label: string;
+
   /** Optional binding/identifier name, used for the definition index. */
   readonly name?: string;
+
   /** Char offset of the declared identifier (the `name`), for semantic queries
    * (type-at / definition-at). Absent when the node declares no single name. */
   readonly nameOffset?: number;
+
   readonly startLine: number;
   readonly endLine: number;
+
   /** 0-based column of the node start on `startLine`. */
   readonly startCol: number;
+
   /** 0-based column of the node end on `endLine`. */
   readonly endCol: number;
+
   /** Character offset of the node start, for definition peeks. */
   readonly startOffset: number;
+
+  /** Character offset of the node end, read the same way. */
   readonly endOffset: number;
+
   readonly depth: number;
   readonly children: StructureNode[];
+
   /** Structured, kind-specific detail for the info card (best-effort). */
   readonly meta?: NodeMeta;
+
   /** The TypeScript AST kind name(s) this node represents. More than one when
    * several nodes share the exact same source range and were merged into one
    * navigable node (e.g. an expression statement and the call it wraps). */
   readonly astKinds?: readonly string[];
+
   /** A human description of why this node is machine-generated, when a language
-   * can vouch that it is (e.g. the TypeScript view recognising a transformer's
+   * can vouch that it is (e.g. the TypeScript view recognizing a transformer's
    * synthetic helper). Absent means "not known to be generated"; the info card
    * shows an origin line only when it is present. */
   readonly generatedOrigin?: string;
@@ -246,11 +285,15 @@ export function flattenStructure(
 export interface Document {
   /** Verbatim source text exactly as piped in, in either view mode. */
   readonly text: string;
+
   readonly lines: readonly Line[];
+
   /** Root-level structure nodes (sections, or top-level statements). */
   readonly structure: readonly StructureNode[];
+
   /** Flattened, pre-order list of structure nodes for linear navigation. */
   readonly flatStructure: readonly StructureNode[];
+
   /** Map from identifier name to its declaration(s) for peek overlays. */
   readonly definitions: ReadonlyMap<string, Definition[]>;
 }

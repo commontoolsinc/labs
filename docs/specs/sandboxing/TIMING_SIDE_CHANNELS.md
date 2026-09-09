@@ -49,7 +49,7 @@ Every real-time-correlated signal a pattern can reach, and how it is closed.
 | 2 | A lift emitting an event to signal "I re-ran" | ungated | W1: frame-gate |
 | 3 | Input-event cadence/count, and the post-block backlog | always-on: cadence shaped (W3), backlog capped (W4) | W3 delivery shaping (DONE) + W4 queue cap (DONE) |
 | 4 | `#now` cell-flip arrival/ordering | value coarsened + tick grid-aligned (≥1 s); deliberately left unshaped (low value; ≥1 s + grid-aligned + W1) | — |
-| 5 | Server-pushed cell changes (cross-tab/cross-machine), the `$value` write bypass, and own commit-completion latency | `$value` keystroke writes to a pattern reader are shaped through the cell-notification shaper (plan B, DONE); server pushes are NOT shaped — shaping them breaks [incremental observation adoption](../scheduler-v2/incremental-observation-adoption.md), and they are network-bounded (see below) | cell-notification shaper on the storage-notification hook |
+| 5 | Server-pushed cell changes (cross-tab/cross-machine), the `$value` write bypass, and own commit-completion latency | `$value` keystroke writes to a pattern reader are shaped through the cell-notification shaper (plan B, DONE); server pushes are NOT shaped — the adoption-era reason is deleted (server-execution v2 stage C; archived at [incremental observation adoption](../../history/specs/scheduler-v2/incremental-observation-adoption.md)), the shaping re-check is owed (runtime-mapping.md N10), and they are network-bounded (see below) | cell-notification shaper on the storage-notification hook |
 | 6 | Builtin progress cells — `fetchData` `pending`, large-language-model `partial` (~15 Hz) | LLM `partial` coarsened to ≤1 Hz always-on (DONE); `fetchData` `pending` left to W1 (terminal, not a cadence) | coarsen at source |
 | 7 | Raw `fetch()` exposed directly to patterns | CLOSED: gated fetch (handler-only, settlement snapped to an issue-relative 1 s grid boundary, fully buffered body) | createGatedFetch in `sandbox/compartment-globals.ts` (DONE) |
 | 8 | `Date.now()` / `Math.random()` re-enabled by a Secure ECMAScript config drift | neutered by an implicit default | W0 (pinned by test) |
@@ -204,19 +204,23 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     other real-time async primitive.
   - Tested in `runner/test/fetch-capability.test.ts` (gate contexts, grid
     arithmetic, settle ordering, response fidelity, compartment injection).
-  - **Consequence — pattern code must guard timer use.** The compartment endows
-    no `setTimeout` (part of the structural barrier above), so an API client's
-    retry/backoff `sleep` must read `globalThis.setTimeout` and no-op when it is
-    absent (a member access yields `undefined` in-sandbox; a bare call throws).
-    Backoff then degrades to an immediate retry in-sandbox, which is acceptable
-    precisely because the gated fetch already spaces every attempt on the one-
-    second grid — the explicit delay is redundant with that settlement. The
-    client helpers now carry this guard (`airtable-client`, `gmail-send-client`,
-    `google-docs-client`, `google-docs-comment-orchestrator`, and the
-    `importer-prompt` template mirror `calendar-write-client`'s existing
-    `waitIfTimersAreAvailable`). Pinned by `runner/test/sandbox-timers.test.ts`
-    (the compartment omits timers; a raw `setTimeout` call throws in it; the
-    guard resolves immediately).
+  - **Consequence — an API client cannot sleep in-sandbox.** The compartment
+    endows no `setTimeout` (part of the structural barrier above), and the name
+    is withheld from the authored surface, so a pattern that reaches for it
+    fails to compile rather than throwing once it runs. A retry or backoff
+    `sleep` therefore has nothing to wait on. The `airtable-client`,
+    `gmail-send-client`, and `google-docs-client` helpers do not attempt one: a
+    401 refreshes the token and retries, and a 429 or any other failure is
+    thrown to the caller for the reactive layer to re-drive. No spacing is lost
+    by this, because the gated fetch already settles every attempt on the
+    one-second grid. The one helper that still waits is
+    `calendar-write-client`, whose `waitIfTimersAreAvailable` reads `setTimeout`
+    off `globalThis` as a member access, which yields `undefined` in-sandbox
+    instead of raising a `ReferenceError`, and resolves immediately when it is
+    absent. That helper therefore waits for real in a host context and degrades
+    to an immediate retry inside a compartment. Pinned by
+    `runner/test/sandbox-timers.test.ts` (the compartment omits timers; a raw
+    `setTimeout` call throws in it; the guard resolves immediately).
   - **Rejected alternative — a coarse sandbox `setTimeout`.** Endowing the
     compartment with a grid-quantized `setTimeout` (delays rounded up to the
     next one-second boundary, matching the gated-fetch settlement) would let
@@ -225,8 +229,8 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     `security-timing.test.ts` pins, so it needs an explicit security
     sign-off, and its only benefit — honoring a long `Retry-After` — is marginal
     once every fetch settles on the grid anyway. If a future need justifies it,
-    the guard sites already degrade cleanly and would transparently begin
-    honoring the endowed timer.
+    `calendar-write-client`'s guard already degrades cleanly and would
+    transparently begin honoring the endowed timer.
 
 - **W1 — Keystone: frame-gate the clock, entropy, and lift event-emit.**
   - **Clock/entropy gate: DONE (always-on, unconditional).** The gated ambient
@@ -248,7 +252,7 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     A renderer or root event captures a fresh coarse instant at creation; across
     separate events time still advances, bounded by how fast events arrive (which
     the delivery shaper already floors). The check is dynamic (call-time) because
-    shared helpers are reached from both contexts (e.g. `occurrence-tracker.tsx`).
+    shared helpers are reached from both contexts.
     Tested in `packages/runner/test/time-capability.test.ts` (frozen across
     reads) and `packages/patterns/integration/time-capability-intrinsics.test.ts`
     (a handler reads the event's coarse time; the instant is carried forward to
@@ -289,8 +293,7 @@ Landing order, smallest and safest first. Each is its own commit/PR.
       `getTodayDate` (`schemas.tsx`) + `expense-form.tsx` — each helper takes
       `nowMs`; lift callers pass `#now`, handler callers pass `Date.now()`.
     - **Exempt (no migration needed).** `notes/schemas` `generateId` is dead (no
-      caller). `age-category` `calculateAge` is exported with no in-repo caller, so
-      its clock read is never reached from a pattern lift. The other `generateId`
+      caller). The other `generateId`
       helpers (`imported-calendar`, `self-improving-classifier`, parking-coordinator
       `genId`, weekly-calendar/`event.tsx`) are only called from handler/action
       contexts.
@@ -630,19 +633,15 @@ real users, has now landed. The items are ordered by what unblocks what.
        what the cap is counting.
      - **Server pushes — deliberately NOT shaped (`|input` only).** Only
        renderer keystroke writes are routed through the cell shaper. Pushes
-       (`pull`/`integrate`) were briefly shaped under a separate `|push` bucket;
-       that is reverted, because deferring a push's wake breaks incremental
-       observation adoption
-       (`docs/specs/scheduler-v2/incremental-observation-adoption.md`).
-       Adoption requires the push's readers to be marked dirty SYNCHRONOUSLY: a
-       sync delivers its `integrate` notification and the writer's
-       `scheduler-observations` in the same synchronous turn, and adoption
-       clears exactly the dirt that integrate just created. The shaper's hold IS
-       the mark-dirty, so holding it moves the marking to a later macrotask;
-       adoption then finds nothing to clear, and every receiving client re-runs
-       each computation the writer already ran instead of adopting it. The two
-       cannot both hold at this seam, and correctness of the multiplayer
-       convergence path wins.
+       (`pull`/`integrate`) were briefly shaped under a separate `|push`
+       bucket; that was reverted while incremental observation adoption
+       needed the push's readers marked dirty synchronously. Adoption was
+       deleted with its observation carriage (server-execution v2 Phase 1
+       stage C; the archived account is
+       `docs/history/specs/scheduler-v2/incremental-observation-adoption.md`),
+       so that reason is gone and whether pushes should now be shaped is an
+       owed re-check (runtime-mapping.md N10); until it is decided, pushes
+       stay unshaped.
        The security cost is small, and it is the assumption the `|push` bucket
        already rested on: a pattern cannot drive server pushes at sub-second
        cadence — it has no way to make the server push to it faster than real

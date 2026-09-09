@@ -1,12 +1,11 @@
-import { isPlainContainer, isRecord } from "@commonfabric/utils/types";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { isObjectOrArray, isPlainContainer } from "@commonfabric/utils/types";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceScopeAndURI } from "./scheduler.ts";
+import { entityKey } from "./scheduler/keys.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -41,11 +40,19 @@ export function sortAndCompactPaths(
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
+  // The instance segment: an address that NAMES its instance
+  // (`scopeKey`, server-execution v2 stage A — a served per-instance
+  // run's logged read) compares by that key, so the union of one node's
+  // N instance runs' logs keeps N reads of one doc apart instead of
+  // compacting them into one; an address without one compares by scope
+  // NAME as before (byte-identical ordering and compaction OFF).
+  const instanceOf = (address: IMemorySpaceAddress): string =>
+    address.scopeKey ?? normalizeCellScope(address.scope);
   const sorted = unsorted.toSorted((a, b) => {
     if (a.space !== b.space) return a.space < b.space ? -1 : 1;
     if (a.id !== b.id) return a.id < b.id ? -1 : 1;
-    const aScope = normalizeCellScope(a.scope);
-    const bScope = normalizeCellScope(b.scope);
+    const aScope = instanceOf(a);
+    const bScope = instanceOf(b);
     if (aScope !== bScope) return aScope < bScope ? -1 : 1;
     return comparePaths(a.path, b.path);
   });
@@ -55,8 +62,7 @@ export function sortAndCompactPaths(
     if (
       sorted[i].space === previous.space &&
       sorted[i].id === previous.id &&
-      normalizeCellScope(sorted[i].scope) ===
-        normalizeCellScope(previous.scope) &&
+      instanceOf(sorted[i]) === instanceOf(previous) &&
       // Is the previous path a prefix of the current path?
       previous.path.every((value, index) => value === sorted[i].path[index]) &&
       // If we compactifyChildren, or the paths are identical, skip this
@@ -78,12 +84,13 @@ export function sortAndCompactPaths(
  */
 export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
+  identity: ScopeKeyIdentity,
 ): Map<SpaceScopeAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceScopeAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    const key: SpaceScopeAndURI = `${address.space}/${
-      normalizeCellScope(address.scope)
-    }/${address.id}`;
+    // Same key vocabulary as the dependency graph — one map entry per
+    // scope instance, via the shared constructor (no inline restatement).
+    const key = entityKey(address, identity);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }
@@ -141,8 +148,16 @@ export function determineTriggeredActions(
   const afterValues: FabricValue[] = [after];
 
   // *LastObject: Last key-able object along currentPath
-  let beforeLastObject = isRecord(before) ? 0 : -1;
-  let afterLastObject = isRecord(after) ? 0 : -1;
+  //
+  // TODO(danfuzz): `isObjectOrArray` counts a `FabricSpecialObject` as key-able, so
+  // the descent below indexes into one: every key reads `undefined` (or, via
+  // the prototype chain, an accessor result) on both the before and after
+  // side, so a subscriber path continuing below a `FabricInstance` compares
+  // equal-by-vacancy and its action never triggers, however the instance's
+  // contents changed. The `shallowEqual` marker at the bottom of this file
+  // covers the leaf comparison; this is the descent's half of the same gap.
+  let beforeLastObject = isObjectOrArray(before) ? 0 : -1;
+  let afterLastObject = isObjectOrArray(after) ? 0 : -1;
 
   while (subscribers.length > 0) {
     // Pull the next path from the queue
@@ -162,12 +177,12 @@ export function determineTriggeredActions(
     for (let i = overlap; i < targetPath.length; i++) {
       if (i <= beforeLastObject) {
         beforeValues[i + 1] = (beforeValues[i] as Keyable)[targetPath[i]!];
-        if (isRecord(beforeValues[i + 1])) beforeLastObject = i + 1;
+        if (isObjectOrArray(beforeValues[i + 1])) beforeLastObject = i + 1;
         else beforeLastObject = i;
       }
       if (i <= afterLastObject) {
         afterValues[i + 1] = (afterValues[i] as Keyable)[targetPath[i]!];
-        if (isRecord(afterValues[i + 1])) afterLastObject = i + 1;
+        if (isObjectOrArray(afterValues[i + 1])) afterLastObject = i + 1;
         else afterLastObject = i;
       }
     }

@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the view's module
+// graph reaches @commonfabric/ui, whose components extend a bare HTMLElement as
+// they load, so it can only load once the test has installed one.
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
@@ -130,6 +134,36 @@ describe("XAppView named-space preparation", () => {
       await view._spaceRootPattern.taskComplete;
       expect(view._spaceRootPattern.value).toBe(root);
       expect(names).toEqual(["atlas"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not request the space root for a piece-focused view", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const space = "did:key:z6Mk-shell-piece-without-root" as DID;
+      let rootRequests = 0;
+      const view = new XAppView();
+      view.app = {
+        view: { spaceName: "notebook", pieceId: "of:piece" },
+      } as never;
+      view.space = space;
+      view.rt = {
+        signal: new AbortController().signal,
+        resolveSpaceName: () => Promise.resolve(space),
+        getSpaceRootPattern: () => {
+          rootRequests++;
+          return Promise.reject(new Error("space root must stay untouched"));
+        },
+      } as never;
+
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+
+      expect(view._spaceRootPattern.value).toBeUndefined();
+      expect(rootRequests).toBe(0);
     } finally {
       restore();
     }

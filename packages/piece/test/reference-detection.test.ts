@@ -1,13 +1,12 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * These tests focus on the core functionality used by our piece reference detection
- * without requiring the full PieceManager setup
+ * without requiring the full PiecesController setup
  */
 describe("Reference detection core functionality", () => {
-  // Test detection of object structures similar to cell links
   it("should identify object structures with cell and path properties", () => {
     // Create an object with a structure similar to a cell link
     const objWithCellAndPath = {
@@ -28,7 +27,6 @@ describe("Reference detection core functionality", () => {
     );
   });
 
-  // Test finding aliases with different structures
   it("should find aliases in nested objects", () => {
     // Create test data with different alias structures
     const testData = {
@@ -82,7 +80,6 @@ describe("Reference detection core functionality", () => {
     assertEquals(arrayAliasIndex, 1, "Should detect alias in array");
   });
 
-  // Test recursive search for references
   it("should recursively search for references in deep structures", () => {
     const foundReferences: string[] = [];
 
@@ -92,14 +89,15 @@ describe("Reference detection core functionality", () => {
 
       // Check for alias
       if (
-        isRecord(value) && isRecord(value.$alias) && isRecord(value.$alias.cell)
+        isObjectOrArray(value) && isObjectOrArray(value.$alias) &&
+        isObjectOrArray(value.$alias.cell)
       ) {
         // FIXME: types
         foundReferences.push(value.$alias.cell.id as string);
       }
 
       // Recursively search through object properties
-      if (isObject(value)) {
+      if (isObjectNotArray(value)) {
         for (const key in value) {
           recursiveSearch((value as Record<string, unknown>)[key]);
         }
@@ -157,7 +155,6 @@ describe("Reference detection core functionality", () => {
     );
   });
 
-  // Test the behavior of our reference detection with mixed reference types
   it("should handle mixed reference types", () => {
     const foundReferences: Array<{ type: string; id: string }> = [];
 
@@ -166,8 +163,8 @@ describe("Reference detection core functionality", () => {
       if (!value) return;
 
       // Check if value might be a cell link
-      const isCellLink = isRecord(value) &&
-        isRecord(value.cell) &&
+      const isCellLink = isObjectOrArray(value) &&
+        isObjectOrArray(value.cell) &&
         "path" in value;
       if (isCellLink) {
         foundReferences.push({
@@ -179,7 +176,8 @@ describe("Reference detection core functionality", () => {
 
       // Check for alias
       if (
-        isRecord(value) && isRecord(value.$alias) && isRecord(value.$alias.cell)
+        isObjectOrArray(value) && isObjectOrArray(value.$alias) &&
+        isObjectOrArray(value.$alias.cell)
       ) {
         foundReferences.push({
           type: "alias",
@@ -189,7 +187,7 @@ describe("Reference detection core functionality", () => {
       }
 
       // Recursively search
-      if (isObject(value)) {
+      if (isObjectNotArray(value)) {
         for (const key in value) {
           detectReferences((value as Record<string, unknown>)[key]);
         }

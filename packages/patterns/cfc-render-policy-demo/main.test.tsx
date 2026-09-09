@@ -1,4 +1,11 @@
-import { assert, handler, pattern, Stream, Writable } from "commonfabric";
+import {
+  assert,
+  handler,
+  pattern,
+  Stream,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import RenderPolicyDemo, { TrustedHealthDisclosureSurface } from "./main.tsx";
 
 const trigger = handler<void, { stream: Stream<unknown> }>((_, { stream }) => {
@@ -21,7 +28,7 @@ export default pattern(() => {
   const assert_concealed = assert(() => revealSensitive.get() === false);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initially_hidden },
       { action: action_reveal },
       { assertion: assert_revealed },

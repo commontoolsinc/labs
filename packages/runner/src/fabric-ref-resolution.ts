@@ -16,6 +16,7 @@ const DID_RE = /^did:[a-z0-9]+:.+$/;
 
 export interface FabricChaseResult {
   entryIdentity: string;
+
   /** Human-readable hops for errors/tooling. */
   chain: string[];
 }

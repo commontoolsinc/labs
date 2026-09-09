@@ -131,6 +131,10 @@ module-graph cleanliness, "make invalid states unrepresentable") is a loud,
 Blocking finding even if the code "works." Fix what the diff touches; propose
 wider sweeps as follow-ups — don't boil the ocean.
 
+For `cf-harness` runtime-semantics changes, include the system map, which reads
+as authoritative but is never a source of truth, in that coherence sweep and
+follow its update procedure in `packages/cf-harness/docs/system-map/README.md`.
+
 `docs/history/` is exempt from the coherence sweep: those are frozen
 point-in-time records and are supposed to describe old behavior. The reverse
 check applies instead — a diff that edits the content of a `docs/history/`
@@ -148,19 +152,19 @@ home.** Point to the module rather than trusting a symbol name remembered here �
 names drift, so confirm against the package's actual exports when you rely on it
 (this table is the highest-value _and_ highest-rot content in the skill):
 
-| Concern                                     | Canonical home                                                                                                | Do not                                                                                                                                            |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| stringifying fabric values for debug/log    | `@commonfabric/data-model/value-debug`                                                                        | `JSON.stringify()` on fabric data; it stringifies most non-plain objects as literally `{}`                                                        |
-| sorting strings for cross-platform          | `@commonfabric/utils/utf8`                                                                                    | use JavaScript `string1 < string2` (incorrect given UTF-16 surrogate code points), hand-roll or import a different sorting function               |
-| SHA-256 / content addressing                | `@commonfabric/content-hash`                                                                                  | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`            |
-| hashing a fabric value or schema            | `@commonfabric/data-model/value-hash`, `@commonfabric/data-model/schema-hash`                                 | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
-| cloning a fabric value                      | `@commonfabric/data-model/value-clone`                                                                        | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on fabric / cell data — drops cell links, dies on circular `$UI` trees                   |
-| cloning a schema (for modification)         | `@commonfabric/data-model/schema-utils`, several useful functions available                                   | `structuredClone()` or `JSON.parse(JSON.stringify(...))`                                                                                          |
-| (de)serializing fabric values / wire format | `@commonfabric/data-model/codec-json`                                                                         | invent a parallel serializer / `toJSON` for fabric values                                                                                         |
-| cell ↔ link conversion                      | `convertCellsToLinks` (`packages/runner/src/cell.ts`)                                                         | re-implement link conversion (don't copy the internal `traverse*` helpers in `llm-dialog.ts`)                                                     |
-| identity / DID / keypairs                   | `@commonfabric/identity`                                                                                      | mint DIDs or keys ad hoc                                                                                                                          |
-| variable-length integer encoding            | `@commonfabric/leb128` (LEB128 or similar)                                                                    | hand-roll varint encode / decode                                                                                                                  |
-| Merkle-tree hashing                         | **N/A — we don't do Merkle-tree hashing** (we have content hashes in `data-model`, not a classic Merkle tree) | invent or import a Merkle-tree library unless specifically asked                                                                                  |
+| Concern                                      | Canonical home                                                                                                | Do not                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| stringifying `FabricValue`s for debug/log    | `@commonfabric/data-model`                                                                                    | `JSON.stringify()` on a `FabricValue`; it stringifies most non-plain objects as literally `{}`                                                    |
+| sorting strings for cross-platform           | `@commonfabric/utils/utf8`                                                                                    | use JavaScript `string1 < string2` (incorrect given UTF-16 surrogate code points), hand-roll or import a different sorting function               |
+| SHA-256 / content addressing                 | `@commonfabric/content-hash`                                                                                  | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`            |
+| hashing a `FabricValue` or schema            | `@commonfabric/data-model`, `@commonfabric/data-model-schema`                                                 | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
+| cloning a `FabricValue`                      | `@commonfabric/data-model`                                                                                    | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on `FabricValue` / cell data — drops cell links, dies on circular `$UI` trees            |
+| cloning a schema (for modification)          | `@commonfabric/data-model-schema`, several useful functions available                                         | `structuredClone()` or `JSON.parse(JSON.stringify(...))`                                                                                          |
+| (de)serializing `FabricValue`s / wire format | `@commonfabric/data-model/codec-json`                                                                         | invent a parallel serializer / `toJSON` for `FabricValue`s                                                                                        |
+| cell ↔ link conversion                       | `convertCellsToLinks` (`packages/runner/src/cell.ts`)                                                         | re-implement link conversion (don't copy the internal `traverse*` helpers in `llm-dialog.ts`)                                                     |
+| identity / DID / keypairs                    | `@commonfabric/identity`                                                                                      | mint DIDs or keys ad hoc                                                                                                                          |
+| variable-length integer encoding             | `@commonfabric/leb128` (LEB128 or similar)                                                                    | hand-roll varint encode / decode                                                                                                                  |
+| Merkle-tree hashing                          | **N/A — we don't do Merkle-tree hashing** (we have content hashes in `data-model`, not a classic Merkle tree) | invent or import a Merkle-tree library unless specifically asked                                                                                  |
 
 `hash`, `serialize`, and `clone` are the three we re-fork most — the tree
 _already_ carries several SHA-256s (e.g. `content-hash` vs
@@ -182,9 +186,8 @@ recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
   tests);
 - ambiguous `any` (or abuse of `unknown`) away from a serialization boundary;
   types that admit invalid intermediate states;
-- working around the transformer (stray `/// <cf-disable-transform />`, manual
-  graph wiring the transformers would do, imperative escapes from the target
-  language);
+- working around the transformer (manual graph wiring the transformers would do,
+  imperative escapes from the target language);
 - async escapes in patterns (`async/await` in handlers; awaiting `generateText`
   / `generateObject` instead of projecting the request with `resultOf()`;
   `new Stream()` / `.subscribe()`).
@@ -200,8 +203,37 @@ transformer bug with a repro — not to hand-build a workaround.
 Stray cruft is trivial to fix but shouldn't merge: leftover debug logging /
 `*.log` / scratch notes, commented-out code, `.only` on tests, "temp" / "HACK"
 stopgaps, abandoned TODOs. A new workspace package must register in the root
-`deno.jsonc` and carry its own `tasks.test` (a missing one makes the root runner
-recurse and time out CI). Run `deno fmt` and `deno lint` on touched files.
+`deno.jsonc` and carry its own `tasks.test`, in the manifest Deno resolves — a
+`deno.json` shadows a `deno.jsonc` beside it. Without one the root runner
+refuses to start and names the member. Run `deno fmt` and `deno lint` on touched
+files.
+
+**A doc comment detached from its declaration** belongs here too, and a diff is
+the one place it is easy to see. A definition added directly under an existing
+doc comment takes that comment over and leaves the declaration it was written
+for undocumented; a `//` note wedged in between splits the contract from its
+subject, unless it is a label picking out one member of an overload set, which
+is allowed. Two doc comments in a row are the loudest tell — only the nearer one
+survives into rendered documentation. See
+`docs/development/code-comment-style.md`, "Where one goes".
+
+**A documented declaration with nothing blank after it** is that same defect
+read downward, and it is quieter, because the comment is still next to the thing
+it was written for. The comment reaches on past it, so the members added under
+it look documented when they are not — which is exactly the shape a diff
+appending one member to a run of them puts in front of you. See the same
+document, "The blank line below". An overload set counts as one declaration
+here, so the blank line falls after the implementation — or, for a set with none
+to close it, after its last signature — and never between the signatures.
+
+**A missing or misplaced file header** is that same defect one level up, and is
+equally a thing a diff shows you. A file header is a doc comment at the very
+top, above the first `import` and the first `export`; a new file carrying none,
+or carrying one written as a `//` block or parked below the import block, is a
+finding nothing else in the file will point you at. See the same document, "File
+headers", for the four kinds of file that carry none by design — a unit test
+file among them, since a header that would only name the file under test is left
+out — before writing the finding.
 
 ### 6. Craft & conventions
 
@@ -209,10 +241,22 @@ Mostly Improvement / Nit — don't drown the report in these. Dead code, unused
 exports, superfluous abstraction, unclear names. Types: no needless `any`; no
 needless casts (an `as Something` that isn't required for correctness) and no
 unjustified `as unknown as Something`, especially one erasing `Immutable<T>` /
-`Readonly<T>`. For the rest — named exports, JSDoc on exports and public
-members, import grouping, `@commonfabric/api` xor `/interface`, module-graph
-hygiene — follow `docs/development/DEVELOPMENT.md` and point to it rather than
-relisting it.
+`Readonly<T>`.
+
+For the rest the authority is `docs/development/DEVELOPMENT.md`, § Style &
+Conventions: follow it and point to it rather than relisting it. Its subsections
+seed what to look for — e.g. named exports, JSDoc on exports and public members,
+import grouping and collation, `@commonfabric/api` xor `/interface`,
+module-graph hygiene. Two of them seed nothing any gate will ever raise, which
+is where a diff-reading reviewer earns their keep: **§ Classes** —
+`#privateName` over TypeScript's `private`, a class exposing no enumerable
+properties, and the member order; the wrong form compiles and type-checks clean,
+and an erased `private` leaves an own enumerable property behind — and **§ Word
+choice**, American spelling and one word per concept, which reaches comments and
+error and log messages as much as it reaches documents.
+
+`skills/writing-code/SKILL.md` is what an author is handed for this same
+material. A finding here that it does not cover is a gap in the skill; say so.
 
 ### 7. Test rigor — the special-attention area
 
@@ -266,6 +310,16 @@ omit the `@` if unsure) — via `gh pr review --comment`, or inline comments
 through the reviews API for Blocking / Improvements with Nits left in the
 summary. Skip posting when it isn't worth it.
 
+Anchor every finding to the context it responds to: a threaded reply
+(`gh api .../pulls/<n>/comments/<id>/replies`) when answering an existing
+thread, otherwise an inline comment on the file and line it addresses —
+`gh api repos/<owner>/<repo>/pulls/<n>/comments -F body=@file
+-f commit_id=<head-sha> -f path=<file> -F line=<n> -f side=RIGHT`.
+A top-level `gh pr comment` detaches the argument from what it argues about;
+reviewers read threads in-diff, and a floating comment is easy to miss and hard
+to answer in context. Find anchor lines by grepping the PR-head version of the
+file.
+
 ---
 
 ## Canonical references
@@ -274,6 +328,10 @@ summary. Skip posting when it isn't worth it.
   `docs/development/skill-authoring.md`
 - Pattern rules + severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
 - Design principles & idioms: `docs/development/DEVELOPMENT.md`
+- What an author is handed for the same conventions:
+  `skills/writing-code/SKILL.md`
+- Comment style, `//` and JSDoc alike, file headers included:
+  `docs/development/code-comment-style.md`
 - Transformer semantics: `docs/specs/ts-transformer/README.md`
 - Reactivity model: `docs/common/concepts/reactivity.md`
 - Debugging & gotchas: `docs/development/debugging/README.md`

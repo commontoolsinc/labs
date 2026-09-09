@@ -14,7 +14,7 @@ import {
   isReactiveValueExpression,
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import { isTransparentWrapper, unwrapExpression } from "../utils/expression.ts";
 import { isBrandedCellType } from "./cell-type.ts";
 import {
   isPatternFactoryCalleeExpression,
@@ -285,7 +285,7 @@ function visitExpressionWithCausePath(
       context.tsContext,
     ) as ts.Expression;
   }
-  if (addRootFor && isTransparentExpressionWrapper(expression)) {
+  if (addRootFor && isTransparentWrapper(expression)) {
     return createForCall(expression, causePath, context);
   }
 
@@ -306,15 +306,6 @@ function visitExpressionWithCausePath(
   }
 
   return createForCall(visited, causePath, context);
-}
-
-function isTransparentExpressionWrapper(expression: ts.Expression): boolean {
-  return ts.isParenthesizedExpression(expression) ||
-    ts.isAsExpression(expression) ||
-    ts.isTypeAssertionExpression(expression) ||
-    ts.isSatisfiesExpression(expression) ||
-    ts.isNonNullExpression(expression) ||
-    ts.isPartiallyEmittedExpression(expression);
 }
 
 function visitExpressionChildrenWithCausePath(
@@ -648,8 +639,7 @@ function shouldAddReactiveFor(
   const type = getTypeAtLocationWithFallback(
     expression,
     context.checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+    context.state.typeRegistry,
   );
   return isCellLikeType(type, context.checker);
 }
@@ -726,10 +716,9 @@ function isReactiveArrayMethodCall(
       allowImplicitReactiveParameters: false,
       allowReactiveArrayCallbackParameters: false,
       sameScope: getEnclosingFunctionLikeDeclaration(call),
-      typeRegistry: context.options.state?.typeRegistry,
-      syntheticReactiveCollectionRegistry: context.options.state
-        ?.syntheticReactiveCollectionRegistry,
-      logger: context.options.logger,
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry: context.state
+        .syntheticReactiveCollectionRegistry,
     },
   ) || isExplicitReactiveCall(target.expression, context);
 }
@@ -761,8 +750,7 @@ function shouldRetargetReactiveReference(
   const type = getTypeAtLocationWithFallback(
     target,
     context.checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+    context.state.typeRegistry,
   );
   if (type) {
     return isBrandedCellType(type, context.checker) ||
@@ -898,8 +886,7 @@ function shouldUseStreamCause(
   const type = getTypeAtLocationWithFallback(
     target,
     context.checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+    context.state.typeRegistry,
   );
   return isStreamLikeType(type, context.checker);
 }

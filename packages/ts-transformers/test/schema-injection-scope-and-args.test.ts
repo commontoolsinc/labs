@@ -3,9 +3,11 @@ import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { emittedSchemas, parseModule } from "./transformed-ast.ts";
 
+//
 // Targeted coverage for schema-injection branches that ran in CI only through
 // patterns: the per-session scope on a `new` cell constructor, and the schema-
 // argument detection that skips injection when two schemas are already present.
+//
 
 Deno.test("schema injection reads the session scope from a `new X.perSession(...)` constructor", async () => {
   const source = [

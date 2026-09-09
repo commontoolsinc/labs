@@ -44,7 +44,7 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
       assertEquals(diagnostics[0].severity, "error");
       assertStringIncludes(diagnostics[0].message, "pageResultRef");
       assertStringIncludes(diagnostics[0].message, "unknown");
-      assertStringIncludes(diagnostics[0].message, "undefined");
+      assertStringIncludes(diagnostics[0].message, "opaque reference");
     },
   );
 

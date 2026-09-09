@@ -1,15 +1,16 @@
 import { assert, assertEquals } from "@std/assert";
-import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
+
+import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
+import { renderLineColored } from "../lib/view/highlight.ts";
 import {
+  _internal,
   labeledDiffMetadataLine,
   overlayBox,
   renderFrame,
   type ViewState,
 } from "../lib/view/render.ts";
-import { _internal } from "../lib/view/render.ts";
-import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
-import { renderLineColored } from "../lib/view/highlight.ts";
-import { lineBg, ui } from "../lib/view/theme.ts";
+import { lineBg, styleFor, ui } from "../lib/view/theme.ts";
+import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
 
 function baseView(over: Partial<ViewState> = {}): ViewState {
   return {
@@ -36,7 +37,7 @@ function diffView(over: Partial<ViewState> = {}): ViewState {
 }
 
 /** The editor background sits behind every cell, so a "highlighted" cell is one
- * whose background is some OTHER colour (a selection tint, a search match, a
+ * whose background is some OTHER color (a selection tint, a search match, a
  * diff row). */
 const EDITOR_BG = bgCode(ui.editorBg);
 
@@ -65,7 +66,7 @@ function bgColumns(row: string): boolean[] {
   return out;
 }
 
-/** Background colour active at one visible column, as an RGB tuple string. */
+/** Background color active at one visible column, as an RGB tuple string. */
 function bgAtColumn(row: string, target: number): string | null {
   let bg: string | null = null;
   let col = 0;
@@ -89,7 +90,7 @@ function bgAtColumn(row: string, target: number): string | null {
   return null;
 }
 
-/** Foreground colour active at one visible column, as an RGB tuple string. */
+/** Foreground color active at one visible column, as an RGB tuple string. */
 function fgAtColumn(row: string, target: number): string | null {
   let fg: string | null = null;
   let col = 0;
@@ -281,7 +282,7 @@ Deno.test("renderFrame: edit mode leaves rows after the document blank", () => {
   assertEquals(rows[1], " ".repeat(15));
 });
 
-Deno.test("renderFrame: content rows are verbatim under the colour", () => {
+Deno.test("renderFrame: content rows are verbatim under the color", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(doc, baseView());
   // line 0 is the section header, line 1 is `const define = undefined;`
@@ -555,6 +556,144 @@ Deno.test("renderFrame: wrapped metadata keeps its label beside the backslash", 
     "ij    █",
     " ☙ ❦ ❧ ",
   ]);
+});
+
+Deno.test("renderFrame: draws the whole-diff totals in the first line's corner", () => {
+  const doc = parseDocument("meta\nbody");
+  const view = diffView({
+    width: 16,
+    height: 4,
+    color: false,
+    diffTotals: { adds: 456, dels: 123 },
+  });
+  const rows = renderFrame(doc, view);
+  assertEquals(rows[0], "meta   +456 −123");
+  assertEquals(rows[1], "body            ");
+  // The label belongs to the first line: scrolling down takes it off screen.
+  const scrolled = renderFrame(doc, { ...view, top: 1 });
+  assertEquals(scrolled[0], "body            ");
+  assert(!scrolled.some((row) => row.includes("+456")));
+});
+
+Deno.test("renderFrame: colors the totals as removals and additions", () => {
+  const doc = parseDocument("meta");
+  const rows = renderFrame(
+    doc,
+    diffView({ width: 12, height: 3, diffTotals: { adds: 2, dels: 1 } }),
+  );
+  assertEquals(stripAnsi(rows[0]), "meta   +2 −1");
+  const del = styleFor("diffDel").fg!.join(",");
+  const add = styleFor("diffAdd").fg!.join(",");
+  assertEquals(fgAtColumn(rows[0], 7), add, "the + sign");
+  assertEquals(fgAtColumn(rows[0], 8), add, "the added count");
+  assertEquals(fgAtColumn(rows[0], 10), del, "the − sign");
+  assertEquals(fgAtColumn(rows[0], 11), del, "the removed count");
+  assertEquals(bgAtColumn(rows[0], 8), ui.editorBg.join(","));
+});
+
+Deno.test("renderFrame: the totals reserve wrapped width on the first line", () => {
+  const doc = parseDocument("abcdefghijklmnop");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 12,
+      height: 4,
+      color: false,
+      wrapMode: "hard",
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows[0], "abcdef\\+2 −1");
+  assertEquals(rows[1], "ghijklmnop  ");
+});
+
+Deno.test("renderFrame: the totals sit before a first-line Ctrl-L label", () => {
+  const doc = parseDocument("meta\nbody");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 16,
+      height: 4,
+      color: false,
+      expandMargin: true,
+      diffAnnotations: [
+        { line: 1, kind: "expandUp" },
+        { line: 0, kind: "diffMetadata" },
+      ],
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows[0], "meta    +2 −1^L█");
+  assertEquals(rows[1], "body           ◥");
+});
+
+Deno.test("renderFrame: wrapped totals layer over a first-line annotation", () => {
+  const doc = parseDocument("metadatax\nabc");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 12,
+      height: 4,
+      color: false,
+      expandMargin: true,
+      wrapMode: "hard",
+      diffAnnotations: [
+        { line: 1, kind: "expandUp" },
+        { line: 0, kind: "diffMetadata" },
+      ],
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows[0], "met\\+2 −1^L█");
+  assertEquals(rows[1], "adatax     █");
+  assertEquals(rows[2], "abc        ◥");
+});
+
+Deno.test("renderFrame: totals reflow moves the Ctrl-L label, not copies it", () => {
+  // Without the totals, the 16-column first line fits beside its expansion
+  // triangle, so the metadata line below would carry the ^L label. The totals
+  // reservation wraps the first line, and the label must follow it onto the
+  // wrapped row rather than appear in both places.
+  const doc = parseDocument("abcdefghijklmnop\nmeta");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 20,
+      height: 5,
+      color: false,
+      expandMargin: true,
+      wrapMode: "hard",
+      diffAnnotations: [
+        { line: 0, kind: "expandDown" },
+        { line: 1, kind: "diffMetadata" },
+      ],
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows.slice(0, 3), [
+    "abcdefghijklm\\+2 −1◢",
+    "nop              ^L█",
+    "meta               █",
+  ]);
+  assertEquals(
+    rows.filter((row) => row.includes("^L")).length,
+    1,
+    "exactly one Ctrl-L label",
+  );
+});
+
+Deno.test("renderFrame: narrow totals keep at least one source cell", () => {
+  const doc = parseDocument("abcdef");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 4,
+      height: 3,
+      color: false,
+      diffTotals: { adds: 345, dels: 12 },
+    }),
+  );
+  assertEquals(rows[0], "a−12");
 });
 
 Deno.test("renderFrame: a diff without a final triangle omits the end connector", () => {
@@ -1003,7 +1142,9 @@ Deno.test("renderFrame: selecting a node draws a guide bar", () => {
   assert(/[╭│╰▶]/.test(joined), "guide glyphs present when a node is selected");
 });
 
-// --- display modes at the frame level ----------------------------------------
+//
+// display modes at the frame level
+//
 
 /** A one-line document whose text is `text` verbatim, in a single plain span. */
 function docOf(text: string) {
@@ -1030,7 +1171,7 @@ Deno.test("renderFrame: hidden mode collapses a control run and shifts text left
   );
 });
 
-Deno.test("renderFrame: ansi mode paints the sequence's colour onto later text", () => {
+Deno.test("renderFrame: ansi mode paints the sequence's color onto later text", () => {
   const doc = docOf("a\x1b[31mb");
   const rows = renderFrame(doc, baseView({ displayMode: "ansi" }));
   // The escape is consumed; "b" is painted ANSI red (205;49;49) while "a" is not.
@@ -1326,7 +1467,7 @@ Deno.test("overlayBox: inner dimensions never go negative", () => {
       assert(box.innerH >= 0, `innerH >= 0 at ${width}x${height}`);
       assert(box.x >= 0, `x >= 0 at ${width}x${height}`);
       assert(box.y >= 0, `y >= 0 at ${width}x${height}`);
-      // The box never extends past the terminal it is centred in.
+      // The box never extends past the terminal it is centered in.
       assert(box.boxW <= Math.max(0, width), `boxW fits at ${width}x${height}`);
       assert(
         box.boxH <= Math.max(0, height),
@@ -1374,7 +1515,7 @@ Deno.test("renderFrame: the overlay uses a double-line (Turbo Pascal) frame", ()
   }
 });
 
-Deno.test("renderFrame: the info panel uses the dialog panel and text colours", () => {
+Deno.test("renderFrame: the info panel uses the dialog panel and text colors", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
     doc,
@@ -1393,11 +1534,11 @@ Deno.test("renderFrame: the info panel uses the dialog panel and text colours", 
     }),
   );
   const body = rows.find((r) => stripAnsi(r).includes("hello"))!;
-  assert(body.includes(bgCode(ui.overlayBg)), "the dialog panel colour");
-  assert(body.includes(fgCode(ui.dialogText.fg!)), "the dialog text colour");
+  assert(body.includes(bgCode(ui.overlayBg)), "the dialog panel color");
+  assert(body.includes(fgCode(ui.dialogText.fg!)), "the dialog text color");
 });
 
-Deno.test("renderFrame: a source overlay uses the editor colours, not the dialog panel", () => {
+Deno.test("renderFrame: a source overlay uses the editor colors, not the dialog panel", () => {
   const doc = parseDocument(SAMPLE);
   const overlay = (sourceView: boolean) => ({
     title: "SRC",
@@ -1419,9 +1560,9 @@ Deno.test("renderFrame: a source overlay uses the editor colours, not the dialog
   );
   const dialogBody = rowsDialog.find((r) => stripAnsi(r).includes("code"))!;
   const sourceBody = rowsSource.find((r) => stripAnsi(r).includes("code"))!;
-  assert(dialogBody.includes(bgCode(ui.overlayBg)), "the dialog panel colour");
+  assert(dialogBody.includes(bgCode(ui.overlayBg)), "the dialog panel color");
   assert(
     sourceBody.includes(bgCode(ui.editorBg)),
-    "the source panel is the editor colour",
+    "the source panel is the editor color",
   );
 });

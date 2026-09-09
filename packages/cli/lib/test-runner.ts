@@ -4,36 +4,57 @@
  * Test patterns (.test.tsx) are patterns that:
  * 1. Import and instantiate the pattern under test
  * 2. Define test steps as an array of { assertion } or { action } objects
- * 3. Return { tests: TestStep[] }
+ * 3. Return { [TESTS]: TestStep[] } under the reserved `[TESTS]` output key
  *
  * TestStep is a discriminated union:
- * - { assertion: Reactive<boolean> } from computed(() => condition)
- * - { action: Stream<void> } from action(() => sideEffect)
+ * - { assertion: Reactive<AssertRecord> } from assert(() => condition)
+ * - { action: Stream<unknown> } from action(() => sideEffect)
+ * - { render: unknown } naming a UI target to materialize
+ * - { settle: true } settling fully at a point the author names
+ * - { label: string } and { await: string } coordinating participants
+ *   in a multi-user test
  *
  * The discriminated union avoids TypeScript declaration emit issues
  * that occur when mixing Cell and Stream types in the same array.
  *
  * Example:
- * tests: [
- *   { assertion: computed(() => game.phase === "playing") },
+ * [TESTS]: [
+ *   { assertion: assert(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
- *   { assertion: computed(() => game.phase === "started") },
+ *   { assertion: assert(() => game.phase === "started") },
  * ]
  *
- * Note: By default, test patterns can only import from their own directory or
- * subdirectories. To enable imports from sibling directories (e.g., `../shared/`),
- * use the --root option to specify a common ancestor directory.
+ * Note: A test pattern's imports resolve within its root directory: an
+ * explicit --root when given, otherwise the nearest ancestor whose
+ * deno.json(c) declares a package name, otherwise the test file's own
+ * directory. An import that climbs above that root is refused by name.
  */
 
+import { basename } from "@std/path";
+
+import {
+  FragmentWriter,
+  repositoryRelativePath,
+} from "@commonfabric/test-support/records";
+
+import { internSchema } from "@commonfabric/data-model-schema";
+import {
+  toCompactDebugString,
+  toDebugKindString,
+} from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
   parseLink,
   PatternCoverageCollector,
   patternCoverageOutputPath,
+  type PatternInstantiationObserver,
   Runtime,
+  type RuntimeOptions,
   runtimePresets,
+  TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import type {
@@ -46,25 +67,29 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import type { AssertPart, AssertRecord, Reactive } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { basename } from "@std/path";
+import {
+  type CDFPoint,
+  clearTimingMeasures,
+  getLogger,
+  getLoggerCountsBreakdown,
+  getTimingMeasuresState,
+  getTimingStatsBreakdown,
+  resetAllCountBaselines,
+  resetAllLoggerCounts,
+  resetAllTimingBaselines,
+  resetAllTimingStats,
+  resetTimingMeasureBudget,
+  setTimingMeasuresEnabled,
+  TIMING_MEASURE_PREFIX,
+} from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
+
+import { assertionOutcome } from "./assert-record.ts";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   appendLoggerDeltaMessages,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  buildActionEvent,
-  type TrustedUiDescriptor,
-} from "./trusted-test-event.ts";
-import {
-  multiUserDescriptorMeta,
-  runMultiUserTestPattern,
-} from "./multi-user-test-runner.ts";
 import {
   type FetchMockEntry,
   makeMockFetch,
@@ -72,15 +97,11 @@ import {
 } from "./fetch-mock.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import {
-  type CDFPoint,
-  getLogger,
-  getLoggerCountsBreakdown,
-  getTimingStatsBreakdown,
-  resetAllCountBaselines,
-  resetAllLoggerCounts,
-  resetAllTimingBaselines,
-  resetAllTimingStats,
-} from "@commonfabric/utils/logger";
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import { inferProgramRoot } from "./program-root.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 const phaseLogger = getLogger("test-runner-phase", {
   enabled: false,
@@ -116,6 +137,43 @@ async function withPhase<T>(
   }
 }
 
+interface CapturedMeasure {
+  name: string;
+  startTime: number;
+  duration: number;
+}
+
+/**
+ * Take this file's emitted measures off the timeline.
+ *
+ * Draining per file rather than reading once at the end is what makes a
+ * multi-file run work at all: each file starts by clearing the timeline, so
+ * anything not collected before the next one begins is gone.
+ */
+function drainTimingMeasures(into: CapturedMeasure[]): void {
+  for (const entry of performance.getEntriesByType("measure")) {
+    if (!entry.name.startsWith(TIMING_MEASURE_PREFIX)) continue;
+    into.push({
+      name: entry.name,
+      startTime: entry.startTime,
+      duration: entry.duration,
+    });
+  }
+  clearTimingMeasures();
+}
+
+async function writeTimingMeasures(
+  path: string,
+  entries: readonly CapturedMeasure[],
+): Promise<void> {
+  await Deno.writeTextFile(path, JSON.stringify(entries));
+  console.log(
+    `\nWrote ${entries.length} timing measure(s) to ${path}. Aggregate with:` +
+      `\n  deno run --allow-read ` +
+      `skills/perf-investigation/scripts/aggregate-measures.ts ${path}`,
+  );
+}
+
 function formatError(error: unknown): string {
   return error instanceof Error
     ? error.stack || error.message || String(error)
@@ -131,84 +189,11 @@ function indentLines(text: string, indent: string): string {
 }
 
 /**
- * Recognizes the record an `assert(...)` assertion carries. A `computed(...)`
- * assertion carries a bare boolean instead, so this is what tells the two
- * apart at the point the harness reads the value.
+ * The loose shape the runner reads a step cell as, to classify it by which
+ * field is present. The authored `TestStep` union (in the api) is already
+ * type-checked at the pattern's return; here the fields arrive from storage as
+ * `unknown`, so this is deliberately permissive.
  */
-function asAssertRecord(value: unknown): AssertRecord | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const candidate = value as Partial<AssertRecord>;
-  if (
-    typeof candidate.ok !== "boolean" ||
-    typeof candidate.source !== "string" ||
-    !Array.isArray(candidate.parts)
-  ) {
-    return undefined;
-  }
-  const parts = candidate.parts.filter((part): part is AssertPart =>
-    typeof part === "object" && part !== null &&
-    typeof (part as Partial<AssertPart>).src === "string" &&
-    typeof (part as Partial<AssertPart>).rendered === "string"
-  );
-  return { ok: candidate.ok, source: candidate.source, parts };
-}
-
-/**
- * Renders a failed `assert(...)` as its authored text followed by the operands
- * recorded while it ran, for example:
- *
- *     a + b <= c
- *       a + b = 3
- *       c     = 2
- *
- * The operands say the assertion was false, so saying it again adds nothing.
- * An assertion that recorded none — a bare value, or one whose operands are
- * all literals — has nothing to explain itself with, so that one still reports
- * what happened rather than restating the source on its own.
- */
-function formatAssertRecord(record: AssertRecord): string {
-  if (record.parts.length === 0) {
-    return record.source.length > 0
-      ? `Expected true, got false: ${record.source}`
-      : "Expected true, got false";
-  }
-
-  const width = Math.max(...record.parts.map((part) => part.src.length));
-  const lines = record.parts.map((part) =>
-    `  ${part.src.padEnd(width)} = ${part.rendered}`
-  );
-  return [record.source, ...lines].join("\n");
-}
-
-/**
- * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
- * property.
- * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
- * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
- *
- * Action steps may carry an `event` payload (sent instead of `undefined`) and
- * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
- * renderer-trusted DOM provenance for that surface/action — the headless
- * equivalent of the user clicking the trusted surface — which CFC
- * `TrustedActionWrite` policies require under enforcement.
- *
- * A `{ settle: true }` step waits for FULL settlement (the scheduler, storage,
- * and every in-flight async builtin operation — a `db.query` RPC + writeback, a
- * fetch / llm call) via `runtime.settled()`. The light per-action settle returns
- * before that I/O lands, so insert `{ settle: true }` before an assertion that
- * reads an async-builtin result to keep the read deterministic under load.
- */
-export type TestStep =
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord>; skip?: boolean }
-  | {
-    action: Stream<unknown>;
-    event?: unknown;
-    trustedUi?: TrustedUiDescriptor;
-    skip?: boolean;
-  }
-  | { render: unknown; skip?: boolean }
-  | { settle: true; skip?: boolean };
-
 type HarnessTestStepMeta = {
   action?: unknown;
   assertion?: unknown;
@@ -219,6 +204,12 @@ type HarnessTestStepMeta = {
   // `{ settle: true }` step: wait for full settlement (scheduler + storage +
   // in-flight async builtin I/O) via `runtime.settled()` before the next step.
   settle?: boolean;
+  // `{ label }` / `{ await }` synchronize participants in a multi-user test.
+  // A single-user run has no participant to synchronize with, so they carry
+  // no work here — but they still have to be recognized, or a step holding
+  // one matches no discriminant and the run reports it as malformed.
+  label?: string;
+  await?: string;
 };
 
 type HarnessTestStepCell = Cell<unknown>;
@@ -229,7 +220,13 @@ const testStepPeekSchema = internSchema(
     properties: {
       action: { type: "unknown" },
       assertion: { type: "unknown" },
-      event: { type: "unknown" },
+      // The payload is what the step sends, so it is read as authored: an
+      // object arrives as an object, reaching the handler as a reference into
+      // this step rather than a snapshot of it. `type: "unknown"` marks a
+      // value the traversal must not descend into, which is right for the
+      // fields this schema only tests for presence and wrong here, where it
+      // drops an object payload to `undefined`.
+      event: true,
       trustedUi: {
         type: "object",
         properties: {
@@ -240,6 +237,8 @@ const testStepPeekSchema = internSchema(
       render: { type: "unknown" },
       skip: { type: "boolean" },
       settle: { type: "boolean" },
+      label: { type: "string" },
+      await: { type: "string" },
     },
   },
 );
@@ -282,6 +281,7 @@ export interface TestResult {
 export interface NavigationEvent {
   /** Name ($NAME) of the navigation target, if available */
   name?: string;
+
   /** Index of the action that triggered this navigation */
   afterActionIndex: number;
 }
@@ -291,36 +291,46 @@ export interface TestRunResult {
   results: TestResult[];
   totalDurationMs: number;
   error?: string;
+
   /** Navigation events recorded during the test run */
   navigations: NavigationEvent[];
+
   /** Runtime errors captured via errorHandlers during the test run */
   runtimeErrors: string[];
+
   /** If true, runtime errors are expected and should not fail the test */
   allowRuntimeErrors?: boolean;
+
   /** If set, runtime errors are REQUIRED: the run fails when none (or, for a
    * number, a different count) were captured. Like expectNonIdempotent, this
    * asserts the loudness fires — it is not a mere tolerance — so reverting a
    * throwing rejection to a silent return fails the suite. Implies
    * allowRuntimeErrors for the captured errors themselves. */
   expectRuntimeErrors?: boolean | number;
+
   /** Non-idempotent computation names detected by the idempotency check */
   nonIdempotent: string[];
+
   /** If true, non-idempotent computations are expected: detected violations
    * don't fail the test, and detecting NONE fails it (the flag asserts the
    * detector fires; it is not a mere tolerance). */
   expectNonIdempotent?: boolean;
+
   /**
    * console.error() calls captured via the harness console event during the
    * run phase, plus logger-level error activity detected via count deltas.
    */
   consoleErrors: string[];
+
   /** If true, console errors are expected and should not fail the test. */
   allowConsoleErrors?: boolean;
+
   /**
    * console.warn() calls captured via the harness console event during the
    * run phase, plus logger-level warn activity detected via count deltas.
    */
   consoleWarnings: string[];
+
   /** If true, console warnings are expected and should not fail the test. */
   allowConsoleWarnings?: boolean;
 }
@@ -328,31 +338,115 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
-  /** Root directory for resolving imports. If not provided, uses the test file's directory. */
+
+  /**
+   * Root directory for resolving imports. If not provided, the nearest
+   * ancestor of the test file whose deno.json(c) declares a package name is
+   * used, falling back to the test file's directory.
+   */
   root?: string;
+
+  /**
+   * Data file paths to attach, so a pattern under test that reads one with
+   * `dataFile` reads here what it will read once deployed.
+   */
+  dataFilePaths?: string[];
+
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
   statsInclude?: string[];
+
   /** Number of per-step scheduler action deltas to print. Default 10. */
   statsActionLimit?: number;
+
   /** Override CFC enforcement mode for the test runtime. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /** Shared compiled-module-byte cache for direct harness compiles. */
   moduleByteCache?: ModuleByteCache;
+
   /** Print storage-related logger timings and counts after each test file. */
   storageStats?: boolean;
+
   /** Limit for storage timing/count tables when storageStats is enabled. */
   storageStatsLimit?: number;
+
   /** Directory for pattern runtime coverage LCOV artifacts. */
   patternCoverageDir?: string;
+
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+
+  /**
+   * Spool one test record per file run, named by the file's
+   * repository-relative path.
+   *
+   * The `cf test` command sets this: the files it was pointed at are the
+   * tests of a run. A caller inside another test leaves it unset, because
+   * the files it hands over are that test's fixtures, and a fixture is data
+   * rather than a test of this repository.
+   */
+  recordResults?: boolean;
+
+  /**
+   * Emit a `performance.measure` per logger time span and write them here.
+   *
+   * The statistics a run prints are aggregates: they say a key was reached
+   * 4,000 times and what that cost on average, and nothing about which of
+   * them nested inside which. The measures keep each span's own interval, so
+   * a consumer can roll them up by key prefix and find the level where the
+   * count starts multiplying.
+   */
+  timingMeasuresOut?: string;
+
+  /**
+   * Run against a caller-supplied identity and storage manager, and observe
+   * what the run instantiates.
+   *
+   * Why: `StorageManager.emulate` runs its memory server against `:memory:`,
+   * so an ordinary test run leaves no file behind. The pattern-update
+   * state-continuity capture (`tasks/pattern-vintage-run.ts`) runs a pattern's
+   * OWN tests against a file-backed store and snapshots the result, which is
+   * what puts real pattern state — written through real handlers — into a
+   * fixture instead of a bare materialized root.
+   *
+   * The caller OWNS the lifecycle: the runner will not close this storage
+   * manager, because a callee must not tear down a resource its caller is
+   * still using — the snapshot happens after the run returns.
+   *
+   * The RUNTIME is still torn down (`dispose({ closeStorage: false })`), which
+   * is what makes reading the store afterwards a statement about the state the
+   * run reached: the runtime that wrote it can no longer commit into it. A
+   * teardown that does not complete is RAISED, so a caller never reads a store
+   * whose writer never stopped.
+   *
+   * A multi-user test refuses this option: its participants instantiate and
+   * write in workers of their own, against a storage server the multi-user
+   * runner starts, so neither the store nor the observer below would see them.
+   */
+  storageHost?: {
+    identity: Identity;
+    storageManager: RuntimeOptions["storageManager"];
+
+    /**
+     * Cause for the test pattern's result cell, pinning its entity id.
+     *
+     * The default is `test-pattern-result-${Date.now()}` — fine for a store
+     * that is thrown away, fatal for one that is kept, since an id that
+     * differs every run can never be addressed again.
+     */
+    resultCause?: unknown;
+
+    /** Records every pattern the run materializes; see the vintage capture. */
+    onPatternInstantiated?: PatternInstantiationObserver;
+  };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Verbose-mode logger stats helpers
-// ---------------------------------------------------------------------------
+//
 
 type GlobalWithLoggers = {
   commonfabric?: {
@@ -948,9 +1042,22 @@ export async function runTestPattern(
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
+  // The effective import root: an explicit `root` wins; otherwise the nearest
+  // package root above the test file, so imports that span the package (shared
+  // helpers, sibling patterns) resolve without a flag. When neither exists the
+  // resolver anchors at the file's own directory.
+  const root = options.root ?? inferProgramRoot(testPath);
+  if (options.verbose && !options.root && root !== undefined) {
+    console.log(
+      `  Resolving imports from ${root} (nearest package root; --root overrides)`,
+    );
+  }
   const startTime = performance.now();
   performance.clearMarks();
   performance.clearMeasures();
+  // The line above drops this run's emitted measures along with everything
+  // else, so the budget they were charged against has to come back too.
+  resetTimingMeasureBudget();
   resetAllLoggerCounts();
   resetAllTimingStats();
 
@@ -978,20 +1085,26 @@ export async function runTestPattern(
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
     ["runTestPattern", "identity"],
-    () => Identity.fromPassphrase("test-runner"),
+    () =>
+      options.storageHost?.identity ?? Identity.fromPassphrase("test-runner"),
   );
   const space = identity.did();
-  const { StorageManager } = await withPhase([
-    "runTestPattern",
-    "storageImport",
-  ], () => import("@commonfabric/runner/storage/cache.deno"));
-  const storageManager = await withPhase(
-    ["runTestPattern", "storageManager"],
-    () =>
-      StorageManager.emulate({
-        as: identity,
-      }),
-  );
+  // A caller-supplied store is FILE-BACKED, which the default emulation is not:
+  // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
+  // snapshot. See `TestRunnerOptions.storageHost`.
+  const storageManager = options.storageHost?.storageManager ??
+    await withPhase(
+      ["runTestPattern", "storageManager"],
+      async () => {
+        // The Deno storage cache opens SQLite as it loads, which a
+        // caller-supplied storage host makes unnecessary.
+        // deno-lint-ignore cf-imports/no-inline-module-import
+        const { StorageManager } = await import(
+          "@commonfabric/runner/storage/cache.deno"
+        );
+        return StorageManager.emulate({ as: identity });
+      },
+    );
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
@@ -1027,6 +1140,9 @@ export async function runTestPattern(
         // Tests that need a laxer mode than the shared pin opt out per test.
         ...(options.cfcEnforcementMode !== undefined
           ? { cfcEnforcementMode: options.cfcEnforcementMode }
+          : {}),
+        ...(options.storageHost?.onPatternInstantiated !== undefined
+          ? { onPatternInstantiated: options.storageHost.onPatternInstantiated }
           : {}),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
         navigateCallback: (target) => {
@@ -1080,9 +1196,13 @@ export async function runTestPattern(
     const program = await withPhase(
       ["runTestPattern", "resolve"],
       () =>
-        engine.resolve(
-          new FileSystemProgramResolver(testPath, options.root),
-        ),
+        resolveLocalProgram((r) => engine.resolve(r), {
+          main: testPath,
+          ...(root === undefined ? {} : { root }),
+          ...(options.dataFilePaths === undefined
+            ? {}
+            : { dataFilePaths: options.dataFilePaths }),
+        }),
     );
     const evalResult = await withPhase(
       ["runTestPattern", "compile"],
@@ -1119,7 +1239,14 @@ export async function runTestPattern(
       writeLocalPatternCoverage = false;
       return await withPhase(
         ["runTestPattern", "multiUser"],
-        () => runMultiUserTestPattern(testPath, multiUserMeta, options),
+        // The participant workers compile the file again in their own
+        // processes; passing the resolved root keeps their import resolution
+        // identical to the detection compile above.
+        () =>
+          runMultiUserTestPattern(testPath, multiUserMeta, {
+            ...options,
+            root,
+          }),
       );
     }
 
@@ -1134,7 +1261,7 @@ export async function runTestPattern(
     // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
-    // access pieceRegistry, recentPieces, etc. work correctly.
+    // access the piece registry and related space services work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -1167,7 +1294,6 @@ export async function runTestPattern(
         },
         parseLink(addPiece),
       );
-      (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
       });
@@ -1194,7 +1320,8 @@ export async function runTestPattern(
         // Create a result cell for the pattern
         const resultCell = runtime.getCell<Record<string, unknown>>(
           space,
-          `test-pattern-result-${Date.now()}`,
+          options.storageHost?.resultCause ??
+            `test-pattern-result-${Date.now()}`,
           undefined,
           tx,
         );
@@ -1233,10 +1360,10 @@ export async function runTestPattern(
       await runtime.idle();
     });
 
-    // 4. Get the tests array from pattern output
+    // 4. Get the tests array from pattern output (the reserved [TESTS] key)
     const testsCell = await withPhase(
       ["runTestPattern", "testsCell"],
-      () => patternResult.key("tests") as Cell<unknown>,
+      () => patternResult.key(TESTS) as Cell<unknown>,
     );
     const testSteps = await withPhase(
       ["runTestPattern", "testsValue"],
@@ -1246,8 +1373,8 @@ export async function runTestPattern(
     // Validate it's an array
     if (!Array.isArray(testSteps)) {
       throw new Error(
-        "Test pattern must return { tests: TestStep[] }. Got: " +
-          toCompactDebugString(typeof testSteps),
+        "Test pattern must return { [TESTS]: TestStep[] }. Got: " +
+          toDebugKindString(testSteps),
       );
     }
 
@@ -1394,6 +1521,12 @@ export async function runTestPattern(
       const isAssertion = Object.hasOwn(stepValue, "assertion");
       const isRender = Object.hasOwn(stepValue, "render");
       const isSettle = Object.hasOwn(stepValue, "settle");
+      const isMarker = Object.hasOwn(stepValue, "label") ||
+        Object.hasOwn(stepValue, "await");
+
+      // A multi-user marker in a single-user run: inert, and transparent to
+      // the reported results.
+      if (isMarker) continue;
 
       // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
       // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
@@ -1428,8 +1561,8 @@ export async function runTestPattern(
       if (!isAction && !isAssertion) {
         throw new Error(
           `Test step at index ${i} must have an 'action', 'assertion', ` +
-            `'render', or 'settle' key. Got: ${
-              toCompactDebugString(Object.keys(stepValue))
+            `'render', 'settle', 'label', or 'await' key. Got: ${
+              toCompactDebugString(Object.keys(stepCell.get() as object))
             }`,
         );
       }
@@ -1669,21 +1802,9 @@ export async function runTestPattern(
           try {
             const assertCell = stepCell.key("assertion") as Cell<unknown>;
             const value = await assertCell.pull();
-            if (value === true) {
-              return { passed: true };
-            }
-            // An `assert(...)` assertion carries the operands recorded by the
-            // evaluation that produced this value, so report them.
-            const record = asAssertRecord(value);
-            if (record) {
-              return record.ok
-                ? { passed: true }
-                : { passed: false, error: formatAssertRecord(record) };
-            }
-            return {
-              passed: false,
-              error: `Expected true, got ${toCompactDebugString(value)}`,
-            };
+            // An `assert(...)` assertion carries the operands recorded while
+            // the condition ran, so a failure names them and their values.
+            return assertionOutcome(value);
           } catch (err) {
             return {
               passed: false,
@@ -1811,8 +1932,9 @@ export async function runTestPattern(
 
     // Add helpful hint for import resolution errors when --root wasn't provided
     if (
-      errorMessage.includes("No such file or directory") &&
-      errorMessage.includes("readfile") &&
+      (errorMessage.includes("escapes the program root") ||
+        (errorMessage.includes("No such file or directory") &&
+          errorMessage.includes("readfile"))) &&
       !options.root
     ) {
       errorMessage +=
@@ -1845,7 +1967,7 @@ export async function runTestPattern(
           writePatternCoverageLcov(
             patternCoverage,
             patternCoverageOutputPath(options.patternCoverageDir!, testPath),
-            { root: options.root },
+            { root },
           ),
       ).catch((error) => {
         console.error(
@@ -1856,15 +1978,62 @@ export async function runTestPattern(
       });
     }
     // 6. Cleanup
+    // The run is over, so pattern-code output during teardown is no longer the
+    // test's behavior. This matters more than it used to: `engine.dispose()`
+    // was the FIRST cleanup step and killed the SES runtime immediately, while
+    // `Runtime.dispose()` reaches `harness.dispose()` only at the end — so the
+    // drain below now runs with pattern code still able to log. Both capture
+    // lists are returned BY REFERENCE, so a late push would still fail the run.
+    consoleCaptureActive = false;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
-    await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
-      engine.dispose();
-    });
-    await withPhase(
-      ["runTestPattern", "cleanup", "storageClose"],
-      () => storageManager.close(),
+    // Tear the whole runtime down, not just its engine: that is what stops it
+    // WRITING (`Runtime.dispose`'s JSDoc has the mechanism). It matters here
+    // because a caller-supplied store outlives this call and gets READ — the
+    // vintage capture snapshots it — so a runtime still able to commit would
+    // make the snapshot a race rather than a record. `closeStorage` keeps that
+    // store the CALLER's to close.
+    //
+    // Bounded the same way every other await in this function is (the step
+    // settles at `settleRuntime`), and for the same reason: a pattern under
+    // test is untrusted code that may never quiesce, and `scheduler.idle()` —
+    // which `dispose()` awaits — never resolves for a system that genuinely
+    // never settles. Unbounded, one such pattern turns "this file reports a
+    // timeout" into "`cf test` hangs with no output", since `runTests` has no
+    // per-file guard. Firing early is safe here in a way it is not elsewhere:
+    // it only skips the rest of a teardown in a process that is moving on.
+    //
+    // A teardown that does not complete is RAISED, on both paths. It says the
+    // runtime never quiesced, which is a fact about the pattern under test —
+    // reporting it only to stderr would let `cf test` exit 0 on a run whose
+    // writer was still going, and a caller that supplied its own store is worse
+    // off still, since it is about to read what that writer wrote. Raising also
+    // keeps the pre-existing contract: `storageManager.close()` used to sit here
+    // unguarded, so a failing teardown already failed the file.
+    //
+    // Logged BEFORE it is raised because throwing from a `finally` discards the
+    // result this function was about to return, including any step failures.
+    // The exit code is right either way; the log is what keeps the diagnosis.
+    //
+    // Losing the race ABANDONS the dispose rather than cancelling it:
+    // `settled()` takes no abort signal, so the drain runs on in the background
+    // and the steps after it never happen. Acceptable because the only path
+    // that reaches it has already failed, and a capture's temp store and server
+    // are torn down by `captureVintage`'s own `finally`.
+    const teardown = withPhase(
+      ["runTestPattern", "cleanup", "runtimeDispose"],
+      () =>
+        Promise.race([
+          runtime.dispose({ closeStorage: options.storageHost === undefined }),
+          timeout(TIMEOUT, `Runtime teardown timed out after ${TIMEOUT}ms`),
+        ]),
     );
+    await teardown.catch((error) => {
+      console.error(
+        `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
+      );
+      throw error;
+    });
   }
 }
 
@@ -1881,15 +2050,69 @@ export async function runTests(
   results: TestRunResult[];
 }> {
   const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  // Emission is process-global, so a run that turns it on owes the process its
+  // previous state back — otherwise a later `runTests()` without the option
+  // keeps emitting into a buffer nobody will read.
+  const priorMeasures = getTimingMeasuresState();
+  const captured: CapturedMeasure[] | undefined = options.timingMeasuresOut
+    ? []
+    : undefined;
+  if (options.timingMeasuresOut) {
+    // Draining per file means the buffer never holds more than one file's
+    // worth, so the default ceiling — which exists to bound a process that
+    // never drains — would only truncate the capture for no benefit.
+    setTimingMeasuresEnabled(true, { cap: Number.MAX_SAFE_INTEGER });
+  }
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
   let totalFailed = 0;
   let totalSkipped = 0;
 
+  // One record per file, spooled with the file's final verdict — the one
+  // that includes the runtime-error, console, and idempotence checks below,
+  // not just the assertion results. Written only for a caller that asked
+  // for records, and inert unless CF_TEST_RECORDS_DIR is set; the
+  // integration orchestrator clears that variable for its cf children and
+  // records from its own clock instead.
+  const recordsFragment = options.recordResults === true
+    ? FragmentWriter.openForRun()
+    : undefined;
+  const recordFile = (testPath: string, failed: boolean, durationMs: number) =>
+    recordsFragment?.append({
+      line: "record",
+      test: {
+        k: "pattern",
+        s: "patterns",
+        n: repositoryRelativePath(testPath),
+      },
+      outcome: failed ? "fail" : "pass",
+      durationMs: Math.round(durationMs),
+    });
+
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
+    const failedBefore = totalFailed;
+    const fileStarted = performance.now();
 
-    const result = await runTestPattern(testPath, options);
+    // `runTestPattern` RAISES a teardown that did not complete, which is the
+    // right contract for a direct caller — the vintage capture is about to read
+    // what the run wrote, so it must refuse rather than snapshot. A multi-file
+    // run is the other case: one wedged file is a failure of that file, not a
+    // reason the remaining ones go unreported. Counted and skipped past, so the
+    // exit code is still non-zero.
+    let result: TestRunResult;
+    try {
+      result = await runTestPattern(testPath, options);
+    } catch (error) {
+      totalFailed++;
+      console.log(`  ✗ ${formatError(error)}`);
+      recordFile(testPath, true, performance.now() - fileStarted);
+      continue;
+    } finally {
+      // Before the next file clears the timeline, and on the failure path too:
+      // a file that wedged is often the one whose measures are wanted.
+      if (captured) drainTimingMeasures(captured);
+    }
     allResults.push(result);
 
     if (result.error) {
@@ -2027,6 +2250,21 @@ export async function runTests(
         }
       }
     }
+
+    recordFile(testPath, totalFailed > failedBefore, result.totalDurationMs);
+  }
+  recordsFragment?.close();
+
+  try {
+    if (options.timingMeasuresOut && captured) {
+      await writeTimingMeasures(options.timingMeasuresOut, captured);
+    }
+  } finally {
+    // Both halves of what was borrowed, and in a `finally` because a failed
+    // write must not strand them: the switch left on costs every later run in
+    // the process, and the raised ceiling left behind removes the retention
+    // bound entirely.
+    setTimingMeasuresEnabled(priorMeasures.enabled, { cap: priorMeasures.cap });
   }
 
   // Summary

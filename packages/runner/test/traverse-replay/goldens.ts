@@ -10,6 +10,7 @@
  * (and the regenerated golden diff is the review artifact justifying the
  * change).
  */
+
 import { readMaybeGzippedText, writeGzippedText } from "./gzip.ts";
 import type { ReplayOracle } from "./replay.ts";
 

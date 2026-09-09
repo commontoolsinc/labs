@@ -1,3 +1,4 @@
+import { readLoomAuthoringConfig } from "./loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import {
   basename,
@@ -7,18 +8,18 @@ import {
   relative,
   resolve,
 } from "@std/path";
-import {
-  isAbsolute as isAbsoluteSandboxPath,
-  normalize as normalizeSandboxPath,
-} from "@std/path/posix";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
-import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
+  type HarnessPatternIndexConfig,
+  type HarnessSkillsShConfig,
+  isHarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
+  readCeilingsEqual,
 } from "./config.ts";
 import {
   createHarnessImageAttachment,
@@ -36,17 +37,21 @@ import {
   readHarnessRunArtifacts,
   resolveHarnessRunPaths,
 } from "./artifacts.ts";
+import { httpOriginOf } from "./tools/handle-values.ts";
 import {
   createCliPromptSlotBinding,
   type PromptSlotRole,
 } from "./contracts/prompt-slot.ts";
 import {
+  bindLoomLocalRunManifest,
   HARNESS_CREDENTIAL_OWNER_REF_TYPE,
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
   type HarnessRunManifest,
+  type LoomLocalHostBinding,
   parseLoomRunManifestJson,
 } from "./contracts/run-manifest.ts";
+import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   getHarnessSubagentProfileConfig,
@@ -54,34 +59,55 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import { type BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { renderCfcPostureReport } from "./cfc-posture.ts";
+import {
+  describeHarnessDocsCorpus,
+  type HarnessDocsCorpusRecord,
+  harnessDocsCorpusRecordsEqual,
+} from "./contracts/docs-corpus.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
+import { resolveHarnessFabricSessionConfig } from "./fabric-session-options.ts";
+import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
+import {
+  establishHarnessSessionContext,
+  type HarnessSessionConfig,
+  harnessSessionEngineOptions,
+} from "./session-assembly.ts";
 import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DEFAULT_FABRIC_MOUNT_PATH,
 } from "./sandbox/docker-runsc.ts";
-import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
+import {
+  type CfHarnessHostMountConfig,
+  type CfHarnessHostMountMode,
+  parseHostMountSpecs,
+} from "./host-mounts.ts";
+
+export type { CfHarnessHostMountConfig, CfHarnessHostMountMode };
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
   type HarnessPromptLoopResult,
 } from "./prompt-loop.ts";
+import { createHarnessSkillsShAcquisitionClientFactory } from "./skills-sh/acquisition.ts";
 import {
-  discoverHarnessSkills,
-  loadHarnessSkillContext,
-} from "./skills/registry.ts";
+  createHarnessSkillsShSearchClientFactory,
+} from "./skills-sh/search-client.ts";
 import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
-import type {
-  HarnessAllowedSkillScript,
-  HarnessSkillScriptExecutionTarget,
+import { resolveHarnessSkillsRoot } from "./skills/root.ts";
+import {
+  describeHarnessSkillsRoot,
+  type HarnessAllowedSkillScript,
+  type HarnessSkillScriptExecutionTarget,
 } from "./contracts/skill.ts";
 import {
   digestJsonValue,
@@ -90,12 +116,17 @@ import {
   validateStructuredResultValue,
 } from "./structured-result.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
-import { normalizeCdpOrigin } from "./tools/browser-host-command-policy.ts";
+import { normalizeCdpOrigin } from "./contracts/browser-access.ts";
 import {
   defaultHarnessCredentialStorePath,
   FileHarnessCredentialStore,
   type HarnessCredentialStore,
 } from "./auth/credential-store.ts";
+import {
+  defaultHarnessProviderSettingsPath,
+  FileHarnessProviderSettingsStore,
+  resolveHarnessModelProviderPreference,
+} from "./auth/provider-settings.ts";
 import {
   completeOpenAICodexDeviceAuthorization,
   loginOpenAICodexWithBrowser,
@@ -107,13 +138,31 @@ import {
   type OpenAICodexCredentialResolverLike,
   OpenAICodexResponsesClient,
 } from "./model/openai-codex-responses.ts";
-import type { HarnessModelClient } from "./model/client.ts";
+import type { HarnessModelClient, HarnessModelUsage } from "./model/client.ts";
+import {
+  currentProvenance,
+  type HarnessProvenance,
+  provenanceEntries,
+  provenanceUserAgent,
+  recordProvenanceRunManifest,
+  setCurrentProvenance,
+  setProvenanceCommand,
+} from "./provenance.ts";
+import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
+import { parseInputCellArgument } from "./input-cells.ts";
+import {
+  HarnessControlError,
+  type HarnessControlErrorCode,
+  harnessResumeRefusal,
+} from "./control-errors.ts";
 
-const DEFAULT_MODEL = "gpt-5.6-terra";
+const DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
+  "handle-value-origin",
+  "input-cell",
   "workspace",
   "cwd",
   "focus-root",
@@ -129,7 +178,12 @@ const CLI_STRING_FLAGS = [
   "resume-run",
   "model",
   "model-provider",
+  "reasoning-effort",
+  "compact-threshold",
+  "prompt-cache-mode",
   "skills-root",
+  "docs-corpus-root",
+  "skills-registry-url",
   "skill",
   "skill-script-execution-target",
   "gateway-base-url",
@@ -147,6 +201,16 @@ const CLI_STRING_FLAGS = [
   "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
+  "loom-authoring-config",
+  "fabric-api-url",
+  "fabric-identity",
+  "fabric-space",
+  "fabric-cfc-enforcement-mode",
+  "fabric-cfc-flow-labels",
+  "fabric-cfc-posture",
+  "max-confidentiality",
+  "space-db",
+  "pattern-index-url",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -161,24 +225,30 @@ const CLI_BOOLEAN_FLAGS = [
   "print-transcript",
   "stream-events",
   "no-skill-catalog",
+  "no-docs-corpus",
+  "no-pattern-index-publish",
 ] as const;
 const CLI_COLLECT_FLAGS = [
   "allow-tool",
+  "docs-corpus-root",
   "allow-skill-script",
   "allow-subagent-profile",
   "skill",
   "image",
   "host-mount",
+  "handle-value-origin",
+  "input-cell",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
 
-export interface CfHarnessCliConfig {
-  workspace: string;
-  cwd?: string;
+/**
+ * What one batch CLI invocation resolves to: the session it describes, plus
+ * what belongs to this surface alone — where the prompt came from, how the
+ * result is printed, which run is being resumed.
+ */
+export interface CfHarnessCliConfig extends HarnessSessionConfig {
   focusRoot?: string;
-  allowedToolIds?: readonly BuiltinToolId[];
-  allowedSubagentProfiles: readonly HarnessSubagentProfile[];
   outputMode: CfHarnessCliOutputMode;
   streamEvents: boolean;
   promptSlotRole: PromptSlotRole;
@@ -186,43 +256,18 @@ export interface CfHarnessCliConfig {
   imageAttachments: readonly HarnessImageAttachment[];
   resumeRun?: string;
   systemPrompt?: string;
-  skillsRoot?: string;
-  skillsRootSandboxPath?: string;
-  skillNames: readonly string[];
-  allowedSkillScripts: readonly HarnessAllowedSkillScript[];
-  skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   skillCatalogEnabled: boolean;
-  model?: string;
   modelProvider?: HarnessModelProviderId;
   gatewayConfigurationExplicit: boolean;
   harnessHome: string;
   gatewayBaseUrl: string;
   gatewayAuthMode: HarnessGatewayAuthMode;
-  artifactRoot: string;
   resultJsonPath?: string;
   structuredResult?: CfHarnessStructuredResultConfig;
   runManifestPath?: string;
-  cfcEnforcementModeOverride?: CfcEnforcementMode;
-  cfcResultDir?: string;
-  cfcInvocationContextDir?: string;
-  browserAccess?: HarnessBrowserAccessLease;
-  maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
-  sandboxImage?: string;
-  sandboxDockerRuntime?: string;
-  fabricMount?: string;
-  hostMounts: readonly CfHarnessHostMountConfig[];
-}
-
-export type CfHarnessHostMountMode = "readonly" | "writable";
-
-export interface CfHarnessHostMountConfig {
-  name: string;
-  hostPath: string;
-  sandboxPath: string;
-  mode: CfHarnessHostMountMode;
 }
 
 export interface CfHarnessStructuredResultConfig {
@@ -253,6 +298,15 @@ export interface CfHarnessCliCapabilities {
     resumeRun: true;
     subscriptionAuth: true;
     modelDiscovery: true;
+    modelUsage: true;
+    promptCacheControls: true;
+    reasoningEffort: true;
+    compactThreshold: true;
+    persistentProviderConfig: true;
+    structuredAuthControl: true;
+    credentialHealth: true;
+    loomLocalOwnerBinding: true;
+    runPattern: true;
   };
 }
 
@@ -260,6 +314,33 @@ export interface CfHarnessCliIO {
   stdout(text: string): void;
   stderr(text: string): void;
 }
+
+export interface CfHarnessHostFailure {
+  type: "cf-harness.host-failure";
+  version: 1;
+  ok: false;
+  error: {
+    code: HarnessControlErrorCode;
+    message: string;
+  };
+}
+
+export const createCfHarnessHostFailure = (
+  error: unknown,
+): CfHarnessHostFailure => {
+  const controlError = error instanceof HarnessControlError
+    ? error
+    : new HarnessControlError(
+      "internal-error",
+      "The local cf-harness host operation failed",
+    );
+  return {
+    type: "cf-harness.host-failure",
+    version: 1,
+    ok: false,
+    error: { code: controlError.code, message: controlError.message },
+  };
+};
 
 export type CfHarnessCliSignal = "SIGINT" | "SIGTERM";
 
@@ -270,6 +351,19 @@ export type CfHarnessCliSignalHandler = (
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
+
+  /** Trusted, fixed binding supplied only by the dedicated local Loom host. */
+  loomLocalHostBinding?: LoomLocalHostBinding;
+
+  fetchFn?: HarnessFetch;
+  structuredHostFailures?: boolean;
+
+  /**
+   * What caused this run, reported on every gateway request it makes.
+   * Resolved from the process when absent.
+   */
+  provenance?: HarnessProvenance;
+
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: (path: string, text: string) => Promise<void>;
@@ -278,6 +372,12 @@ export interface RunCfHarnessCliDependencies {
     options: CreateHarnessPromptLoopOptions,
   ) => Pick<CfHarnessPromptLoop, "runPrompt" | "runTranscript">;
   credentialStore?: HarnessCredentialStore;
+  providerSettingsStore?: Pick<
+    FileHarnessProviderSettingsStore,
+    "inspect" | "initialize" | "set"
+  >;
+  controlSignal?: AbortSignal;
+  loginOpenAICodex?: typeof loginOpenAICodexWithBrowser;
   openAICodexCredentialResolver?: OpenAICodexCredentialResolverLike & {
     ownerKey?: string;
     credentialOwner?: HarnessCredentialOwnerRef;
@@ -294,6 +394,12 @@ export interface RunCfHarnessCliDependencies {
     handler: CfHarnessCliSignalHandler,
   ) => () => void;
   exit?: (code: number) => never | void;
+
+  /**
+   * Replaces the Fabric session the engine would build from `--fabric-*`
+   * configuration. Tests grant well-known handles without a deployed API.
+   */
+  fabricSessionFactory?: HarnessFabricSessionFactory;
 }
 
 const defaultCliIo = (): CfHarnessCliIO => ({
@@ -364,15 +470,29 @@ export const installCfHarnessSignalHandlers = (
 const usage = `Usage: deno run -A src/main.ts [options] [prompt text]
 
 Options:
-  auth login openai-codex [--device]
+  config inspect [--json]       Inspect configured and effective provider
+  config init <provider> [--json]
+                                Initialize provider only when absent
+  config set <provider> [--json]
+                                Persist the default model provider
+  auth login openai-codex [--device] [--json]
                                 Connect a ChatGPT/Codex subscription
-  auth status openai-codex      Show local connection status without secrets
-  auth logout openai-codex      Remove only cf-harness local credentials
+  auth status openai-codex [--json]
+                                Show local connection status without secrets
+  auth logout openai-codex [--json]
+                                Remove only cf-harness local credentials
   models openai-codex           List models advertised for this subscription
+  whoami [--json]               Show the provenance this host reports to the gateway,
+                                including the principal that identifies its requests
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs | loom_compose | loom_inspect | loom_authoring_context);
+                                run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
+                                search_patterns and record_feedback require --pattern-index-url,
+                                search_skills and acquire_skill require --skills-registry-url,
+                                query_docs requires a resolved documentation corpus,
+                                and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -384,12 +504,21 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
+  --docs-corpus-root <path>     Reference tree query_docs answers out of (repeatable)
+  --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
+  --no-docs-corpus              Resolve no documentation corpus, so query_docs is absent
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
+                                (no default; select one here, through
+                                CF_HARNESS_MODEL_PROVIDER, or with config set)
+  --reasoning-effort <effort>   Provider reasoning effort (for example low, medium, high)
+  --compact-threshold <n>       Token threshold for server-side compaction
+                                (default: 75% of the model input budget; 0 disables)
+  --prompt-cache-mode <mode>    implicit | explicit (GPT-5.6 API gateway only)
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
@@ -404,12 +533,42 @@ Options:
   --browser-access-expires-at <t> Optional lease expiry timestamp
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
+  --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
+  --input-cell <name>=<link>       Pass a cell in the fabric space into the run by reference, announced to the model as a handle under the operator-authored <name>; its shape and labels live on the cell's declared schema (repeatable; requires --fabric-space)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --loom-authoring-config <path> Absolute host-owned JSON file backing Loom tools
+  --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug)
+  --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
+  --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
+                                all three --fabric-* session flags go together
+  --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict for the fabric
+                                session's runtime (raise-only; distinct from
+                                --cfc-enforcement-mode, which governs the harness)
+  --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
+                                the fabric session's runtime
+  --fabric-cfc-posture <name>   max-enforcement: opt the fabric session's runtime
+                                into the named CFC posture bundle (every staged
+                                enforcement dial on); the two dials above still
+                                apply over the bundle
+  --max-confidentiality <json>  Read ceiling for the fabric session's runtime: a
+                                JSON array of confidentiality clauses every
+                                db.query the run issues is bounded by, met with
+                                any the run manifest declares (never widened)
+  --space-db <path>             The space database the run's per-cell label
+                                snapshot reads. Give it when this run's working
+                                directory shares no ancestor with the server's,
+                                which is what the discovery walk looks under
+  --pattern-index-url <url>     Base URL of the pattern index for search_patterns,
+                                record_feedback, and run_pattern's patternId argument;
+                                signs with the fabric session identity, so it needs the
+                                three --fabric-* flags
+  --no-pattern-index-publish    Read the pattern index without contributing to it: a
+                                pattern the model authors and runs is not published back
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -423,10 +582,28 @@ Environment:
   CF_HARNESS_GATEWAY_AUTH_MODE  Default value for --gateway-auth-mode
   CF_HARNESS_MODEL              Default value for --model (ignored on --resume-run)
   CF_HARNESS_MODEL_PROVIDER     Default value for --model-provider
+  CF_HARNESS_REASONING_EFFORT   Default value for --reasoning-effort
+  CF_HARNESS_COMPACT_THRESHOLD  Default value for --compact-threshold
+  CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
+  CF_HARNESS_SKILLS_REGISTRY_URL Default value for --skills-registry-url
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_LOOM_AUTHORING_CONFIG Default host authoring configuration file
+  CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
+  CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
+  CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
+  CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
+  CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
+  CF_HARNESS_FABRIC_CFC_POSTURE Default value for --fabric-cfc-posture
+  CF_HARNESS_SPACE_DB           Default value for --space-db
+  CF_HARNESS_PATTERN_INDEX_URL  Default value for --pattern-index-url
+  CF_HARNESS_PATTERN_INDEX_PUBLISH 0 applies --no-pattern-index-publish
+  CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE 1 offers successful authored
+                                patterns to search immediately (default: recorded only)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
+  CF_HARNESS_CFC_ENFORCEMENT_MODE Default value for --cfc-enforcement-mode (ignored on --resume-run)
+  CF_CFC_MODE                   Fallback for CF_HARNESS_CFC_ENFORCEMENT_MODE
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
   ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
 `;
@@ -478,6 +655,17 @@ const CLI_PARENT_TOOL_IDS = [
   "edit_file",
   "write_file",
   "delegate_task",
+  "describe_handle",
+  "loom_compose",
+  "loom_inspect",
+  "loom_authoring_context",
+  "run_pattern",
+  "assign_slug",
+  "search_patterns",
+  "record_feedback",
+  "search_skills",
+  "acquire_skill",
+  "query_docs",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -513,6 +701,15 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     resumeRun: true,
     subscriptionAuth: true,
     modelDiscovery: true,
+    modelUsage: true,
+    promptCacheControls: true,
+    reasoningEffort: true,
+    compactThreshold: true,
+    persistentProviderConfig: true,
+    structuredAuthControl: true,
+    credentialHealth: true,
+    loomLocalOwnerBinding: true,
+    runPattern: true,
   },
 });
 
@@ -664,6 +861,62 @@ const optionalStringValue = <T extends string>(
   throw new Error(`${flagName} must be one of: ${allowed.join(", ")}`);
 };
 
+/**
+ * The origins `--handle-value-origin` names, normalized. Every occurrence must
+ * be a well-formed http(s) origin; anything else is refused at parse rather
+ * than turning into a destination check that silently never matches. An empty
+ * list is the default and means no handle may be materialized anywhere.
+ */
+const parseHandleValueOrigins = (
+  raw: string | readonly string[] | undefined,
+): readonly string[] => {
+  const values = raw === undefined
+    ? []
+    : (typeof raw === "string" ? [raw] : raw);
+  const origins: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    const origin = httpOriginOf(trimmed);
+    if (origin === undefined || origin !== trimmed.replace(/\/+$/, "")) {
+      throw new Error(
+        `--handle-value-origin must be an http(s) origin such as https://example.com, got \`${trimmed}\``,
+      );
+    }
+    origins.push(origin);
+  }
+  return uniqueStrings(origins);
+};
+
+/**
+ * The input cells `--input-cell` names. Grammar defects are refused at
+ * parse: an input cell is explicit operator configuration, and a run must
+ * not start without what it asked for. No shape is stated here — a cell's
+ * schema and labels live on its declaration in the fabric. A reference is
+ * held to the handle-table grammar here; whether it names the session's own
+ * space is checked at mint time, where the space is known.
+ */
+const parseInputCells = (
+  raw: string | readonly string[] | undefined,
+): readonly HarnessInputCellSpec[] => {
+  const values = raw === undefined
+    ? []
+    : (typeof raw === "string" ? [raw] : raw);
+  const specs: HarnessInputCellSpec[] = [];
+  const names = new Set<string>();
+  for (const value of values) {
+    const parsed = parseInputCellArgument(value);
+    // Refused here, at parse, so the defect is classified as the invalid
+    // request it is and no model client, session, or run setup is reached;
+    // `mintInputCellHandles` keeps its own check for non-CLI callers.
+    if (names.has(parsed.name)) {
+      throw new Error(`--input-cell names \`${parsed.name}\` twice`);
+    }
+    names.add(parsed.name);
+    specs.push({ name: parsed.name, ref: parsed.ref });
+  }
+  return specs;
+};
+
 const parseBrowserAccessLease = (
   args: ReturnType<typeof parseArgs>,
 ): HarnessBrowserAccessLease | undefined => {
@@ -725,7 +978,8 @@ const parseBrowserAccessLease = (
   };
 };
 
-const parseSkillNames = (
+/** The distinct non-empty values of a repeatable option. */
+const parseRepeatedValues = (
   input: string | readonly string[] | undefined,
 ): readonly string[] => {
   if (input === undefined) {
@@ -745,127 +999,6 @@ interface CfHarnessAllowedHostRoot {
   readOnly: boolean;
   name?: string;
 }
-
-const HOST_MOUNT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-const normalizeSandboxMountPath = (path: string, label: string): string => {
-  const normalized = normalizeSandboxPath(path);
-  if (!isAbsoluteSandboxPath(normalized) || normalized === "/") {
-    throw new Error(`${label} must be an absolute non-root sandbox path`);
-  }
-  return normalized.length > 1 && normalized.endsWith("/")
-    ? normalized.slice(0, -1)
-    : normalized;
-};
-
-const parseHostMountSpecParts = (
-  spec: string,
-): Record<string, string> => {
-  const parts: Record<string, string> = {};
-  for (const segment of spec.split(",")) {
-    const trimmed = segment.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    const index = trimmed.indexOf("=");
-    if (index <= 0) {
-      throw new Error(
-        "--host-mount entries must use key=value comma-separated fields",
-      );
-    }
-    const key = trimmed.slice(0, index).trim();
-    const value = trimmed.slice(index + 1).trim();
-    if (key.length === 0 || value.length === 0) {
-      throw new Error("--host-mount fields require non-empty keys and values");
-    }
-    if (parts[key] !== undefined) {
-      throw new Error(`--host-mount field repeated: ${key}`);
-    }
-    parts[key] = value;
-  }
-  return parts;
-};
-
-const realPathIfDirectory = async (
-  path: string,
-  label: string,
-): Promise<string> => {
-  let realPath: string;
-  try {
-    realPath = await Deno.realPath(path);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      throw new Error(`${label} must exist: ${path}`);
-    }
-    throw error;
-  }
-  const stat = await Deno.stat(realPath);
-  if (!stat.isDirectory) {
-    throw new Error(`${label} must be a directory: ${path}`);
-  }
-  if (realPath === dirname(realPath)) {
-    throw new Error(`${label} must not be the filesystem root`);
-  }
-  return realPath;
-};
-
-const parseHostMountSpec = async (
-  spec: string,
-  cwd: string,
-): Promise<CfHarnessHostMountConfig> => {
-  if (spec.trim().length === 0) {
-    throw new Error("--host-mount requires a non-empty spec");
-  }
-  const parts = parseHostMountSpecParts(spec);
-  const name = parts.name;
-  const source = parts.source;
-  const target = parts.target;
-  const mode = parts.mode ?? "readonly";
-  if (name === undefined || source === undefined || target === undefined) {
-    throw new Error(
-      "--host-mount requires name, source, and target fields",
-    );
-  }
-  if (!HOST_MOUNT_NAME_PATTERN.test(name)) {
-    throw new Error(
-      "--host-mount name must start with an alphanumeric character and contain only alphanumerics, dot, underscore, or dash",
-    );
-  }
-  if (mode !== "readonly" && mode !== "writable") {
-    throw new Error("--host-mount mode must be readonly or writable");
-  }
-  return {
-    name,
-    hostPath: await realPathIfDirectory(
-      isAbsolute(source) ? resolve(source) : resolve(cwd, source),
-      "--host-mount source",
-    ),
-    sandboxPath: normalizeSandboxMountPath(target, "--host-mount target"),
-    mode,
-  };
-};
-
-const parseHostMountSpecs = async (
-  input: string | readonly string[] | undefined,
-  cwd: string,
-): Promise<readonly CfHarnessHostMountConfig[]> => {
-  const specs = input === undefined
-    ? []
-    : Array.isArray(input)
-    ? input
-    : [input];
-  const mounts = await Promise.all(
-    specs.map((spec) => parseHostMountSpec(spec, cwd)),
-  );
-  const names = new Set<string>();
-  for (const mount of mounts) {
-    if (names.has(mount.name)) {
-      throw new Error(`--host-mount name repeated: ${mount.name}`);
-    }
-    names.add(mount.name);
-  }
-  return mounts;
-};
 
 const resolveHostPathThroughNearestRealParent = (hostPath: string): string => {
   const suffix: string[] = [];
@@ -1101,7 +1234,10 @@ const parseStructuredResultConfig = async (
 
 export const parseCfHarnessCliArgs = async (
   argv: readonly string[],
-  deps: Pick<RunCfHarnessCliDependencies, "cwd" | "env" | "readTextFile"> = {},
+  deps: Pick<
+    RunCfHarnessCliDependencies,
+    "cwd" | "env" | "readTextFile" | "providerSettingsStore"
+  > = {},
 ): Promise<CfHarnessCliConfig | { help: true }> => {
   const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
   const args = parseArgs([...normalizedArgv], {
@@ -1140,7 +1276,7 @@ export const parseCfHarnessCliArgs = async (
   const focusRoot = typeof args["focus-root"] === "string"
     ? resolve(workspace, args["focus-root"])
     : undefined;
-  const skillsRoot = typeof args["skills-root"] === "string"
+  const configuredSkillsRoot = typeof args["skills-root"] === "string"
     ? resolvePathWithinAllowedHostRoots(
       allowedHostRoots,
       workspace,
@@ -1148,15 +1284,50 @@ export const parseCfHarnessCliArgs = async (
       "--skills-root",
     ).hostPath
     : undefined;
-  const skillsRootSandboxPath = skillsRoot !== undefined
+  // The named tree is addressed inside the sandbox because it was resolved
+  // against the roots the sandbox mounts. The checkout's own tree was not: it
+  // is read on the host, where the registry scan runs, and a tool that needs
+  // the sandbox path — a skill script — still needs the flag.
+  const skillsRootSandboxPath = configuredSkillsRoot !== undefined
     ? resolvePathWithinAllowedHostRoots(
       allowedHostRoots,
       workspace,
-      skillsRoot,
+      configuredSkillsRoot,
       "--skills-root",
     ).sandboxPath
     : undefined;
-  const skillNames = parseSkillNames(
+  // Naming no skills tree is not the same as wanting none: a run with no
+  // registry gives a `pattern-author` child no authoring skill at all, which
+  // is not what an operator who passed no flag asked for. The default is the
+  // checkout the harness runs out of, as the documentation corpus resolves its
+  // own.
+  const skillsRootRecord = resolveHarnessSkillsRoot(configuredSkillsRoot);
+  const skillsRoot = skillsRootRecord?.hostPath;
+  // Naming no root is not the same as wanting none: the default comes from the
+  // checkout the harness runs out of, applied where every surface resolves its
+  // configuration, so a console started with no documentation flag is not
+  // documentation-blind.
+  const configuredDocsCorpusRoots = parseRepeatedValues(
+    args["docs-corpus-root"] as string | readonly string[] | undefined,
+  ).map((root) => resolve(workspace, root));
+  // `--no-docs-corpus` wins over a named root: an operator who asked for no
+  // corpus and also named one has said two things, and the safe reading of the
+  // pair is the one that reaches for less documentation rather than more.
+  const docsCorpus: HarnessDocsCorpusRecord | undefined =
+    args["no-docs-corpus"] === true
+      ? {
+        type: "cf-harness.docs-corpus-record",
+        source: "configured",
+        roots: [],
+      }
+      : configuredDocsCorpusRoots.length === 0
+      ? undefined
+      : {
+        type: "cf-harness.docs-corpus-record",
+        source: "configured",
+        roots: configuredDocsCorpusRoots,
+      };
+  const skillNames = parseRepeatedValues(
     args.skill as string | readonly string[] | undefined,
   );
   if (skillNames.length > 0 && skillsRoot === undefined) {
@@ -1165,7 +1336,10 @@ export const parseCfHarnessCliArgs = async (
   const allowedSkillScripts = parseAllowedSkillScripts(
     args["allow-skill-script"] as string | readonly string[] | undefined,
   );
-  if (allowedSkillScripts.length > 0 && skillsRoot === undefined) {
+  if (allowedSkillScripts.length > 0 && configuredSkillsRoot === undefined) {
+    // A skill script runs in the sandbox and is addressed by the sandbox path
+    // only a named tree has, so this one asks for the flag rather than for a
+    // tree.
     throw new Error("--allow-skill-script requires --skills-root");
   }
   const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
@@ -1186,6 +1360,9 @@ export const parseCfHarnessCliArgs = async (
     ),
   );
   const browserAccess = parseBrowserAccessLease(args);
+  const handleValueOrigins = parseHandleValueOrigins(
+    args["handle-value-origin"] as string | readonly string[] | undefined,
+  );
   const outputMode = parseCliOutputMode(
     typeof args["output-mode"] === "string" ? args["output-mode"] : undefined,
   );
@@ -1220,10 +1397,10 @@ export const parseCfHarnessCliArgs = async (
   if (resumeRun !== undefined && imagePaths.length > 0) {
     throw new Error("--image is not supported with --resume-run");
   }
-  if (skillsRoot !== undefined) {
+  if (configuredSkillsRoot !== undefined) {
     await assertSkillsRootRealPathWithinAllowedHostRoots(
       allowedHostRoots,
-      skillsRoot,
+      configuredSkillsRoot,
     );
   }
   const artifactRoot = resolve(
@@ -1249,12 +1426,46 @@ export const parseCfHarnessCliArgs = async (
       ),
       CF_HARNESS_MODEL: Deno.env.get("CF_HARNESS_MODEL"),
       CF_HARNESS_MODEL_PROVIDER: Deno.env.get("CF_HARNESS_MODEL_PROVIDER"),
+      CF_HARNESS_REASONING_EFFORT: Deno.env.get(
+        "CF_HARNESS_REASONING_EFFORT",
+      ),
+      CF_HARNESS_PROMPT_CACHE_MODE: Deno.env.get(
+        "CF_HARNESS_PROMPT_CACHE_MODE",
+      ),
+      CF_HARNESS_COMPACT_THRESHOLD: Deno.env.get(
+        "CF_HARNESS_COMPACT_THRESHOLD",
+      ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+      CF_HARNESS_SKILLS_REGISTRY_URL: Deno.env.get(
+        "CF_HARNESS_SKILLS_REGISTRY_URL",
+      ),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
       ),
       CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
+      CF_HARNESS_FABRIC_API_URL: Deno.env.get("CF_HARNESS_FABRIC_API_URL"),
+      CF_HARNESS_FABRIC_IDENTITY: Deno.env.get("CF_HARNESS_FABRIC_IDENTITY"),
+      CF_HARNESS_FABRIC_SPACE: Deno.env.get("CF_HARNESS_FABRIC_SPACE"),
+      CF_HARNESS_SPACE_DB: Deno.env.get("CF_HARNESS_SPACE_DB"),
+      CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
+      ),
+      CF_HARNESS_FABRIC_CFC_FLOW_LABELS: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
+      ),
+      CF_HARNESS_FABRIC_CFC_POSTURE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_POSTURE",
+      ),
+      CF_HARNESS_PATTERN_INDEX_URL: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_URL",
+      ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH",
+      ),
+      CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: Deno.env.get(
+        "CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1278,15 +1489,71 @@ export const parseCfHarnessCliArgs = async (
     throw new Error("gateway auth mode must be one of bearer, none");
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
-  const rawModelProvider = typeof args["model-provider"] === "string"
+  const harnessHome = resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
+  const rawExplicitModelProvider = typeof args["model-provider"] === "string"
     ? args["model-provider"]
-    : nonEmptyEnvValue(env.CF_HARNESS_MODEL_PROVIDER);
-  const modelProvider = parseModelProvider(rawModelProvider);
-  if (rawModelProvider !== undefined && modelProvider === undefined) {
+    : undefined;
+  const rawEnvironmentModelProvider = nonEmptyEnvValue(
+    env.CF_HARNESS_MODEL_PROVIDER,
+  );
+  const explicitModelProvider = parseModelProvider(rawExplicitModelProvider);
+  const environmentModelProvider = parseModelProvider(
+    rawEnvironmentModelProvider,
+  );
+  if (
+    (rawExplicitModelProvider !== undefined &&
+      explicitModelProvider === undefined) ||
+    (rawExplicitModelProvider === undefined &&
+      rawEnvironmentModelProvider !== undefined &&
+      environmentModelProvider === undefined)
+  ) {
     throw new Error(
       "model provider must be one of openai-compatible-gateway, openai-codex",
     );
   }
+  const modelProvider = explicitModelProvider ?? environmentModelProvider;
+  const reasoningEffort = typeof args["reasoning-effort"] === "string"
+    ? nonEmptyEnvValue(args["reasoning-effort"])
+    : nonEmptyEnvValue(env.CF_HARNESS_REASONING_EFFORT);
+  if (
+    args["reasoning-effort"] !== undefined &&
+    reasoningEffort === undefined
+  ) {
+    throw new Error("--reasoning-effort requires a non-empty value");
+  }
+  // 0 is meaningful (disables compaction), so an explicit 0 must survive.
+  const rawCompactThreshold = typeof args["compact-threshold"] === "string"
+    ? args["compact-threshold"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_COMPACT_THRESHOLD);
+  let compactThreshold: number | undefined;
+  if (rawCompactThreshold !== undefined && rawCompactThreshold !== "") {
+    const parsedThreshold = Number(rawCompactThreshold);
+    if (!Number.isSafeInteger(parsedThreshold) || parsedThreshold < 0) {
+      throw new Error(
+        "--compact-threshold requires a non-negative integer token count",
+      );
+    }
+    compactThreshold = parsedThreshold;
+  } else if (args["compact-threshold"] !== undefined) {
+    // A bare flag lands here, and so does a value the parser read as another
+    // flag: `--compact-threshold -5` leaves the option set with no string.
+    // Name the requirement, and point at the form that survives parsing.
+    throw new Error(
+      "--compact-threshold requires a non-negative integer token count; " +
+        "pass values the parser would read as a flag as " +
+        "--compact-threshold=<n>",
+    );
+  }
+  const promptCacheMode = optionalStringValue(
+    typeof args["prompt-cache-mode"] === "string"
+      ? args["prompt-cache-mode"].trim()
+      : nonEmptyEnvValue(env.CF_HARNESS_PROMPT_CACHE_MODE),
+    ["implicit", "explicit"] as const,
+    "prompt cache mode",
+  );
   const gatewayConfigurationExplicit = args["gateway-base-url"] !== undefined ||
     args["gateway-auth-mode"] !== undefined ||
     nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_BASE_URL) !== undefined ||
@@ -1296,11 +1563,22 @@ export const parseCfHarnessCliArgs = async (
       "gateway URL/auth options cannot be used with --model-provider openai-codex",
     );
   }
-  const harnessHome = resolve(
-    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
-      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
-  );
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const loomAuthoring = await readLoomAuthoringConfig(
+    typeof args["loom-authoring-config"] === "string"
+      ? args["loom-authoring-config"]
+      : env.CF_HARNESS_LOOM_AUTHORING_CONFIG,
+    readTextFile,
+  );
+  const inputCells = parseInputCells(
+    args["input-cell"] as string | readonly string[] | undefined,
+  );
+  // A resumed run replays the input cells its run state recorded; a new
+  // one on resume would be silently ignored, so it is refused like --skill
+  // and --image are.
+  if (resumeRun !== undefined && inputCells.length > 0) {
+    throw new Error("--input-cell is not supported with --resume-run");
+  }
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
     workspace,
@@ -1345,8 +1623,15 @@ export const parseCfHarnessCliArgs = async (
   const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
     ? args["cfc-enforcement-mode"]
     : undefined;
-  const envCfcMode = nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
-    nonEmptyEnvValue(env.CF_CFC_MODE);
+  // The environment forms name a fleet's posture for the runs it starts, and
+  // a resume is not one of those: its mode is already recorded, and the run
+  // enforces at the recorded mode whatever the environment says. Reading them
+  // on a resume would state a dial nobody typed, which a run recorded at
+  // another mode then refuses. `CF_HARNESS_MODEL` is read the same way.
+  const envCfcMode = resumeRun === undefined
+    ? nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
+      nonEmptyEnvValue(env.CF_CFC_MODE)
+    : undefined;
   const cfcEnforcementModeOverride = parseCfcEnforcementMode(
     explicitCfcMode ?? envCfcMode,
   );
@@ -1379,6 +1664,113 @@ export const parseCfHarnessCliArgs = async (
   const fabricMount = rawFabricMount !== undefined
     ? resolve(cwd, rawFabricMount)
     : undefined;
+  const fabricSession = resolveHarnessFabricSessionConfig(args, env, cwd);
+  const rawSpaceDb = typeof args["space-db"] === "string"
+    ? args["space-db"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SPACE_DB);
+  if (rawSpaceDb === "") {
+    throw new Error("--space-db requires a non-empty value");
+  }
+  if (rawSpaceDb !== undefined && fabricSession === undefined) {
+    // The snapshot it points at is taken over the cells of a fabric session,
+    // so without one there is nothing for the database to be read for, and a
+    // path accepted here would silently do nothing all run.
+    throw new Error(
+      "--space-db names the database the fabric session's labels are read from and needs --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
+  }
+  const spaceDbPath = rawSpaceDb === undefined
+    ? undefined
+    : resolve(cwd, rawSpaceDb);
+  const rawPatternIndexUrl = typeof args["pattern-index-url"] === "string"
+    ? args["pattern-index-url"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_URL);
+  if (rawPatternIndexUrl === "") {
+    throw new Error("--pattern-index-url requires a non-empty value");
+  }
+  let patternIndex: HarnessPatternIndexConfig | undefined;
+  if (rawPatternIndexUrl !== undefined) {
+    try {
+      new URL(rawPatternIndexUrl);
+    } catch {
+      throw new Error(
+        `--pattern-index-url must be a valid URL: ${rawPatternIndexUrl}`,
+      );
+    }
+    if (fabricSession === undefined) {
+      // Index requests carry the fabric session's identity, and a pattern
+      // taken from the index runs in the session's space.
+      throw new Error(
+        "--pattern-index-url needs a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
+      );
+    }
+    // Publishing is on unless the operator turns it off, on the flag or in
+    // the environment; `0` is the only value the environment disables on, so
+    // an unset or unrecognized value leaves a run publishing.
+    const publish = args["no-pattern-index-publish"] !== true &&
+      nonEmptyEnvValue(env.CF_HARNESS_PATTERN_INDEX_PUBLISH) !== "0";
+    const publishDiscoverable = nonEmptyEnvValue(
+      env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE,
+    ) === "1";
+    patternIndex = {
+      baseUrl: rawPatternIndexUrl,
+      ...(publish ? {} : { publish: false }),
+      ...(publishDiscoverable ? { publishDiscoverable: true } : {}),
+    };
+  }
+  const rawSkillsRegistryUrl = typeof args["skills-registry-url"] === "string"
+    ? args["skills-registry-url"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_SKILLS_REGISTRY_URL);
+  if (rawSkillsRegistryUrl === "") {
+    throw new Error("--skills-registry-url requires a non-empty value");
+  }
+  let skillsSh: HarnessSkillsShConfig | undefined;
+  if (rawSkillsRegistryUrl !== undefined) {
+    try {
+      new URL(rawSkillsRegistryUrl);
+    } catch {
+      throw new Error(
+        `--skills-registry-url must be a valid URL: ${rawSkillsRegistryUrl}`,
+      );
+    }
+    skillsSh = { baseUrl: rawSkillsRegistryUrl };
+  }
+  // An allowlisted fabric-session tool with no session to run it against is
+  // a configuration contradiction, surfaced here rather than as a tool that
+  // is silently absent from the run.
+  const sessionTool = (["run_pattern", "assign_slug", "acquire_skill"] as const)
+    .find(
+      (toolId) => allowedToolIds?.includes(toolId) === true,
+    );
+  if (sessionTool !== undefined && fabricSession === undefined) {
+    throw new Error(
+      `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
+    );
+  }
+  const indexTool = (["search_patterns", "record_feedback"] as const).find(
+    (toolId) => allowedToolIds?.includes(toolId) === true,
+  );
+  if (indexTool !== undefined && patternIndex === undefined) {
+    throw new Error(
+      `--allow-tool ${indexTool} requires a pattern index; missing --pattern-index-url`,
+    );
+  }
+  if (
+    allowedToolIds?.includes("search_skills") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool search_skills requires a skills registry; missing --skills-registry-url",
+    );
+  }
+  if (
+    allowedToolIds?.includes("acquire_skill") === true &&
+    skillsSh === undefined
+  ) {
+    throw new Error(
+      "--allow-tool acquire_skill requires a skills registry; missing --skills-registry-url",
+    );
+  }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
     ? "CF_HARNESS_API_KEY"
@@ -1401,6 +1793,8 @@ export const parseCfHarnessCliArgs = async (
       ? { systemPrompt: args["system-prompt"] }
       : {}),
     ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+    ...(skillsRootRecord !== undefined ? { skillsRootRecord } : {}),
+    ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
     allowedSkillScripts,
@@ -1412,6 +1806,9 @@ export const parseCfHarnessCliArgs = async (
       ? { model: nonEmptyEnvValue(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL }
       : {}),
     ...(modelProvider !== undefined ? { modelProvider } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(compactThreshold !== undefined ? { compactThreshold } : {}),
+    ...(promptCacheMode !== undefined ? { promptCacheMode } : {}),
     gatewayConfigurationExplicit,
     harnessHome,
     gatewayBaseUrl,
@@ -1428,6 +1825,12 @@ export const parseCfHarnessCliArgs = async (
       ? { cfcInvocationContextDir }
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
+    handleValueOrigins,
+    inputCells,
+    // A pattern reference is attached per task, and this surface takes one
+    // prompt: a batch run names an indexed pattern in its prompt or finds it
+    // with search_patterns.
+    patternRefs: [],
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -1440,6 +1843,11 @@ export const parseCfHarnessCliArgs = async (
     ...(sandboxImage !== undefined ? { sandboxImage } : {}),
     ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
+    ...(fabricSession !== undefined ? { fabricSession } : {}),
+    ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
+    ...(patternIndex !== undefined ? { patternIndex } : {}),
+    ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,
   };
 };
@@ -1498,7 +1906,8 @@ const createSelectedModelClient = async (options: {
   let resolver = options.deps.openAICodexCredentialResolver;
   if (options.loom) {
     if (resolver === undefined) {
-      throw new Error(
+      throw new HarnessControlError(
+        "provider-auth-required",
         "Loom openai-codex runs require an injected owner-bound credential resolver",
       );
     }
@@ -1523,11 +1932,13 @@ const createSelectedModelClient = async (options: {
       store,
       ownerKey: credentialOwnerKey,
       credentialOwner: options.credentialOwner,
+      fetchFn: options.deps.fetchFn,
     });
   }
   return new OpenAICodexResponsesClient({
     credentialResolver: resolver!,
     credentialOwner: options.credentialOwner,
+    fetchFn: options.deps.fetchFn,
   });
 };
 
@@ -1565,23 +1976,40 @@ const runCfHarnessModelsCommand = async (
   return 0;
 };
 
-const createAdditionalMountConfigs = (
-  config: Pick<CfHarnessCliConfig, "fabricMount" | "hostMounts">,
-): readonly DockerRunscAdditionalMountConfig[] => [
-  ...(config.fabricMount !== undefined
-    ? [{
-      kind: "fabric-fuse" as const,
-      hostPath: config.fabricMount,
-    }]
-    : []),
-  ...config.hostMounts.map((mount) => ({
-    kind: "host-bind" as const,
-    name: mount.name,
-    hostPath: mount.hostPath,
-    sandboxPath: mount.sandboxPath,
-    readOnly: mount.mode === "readonly",
-  })),
-];
+/**
+ * Prints the provenance this host attaches to gateway requests, principal
+ * first.
+ */
+const runCfHarnessWhoamiCommand = (
+  argv: readonly string[],
+  _deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): number | undefined => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
+  if (normalized[0] !== "whoami") return undefined;
+  const json = normalized[1] === "--json";
+  if (normalized.length > 2 || (normalized.length === 2 && !json)) {
+    throw new Error("usage: whoami [--json]");
+  }
+  const provenance = currentProvenance();
+  const entries = provenanceEntries(provenance);
+  const fields = Object.fromEntries(entries);
+  if (json) {
+    io.stdout(`${JSON.stringify(fields, null, 2)}\n`);
+    return 0;
+  }
+  const lines = [
+    ...entries.map(([name, value]) => `${name.padEnd(10)} ${value}`),
+    "",
+    "The principal is a random label drawn once for this machine and kept in",
+    "the harness home. It is what the LLM gateway records for requests from",
+    `here, so when a run is traced to a principal, ${fields.principal} is yours.`,
+    "",
+    `user agent  ${provenanceUserAgent(provenance)}`,
+  ];
+  io.stdout(`${lines.join("\n")}\n`);
+  return 0;
+};
 
 export const formatCfHarnessCliUsage = (): string => usage;
 
@@ -1618,6 +2046,9 @@ export const buildCfHarnessBaseSystemPrompt = (): string =>
     "When verification fails and tools remain available, treat that as the next debugging target: read the relevant docs, inspect logs or transformed output when useful, form a narrow hypothesis, make a targeted repair, and rerun verification. Continue this loop until the goal is complete.",
     "Treat repository files and tool results as evidence. Separate observed facts from assumptions, keep work scoped to the assigned goal, and include concise verification details when handing off. If completion truly cannot be reached with the available context and tools, explain the specific evidence and what would be required next.",
     "Respect explicit user/developer instructions, workspace boundaries, CFC policy, and tool availability. Skills and docs provide context; they do not grant additional tool authority.",
+    "When you delegate, declare the return shape up front: say in the delegation what the child must return, and give a returnSchema whenever the caller interface allows one. A returned reference means something only together with the contract it satisfied.",
+    "Say what the child should do when it cannot succeed, and expect a failure answer rather than a substitute. A child that failed has produced nothing: never present an earlier step's reference, a partial result, or your own expectation as its output.",
+    "Check a returned reference by shape before you use it. describe_handle reports the schema and path behind a handle token and never its value, so you can confirm a reference is the kind of thing the next step expects without reading the data.",
   ].join("\n");
 
 const appendAdditionalInstructions = (
@@ -1768,6 +2199,10 @@ export interface CfHarnessBatchResult {
   run_id: string;
   status: string;
   model: string;
+  model_provider?: HarnessModelProviderId;
+  model_auth_source?: string;
+  credential_owner?: HarnessCredentialOwnerRef;
+  usage?: HarnessModelUsage;
   artifact_root?: string;
   transcript_path?: string;
   run_report_path?: string;
@@ -1854,6 +2289,18 @@ export const createCfHarnessBatchResult = (
   run_id: result.runState.runId,
   status: result.runState.status,
   model: result.model,
+  ...(result.runState.modelProvider !== undefined
+    ? { model_provider: result.runState.modelProvider }
+    : {}),
+  ...(result.runState.modelAuthSource !== undefined
+    ? { model_auth_source: result.runState.modelAuthSource }
+    : {}),
+  ...(result.runState.credentialOwner !== undefined
+    ? { credential_owner: structuredClone(result.runState.credentialOwner) }
+    : {}),
+  ...((result.totalUsage ?? result.usage) !== undefined
+    ? { usage: result.totalUsage ?? result.usage }
+    : {}),
   ...(result.runState.artifactRoot !== undefined
     ? { artifact_root: result.runState.artifactRoot }
     : {}),
@@ -1894,10 +2341,24 @@ const summarizeToolCallArguments = (
     const parsed = JSON.parse(rawArguments) as Record<string, unknown>;
     switch (toolName) {
       case "bash":
-      case "bash-no-sandbox":
         return typeof parsed.command === "string"
           ? `command=${JSON.stringify(parsed.command)}`
           : undefined;
+      case "browser": {
+        const action = typeof parsed.action === "string"
+          ? `action=${JSON.stringify(parsed.action)}`
+          : undefined;
+        const ref = typeof parsed.ref === "string"
+          ? `ref=${JSON.stringify(parsed.ref)}`
+          : undefined;
+        const url = typeof parsed.url === "string"
+          ? `url=${JSON.stringify(parsed.url)}`
+          : undefined;
+        const joined = [action, ref, url].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
       case "read_file":
         return typeof parsed.path === "string"
           ? `path=${JSON.stringify(parsed.path)}`
@@ -1957,8 +2418,66 @@ const summarizeToolCallArguments = (
         )
           .join(" ");
       }
+      case "search_patterns": {
+        const tags = Array.isArray(parsed.tags)
+          ? `tags=${JSON.stringify(parsed.tags)}`
+          : undefined;
+        const text = typeof parsed.text === "string"
+          ? `text=${JSON.stringify(parsed.text)}`
+          : undefined;
+        const joined = [tags, text].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "search_skills": {
+        const query = typeof parsed.query === "string"
+          ? `query=${JSON.stringify(parsed.query)}`
+          : undefined;
+        const owner = typeof parsed.owner === "string"
+          ? `owner=${JSON.stringify(parsed.owner)}`
+          : undefined;
+        const limit = typeof parsed.limit === "number"
+          ? `limit=${parsed.limit}`
+          : undefined;
+        const joined = [query, owner, limit].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "acquire_skill":
+        return typeof parsed.id === "string"
+          ? `id=${JSON.stringify(parsed.id)}`
+          : undefined;
+      case "query_docs":
+        return typeof parsed.question === "string"
+          ? `question=${JSON.stringify(parsed.question)}`
+          : undefined;
+      case "record_feedback": {
+        // The note is the model's prose about a run and can quote what the
+        // pattern produced, so the line names the verdict and the pattern
+        // and leaves the note to the transcript.
+        const patternId = typeof parsed.patternId === "string"
+          ? `patternId=${JSON.stringify(parsed.patternId)}`
+          : undefined;
+        const verdict = typeof parsed.verdict === "string"
+          ? `verdict=${JSON.stringify(parsed.verdict)}`
+          : undefined;
+        const joined = [patternId, verdict].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
+      case "run_pattern":
+        return typeof parsed.patternId === "string"
+          ? `patternId=${JSON.stringify(parsed.patternId)}`
+          : undefined;
       case "delegate_task":
         return "subagent";
+      case "describe_handle":
+        return typeof parsed.token === "string"
+          ? `token=${JSON.stringify(parsed.token)}`
+          : undefined;
       default:
         return undefined;
     }
@@ -2020,7 +2539,108 @@ export const formatCfHarnessCliResult = (
     `runId: ${result.runState.runId}`,
     `status: ${result.runState.status}`,
     `modelTurns: ${result.modelTurns}`,
+    `cfcMode: ${result.runState.cfcEnforcementMode} (harness)`,
   ];
+  if (result.runState.fabricSessionCfc !== undefined) {
+    const posture = result.runState.fabricSessionCfc;
+    lines.push(
+      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})${
+        posture.posture !== undefined ? `, posture ${posture.posture}` : ""
+      }${
+        posture.readMaxConfidentiality !== undefined
+          ? `, read-ceiling ${posture.readMaxConfidentiality.length} clause(s) onExceed ${
+            posture.readOnExceed ?? "fail"
+          } (${posture.readMaxConfidentialitySource ?? "unknown"})`
+          : ""
+      }`,
+    );
+    if (posture.record !== undefined) {
+      lines.push(...renderCfcPostureReport(posture.record));
+    }
+  }
+  const docsCorpus = result.runState.docsCorpus;
+  lines.push(
+    docsCorpus === undefined || docsCorpus.roots.length === 0
+      ? "docsCorpus: none — query_docs is absent and children cannot look documentation up"
+      : `docsCorpus: ${docsCorpus.source} ${docsCorpus.roots.join(", ")}`,
+  );
+  const skillsRoot = result.runState.skillsRoot;
+  lines.push(
+    skillsRoot === undefined
+      ? "skillsRoot: none — this run scanned no skills tree, so no profile preloads any skill"
+      : `skillsRoot: ${describeHarnessSkillsRoot(skillsRoot)}`,
+  );
+  const docsQueryFailures = result.runState.docsQueryFailures ?? 0;
+  if (docsQueryFailures > 0) {
+    lines.push(
+      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children that ended with no answer`,
+    );
+  }
+  if (
+    result.runState.wellKnownGrants !== undefined &&
+    result.runState.wellKnownGrants.length > 0
+  ) {
+    lines.push(
+      `fabricGrants: ${
+        result.runState.wellKnownGrants.map((grant) =>
+          `${grant.name} ${grant.token}`
+        ).join(", ")
+      }`,
+    );
+  }
+  if (
+    result.runState.inputCells !== undefined &&
+    result.runState.inputCells.length > 0
+  ) {
+    lines.push(
+      `inputCells: ${
+        result.runState.inputCells.map((cell) => `${cell.name} ${cell.token}`)
+          .join(", ")
+      }`,
+    );
+  }
+  const reportedUsage = result.totalUsage ?? result.usage;
+  if (reportedUsage !== undefined) {
+    const usage = reportedUsage;
+    const fields = [
+      usage.inputTokens !== undefined
+        ? `input=${usage.inputTokens}`
+        : undefined,
+      usage.cachedInputTokens !== undefined
+        ? `cachedInput=${usage.cachedInputTokens}`
+        : undefined,
+      usage.cacheWriteTokens !== undefined
+        ? `cacheWrite=${usage.cacheWriteTokens}`
+        : undefined,
+      usage.outputTokens !== undefined
+        ? `output=${usage.outputTokens}`
+        : undefined,
+      usage.reasoningTokens !== undefined
+        ? `reasoning=${usage.reasoningTokens}`
+        : undefined,
+      usage.totalTokens !== undefined
+        ? `total=${usage.totalTokens}`
+        : undefined,
+      usage.inputTokens !== undefined && usage.inputTokens > 0 &&
+        usage.cachedInputTokens !== undefined
+        ? `cacheRead=${
+          (
+            usage.cachedInputTokens / usage.inputTokens * 100
+          ).toFixed(1)
+        }%`
+        : undefined,
+      usage.costUsd !== undefined
+        ? `providerCostUsd=${usage.costUsd.toFixed(6)}`
+        : undefined,
+      usage.estimatedCostUsd !== undefined
+        ? `estimatedCostUsd=${usage.estimatedCostUsd.toFixed(6)}`
+        : undefined,
+      usage.estimateWithheldReason !== undefined
+        ? `estimateWithheld=${usage.estimateWithheldReason}`
+        : undefined,
+    ].filter((value): value is string => value !== undefined);
+    lines.push(`usage: ${fields.join(" ")}`);
+  }
   if (result.runState.artifactRoot !== undefined) {
     lines.push(`artifactRoot: ${result.runState.artifactRoot}`);
   }
@@ -2053,6 +2673,21 @@ const parseCfHarnessCliControlArgs = (
   });
 };
 
+export type CfHarnessCliInformationalControl =
+  | "help"
+  | "describe-capabilities";
+
+/** Classifies global controls that do not inspect provider or auth state. */
+export const cfHarnessCliInformationalControl = (
+  argv: readonly string[],
+): CfHarnessCliInformationalControl | undefined => {
+  if (cfHarnessCliCommandName(argv) !== "prompt") return undefined;
+  const args = parseCfHarnessCliControlArgs(argv);
+  if (args.help) return "help";
+  if (args["describe-capabilities"]) return "describe-capabilities";
+  return undefined;
+};
+
 const defaultOpenUrl = async (url: string): Promise<void> => {
   const command = Deno.build.os === "darwin"
     ? { command: "open", args: [url] }
@@ -2072,6 +2707,197 @@ const defaultOpenUrl = async (url: string): Promise<void> => {
   }
 };
 
+interface HarnessControlResult<T> {
+  type: "cf-harness.control-result";
+  version: 1;
+  ok: true;
+  command: string;
+  result: T;
+}
+
+interface HarnessControlFailure {
+  type: "cf-harness.control-result";
+  version: 1;
+  ok: false;
+  command: string;
+  error: {
+    code: HarnessControlErrorCode;
+    message: string;
+  };
+}
+
+const writeJsonControlResult = <T>(
+  io: CfHarnessCliIO,
+  command: string,
+  result: T,
+): void => {
+  const envelope: HarnessControlResult<T> = {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command,
+    result,
+  };
+  io.stdout(`${JSON.stringify(envelope)}\n`);
+};
+
+const writeJsonControlFailure = (
+  io: CfHarnessCliIO,
+  command: string,
+  error: unknown,
+  signal?: AbortSignal,
+): void => {
+  const controlError = signal?.aborted
+    ? new HarnessControlError(
+      "operation-canceled",
+      "The cf-harness control operation was canceled",
+    )
+    : error instanceof HarnessControlError
+    ? error
+    : error instanceof DOMException && error.name === "AbortError"
+    ? new HarnessControlError(
+      "operation-canceled",
+      "The cf-harness control operation was canceled",
+    )
+    : new HarnessControlError(
+      "provider-unavailable",
+      "The cf-harness control operation failed",
+    );
+  const envelope: HarnessControlFailure = {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: false,
+    command,
+    error: { code: controlError.code, message: controlError.message },
+  };
+  io.stdout(`${JSON.stringify(envelope)}\n`);
+};
+
+const writeJsonControlEvent = <T>(
+  io: CfHarnessCliIO,
+  command: string,
+  event: string,
+  data: T,
+): void => {
+  io.stdout(`${
+    JSON.stringify({
+      type: "cf-harness.control-event",
+      version: 1,
+      command,
+      event,
+      data,
+    })
+  }\n`);
+};
+
+const harnessHomeForControl = (
+  deps: RunCfHarnessCliDependencies,
+): string => {
+  const env = deps.env ?? {
+    CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+    HOME: Deno.env.get("HOME"),
+  };
+  const cwd = resolve(deps.cwd ?? Deno.cwd());
+  return resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
+};
+
+const runCfHarnessConfigCommand = async (
+  argv: readonly string[],
+  deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): Promise<number | undefined> => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : [...argv];
+  if (normalized[0] !== "config") return undefined;
+  const action = normalized[1];
+  const json = normalized.includes("--json");
+  const positional = normalized.slice(2).filter((value) => value !== "--json");
+  const command = action === undefined ? "config" : `config.${action}`;
+  const store = deps.providerSettingsStore ??
+    new FileHarnessProviderSettingsStore({
+      path: defaultHarnessProviderSettingsPath(harnessHomeForControl(deps)),
+    });
+  try {
+    if (
+      (action !== "inspect" && action !== "init" && action !== "set") ||
+      (action === "inspect" ? positional.length !== 0 : positional.length !== 1)
+    ) {
+      throw new HarnessControlError(
+        "invalid-request",
+        "usage: config inspect|init|set [provider] [--json]",
+      );
+    }
+    if (action === "inspect") {
+      const state = await store.inspect();
+      let effectiveProvider: HarnessModelProviderId | undefined;
+      let effectiveSource: "environment" | "persistent" | undefined;
+      const rawEnvironment = nonEmptyEnvValue(
+        deps.env?.CF_HARNESS_MODEL_PROVIDER ??
+          (deps.env === undefined
+            ? Deno.env.get("CF_HARNESS_MODEL_PROVIDER")
+            : undefined),
+      );
+      const environment = parseModelProvider(rawEnvironment);
+      if (rawEnvironment !== undefined && environment === undefined) {
+        throw new HarnessControlError(
+          "invalid-request",
+          "CF_HARNESS_MODEL_PROVIDER must be openai-compatible-gateway or openai-codex",
+        );
+      }
+      if (environment !== undefined) {
+        effectiveProvider = environment;
+        effectiveSource = "environment";
+      } else if (state.state === "configured") {
+        effectiveProvider = state.settings.modelProvider;
+        effectiveSource = "persistent";
+      }
+      const result = {
+        state: state.state,
+        ...(state.state === "configured"
+          ? { configuredProvider: state.settings.modelProvider }
+          : {}),
+        ...(effectiveProvider !== undefined
+          ? { effectiveProvider, effectiveSource }
+          : {}),
+        ...(state.state === "unsupported-version"
+          ? { version: state.version }
+          : {}),
+      };
+      if (json) writeJsonControlResult(io, command, result);
+      else io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+      return state.state === "invalid" || state.state === "unreadable" ||
+          state.state === "unsupported-version"
+        ? 1
+        : 0;
+    }
+    const provider = positional[0];
+    if (!isHarnessModelProviderId(provider)) {
+      throw new HarnessControlError(
+        "provider-configuration-required",
+        "Model provider must be openai-compatible-gateway or openai-codex",
+      );
+    }
+    const result = action === "init"
+      ? await store.initialize(provider, deps.controlSignal)
+      : await store.set(provider, deps.controlSignal);
+    if (json) writeJsonControlResult(io, command, result);
+    else {
+      io.stdout(
+        `model provider: ${result.settings.modelProvider} (${
+          result.changed ? "saved" : "unchanged"
+        })\n`,
+      );
+    }
+    return 0;
+  } catch (error) {
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, deps.controlSignal);
+    return 1;
+  }
+};
+
 const runCfHarnessAuthCommand = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies,
@@ -2081,72 +2907,152 @@ const runCfHarnessAuthCommand = async (
   if (normalized[0] !== "auth") return undefined;
   const action = normalized[1];
   const provider = normalized[2];
-  if (
-    (action !== "login" && action !== "status" && action !== "logout") ||
-    provider !== "openai-codex"
-  ) {
-    throw new Error(
-      "usage: auth login|status|logout openai-codex [--device]",
-    );
-  }
-  const env = deps.env ?? {
-    CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
-    HOME: Deno.env.get("HOME"),
-  };
-  const cwd = resolve(deps.cwd ?? Deno.cwd());
-  const harnessHome = resolve(
-    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
-      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
-  );
+  const json = normalized.includes("--json");
+  const command = action === undefined ? "auth" : `auth.${action}`;
+  const harnessHome = harnessHomeForControl(deps);
   const store = deps.credentialStore ?? new FileHarnessCredentialStore({
     path: defaultHarnessCredentialStorePath(harnessHome),
   });
   const auth = new OpenAICodexAuthService(store, "local");
-  if (action === "status") {
-    const status = await auth.status();
-    io.stdout(
-      status.signedIn
-        ? `openai-codex: connected (${
-          status.expired ? "refresh required" : "ready"
-        })\n`
-        : "openai-codex: not connected\n",
+  const allowedArguments = action === "login"
+    ? new Set(["--device", "--json"])
+    : new Set(["--json"]);
+  if (
+    (action !== "login" && action !== "status" && action !== "logout") ||
+    provider !== "openai-codex" ||
+    normalized.slice(3).some((argument) => !allowedArguments.has(argument))
+  ) {
+    const error = new HarnessControlError(
+      "invalid-request",
+      "usage: auth login|status|logout openai-codex [--device] [--json]",
     );
-    return status.signedIn ? 0 : 1;
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, deps.controlSignal);
+    return 1;
+  }
+  if (action === "status") {
+    try {
+      const status = await auth.status();
+      if (json) writeJsonControlResult(io, command, status);
+      else {
+        io.stdout(
+          status.status === "connected"
+            ? `openai-codex: connected (${
+              status.refreshHealth === "refresh-on-use"
+                ? "refresh required"
+                : "ready"
+            })\n`
+            : status.status === "reconnect-required"
+            ? `openai-codex: reconnect required (${status.reason})\n`
+            : "openai-codex: not connected\n",
+        );
+      }
+      return status.status === "connected" ? 0 : 1;
+    } catch (error) {
+      if (!json) throw error;
+      writeJsonControlFailure(io, command, error, deps.controlSignal);
+      return 1;
+    }
   }
   if (action === "logout") {
-    await auth.logout();
-    io.stdout("openai-codex: disconnected\n");
-    return 0;
+    try {
+      await auth.logout();
+      const result = { providerId: "openai-codex", status: "disconnected" };
+      if (json) writeJsonControlResult(io, command, result);
+      else io.stdout("openai-codex: disconnected\n");
+      return 0;
+    } catch (error) {
+      if (!json) throw error;
+      writeJsonControlFailure(io, command, error, deps.controlSignal);
+      return 1;
+    }
   }
-  if (normalized.slice(3).some((argument) => argument !== "--device")) {
-    throw new Error("auth login openai-codex accepts only --device");
-  }
-  if (normalized.includes("--device")) {
-    const device = await startOpenAICodexDeviceAuthorization();
-    io.stdout(
-      `Open ${device.verificationUrl} and enter code ${device.userCode}\n`,
+  const loginController = new AbortController();
+  const signal = deps.controlSignal ?? loginController.signal;
+  const cleanupSignal = deps.controlSignal !== undefined
+    ? () => {}
+    : (deps.registerSignalHandler ?? defaultRegisterSignalHandler)(
+      ["SIGINT", "SIGTERM"],
+      () =>
+        loginController.abort(new DOMException("login canceled", "AbortError")),
     );
-    const credential = await completeOpenAICodexDeviceAuthorization({ device });
-    await auth.save(credential);
-  } else {
-    await loginOpenAICodexWithBrowser({
-      authService: auth,
-      onAuthorizationUrl: async (url) => {
-        io.stdout(`Open this URL to connect openai-codex:\n${url}\n`);
-        await (deps.openUrl ?? defaultOpenUrl)(url);
-      },
-    });
+  try {
+    if (normalized.includes("--device")) {
+      const device = await startOpenAICodexDeviceAuthorization({ signal });
+      if (json) {
+        writeJsonControlEvent(io, command, "authorization-required", {
+          method: "device",
+          verificationUrl: device.verificationUrl,
+          userCode: device.userCode,
+        });
+      } else {
+        io.stdout(
+          `Open ${device.verificationUrl} and enter code ${device.userCode}\n`,
+        );
+      }
+      const credential = await completeOpenAICodexDeviceAuthorization({
+        device,
+        signal,
+      });
+      await auth.save(credential, signal);
+    } else {
+      await (deps.loginOpenAICodex ?? loginOpenAICodexWithBrowser)({
+        authService: auth,
+        signal,
+        onAuthorizationUrl: async (url) => {
+          if (json) {
+            writeJsonControlEvent(io, command, "authorization-required", {
+              method: "browser",
+              url,
+            });
+          } else {
+            io.stdout(`Open this URL to connect openai-codex:\n${url}\n`);
+          }
+          await (deps.openUrl ?? defaultOpenUrl)(url);
+        },
+      });
+    }
+    const result = {
+      providerId: "openai-codex",
+      status: "connected",
+      refreshHealth: "ready",
+    };
+    if (json) writeJsonControlResult(io, command, result);
+    else io.stdout("openai-codex: connected\n");
+    return 0;
+  } catch (error) {
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, signal);
+    return 1;
+  } finally {
+    cleanupSignal();
   }
-  io.stdout("openai-codex: connected\n");
-  return 0;
+};
+
+/**
+ * Which subcommand is running, drawn from a closed set. Anything unrecognized
+ * reports "prompt", keeping the command line out of the reported provenance.
+ */
+export const cfHarnessCliCommandName = (argv: readonly string[]): string => {
+  const first = argv[0] === "--" ? argv[1] : argv[0];
+  return first === "auth" || first === "config" || first === "models" ||
+      first === "whoami"
+    ? first
+    : "prompt";
 };
 
 export const runCfHarnessCli = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies = {},
 ): Promise<number> => {
+  setCurrentProvenance(deps.provenance);
+  setProvenanceCommand(cfHarnessCliCommandName(argv));
   const io = deps.io ?? defaultCliIo();
   let activeEngine: CfHarnessEngine | undefined;
+  // Set once the argv and the run's recorded binding have both been accepted.
+  // Past that point a fault is infrastructure, not a client error, and a host
+  // keying its retry policy on the reported code needs to tell them apart.
+  let requestAccepted = false;
   let signalCleanup: (() => void) | undefined;
   const activateEngine = (engine: CfHarnessEngine) => {
     activeEngine = engine;
@@ -2156,16 +3062,20 @@ export const runCfHarnessCli = async (
     );
   };
   try {
+    const configResult = await runCfHarnessConfigCommand(argv, deps, io);
+    if (configResult !== undefined) return configResult;
     const authResult = await runCfHarnessAuthCommand(argv, deps, io);
     if (authResult !== undefined) return authResult;
     const modelsResult = await runCfHarnessModelsCommand(argv, deps, io);
     if (modelsResult !== undefined) return modelsResult;
-    const controlArgs = parseCfHarnessCliControlArgs(argv);
-    if (controlArgs.help) {
+    const whoamiResult = runCfHarnessWhoamiCommand(argv, deps, io);
+    if (whoamiResult !== undefined) return whoamiResult;
+    const informationalControl = cfHarnessCliInformationalControl(argv);
+    if (informationalControl === "help") {
       io.stdout(formatCfHarnessCliUsage());
       return 0;
     }
-    if (controlArgs["describe-capabilities"]) {
+    if (informationalControl === "describe-capabilities") {
       io.stdout(
         `${JSON.stringify(createCfHarnessCliCapabilities(), null, 2)}\n`,
       );
@@ -2181,12 +3091,27 @@ export const runCfHarnessCli = async (
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
     const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
-    const runManifest = await readRunManifest(
+    let runManifest = await readRunManifest(
       parsed.runManifestPath,
       readTextFile,
     );
+    if (deps.loomLocalHostBinding !== undefined) {
+      try {
+        runManifest = bindLoomLocalRunManifest(
+          runManifest,
+          deps.loomLocalHostBinding,
+          parsed.model,
+        );
+      } catch (error) {
+        throw new HarnessControlError(
+          "provider-mismatch",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
     const promptSlotBinding = runManifest?.promptSlot ??
       createCliPromptSlotBinding({
         kernelName: "cf-harness",
@@ -2209,36 +3134,30 @@ export const runCfHarnessCli = async (
         }
       }
       : undefined;
-    const additionalMounts = createAdditionalMountConfigs(parsed);
-    const prepareSkillContextMessages = async (
-      engine: CfHarnessEngine,
-    ): Promise<string[]> => {
-      if (parsed.skillsRoot === undefined) {
-        return [];
-      }
-      const registry = await discoverHarnessSkills({
-        skillsRoot: parsed.skillsRoot,
-        sandboxSkillsRoot: parsed.skillsRootSandboxPath,
-      });
-      await engine.persistSkillRegistry(registry);
-      if (parsed.skillNames.length === 0) {
-        return [];
-      }
-      const context = await loadHarnessSkillContext({
-        registry,
-        skillNames: parsed.skillNames,
-        source: "cli-preload",
-        runId: engine.getRunState().runId,
-        activatedAt: engine.getRunState().updatedAt,
-      });
-      await engine.persistSkillActivations(context.activations);
-      return [context.contextText];
-    };
+    const sessionOptions = harnessSessionEngineOptions(parsed);
+    const skillsShSearchClientFactory = parsed.skillsSh !== undefined &&
+        deps.fetchFn !== undefined
+      ? createHarnessSkillsShSearchClientFactory(
+        parsed.skillsSh.baseUrl,
+        deps.fetchFn,
+      )
+      : undefined;
+    const skillsShAcquisitionClientFactory =
+      parsed.skillsSh !== undefined && deps.fetchFn !== undefined
+        ? createHarnessSkillsShAcquisitionClientFactory(deps.fetchFn)
+        : undefined;
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
-      const artifacts = await readRunArtifacts(parsed.resumeRun);
+      const artifacts = await readRunArtifacts(parsed.resumeRun).catch(
+        (error: unknown) => {
+          // Naming a run that is not there is a bad request. A run that is
+          // there and will not read is infrastructure, whatever the argv said.
+          if (!(error instanceof Deno.errors.NotFound)) requestAccepted = true;
+          throw error;
+        },
+      );
       if (artifacts.runState.lineage?.role === "subagent") {
-        throw new Error(
+        throw harnessResumeRefusal(
           `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
         );
       }
@@ -2250,7 +3169,7 @@ export const runCfHarnessCli = async (
         requestedProvider !== undefined &&
         requestedProvider !== recordedProvider
       ) {
-        throw new Error(
+        throw harnessResumeRefusal(
           `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
         );
       }
@@ -2258,8 +3177,8 @@ export const runCfHarnessCli = async (
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
-        throw new Error(
-          "gateway URL/auth options cannot be used with openai-codex",
+        throw harnessResumeRefusal(
+          "gateway URL/auth options cannot be used with openai-codex, which is the provider this run recorded",
         );
       }
       if (
@@ -2270,7 +3189,31 @@ export const runCfHarnessCli = async (
           "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
         );
       }
+      // The documentation a run answered out of is part of what it is. An
+      // operator repeating the flags with different roots is asking for a
+      // different run, so the resume is refused rather than quietly answering
+      // later questions from another tree; omitting them keeps the record.
+      const recordedDocsCorpus = artifacts.runState.docsCorpus;
+      if (
+        parsed.docsCorpus !== undefined && recordedDocsCorpus !== undefined &&
+        !harnessDocsCorpusRecordsEqual(parsed.docsCorpus, recordedDocsCorpus)
+      ) {
+        throw harnessResumeRefusal(
+          `resume docs corpus mismatch: run uses ${
+            describeHarnessDocsCorpus(recordedDocsCorpus)
+          }, requested ${describeHarnessDocsCorpus(parsed.docsCorpus)}`,
+        );
+      }
       const recordedRunManifest = artifacts.runState.runManifest;
+      if (
+        runManifest?.model !== undefined &&
+        artifacts.runState.model !== undefined &&
+        runManifest.model !== artifacts.runState.model
+      ) {
+        throw harnessResumeRefusal(
+          `resume model mismatch: run uses ${artifacts.runState.model}, requested manifest uses ${runManifest.model}`,
+        );
+      }
       const credentialOwner = recordedRunManifest?.credentialOwner ??
         localCredentialOwner(artifacts.runState.credentialOwnerKey ?? "local");
       if (
@@ -2280,37 +3223,47 @@ export const runCfHarnessCli = async (
           credentialOwner,
         )
       ) {
-        throw new Error(
+        throw harnessResumeRefusal(
           "resume credential owner mismatch: requested owner does not match the recorded run",
+        );
+      }
+      // A manifest handed to a resume must agree with the recorded one on
+      // the read ceiling, as it must on the model and the credential owner:
+      // the recorded manifest is what the run resumes under, and a different
+      // ceiling silently set aside would leave the operator believing the
+      // run reads under the one they passed.
+      if (
+        runManifest !== undefined && recordedRunManifest !== undefined &&
+        (!readCeilingsEqual(
+          runManifest.cfc?.maxConfidentiality,
+          recordedRunManifest.cfc?.maxConfidentiality,
+        ) ||
+          runManifest.cfc?.onExceed !== recordedRunManifest.cfc?.onExceed)
+      ) {
+        throw new HarnessControlError(
+          "provider-mismatch",
+          "resume read ceiling mismatch: the requested manifest's " +
+            "cfc.maxConfidentiality or cfc.onExceed does not match the " +
+            "recorded run's",
         );
       }
       const credentialOwnerKey = credentialOwner.ownerKey;
       const effectiveRunManifest = recordedRunManifest ?? runManifest;
+      recordProvenanceRunManifest(effectiveRunManifest);
       const loom = effectiveRunManifest?.source === "loom";
       if (
         modelProvider === "openai-codex" && loom &&
         recordedRunManifest?.credentialOwner === undefined
       ) {
-        throw new Error(
+        throw new HarnessControlError(
+          "provider-auth-required",
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
+      requestAccepted = true;
       const engine = new CfHarnessEngine({
+        ...sessionOptions,
         runState: artifacts.runState,
-        artifactRoot: parsed.artifactRoot,
-        workspaceHostPath: parsed.workspace,
-        ...(parsed.sandboxImage !== undefined
-          ? { sandboxImage: parsed.sandboxImage }
-          : {}),
-        ...(parsed.sandboxDockerRuntime !== undefined
-          ? { sandboxDockerRuntime: parsed.sandboxDockerRuntime }
-          : {}),
-        ...(parsed.cfcResultDir !== undefined
-          ? { cfcResultDir: parsed.cfcResultDir }
-          : {}),
-        ...(parsed.cfcInvocationContextDir !== undefined
-          ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
-          : {}),
         model: parsed.model ?? artifacts.runState.model,
         modelProvider,
         credentialOwnerKey,
@@ -2320,25 +3273,24 @@ export const runCfHarnessCli = async (
             gatewayAuthMode: parsed.gatewayAuthMode,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
           : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
           : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
+        // What the run was asked to do, in the operator's words. A pattern
+        // the run publishes carries it as the request it answers.
+        ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
+        ...(deps.fabricSessionFactory !== undefined
+          ? { fabricSessionFactory: deps.fabricSessionFactory }
           : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
       });
       const modelClient = await createSelectedModelClient({
         provider: modelProvider,
@@ -2349,9 +3301,8 @@ export const runCfHarnessCli = async (
       });
       activateEngine(engine);
       const loop = createPromptLoop({
+        ...sessionOptions,
         engine,
-        workspaceHostPath: parsed.workspace,
-        artifactRoot: parsed.artifactRoot,
         model: parsed.model ?? artifacts.runState.model,
         modelProvider,
         credentialOwnerKey,
@@ -2359,35 +3310,18 @@ export const runCfHarnessCli = async (
           ? {
             gatewayBaseUrl: parsed.gatewayBaseUrl,
             gatewayAuthMode: parsed.gatewayAuthMode,
+            apiKey: parsed.apiKey,
+            apiKeySource: parsed.apiKeySource,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
-          : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
-          : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
-          : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(modelProvider === "openai-compatible-gateway"
-          ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
-          : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
-        maxModelTurns: parsed.maxModelTurns,
-        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
-        ...(parsed.allowedToolIds !== undefined
-          ? { allowedToolIds: parsed.allowedToolIds }
-          : {}),
+        ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
       });
       if (artifacts.transcript === undefined) {
         throw new Error(
@@ -2405,7 +3339,12 @@ export const runCfHarnessCli = async (
     } else {
       const modelProvider = parsed.modelProvider ??
         runManifest?.modelProvider ??
-        "openai-compatible-gateway";
+        (await resolveHarnessModelProviderPreference({
+          store: deps.providerSettingsStore ??
+            new FileHarnessProviderSettingsStore({
+              path: defaultHarnessProviderSettingsPath(parsed.harnessHome),
+            }),
+        })).provider;
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
@@ -2424,14 +3363,17 @@ export const runCfHarnessCli = async (
       const credentialOwner = runManifest?.credentialOwner ??
         localCredentialOwner();
       const credentialOwnerKey = credentialOwner.ownerKey;
+      recordProvenanceRunManifest(runManifest);
       if (
         modelProvider === "openai-codex" && runManifest?.source === "loom" &&
         runManifest.credentialOwner === undefined
       ) {
-        throw new Error(
+        throw new HarnessControlError(
+          "provider-auth-required",
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
+      requestAccepted = true;
       const modelClient = await createSelectedModelClient({
         provider: modelProvider,
         credentialOwner,
@@ -2440,21 +3382,7 @@ export const runCfHarnessCli = async (
         deps,
       });
       const engine = new CfHarnessEngine({
-        workspaceHostPath: parsed.workspace,
-        artifactRoot: parsed.artifactRoot,
-        ...(parsed.sandboxImage !== undefined
-          ? { sandboxImage: parsed.sandboxImage }
-          : {}),
-        ...(parsed.sandboxDockerRuntime !== undefined
-          ? { sandboxDockerRuntime: parsed.sandboxDockerRuntime }
-          : {}),
-        ...(parsed.cfcResultDir !== undefined
-          ? { cfcResultDir: parsed.cfcResultDir }
-          : {}),
-        ...(parsed.cfcInvocationContextDir !== undefined
-          ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
-          : {}),
-        model: parsed.model,
+        ...sessionOptions,
         modelProvider,
         credentialOwnerKey,
         ...(modelProvider === "openai-compatible-gateway"
@@ -2463,65 +3391,54 @@ export const runCfHarnessCli = async (
             gatewayAuthMode: parsed.gatewayAuthMode,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
+        ...(skillsShSearchClientFactory !== undefined
+          ? { skillsShSearchClientFactory }
           : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
+        ...(skillsShAcquisitionClientFactory !== undefined
+          ? { skillsShAcquisitionClientFactory }
           : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
+        // What the run was asked to do, in the operator's words. A pattern
+        // the run publishes carries it as the request it answers.
+        ...(parsed.prompt !== undefined ? { taskText: parsed.prompt } : {}),
+        ...(deps.fabricSessionFactory !== undefined
+          ? { fabricSessionFactory: deps.fabricSessionFactory }
           : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
+        ...sessionOptions,
         engine,
-        workspaceHostPath: parsed.workspace,
-        artifactRoot: parsed.artifactRoot,
-        model: parsed.model,
         modelProvider,
         credentialOwnerKey,
         ...(modelProvider === "openai-compatible-gateway"
           ? {
             gatewayBaseUrl: parsed.gatewayBaseUrl,
             gatewayAuthMode: parsed.gatewayAuthMode,
+            apiKey: parsed.apiKey,
+            apiKeySource: parsed.apiKeySource,
           }
           : {}),
-        ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
-        ...(parsed.skillsRoot !== undefined
-          ? { skillsRoot: parsed.skillsRoot }
-          : {}),
-        ...(parsed.allowedSkillScripts.length > 0
-          ? { allowedSkillScripts: parsed.allowedSkillScripts }
-          : {}),
-        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        ...(modelProvider === "openai-compatible-gateway"
-          ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
-          : {}),
-        ...(modelClient !== undefined ? { modelClient } : {}),
-        cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        maxModelTurns: parsed.maxModelTurns,
-        allowedSubagentProfiles: parsed.allowedSubagentProfiles,
-        ...(parsed.browserAccess !== undefined
-          ? { browserAccess: parsed.browserAccess }
-          : {}),
-        ...(parsed.allowedToolIds !== undefined
-          ? { allowedToolIds: parsed.allowedToolIds }
-          : {}),
+        ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
       });
-      const contextMessages = await prepareSkillContextMessages(engine);
+      const contextMessages = await establishHarnessSessionContext({
+        engine,
+        config: parsed,
+        onGrantsUnavailable: (error) =>
+          io.stderr(
+            `fabric grants: unavailable (${
+              error instanceof Error ? error.message : String(error)
+            })\n`,
+          ),
+      });
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
         imageAttachments: parsed.imageAttachments,
@@ -2573,7 +3490,20 @@ export const runCfHarnessCli = async (
     }
     return 0;
   } catch (error) {
-    io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    const hostError = deps.structuredHostFailures &&
+        !(error instanceof HarnessControlError)
+      ? new HarnessControlError(
+        requestAccepted ? "internal-error" : "invalid-request",
+        requestAccepted
+          ? "The local cf-harness host operation failed"
+          : "The cf-harness request is invalid",
+      )
+      : error;
+    io.stderr(
+      deps.structuredHostFailures
+        ? `${JSON.stringify(createCfHarnessHostFailure(hostError))}\n`
+        : `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     return 1;
   } finally {
     signalCleanup?.();

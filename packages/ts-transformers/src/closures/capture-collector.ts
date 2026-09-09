@@ -25,13 +25,19 @@ export interface CaptureCollectorOptions {
 }
 
 export class CaptureCollector {
+  readonly #checker: ts.TypeChecker;
+  readonly #options: CaptureCollectorOptions;
+
   constructor(
-    private readonly checker: ts.TypeChecker,
-    private readonly options: CaptureCollectorOptions = {},
-  ) {}
+    checker: ts.TypeChecker,
+    options: CaptureCollectorOptions = {},
+  ) {
+    this.#checker = checker;
+    this.#options = options;
+  }
 
   analyze(func: ts.FunctionLikeDeclaration): CaptureAnalysis {
-    const captures = this.collectCaptures(func);
+    const captures = this.#collectCaptures(func);
     const captureTree = groupCapturesByRoot(captures);
     return { captures, captureTree };
   }
@@ -42,7 +48,7 @@ export class CaptureCollector {
     const current = this.analyze(func);
     const original = ts.getOriginalNode(func);
     if (
-      !this.isFunctionLikeDeclaration(original) ||
+      !this.#isFunctionLikeDeclaration(original) ||
       original === func
     ) {
       return current;
@@ -72,7 +78,7 @@ export class CaptureCollector {
    * Detects captured variables in a function using TypeScript's symbol table.
    * Returns all captured expressions (both reactive and non-reactive).
    */
-  private collectCaptures(
+  #collectCaptures(
     func: ts.FunctionLikeDeclaration,
   ): Set<ts.Expression> {
     const captures = new Set<ts.Expression>();
@@ -82,8 +88,8 @@ export class CaptureCollector {
       // Even though they have their own scope for parameters, they still
       // close over variables from outer scopes, and we need to know about
       // all such captures for the lift-applied/handler transformation
-      if (node !== func && this.isFunctionLikeDeclaration(node)) {
-        const nestedCaptures = this.collectCaptures(node);
+      if (node !== func && this.#isFunctionLikeDeclaration(node)) {
+        const nestedCaptures = this.#collectCaptures(node);
         // Filter out captures that are parameters of the current function
         //
         // CRITICAL: We must filter based on root identifiers for property accesses.
@@ -98,7 +104,7 @@ export class CaptureCollector {
         );
 
         for (const capture of nestedCaptures) {
-          if (this.shouldAddNestedCapture(capture, func, funcParams)) {
+          if (this.#shouldAddNestedCapture(capture, func, funcParams)) {
             captures.add(capture);
           }
         }
@@ -115,7 +121,7 @@ export class CaptureCollector {
         const methodTarget = getMethodCallTarget(node);
         if (methodTarget) {
           // Method call on a property access (e.g., state.counter.set())
-          const captured = this.shouldCapturePropertyAccess(
+          const captured = this.#shouldCapturePropertyAccess(
             methodTarget,
             func,
           );
@@ -126,7 +132,7 @@ export class CaptureCollector {
           }
         } else if (!isMethodCall(node)) {
           // Not a method call, capture the property access normally
-          const captured = this.shouldCapturePropertyAccess(node, func);
+          const captured = this.#shouldCapturePropertyAccess(node, func);
           if (captured) {
             captures.add(captured);
             // Don't visit children - we've captured the whole property access chain
@@ -142,7 +148,7 @@ export class CaptureCollector {
 
       // For plain identifiers
       if (ts.isIdentifier(node)) {
-        const captured = this.shouldCaptureIdentifier(node, func);
+        const captured = this.#shouldCaptureIdentifier(node, func);
         if (captured) {
           captures.add(captured);
         }
@@ -170,7 +176,7 @@ export class CaptureCollector {
    * Check if a property access expression should be captured.
    * Returns the expression to capture, or undefined if it shouldn't be captured.
    */
-  private shouldCapturePropertyAccess(
+  #shouldCapturePropertyAccess(
     node: ts.PropertyAccessExpression,
     func: ts.FunctionLikeDeclaration,
   ): ts.PropertyAccessExpression | undefined {
@@ -184,7 +190,7 @@ export class CaptureCollector {
       return undefined;
     }
 
-    const symbol = this.checker.getSymbolAtLocation(root);
+    const symbol = this.#checker.getSymbolAtLocation(root);
     if (!symbol) return undefined;
 
     const declarations = symbol.getDeclarations();
@@ -213,7 +219,7 @@ export class CaptureCollector {
     // Skip function declarations
     if (
       declarations.some((decl: ts.Declaration) =>
-        isFunctionDeclaration(decl, this.checker)
+        isFunctionDeclaration(decl, this.#checker)
       )
     ) {
       return undefined;
@@ -226,7 +232,7 @@ export class CaptureCollector {
     });
 
     if (hasExternalDeclaration) {
-      if (this.options.captureNonModuleExternalPropertyAccesses === false) {
+      if (this.#options.captureNonModuleExternalPropertyAccesses === false) {
         return undefined;
       }
       // Capture the whole property access expression
@@ -240,7 +246,7 @@ export class CaptureCollector {
    * Check if an identifier should be captured.
    * Returns the identifier to capture, or undefined if it shouldn't be captured.
    */
-  private shouldCaptureIdentifier(
+  #shouldCaptureIdentifier(
     node: ts.Identifier,
     func: ts.FunctionLikeDeclaration,
   ): ts.Identifier | undefined {
@@ -276,7 +282,7 @@ export class CaptureCollector {
     if (ts.isShorthandPropertyAssignment(node.parent)) {
       // For shorthand properties, we need to resolve to the actual variable/value being referenced
       // Use the type checker to get the actual symbol of the referenced value
-      const propSymbol = this.checker.getShorthandAssignmentValueSymbol(
+      const propSymbol = this.#checker.getShorthandAssignmentValueSymbol(
         node.parent,
       );
       if (propSymbol) {
@@ -287,7 +293,7 @@ export class CaptureCollector {
         if (allDeclaredInside) {
           return undefined;
         }
-        return this.shouldCaptureExternalIdentifier(node, propDeclarations)
+        return this.#shouldCaptureExternalIdentifier(node, propDeclarations)
           ? node
           : undefined;
       }
@@ -303,7 +309,7 @@ export class CaptureCollector {
       return undefined;
     }
 
-    const symbol = this.checker.getSymbolAtLocation(node);
+    const symbol = this.#checker.getSymbolAtLocation(node);
     if (!symbol) {
       return undefined;
     }
@@ -363,7 +369,7 @@ export class CaptureCollector {
       return undefined;
     }
 
-    if (!this.shouldCaptureExternalIdentifier(node, declarations)) {
+    if (!this.#shouldCaptureExternalIdentifier(node, declarations)) {
       return undefined;
     }
 
@@ -372,13 +378,13 @@ export class CaptureCollector {
     return node;
   }
 
-  private shouldCaptureExternalIdentifier(
+  #shouldCaptureExternalIdentifier(
     node: ts.Identifier,
     declarations: readonly ts.Declaration[],
   ): boolean {
     // Skip function declarations (can't serialize functions)
     const isFunction = declarations.some((decl: ts.Declaration) =>
-      isFunctionDeclaration(decl, this.checker)
+      isFunctionDeclaration(decl, this.#checker)
     );
     if (isFunction) {
       return false;
@@ -398,22 +404,22 @@ export class CaptureCollector {
       isModuleScopedDeclaration(decl)
     );
     if (isModuleScoped) {
-      const predicate = this.options.captureModuleScopedIdentifierWhen;
+      const predicate = this.#options.captureModuleScopedIdentifierWhen;
       if (!predicate) {
         return false;
       }
-      const type = this.checker.getTypeAtLocation(node);
-      return predicate(node, type, this.checker);
+      const type = this.#checker.getTypeAtLocation(node);
+      return predicate(node, type, this.#checker);
     }
 
-    return this.options.captureNonModuleExternalIdentifiers !== false;
+    return this.#options.captureNonModuleExternalIdentifiers !== false;
   }
 
   /**
    * Type guard for function-like declarations (excludes signature declarations).
    * Used to identify nested functions that can have their own captures.
    */
-  private isFunctionLikeDeclaration(
+  #isFunctionLikeDeclaration(
     node: ts.Node,
   ): node is ts.FunctionLikeDeclaration {
     return ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
@@ -422,7 +428,7 @@ export class CaptureCollector {
       ts.isConstructorDeclaration(node);
   }
 
-  private isParameterOrLocalVariable(
+  #isParameterOrLocalVariable(
     identifier: ts.Identifier,
     func: ts.FunctionLikeDeclaration,
     funcParams: Set<string>,
@@ -433,7 +439,7 @@ export class CaptureCollector {
     }
 
     // Check if it's a local variable declared within the function
-    const symbol = this.checker.getSymbolAtLocation(identifier);
+    const symbol = this.#checker.getSymbolAtLocation(identifier);
     if (symbol) {
       const declarations = symbol.getDeclarations() || [];
       for (const decl of declarations) {
@@ -450,13 +456,13 @@ export class CaptureCollector {
    * Determines if a capture from a nested function should be added to the outer function's captures.
    * Filters out captures that are parameters or local variables of the outer function.
    */
-  private shouldAddNestedCapture(
+  #shouldAddNestedCapture(
     capture: ts.Expression,
     outerFunc: ts.FunctionLikeDeclaration,
     funcParams: Set<string>,
   ): boolean {
     if (ts.isIdentifier(capture)) {
-      return !this.isParameterOrLocalVariable(
+      return !this.#isParameterOrLocalVariable(
         capture,
         outerFunc,
         funcParams,
@@ -471,7 +477,7 @@ export class CaptureCollector {
         rootExpr = rootExpr.expression;
       }
       if (ts.isIdentifier(rootExpr)) {
-        return !this.isParameterOrLocalVariable(
+        return !this.#isParameterOrLocalVariable(
           rootExpr,
           outerFunc,
           funcParams,

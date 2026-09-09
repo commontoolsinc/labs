@@ -8,6 +8,7 @@ import {
   resultOf,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -125,7 +126,7 @@ export type ProfileEmbedInput = Record<string, never>;
 
 export type ProfileEmbedOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   // Whether the viewer's profile has resolved (a profile exists). When false the
   // wish fallback (the trusted create surface) is rendered.
   hasProfile: boolean;

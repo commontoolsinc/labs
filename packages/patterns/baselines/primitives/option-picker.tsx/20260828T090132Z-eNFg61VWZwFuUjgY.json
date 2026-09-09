@@ -1,0 +1,95 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "label": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Choose",
+        "description": "Heading shown above the dropdown.",
+        "type": "string"
+      },
+      "options": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The values on offer.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "placeholder": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "None",
+        "description": "Text for the entry that stands for \"nothing picked\".",
+        "type": "string"
+      },
+      "selected": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "The value picked; the empty string while nothing is.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "primitives/option-picker.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "clear": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "hasSelection": {
+        "type": "boolean"
+      },
+      "options": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "select": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "option": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "option"
+        ],
+        "type": "object"
+      },
+      "selected": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "selected",
+      "hasSelection",
+      "options",
+      "select",
+      "clear",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

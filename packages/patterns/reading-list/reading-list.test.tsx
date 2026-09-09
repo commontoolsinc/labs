@@ -13,7 +13,7 @@
  *
  * Run: deno task cf test packages/patterns/reading-list/reading-list.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ReadingList from "./reading-list.tsx";
 
 export default pattern(() => {
@@ -283,7 +283,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state ===
       { assertion: assert_initial_empty },
       { assertion: assert_initial_filter_all },

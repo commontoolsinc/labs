@@ -131,7 +131,7 @@
  * for zero structural win, and would lie to the typechecker at the boundary.
  * This mirrors the TS compiler, which keeps its NodeLinks table private and
  * exposes narrow typed accessors (getTypeAtLocation) instead of the table. The
- * bare boundary maps are our analogue of that narrow published contract.
+ * bare boundary maps are our analog of that narrow published contract.
  *
  * --- Cache invalidation contract ---
  *
@@ -198,9 +198,11 @@
  *      compiler itself structures NodeLinks: one private per-node struct, narrow
  *      public accessors, the table never handed out.
  */
+
 export { TransformationContext } from "./context.ts";
 export { CrossStageState } from "./cross-stage-state.ts";
 export type {
+  BuilderSourceSiteOptions,
   CapabilityParamDefault,
   CapabilityParamSummary,
   DiagnosticInput,
@@ -214,14 +216,17 @@ export type {
   SchemaHints,
   TransformationDiagnostic,
   TransformationOptions,
-  TransformMode,
   TypeRegistry,
   UnreadableCellArgument,
 } from "./transformers.ts";
+export type {
+  BuilderSourceSite,
+  BuilderSourceSitesV1,
+} from "./runtime-contract.ts";
+export { isBuilderSourceSitesV1 } from "./runtime-contract.ts";
 export {
   HelpersOnlyTransformer,
   PATTERN_COVERAGE_GLOBAL,
-  Pipeline,
   Transformer,
 } from "./transformers.ts";
 export * from "./common-fabric-symbols.ts";
@@ -230,7 +235,5 @@ export {
   CFHelpers,
   injectCfHelpers,
   isLegacyInjectedEnvelope,
-  sourceDisablesCfTransform,
-  sourceHasIgnoredDisableDirective,
   transformCfDirective,
 } from "./cf-helpers.ts";

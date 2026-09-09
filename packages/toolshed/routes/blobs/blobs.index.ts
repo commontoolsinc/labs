@@ -1,26 +1,18 @@
+import { hashOf } from "@commonfabric/data-model";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { isDID } from "@commonfabric/identity";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import type { Context } from "@hono/hono";
+
 // Blob routes are intentionally unauthenticated for the MVP. Anyone can POST a
 // blob into any space DID; content addressing prevents overwriting a different
 // payload, but callers can inject blobs and consume storage. Anyone with a hash
 // can GET the blob. Revisit this before any production exposure.
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
-import { isDID } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import {
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
-} from "@commonfabric/memory/v2";
-import type { Context } from "@hono/hono";
 
 const router = createRouter();
-const blobUploadEncoding = new JsonEncodingContext();
-const blobReconstructionContext = new EmptyReconstructionContext(
-  true,
-  "blob upload payloads cannot contain cell references",
-);
 
 type BlobContents = {
   type: string;
@@ -51,12 +43,20 @@ class BlobPayloadTooLarge extends Error {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
+/**
+ * Interprets a decoded request body as bytes, or returns `undefined` when it
+ * is not byte-shaped. The result is always freshly allocated and unshared, so
+ * a caller may cede it to something that takes ownership of a buffer.
+ */
 const toByteArray = (value: unknown): Uint8Array | undefined => {
+  // The copy is what makes the contract above hold for this arm, and so is what
+  // lets the caller cede the result.
+  // TODO(seefeldb): This arm may be unreachable. Every value reaching here is
+  // decoded from a string, and binary in a string form arrives as a
+  // `FabricBytes`, which the caller returns before asking this. Remove the arm
+  // and its copy once that is confirmed.
   if (value instanceof Uint8Array) {
-    return value;
+    return new Uint8Array(value);
   }
   if (
     Array.isArray(value) &&
@@ -64,7 +64,7 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
   ) {
     return Uint8Array.from(value);
   }
-  if (!isRecord(value)) {
+  if (!isObjectNotArray(value)) {
     return undefined;
   }
 
@@ -86,7 +86,7 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 };
 
 const asBlobContents = (value: unknown): BlobContents | undefined => {
-  if (!isRecord(value) || typeof value.type !== "string") {
+  if (!isObjectNotArray(value) || typeof value.type !== "string") {
     return undefined;
   }
   if (value.body instanceof FabricBytes) {
@@ -94,22 +94,10 @@ const asBlobContents = (value: unknown): BlobContents | undefined => {
   }
   const bytes = toByteArray(value.body);
   if (bytes) {
-    return { type: value.type, body: new FabricBytes(bytes) };
+    return { type: value.type, body: new FabricBytes(bytes, true) };
   }
   return undefined;
 };
-
-const memoryBoundaryPreservesBlobContents = (contents: BlobContents): boolean =>
-  asBlobContents(decodeMemoryBoundary(encodeMemoryBoundary(contents))) !==
-    undefined;
-
-const storedBlobValue = (contents: BlobContents): BlobContents | {
-  type: string;
-  body: number[];
-} =>
-  memoryBoundaryPreservesBlobContents(contents)
-    ? contents
-    : { type: contents.type, body: Array.from(contents.body.slice()) };
 
 const parseBlobName = (
   blobName: string,
@@ -176,13 +164,7 @@ const readRequestContents = async (request: Request) => {
   if (!source) {
     return undefined;
   }
-  try {
-    return asBlobContents(
-      blobUploadEncoding.decode(source, blobReconstructionContext),
-    );
-  } catch {
-    return asBlobContents(decodeMemoryBoundary(source));
-  }
+  return asBlobContents(decodeMemoryBoundary(source));
 };
 
 const loadBlobContents = async (
@@ -219,11 +201,7 @@ const upload = async (c: Context) => {
   const blobName = c.req.param("blobName") as string | undefined;
   const suffix = suffixFor(blobName, contents.type);
   const hash = id.slice("fid1:".length);
-  await memoryServer.writeDocument(
-    spaceDid,
-    `cid:${id}`,
-    storedBlobValue(contents),
-  );
+  await memoryServer.writeDocument(spaceDid, `cid:${id}`, contents);
 
   return c.json({ id, url: `blobs/${hash}.${suffix}` }, 201);
 };
@@ -247,8 +225,7 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     return c.text("Blob not found", 404);
   }
 
-  const bytes = contents.body.slice();
-  const body = new Uint8Array(bytes).buffer;
+  const body = contents.body.slice();
   return new Response(body, {
     status: 200,
     headers: {

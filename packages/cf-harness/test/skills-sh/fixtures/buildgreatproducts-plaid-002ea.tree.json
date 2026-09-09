@@ -1,0 +1,127 @@
+{
+  "_capture": {
+    "source": "https://api.github.com/repos/buildgreatproducts/plaid/git/trees/002ea93300572480789719717852dbb7e3107057?recursive=1",
+    "capturedAt": "2026-09-01",
+    "projection": "Full response tree projected to path, mode, and type; order preserved",
+    "reportedEntryCount": 23
+  },
+  "sha": "002ea93300572480789719717852dbb7e3107057",
+  "truncated": false,
+  "tree": [
+    {
+      "path": ".gitignore",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "LICENSE.txt",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "SKILL.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "assets",
+      "mode": "040000",
+      "type": "tree"
+    },
+    {
+      "path": "assets/vision-template.json",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "package.json",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references",
+      "mode": "040000",
+      "type": "tree"
+    },
+    {
+      "path": "references/GTM-GENERATION.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/INTAKE-GUIDE.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/PRD-GENERATION.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/ROADMAP-GENERATION.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/TECH-STACK-OPTIONS.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/VISION-GENERATION.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/VISION-SCHEMA.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/build.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/design.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/idea.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/launch.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/plan.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "references/validate.md",
+      "mode": "100644",
+      "type": "blob"
+    },
+    {
+      "path": "scripts",
+      "mode": "040000",
+      "type": "tree"
+    },
+    {
+      "path": "scripts/validate-vision.js",
+      "mode": "100644",
+      "type": "blob"
+    }
+  ]
+}

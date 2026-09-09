@@ -5,26 +5,40 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { decodeBase64 } from "@std/encoding/base64";
+import { parentToolIdsForBacking } from "../src/contracts/tool-descriptor.ts";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
-import type { HarnessArtifactStore } from "../src/artifacts.ts";
-import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import { CfHarnessEngine } from "../src/engine.ts";
-import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
-import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
-import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
-import { createHarnessImageAttachment } from "../src/image-attachments.ts";
-import { discoverHarnessSkills } from "../src/skills/registry.ts";
+
+import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
+import {
+  createFileSystemHarnessArtifactStore,
+  type HarnessArtifactStore,
+} from "../src/artifacts.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
+import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
 } from "../src/contracts/prompt-slot.ts";
+import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
+import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import {
+  type OpenAIChatCompletionRequest,
+  OpenAICompatibleGatewayClient,
+} from "../src/gateway/openai-client.ts";
+import { createHarnessImageAttachment } from "../src/image-attachments.ts";
+import type { HarnessModelClient } from "../src/model/client.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
+import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
+import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -34,19 +48,15 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
-import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { discoverHarnessSkills } from "../src/skills/registry.ts";
+import { createPatternSkillsFixture } from "./support/pattern-skills-fixture.ts";
 import {
-  type OpenAIChatCompletionRequest,
-  OpenAICompatibleGatewayClient,
-} from "../src/gateway/openai-client.ts";
-import type { HarnessRunState } from "../src/run-state.ts";
-import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
-import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
-import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
-import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -73,13 +83,26 @@ const contextPromptSlotBinding: PromptSlotBinding = {
 };
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
   readonly shellRequests: SandboxShellRequest[] = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+  readonly #shellError?: Error;
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [],
-    private readonly shellError?: Error,
-  ) {}
+    shellResults: SandboxCommandResult[] = [],
+    shellError?: Error,
+  ) {
+    this.#shellResults = shellResults;
+    this.#shellError = shellError;
+  }
+
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
 
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
@@ -87,6 +110,10 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -114,11 +141,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
         exitCode: 0,
       });
     }
-    if (this.shellError) {
-      return Promise.reject(this.shellError);
+    if (this.#shellError) {
+      return Promise.reject(this.#shellError);
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -142,12 +169,16 @@ class FakeRunSandboxRuntime extends FakeSandboxRuntime {
 class FakeProcessRunner implements ProcessRunner {
   readonly requests: ProcessRunRequest[] = [];
 
-  constructor(private readonly results: ProcessRunResult[] = []) {}
+  readonly #results: ProcessRunResult[];
+
+  constructor(results: ProcessRunResult[] = []) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.requests.push(request);
     return Promise.resolve(
-      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -159,7 +190,6 @@ Deno.test("CfHarnessPromptLoop rejects known provider/client mismatches", () => 
         engine: new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           modelProvider: "openai-compatible-gateway",
-          cfcEnforcementMode: "disabled",
         }),
         modelClient: {
           providerId: "openai-codex",
@@ -204,7 +234,6 @@ Deno.test("CfHarnessPromptLoop requires an exact Codex credential owner binding"
           },
         }
         : {}),
-      cfcEnforcementMode: "disabled",
     });
 
   assertThrows(
@@ -299,6 +328,51 @@ Deno.test("CfHarnessPromptLoop preserves a resumed Codex model binding at runTra
   assertEquals(modelCalls, 0);
 });
 
+Deno.test("CfHarnessPromptLoop reports a resumed run's recorded enforcement mode as inherited", async () => {
+  // The run recorded a mode the configuration does not restate, and the
+  // recorded mode is the one it goes on executing at. The snapshot names that
+  // mode and attributes it to the run state it came from.
+  const resumedState: HarnessRunState = {
+    runId: "run-resumed-enforcement-posture",
+    status: "failed",
+    createdAt: "2026-09-03T18:00:00.000Z",
+    updatedAt: "2026-09-03T18:00:01.000Z",
+    cfcEnforcementMode: "observe",
+    currentDir: "/workspace",
+    model: "gpt-5.4",
+    modelProvider: "openai-compatible-gateway",
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  };
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: resumedState,
+  });
+  const loop = new CfHarnessPromptLoop({
+    engine,
+    modelClient: {
+      providerId: "openai-compatible-gateway",
+      complete: () =>
+        Promise.resolve({
+          assistant: { role: "assistant", content: "Resumed." },
+        }),
+    },
+  });
+
+  const result = await loop.runPrompt({ prompt: "Continue." });
+
+  assertEquals(engine.config.cfcEnforcementMode, "observe");
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.cfc.enforcementMode,
+    "observe",
+  );
+  assertEquals(
+    result.runState.cfcPolicySnapshot?.cfc.enforcementModeSource,
+    "inherited",
+  );
+});
+
 Deno.test("CfHarnessPromptLoop persists a fresh Codex model selection before the first turn", async () => {
   let selectedModel: string | undefined;
   const loop = new CfHarnessPromptLoop({
@@ -308,7 +382,6 @@ Deno.test("CfHarnessPromptLoop persists a fresh Codex model selection before the
       modelProvider: "openai-codex",
       model: "gpt-configured-default",
       credentialOwnerKey: "local",
-      cfcEnforcementMode: "disabled",
     }),
     modelClient: {
       providerId: "openai-codex",
@@ -351,9 +424,19 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
     complete(request) {
       turns += 1;
       assertEquals(request.model, "test-model");
+      assertEquals(request.cacheAffinityKey, "stable-cache");
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
       return Promise.resolve(
         turns === 1
           ? {
+            usage: {
+              inputTokens: 100,
+              cachedInputTokens: 0,
+              cacheWriteTokens: 80,
+              outputTokens: 20,
+              totalTokens: 120,
+            },
             assistant: {
               role: "assistant",
               content: "",
@@ -368,6 +451,13 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
             },
           }
           : {
+            usage: {
+              inputTokens: 200,
+              cachedInputTokens: 100,
+              cacheWriteTokens: 0,
+              outputTokens: 30,
+              totalTokens: 230,
+            },
             assistant: { role: "assistant", content: "done" },
           },
       );
@@ -375,10 +465,15 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
   };
   const loop = new CfHarnessPromptLoop({
     modelClient,
+    cacheAffinityKey: "stable-cache",
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
     engine: new CfHarnessEngine({
       sandboxRuntime: sandbox,
       runId: "run-model-client",
       model: "test-model",
+      // Strict enforcement denies the injected read_file call, and
+      // `result.runState.policyEvents[0]?.severity` reads that denial back.
       cfcEnforcementMode: "enforce-strict",
     }),
   });
@@ -387,6 +482,16 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
 
   assertEquals(result.finalAssistantText, "done");
   assertEquals(turns, 2);
+  assertEquals(result.usage, {
+    inputTokens: 300,
+    cachedInputTokens: 100,
+    cacheWriteTokens: 80,
+    outputTokens: 50,
+    totalTokens: 350,
+    estimateWithheldReason: "incomplete-estimates",
+  });
+  assertEquals(result.totalUsage, result.usage);
+  assertEquals(result.modelUsage?.map((entry) => entry.modelTurn), [1, 2]);
   assertEquals(
     sandbox.shellRequests.filter((request) =>
       !request.command.includes(CAPABILITY_PROBE_SENTINEL)
@@ -409,7 +514,6 @@ Deno.test("CfHarnessPromptLoop preserves the public gatewayClient compatibility 
       runId: "run-gateway-client-compat",
       model: "gpt-5.4",
       gatewayAuthMode: "none",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
@@ -433,7 +537,19 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       `data: ${
         JSON.stringify({
           type: "response.completed",
-          response: { status: "completed", output },
+          response: {
+            status: "completed",
+            output,
+            usage: {
+              input_tokens: 10,
+              input_tokens_details: {
+                cached_tokens: 5,
+                cache_write_tokens: 0,
+              },
+              output_tokens: 2,
+              total_tokens: 12,
+            },
+          },
         })
       }\n\n`,
       { status: 200 },
@@ -500,18 +616,45 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       model: "gpt-5.4",
       modelProvider: "openai-codex",
       credentialOwnerKey: "loom:user-1",
-      cfcEnforcementMode: "disabled",
+      credentialOwner: {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "loom:user-1",
+      },
+      modelAuthSource: "cf-harness-local-store",
+      harnessHomeIdentity: "sha256:opaque-home",
     }),
   });
 
-  const result = await loop.runPrompt({ prompt: "Delegate this." });
+  const result = await loop.runPrompt({
+    prompt: "Delegate this.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
 
   assertEquals(result.finalAssistantText, "Parent done.");
   assertEquals(refreshes, 1);
   assertEquals(modelTurns, 3);
+  assertEquals(result.usage?.totalTokens, 24);
+  assertEquals(result.totalUsage?.totalTokens, 36);
   assertEquals(
     result.runState.subagentRuns?.[0]?.manifest.modelProvider,
     "openai-codex",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.modelAuthSource,
+    "cf-harness-local-store",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.credentialOwner,
+    {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+    },
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.harnessHomeIdentity,
+    "sha256:opaque-home",
   );
   const serialized = JSON.stringify(result.runState.subagentRuns);
   assertEquals(serialized.includes("initial-refresh-secret"), false);
@@ -560,11 +703,13 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
       model: "gpt-5.4",
       modelProvider: "openai-codex",
       credentialOwnerKey: "local",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
-  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const result = await loop.runPrompt({
+    prompt: "Delegate and continue.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
   const toolMessage = result.transcript.at(-2);
   if (toolMessage?.role !== "tool") {
     throw new Error("expected delegate_task tool message");
@@ -586,6 +731,143 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
     output.subagent.summary,
     "is not available from provider openai-codex",
   );
+});
+
+Deno.test("CfHarnessPromptLoop keeps provider controls off profile-overridden child models", async () => {
+  let parentTurns = 0;
+  let childTurns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete: (request) => {
+      if (request.model !== "gpt-5.6-terra") {
+        childTurns += 1;
+        assertEquals(request.promptCacheMode, undefined);
+        assertEquals(request.reasoningEffort, undefined);
+        return Promise.resolve({
+          assistant: { role: "assistant", content: "child search complete" },
+        });
+      }
+      parentTurns += 1;
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
+      return Promise.resolve({
+        assistant: parentTurns === 1
+          ? {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-web-search-cache-mode",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Search current documentation.",
+                  profile: "web_search",
+                }),
+              },
+            }],
+          }
+          : {
+            role: "assistant" as const,
+            content: "Parent used the child result.",
+          },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["web_search"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-child-cache-mode",
+      model: "gpt-5.6-terra",
+    }),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate and continue.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: { status: string; summary: string };
+  };
+
+  assertEquals(
+    result.finalAssistantText,
+    "Parent used the child result.",
+  );
+  assertEquals(parentTurns, 2);
+  assertEquals(childTurns, 1);
+  assertEquals(output.subagent.status, "completed");
+  assertStringIncludes(
+    output.subagent.summary,
+    "child search complete",
+  );
+});
+
+Deno.test("CfHarnessPromptLoop propagates provider controls to model-inheriting children", async () => {
+  let turns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete: (request) => {
+      turns += 1;
+      assertEquals(request.model, "gpt-5.6-terra");
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
+      if (turns === 1) {
+        return Promise.resolve({
+          assistant: {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-default-provider-controls",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Inspect the inherited-model path.",
+                  profile: "default",
+                }),
+              },
+            }],
+          },
+        });
+      }
+      return Promise.resolve({
+        assistant: {
+          role: "assistant",
+          content: turns === 2 ? "child done" : "parent done",
+        },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-inherited-provider-controls",
+      model: "gpt-5.6-terra",
+    }),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate and continue.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "parent done");
+  assertEquals(turns, 3);
 });
 
 class FailingArtifactStore implements HarnessArtifactStore {
@@ -635,7 +917,10 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     path: string;
   }> = [];
 
-  constructor(readonly artifactRoot: string, private readonly runId: string) {
+  readonly #runId: string;
+
+  constructor(readonly artifactRoot: string, runId: string) {
+    this.#runId = runId;
     this.runRoot = `${artifactRoot}/${runId}`;
   }
 
@@ -659,7 +944,9 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(`${this.runRoot}/policy-trace.json`);
   }
 
-  persistRunReport(): Promise<string> {
+  persistRunReport(
+    _report: Parameters<HarnessArtifactStore["persistRunReport"]>[0],
+  ): Promise<string> {
     return Promise.resolve(`${this.runRoot}/run-report.json`);
   }
 
@@ -674,6 +961,100 @@ class RecordingArtifactStore implements HarnessArtifactStore {
   }
 }
 
+class FailingDelegateOutputArtifactStore extends RecordingArtifactStore {
+  readonly runReports: Array<
+    Parameters<HarnessArtifactStore["persistRunReport"]>[0]
+  > = [];
+
+  override persistRunReport(
+    report: Parameters<HarnessArtifactStore["persistRunReport"]>[0],
+  ): Promise<string> {
+    this.runReports.push(report);
+    return Promise.resolve(`${this.runRoot}/run-report.json`);
+  }
+
+  override persistToolOutput(): Promise<string> {
+    return Promise.reject(new Error("delegate output persist boom"));
+  }
+}
+
+Deno.test("CfHarnessPromptLoop retains child usage when delegate output persistence fails", async () => {
+  const artifactRoot = await Deno.makeTempDir({
+    dir: "/tmp",
+    prefix: "cf-harness-delegate-usage-failure-",
+  });
+  try {
+    const artifactStore = new FailingDelegateOutputArtifactStore(
+      artifactRoot,
+      "run-delegate-usage-failure",
+    );
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) =>
+        Promise.resolve(
+          request.runId === "run-delegate-usage-failure"
+            ? {
+              usage: {
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+              },
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-delegate-usage-failure",
+                  type: "function" as const,
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Return a short summary.",
+                    }),
+                  },
+                }],
+              },
+            }
+            : {
+              usage: {
+                inputTokens: 20,
+                outputTokens: 3,
+                totalTokens: 23,
+              },
+              assistant: {
+                role: "assistant" as const,
+                content: "Child summary.",
+              },
+            },
+        ),
+    };
+    const loop = new CfHarnessPromptLoop({
+      modelClient,
+      engine: new CfHarnessEngine({
+        artifactStore,
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-delegate-usage-failure",
+        model: "test-model",
+      }),
+    });
+
+    await assertRejects(
+      () =>
+        loop.runPrompt({
+          prompt: "Delegate this.",
+          promptSlotBinding: directPromptSlotBinding,
+        }),
+      Error,
+      "delegate output persist boom",
+    );
+
+    const failureReport = artifactStore.runReports.at(-1);
+    assertEquals(failureReport?.usage?.totalTokens, 12);
+    assertEquals(failureReport?.totalUsage?.totalTokens, 35);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
+
 const observedCfcResult = (
   stdout: string,
   options: {
@@ -683,6 +1064,8 @@ const observedCfcResult = (
     stdoutLabel?: CfcSandboxResult["stdout"]["label"];
     stderrLabel?: CfcSandboxResult["stderr"]["label"];
     exitCodeLabel?: CfcSandboxResult["exitCode"]["label"];
+    stdoutTruncated?: boolean;
+    stderrTruncated?: boolean;
   } = {},
 ): CfcSandboxResult => ({
   version: 1,
@@ -694,6 +1077,7 @@ const observedCfcResult = (
       text: stdout,
       label: options.stdoutLabel ?? { confidentiality: ["public"] },
     }],
+    ...(options.stdoutTruncated === true ? { truncated: true } : {}),
   },
   stderr: options.stderrPolicy === "denied"
     ? {
@@ -710,6 +1094,7 @@ const observedCfcResult = (
         text: options.stderr ?? "",
         label: options.stderrLabel ?? { confidentiality: ["public"] },
       }],
+      ...(options.stderrTruncated === true ? { truncated: true } : {}),
     },
   exitCode: {
     policy: "observed",
@@ -718,17 +1103,35 @@ const observedCfcResult = (
   },
 });
 
+/**
+ * The model-facing fields of a tool result, without the CFC mediation
+ * descriptor the loop attaches beside them.
+ */
+const toolResultFields = (content: string): Record<string, unknown> => {
+  const { cfc: _cfc, ...fields } = JSON.parse(content) as Record<
+    string,
+    unknown
+  >;
+  return fields;
+};
+
 Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant response", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
-        { stdout: "hello from file", stderr: "", exitCode: 0 },
+        {
+          stdout: "hello from file",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("hello from file"),
+        },
       ]),
       runId: "run-loop",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
+      skillsRoot: fixture.skillsRoot,
       now: (() => {
         const timestamps = [
           "2026-04-15T20:00:00.000Z",
@@ -779,6 +1182,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   });
 
   const result = await loop.runPrompt({
+    promptSlotBinding: directPromptSlotBinding,
     systemPrompt: "You are a test harness.",
     prompt: "Read the todo file and summarize it.",
   });
@@ -790,42 +1194,49 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   assertEquals(result.modelTurns, 2);
   assertEquals(result.runState.endedAt, "2026-04-15T20:00:06.000Z");
   assertEquals(result.runState.terminalReason, "assistant_completed");
-  assertEquals(result.transcript, [
-    { role: "system", content: "You are a test harness." },
-    { role: "user", content: "Read the todo file and summarize it." },
-    {
-      role: "assistant",
-      content: "",
-      toolCalls: [{
-        id: "call-1",
-        type: "function",
-        function: {
-          name: "read_file",
-          arguments: JSON.stringify({ path: "notes/todo.txt" }),
-        },
-      }],
-    },
-    {
-      role: "tool",
-      toolCallId: "call-1",
-      toolName: "read_file",
-      content: JSON.stringify({
-        outputId: createToolOutputId("run-loop", "read_file", 1),
-        path: "/workspace/notes/todo.txt",
-        content: "hello from file",
-      }),
-      resultRef: {
-        type: "cf-harness.tool-result-ref",
-        outputId: createToolOutputId("run-loop", "read_file", 1),
-        toolId: "read_file",
-        runId: "run-loop",
+  assertEquals(
+    result.transcript.map((message) =>
+      message.role === "tool"
+        ? { ...message, content: toolResultFields(message.content) }
+        : message
+    ),
+    [
+      { role: "system", content: "You are a test harness." },
+      { role: "user", content: "Read the todo file and summarize it." },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-1",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: JSON.stringify({ path: "notes/todo.txt" }),
+          },
+        }],
       },
-    },
-    {
-      role: "assistant",
-      content: "The todo file says hello from file.",
-    },
-  ]);
+      {
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "read_file",
+        content: {
+          outputId: createToolOutputId("run-loop", "read_file", 1),
+          path: "/workspace/notes/todo.txt",
+          content: "hello from file",
+        },
+        resultRef: {
+          type: "cf-harness.tool-result-ref",
+          outputId: createToolOutputId("run-loop", "read_file", 1),
+          toolId: "read_file",
+          runId: "run-loop",
+        },
+      },
+      {
+        role: "assistant",
+        content: "The todo file says hello from file.",
+      },
+    ],
+  );
   assertEquals(result.runState.status, "completed");
   assertEquals(result.runState.policyEvents, []);
 
@@ -846,20 +1257,18 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
+      "query_docs",
     ],
   );
-  assertEquals(
-    chatViewOfRequest(secondRequest).messages.at(-1),
-    {
-      role: "tool",
-      tool_call_id: "call-1",
-      content: JSON.stringify({
-        outputId: createToolOutputId("run-loop", "read_file", 1),
-        path: "/workspace/notes/todo.txt",
-        content: "hello from file",
-      }),
-    },
-  );
+  const lastSentMessage = chatViewOfRequest(secondRequest).messages.at(-1);
+  assertEquals(lastSentMessage?.role, "tool");
+  assertEquals(lastSentMessage?.tool_call_id, "call-1");
+  assertEquals(toolResultFields(lastSentMessage!.content), {
+    outputId: createToolOutputId("run-loop", "read_file", 1),
+    path: "/workspace/notes/todo.txt",
+    content: "hello from file",
+  });
 });
 
 // A sandbox whose resolvePath throws for anything outside /workspace, so we can
@@ -928,6 +1337,9 @@ Deno.test("CfHarnessPromptLoop: a command timeout is a recoverable bash result, 
       ),
       runId: "run-tool-timeout",
       model: "gpt-5.4",
+      // With enforcement off the recoverable bash result reaches the model as
+      // the tool wrote it. The assertions below read the timeout message and
+      // the exit code out of that tool message.
       cfcEnforcementMode: "disabled",
     }),
     fetchFn: twoTurnBashFetch(
@@ -962,6 +1374,9 @@ Deno.test("CfHarnessPromptLoop: a cwd outside the sandbox is a recoverable bash 
       sandboxRuntime: new CwdEscapeSandboxRuntime(),
       runId: "run-tool-cwd-escape",
       model: "gpt-5.4",
+      // With enforcement off the recoverable bash result reaches the model as
+      // the tool wrote it. The assertion below reads the cwd message out of
+      // that tool message.
       cfcEnforcementMode: "disabled",
     }),
     fetchFn: twoTurnBashFetch(
@@ -997,7 +1412,6 @@ Deno.test("CfHarnessPromptLoop: a non-recoverable tool failure stays fatal and n
     ),
     runId: "run-tool-fatal",
     model: "gpt-5.4",
-    cfcEnforcementMode: "disabled",
   });
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -1005,7 +1419,12 @@ Deno.test("CfHarnessPromptLoop: a non-recoverable tool failure stays fatal and n
     fetchFn: twoTurnBashFetch(fetchCalls, { command: "ls" }, "unreachable"),
   });
 
-  await assertRejects(() => loop.runPrompt({ prompt: "List files." }));
+  await assertRejects(() =>
+    loop.runPrompt({
+      prompt: "List files.",
+      promptSlotBinding: directPromptSlotBinding,
+    })
+  );
   // The run is terminal-failed, and the model never got a second turn — the
   // host detail could not have leaked into a model-facing tool result.
   assertEquals(engine.getRunState().status, "failed");
@@ -1021,7 +1440,6 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", asyn
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-loop-signal",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     }),
     fetchFn: (_input, init) => {
       seenSignal = init?.signal;
@@ -1051,6 +1469,50 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", asyn
   assertEquals(seenSignal, controller.signal);
 });
 
+Deno.test("CfHarnessPromptLoop preserves custom abort reasons for local gateway runs", async () => {
+  const reason = new Error("custom cancellation reason");
+  const controller = new AbortController();
+  controller.abort(reason);
+  const modelClient: HarnessModelClient = {
+    providerId: "openai-compatible-gateway",
+    complete: () => Promise.reject(reason),
+  };
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-local-gateway-custom-abort",
+      model: "gpt-5.4",
+      modelProvider: "openai-compatible-gateway",
+      modelAuthSource: "none",
+      credentialOwner,
+      harnessHomeIdentity: "sha256:opaque-home",
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        modelProvider: "openai-compatible-gateway",
+        modelAuthSource: "none",
+        credentialOwner,
+        harnessHomeIdentity: "sha256:opaque-home",
+      },
+    }),
+  });
+
+  let caught: unknown;
+  try {
+    await loop.runPrompt({ prompt: "Say hi.", signal: controller.signal });
+  } catch (error) {
+    caught = error;
+  }
+  assert(caught === reason, "custom abort reason must be rethrown unchanged");
+});
+
 Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loops", async () => {
   const controller = new AbortController();
   const seenSignals: Array<RequestInit["signal"]> = [];
@@ -1060,7 +1522,6 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loo
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-loop-delegate-signal",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     }),
     fetchFn: (_input, init) => {
       seenSignals.push(init?.signal);
@@ -1112,6 +1573,7 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loo
   });
 
   const result = await loop.runPrompt({
+    promptSlotBinding: directPromptSlotBinding,
     prompt: "Delegate a task.",
     signal: controller.signal,
   });
@@ -1125,7 +1587,12 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loo
 
 Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model tool args", async () => {
   const sandbox = new FakeSandboxRuntime([
-    { stdout: "ok\n", stderr: "", exitCode: 0 },
+    {
+      stdout: "ok\n",
+      stderr: "",
+      exitCode: 0,
+      cfcResult: observedCfcResult("ok\n"),
+    },
   ]);
   let fetchCount = 0;
   const loop = new CfHarnessPromptLoop({
@@ -1133,7 +1600,6 @@ Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model t
     engine: new CfHarnessEngine({
       sandboxRuntime: sandbox,
       runId: "run-strip-cfc-input-labels",
-      cfcEnforcementMode: "disabled",
       model: "gpt-5.4",
     }),
     fetchFn: () => {
@@ -1188,6 +1654,7 @@ Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model t
   });
 
   const result = await loop.runPrompt({
+    promptSlotBinding: directPromptSlotBinding,
     prompt: "Run a command.",
   });
 
@@ -1195,10 +1662,18 @@ Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model t
     !request.command.includes(CAPABILITY_PROBE_SENTINEL)
   );
   assert(toolRequest !== undefined);
-  assertEquals(toolRequest.cfcInvocationContext?.cfcInputLabels, undefined);
+  // The loop labels the command from the prompt slot it was given. The entry
+  // the model wrote reaches neither the sandbox nor the recorded context.
+  const sandboxLabels = toolRequest.cfcInvocationContext?.cfcInputLabels;
+  assertEquals(sandboxLabels?.entries.map((entry) => entry.path), [[
+    "command",
+  ]]);
+  assertEquals(JSON.stringify(sandboxLabels).includes("did:key:forged"), false);
   assertEquals(
-    result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels,
-    undefined,
+    JSON.stringify(
+      result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels ?? null,
+    ).includes("did:key:forged"),
+    false,
   );
 });
 
@@ -1254,6 +1729,7 @@ Deno.test("CfHarnessPromptLoop attaches images loaded by view_image on the next 
   const result = await loop.runPrompt({
     systemPrompt: "You are a test harness.",
     prompt: "Inspect the image if needed.",
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   assertEquals(
@@ -1446,6 +1922,9 @@ Deno.test("CfHarnessPromptLoop surfaces recoverable file-tool failures to the mo
       ]),
       runId: "run-recoverable-file-error",
       model: "gpt-5.4",
+      // With enforcement off the structured read_file error reaches the model
+      // as the tool wrote it. The transcript and second-request assertions
+      // compare against `recoverableOutput`.
       cfcEnforcementMode: "disabled",
       now: (() => {
         const timestamps = [
@@ -1592,7 +2071,602 @@ Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowli
   );
 });
 
+const noToolCallFetch =
+  (fetchCalls: RequestInit[]): typeof fetch => (_input, init) => {
+    fetchCalls.push(init ?? {});
+    return Promise.resolve(
+      new Response(
+        JSON.stringify(responsesBodyFromChatFixture({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "No tool call needed.",
+            },
+          }],
+        })),
+        { status: 200 },
+      ),
+    );
+  };
+
+Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surface when a fabric session is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-default-surface",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+      "run_pattern",
+      "assign_slug",
+      "describe_handle",
+      "query_docs",
+    ],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises run_pattern from an explicit allowlist when a fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "run_pattern"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-allowlisted",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "run_pattern"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when no fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "run_pattern"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-no-session",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop withholds the skill tools from an explicit allowlist when the run has no skill registry", () => {
+  // The tool surface a backing decides, read where the decision is made. A run
+  // with no registry cannot be built out of a checkout any more — the default
+  // sees to that — so the withholding branch is asserted on the function that
+  // owns it rather than on an engine that can no longer reach it.
+  assertEquals(
+    parentToolIdsForBacking({
+      fabricSessionAvailable: false,
+      patternIndexAvailable: false,
+      skillsShSearchAvailable: false,
+      skillsShAcquisitionAvailable: false,
+      skillRegistryAvailable: false,
+      docsCorpusAvailable: false,
+    }).filter((toolId) =>
+      toolId === "read_skill_resource" || toolId === "run_skill_script"
+    ),
+    [],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop offers the skill tools out of the checkout's own skills tree", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "run-skill-tools-checkout-default",
+    model: "gpt-5.4",
+  });
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "read_skill_resource", "run_skill_script"],
+    engine,
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  assertEquals(engine.config.skillsRootRecord?.source, "checkout-default");
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "read_skill_resource", "run_skill_script"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises the skill tools from an explicit allowlist when a skills root is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "read_skill_resource", "run_skill_script"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-skill-tools-with-root",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "read_skill_resource", "run_skill_script"],
+  );
+});
+
+/**
+ * A pattern-index client factory that is never called: what the gate turns on
+ * is whether the run HAS one, and no test of the surface reaches the index.
+ */
+const unusedPatternIndexClientFactory = () =>
+  Promise.reject(new Error("the index client is never built in this test"));
+
+Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default tool surface when an index is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-default-surface",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: unusedPatternIndexClientFactory,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+      "run_pattern",
+      "assign_slug",
+      "describe_handle",
+      "search_patterns",
+      "record_feedback",
+      "query_docs",
+    ],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises the pattern-index tools from an explicit allowlist when an index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_patterns", "record_feedback"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-allowlisted",
+      model: "gpt-5.4",
+      patternIndexClientFactory: unusedPatternIndexClientFactory,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "search_patterns", "record_feedback"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops the pattern-index tools from an explicit allowlist when no index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_patterns", "record_feedback"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-absent",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises search_skills in the default tool surface when configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-default-surface",
+      model: "gpt-5.4",
+      skillsSh: { baseUrl: "https://registry.example" },
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assert(
+    chatViewOfRequest(request).tools.includes("search_skills"),
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises search_skills from an explicit allowlist when configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_skills"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-allowed-surface",
+      model: "gpt-5.4",
+      skillsSh: { baseUrl: "https://registry.example" },
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools,
+    ["read_file", "search_skills"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops search_skills from an explicit allowlist when no registry is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_skills"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "skills-sh-absent",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the pattern-author profile when no index is configured", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-profile-gate",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Say hi." });
+
+  // The profile a delegation would run under, as the run's own policy
+  // snapshot records it: `run_pattern` stays, since the run has a session to
+  // back it, and the two index tools leave.
+  const profile = result.runState.cfcPolicySnapshot?.subagents.profileConfigs
+    .find((config) => config.profile === "pattern-author");
+  assertEquals(profile?.allowedToolIds, [
+    "bash",
+    "read_file",
+    "read_skill_resource",
+    "describe_handle",
+    "run_pattern",
+    "query_docs",
+  ]);
+});
+
+/**
+ * A scripted loop that delegates once and then finishes: the child answers
+ * its profile's own return contract, and the parent says it is done. The
+ * request bodies are collected, so `requestBodies[1]` is the child's.
+ */
+const delegateThenFinishFetch = (
+  requestBodies: unknown[],
+  delegateArguments: Record<string, unknown>,
+): typeof fetch =>
+(_input, init) => {
+  requestBodies.push(JSON.parse(String(init?.body)));
+  const assistant = (message: Record<string, unknown>) => ({
+    choices: [{ index: 0, message: { role: "assistant", ...message } }],
+  });
+  const payload = requestBodies.length === 1
+    ? assistant({
+      content: "",
+      tool_calls: [{
+        id: "call-delegate",
+        type: "function",
+        function: {
+          name: "delegate_task",
+          arguments: JSON.stringify(delegateArguments),
+        },
+      }],
+    })
+    : requestBodies.length === 2
+    ? assistant({
+      content: JSON.stringify({
+        ok: true,
+        resultRef: `of:fid1:${"A".repeat(43)}`,
+        describes: "Counts things.",
+      }),
+    })
+    : assistant({ content: "Parent done." });
+  return Promise.resolve(
+    new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+      status: 200,
+    }),
+  );
+};
+
+Deno.test("CfHarnessPromptLoop delegates in a run configured with a pattern index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-delegation",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      // The shape a console or CLI run has: a session and an index together,
+      // which is the pair the config layer requires of anything holding an
+      // index. The child is configured from the same pair rather than from
+      // the factory alone.
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: (() => {
+      let turn = 0;
+      const assistant = (message: Record<string, unknown>) => ({
+        choices: [{ index: 0, message: { role: "assistant", ...message } }],
+      });
+      return () => {
+        turn += 1;
+        const payload = turn === 1
+          ? assistant({
+            content: "",
+            tool_calls: [{
+              id: "call-delegate",
+              type: "function",
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Author a counter.",
+                  profile: "pattern-author",
+                }),
+              },
+            }],
+          })
+          : turn === 2
+          ? assistant({
+            content: JSON.stringify({
+              ok: true,
+              resultRef: `of:fid1:${"A".repeat(43)}`,
+              describes: "Counts things.",
+              hashtags: ["counter"],
+            }),
+          })
+          : assistant({ content: "Parent done." });
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // The delegation reached a child rather than failing the run: a child given
+  // an index and no session is a configuration the config layer refuses.
+  assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.subagentRuns?.length, 1);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.allowedToolIds.includes(
+      "search_patterns",
+    ),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop tells an index-backed pattern-author child to publish and to return the hashtags it published under", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const requestBodies: unknown[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-child-prompt",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: delegateThenFinishFetch(requestBodies, {
+      goal: "Author a counter.",
+      profile: "pattern-author",
+    }),
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const childSystemPrompt =
+    chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+  // The index is what makes a hashtag mean anything: it is where the atom is
+  // published and where the next run finds it.
+  assertStringIncludes(
+    childSystemPrompt,
+    "plus the hashtags you published it under",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Give every atom its own description and hashtags",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "A search hit is a component to wire, not a specification to rebuild.",
+  );
+});
+
+Deno.test("CfHarnessPromptLoop leaves publishing out of a pattern-author child's prompt when the run has no index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const requestBodies: unknown[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "no-index-child-prompt",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: delegateThenFinishFetch(requestBodies, {
+      goal: "Author a counter.",
+      profile: "pattern-author",
+    }),
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // A run that publishes nothing asks for no hashtags anywhere, including in
+  // the sentence naming the deliverable: the return contract leaves them out
+  // too, so a child told to supply them would be told to supply nothing.
+  const childSystemPrompt =
+    chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+  assertStringIncludes(childSystemPrompt, "You never return source.");
+  assertEquals(childSystemPrompt.includes("hashtags"), false);
+});
+
 Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -1603,7 +2677,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
+      skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -1675,6 +2749,8 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
+      "query_docs",
     ],
   );
   assertEquals(
@@ -1812,7 +2888,6 @@ Deno.test("CfHarnessPromptLoop validates structured subagent returns and linkifi
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-structured-return",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
         artifactStore,
       }),
       fetchFn: (_input, init) => {
@@ -2005,7 +3080,6 @@ Deno.test("CfHarnessPromptLoop fails structured subagent returns without exposin
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-structured-return-invalid",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -2116,7 +3190,6 @@ Deno.test("CfHarnessPromptLoop keeps child-supplied schema mismatch details out 
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-structured-return-mismatch",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -2229,7 +3302,6 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-explicit-profile",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -2367,7 +3439,6 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-web-search",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -2488,7 +3559,8 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
   assertEquals(output.subagent.manifest.nativeModelToolIds, ["google_search"]);
 });
 
-Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent by default", async () => {
+Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by default", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -2497,7 +3569,7 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
       workspaceHostPath: "/tmp/project",
       runId: "run-parent-host-tool-denied",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
+      skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -2512,9 +3584,9 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
                 id: "call-host-tool",
                 type: "function",
                 function: {
-                  name: "bash-no-sandbox",
+                  name: "browser",
                   arguments: JSON.stringify({
-                    command: "agent-browser --help",
+                    action: "snapshot",
                   }),
                 },
               }],
@@ -2561,15 +3633,18 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
+      "query_docs",
     ],
   );
-  assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
+  assertEquals(denied.detail, "browser is not allowed in this run");
   assertEquals(result.runState.toolOutputs, []);
-  assertEquals(result.runState.policyEvents[0]?.toolId, "bash-no-sandbox");
+  assertEquals(result.runState.policyEvents[0]?.toolId, "browser");
   assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
 });
 
-Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized browser subagent profile", async () => {
+Deno.test("CfHarnessPromptLoop gives the browser tool only to the authorized browser subagent profile", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -2583,7 +3658,7 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
       workspaceHostPath: "/tmp/project",
       runId: "run-delegate-browser-profile",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
+      skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -2667,7 +3742,7 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   assertEquals(
     chatViewOfRequest(requestBodies[1]).tools.map((name) => name),
     [
-      "bash-no-sandbox",
+      "browser",
       "read_file",
       "view_image",
       "read_skill_resource",
@@ -2676,25 +3751,25 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   );
   assertEquals(
     chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
-      "Host execution tools available: bash-no-sandbox",
+      "Host execution tools available: browser",
     ),
     true,
   );
   assertEquals(
     chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
-      "Do not use agent-browser eval",
+      "attaches to this run's Browser Access lease",
     ),
     true,
   );
   assertEquals(output.subagent.manifest.profile, "browser");
   assertEquals(output.subagent.manifest.allowedToolIds, [
-    "bash-no-sandbox",
+    "browser",
     "read_file",
     "view_image",
     "read_skill_resource",
     "run_skill_script",
   ]);
-  assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
+  assertEquals(output.subagent.manifest.hostToolIds, ["browser"]);
   assertEquals(output.subagent.manifest.skillNames, ["agent-browser"]);
   assertEquals(output.subagent.manifest.allowedSkillScripts, [
     { skill: "agent-browser", path: "scripts/form-automation.sh" },
@@ -2761,7 +3836,6 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       skillsRoot,
       runId: "run-browser-subagent-skills",
       model: "gpt-5.4",
-      cfcEnforcementMode: "observe",
     });
     await engine.persistSkillRegistry(registry);
 
@@ -2839,11 +3913,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
                     arguments: JSON.stringify({
                       skill: "agent-browser",
                       path: "scripts/capture-workflow.sh",
-                      args: [
-                        "--cdp",
-                        "http://127.0.0.1:9222",
-                        "http://localhost:8000/piece",
-                      ],
+                      args: ["http://localhost:8000/piece"],
                     }),
                   },
                 }],
@@ -2889,7 +3959,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
     assertEquals(
       chatViewOfRequest(requestBodies[1]).tools.map((name) => name),
       [
-        "bash-no-sandbox",
+        "browser",
         "read_file",
         "view_image",
         "read_skill_resource",
@@ -2930,8 +4000,6 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       args: [
         "-s",
         "--",
-        "--cdp",
-        "http://127.0.0.1:9222",
         "http://localhost:8000/piece",
       ],
       cwd: workspace,
@@ -2943,6 +4011,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
         SKILL_DIR: skillDir,
         SKILL_SCRIPT: join(skillDir, "scripts", "capture-workflow.sh"),
         CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: "host",
+        AGENT_BROWSER_CDP: "http://127.0.0.1:9222",
       },
       stdinText: scriptSource,
       timeoutMs: 60000,
@@ -2984,7 +4053,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
   }
 });
 
-Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for browser subagents", async () => {
+Deno.test("CfHarnessPromptLoop briefs browser subagents on the lease without exposing its endpoint", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -3006,7 +4075,6 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
       workspaceHostPath: "/tmp/project",
       runId: "run-delegate-browser-lease",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3071,14 +4139,6 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
     chatViewOfRequest(requestBodies[1]).messages[0].content;
   assertStringIncludes(
     childSystemPrompt,
-    "Browser Access lease: lease-browser-1",
-  );
-  assertStringIncludes(
-    childSystemPrompt,
-    "Browser Access CDP endpoint: http://127.0.0.1:9222",
-  );
-  assertStringIncludes(
-    childSystemPrompt,
     "Browser Access profile mode: transient",
   );
   assertStringIncludes(
@@ -3089,10 +4149,11 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
     childSystemPrompt,
     "temporary no-login profile",
   );
-  assertStringIncludes(
-    childSystemPrompt,
-    "Use agent-browser --cdp http://127.0.0.1:9222 for page commands.",
-  );
+  // The lease's identifiers stay harness-side: the browser tool attaches the
+  // endpoint itself, so neither the lease id nor the CDP endpoint appears in
+  // anything the child model reads.
+  assertEquals(childSystemPrompt.includes("lease-browser-1"), false);
+  assertEquals(childSystemPrompt.includes("http://127.0.0.1:9222"), false);
 });
 
 Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch subagent profile", async () => {
@@ -3109,7 +4170,6 @@ Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch 
       workspaceHostPath: "/tmp/project",
       runId: "run-delegate-web-fetch-profile",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3210,6 +4270,7 @@ Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch 
 });
 
 Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind structured opaque links", async () => {
+  await using fixture = await createPatternSkillsFixture();
   const baseDir = await Deno.makeTempDir({
     dir: "/tmp",
     prefix: "cf-harness-browser-return-",
@@ -3260,7 +4321,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
         workspaceHostPath,
         runId: "run-browser-structured-return",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
+        skillsRoot: fixture.skillsRoot,
       }),
       fetchFn: (_input, init) => {
         const body = JSON.parse(String(init?.body)) as {
@@ -3302,10 +4363,11 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
                   id: "call-agent-browser-text",
                   type: "function",
                   function: {
-                    name: "bash-no-sandbox",
+                    name: "browser",
                     arguments: JSON.stringify({
-                      command:
-                        "agent-browser --cdp http://host.docker.internal:9362 get text body",
+                      action: "get",
+                      kind: "text",
+                      target: "body",
                     }),
                   },
                 }],
@@ -3360,7 +4422,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     assertEquals(
       chatViewOfRequest(requestBodies[1]).tools.map((name) => name),
       [
-        "bash-no-sandbox",
+        "browser",
         "read_file",
         "view_image",
         "read_skill_resource",
@@ -3369,7 +4431,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     );
     assertEquals(
       chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
-        "Browser profile host commands are restricted to agent-browser",
+        "attaches to this run's Browser Access lease",
       ),
       true,
     );
@@ -3433,7 +4495,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     };
     assertEquals(output.subagent.status, "completed");
     assertEquals(output.subagent.manifest.profile, "browser");
-    assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
+    assertEquals(output.subagent.manifest.hostToolIds, ["browser"]);
     assertEquals(
       output.subagent.structuredReturn.schemaDigest,
       output.subagent.manifest.inputSummary.returnSchemaDigest,
@@ -3462,10 +4524,10 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     assertEquals(rawReturn.value.evidence, browserObservation);
     const hostToolOutput = JSON.parse(
       await Deno.readTextFile(
-        `${output.subagent.runState.artifactRoot}/tool-outputs/run-browser-structured-return.subagent.1_bash-no-sandbox_1-bash-no-sandbox.json`,
+        `${output.subagent.runState.artifactRoot}/tool-outputs/run-browser-structured-return.subagent.1_browser_1-browser.json`,
       ),
-    ) as { stdout: string };
-    assertEquals(hostToolOutput.stdout, browserObservation);
+    ) as { output: string };
+    assertEquals(hostToolOutput.output, browserObservation);
     assertEquals(artifactStore.toolOutputs[0]?.toolId, "delegate_task");
   } finally {
     await Deno.remove(baseDir, { recursive: true });
@@ -3481,7 +4543,6 @@ Deno.test("CfHarnessPromptLoop does not authorize the browser profile by default
       workspaceHostPath: "/tmp/project",
       runId: "run-browser-profile-default-denied",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -3549,100 +4610,6 @@ Deno.test("CfHarnessPromptLoop does not authorize the browser profile by default
   });
 });
 
-Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creating a child run", async () => {
-  const cases = [
-    {
-      name: "missing goal",
-      arguments: {},
-      message: "delegate_task goal must be a non-empty string",
-    },
-    {
-      name: "empty goal",
-      arguments: { goal: "  " },
-      message: "delegate_task goal must be a non-empty string",
-    },
-    {
-      name: "non-string context",
-      arguments: { goal: "Inspect", context: 42 },
-      message: "delegate_task context must be a string when provided",
-    },
-    {
-      name: "too many turns",
-      arguments: { goal: "Inspect", maxModelTurns: 65 },
-      message: "delegate_task maxModelTurns must be an integer from 1 to 64",
-    },
-    {
-      name: "unknown profile",
-      arguments: { goal: "Inspect", profile: "unknown" },
-      message:
-        "delegate_task profile must be one of default, browser, web_fetch, web_search",
-    },
-    {
-      name: "array return schema",
-      arguments: { goal: "Inspect", returnSchema: ["not", "schema"] },
-      message:
-        "delegate_task returnSchema must be a JSON Schema object, boolean, or JSON string",
-    },
-    {
-      name: "malformed string return schema",
-      arguments: { goal: "Inspect", returnSchema: "{" },
-      message: "delegate_task returnSchema string must be valid JSON",
-    },
-  ];
-
-  for (const testCase of cases) {
-    let requestCount = 0;
-    const loop = new CfHarnessPromptLoop({
-      apiKey: "test-key",
-      engine: new CfHarnessEngine({
-        sandboxRuntime: new FakeSandboxRuntime(),
-        runId: `run-invalid-delegate-${testCase.name.replaceAll(" ", "-")}`,
-        model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
-      }),
-      fetchFn: () => {
-        requestCount += 1;
-        return Promise.resolve(
-          new Response(
-            JSON.stringify(responsesBodyFromChatFixture({
-              choices: [{
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: "",
-                  tool_calls: [{
-                    id: "call-invalid-delegate",
-                    type: "function",
-                    function: {
-                      name: "delegate_task",
-                      arguments: JSON.stringify(testCase.arguments),
-                    },
-                  }],
-                },
-              }],
-            })),
-            { status: 200 },
-          ),
-        );
-      },
-    });
-
-    await assertRejects(
-      () =>
-        loop.runPrompt({
-          prompt: "Delegate with bad args.",
-          promptSlotBinding: directPromptSlotBinding,
-        }),
-      Error,
-      testCase.message,
-    );
-    assertEquals(requestCount, 1);
-    assertEquals(loop.engine.getRunState().status, "failed");
-    assertEquals(loop.engine.getRunState().subagentRuns, undefined);
-    assertEquals(loop.engine.getRunState().toolOutputs, []);
-  }
-});
-
 Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task output", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
@@ -3661,7 +4628,6 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
       ]),
       runId: "run-delegate-child-failure",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -4060,6 +5026,8 @@ Deno.test("CfHarnessPromptLoop denies delegate_task without direct-command autho
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-denied",
       model: "gpt-5.4",
+      // The expected policy event names this mode in its `mode` field and in
+      // both of its denial details.
       cfcEnforcementMode: "enforce-explicit",
       now: (() => {
         const timestamps = [
@@ -4164,7 +5132,6 @@ Deno.test("CfHarnessPromptLoop denies delegate_task when the profile is not auth
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-profile-denied",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -4303,11 +5270,15 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
-        { stdout: "hello", stderr: "", exitCode: 0 },
+        {
+          stdout: "hello",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("hello"),
+        },
       ]),
       runId: "run-max-turns",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     }),
     maxModelTurns: 1,
     fetchFn: () =>
@@ -4336,7 +5307,11 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
   });
 
   await assertRejects(
-    () => loop.runPrompt({ prompt: "Loop forever." }),
+    () =>
+      loop.runPrompt({
+        prompt: "Loop forever.",
+        promptSlotBinding: directPromptSlotBinding,
+      }),
     Error,
     "prompt loop exceeded max model turns (1)",
   );
@@ -4456,6 +5431,8 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
       ]),
       runId: "run-observe-warning",
       model: "gpt-5.4",
+      // The expected policy event names this mode in its warning detail, and
+      // the tool message carries the sandbox's own stdout.
       cfcEnforcementMode: "observe",
       now: (() => {
         const timestamps = [
@@ -4576,6 +5553,8 @@ Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in obser
       ]),
       runId: "run-large-bash-output",
       model: "gpt-5.4",
+      // The tool message carries the sandbox's own stdout, which is what the
+      // truncation assertions measure.
       cfcEnforcementMode: "observe",
     }),
     fetchFn: (_input, init) => {
@@ -4641,6 +5620,200 @@ Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in obser
   assertEquals(content.exitCode, 0);
 });
 
+Deno.test("CfHarnessPromptLoop retains omission records across provider compaction", async () => {
+  const artifactRoot = await Deno.makeTempDir();
+  const runId = "run-omission-compaction";
+  const hugeStdout = "private".repeat(20_000);
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let turns = 0;
+  try {
+    const artifactStore = createFileSystemHarnessArtifactStore({
+      artifactRoot,
+      runId,
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime([
+          {
+            stdout: hugeStdout,
+            stderr: "",
+            exitCode: 0,
+            cfcResult: observedCfcResult(hugeStdout),
+          },
+          {
+            stdout: "second\n",
+            stderr: "",
+            exitCode: 0,
+            cfcResult: observedCfcResult("second\n"),
+          },
+        ]),
+        artifactStore,
+        runId,
+        model: "gpt-5.4",
+      }),
+      fetchFn: (_input, init) => {
+        turns += 1;
+        requestBodies.push(JSON.parse(String(init?.body)));
+        const output = turns === 1
+          ? [{
+            type: "function_call",
+            id: "fc-first",
+            call_id: "call-first",
+            name: "bash",
+            arguments: JSON.stringify({ command: "first" }),
+          }]
+          : turns === 2
+          ? [{
+            type: "compaction",
+            id: "cmp-after-first",
+            encrypted_content: "encrypted-compaction",
+          }, {
+            type: "function_call",
+            id: "fc-second",
+            call_id: "call-second",
+            name: "bash",
+            arguments: JSON.stringify({ command: "second" }),
+          }]
+          : [{
+            type: "message",
+            id: "msg-done",
+            role: "assistant",
+            status: "completed",
+            content: [{
+              type: "output_text",
+              text: "Done.",
+              annotations: [],
+            }],
+          }];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              object: "response",
+              status: "completed",
+              output,
+            }),
+            { status: 200 },
+          ),
+        );
+      },
+    });
+
+    await loop.runPrompt({
+      prompt: "Run both commands.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const thirdInput = requestBodies[2].input as Array<Record<string, unknown>>;
+    assertEquals(thirdInput[0]?.type, "compaction");
+    assertEquals(
+      JSON.stringify(thirdInput).includes(
+        createToolOutputId(runId, "bash", 1),
+      ),
+      false,
+    );
+    const omissions = JSON.parse(
+      await Deno.readTextFile(
+        join(artifactStore.runRoot, "transcript-omissions.json"),
+      ),
+    ) as HarnessTranscriptOmissions;
+    const first = omissions.results.find((result) =>
+      result.outputId === createToolOutputId(runId, "bash", 1)
+    );
+    assertEquals(first?.rules, [{
+      rule: "model-context-truncation",
+      locations: [{
+        artifactPath: join(
+          artifactStore.runRoot,
+          "tool-outputs",
+          `${runId}_bash_1-bash.json`,
+        ),
+        jsonPointer: "/stdout",
+      }],
+    }]);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
+
+Deno.test("CfHarnessPromptLoop bounds a large model-facing read_file result more tightly than bash output", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const document = `${"a".repeat(20_000)}MIDDLE${"z".repeat(20_000)}`;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: document,
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult(document),
+        },
+      ]),
+      runId: "run-large-read-file",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-large-read-file",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "/workspace/guide.md" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "Read the guide." },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read the guide.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Read the guide.");
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  const toolMessage = chatViewOfRequest(secondRequest).messages.at(-1);
+  assertEquals(toolMessage?.role, "tool");
+  const content = JSON.parse(toolMessage!.content);
+  assertEquals(
+    content.outputId,
+    createToolOutputId("run-large-read-file", "read_file", 1),
+  );
+  assertEquals(content.contentTruncated, true);
+  assertEquals(content.contentOriginalLength, document.length);
+  // 8,000 characters of head and 2,000 of tail, well under the 80,000 a bash
+  // stream keeps, with the marker naming the artifact holding the whole file.
+  assert(content.content.startsWith("a".repeat(8_000)));
+  assert(content.content.endsWith("z".repeat(2_000)));
+  assert(content.content.includes("omitted 30006 characters"));
+  assert(content.content.includes("run-large-read-file:read_file:1"));
+  assert(content.content.length < 11_000);
+});
+
 Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforce mode", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
@@ -4651,6 +5824,9 @@ Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforc
       ]),
       runId: "run-missing-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run denies bash output that carries no mediation
+      // metadata. The tool message is compared against that
+      // observation-denied envelope.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -4765,7 +5941,10 @@ Deno.test({
         ]),
         runId: "run-missing-cfc-script-result",
         model: "gpt-5.4",
+        // An enforcing run denies run_skill_script output that carries no
+        // mediation metadata. The tool message is compared against that denial.
         cfcEnforcementMode: "enforce-explicit",
+        skillsRoot: root,
         allowedSkillScripts: [{
           skill: "deno-memory-profiler",
           path: "scripts/memory.ts",
@@ -4909,7 +6088,7 @@ Deno.test({
         ]),
         runId: "run-mediated-skill-script",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
+        skillsRoot: root,
         allowedSkillScripts: [{
           skill: "deno-memory-profiler",
           path: "scripts/memory.ts",
@@ -5030,6 +6209,8 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
       ]),
       runId: "run-mediated-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run hands the model the mediated stream. The assertions
+      // read `content.cfc.stdout.policy` and `content.cfc.stderr.policy` back.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -5088,6 +6269,83 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
   assertEquals(content.cfc.stderr.policy, "denied");
 });
 
+Deno.test("CfHarnessPromptLoop records CFC-side stream truncation as a model omission", async () => {
+  const artifactRoot = await Deno.makeTempDir();
+  const runId = "run-mediated-cfc-truncation";
+  try {
+    const artifactStore = createFileSystemHarnessArtifactStore({
+      artifactRoot,
+      runId,
+    });
+    let turn = 0;
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        artifactStore,
+        sandboxRuntime: new FakeSandboxRuntime([{
+          stdout: "raw stdout\n",
+          stderr: "raw stderr\n",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released stdout\n", {
+            stderr: "released stderr\n",
+            stdoutTruncated: true,
+            stderrTruncated: true,
+          }),
+        }]),
+        runId,
+        model: "gpt-5.4",
+      }),
+      fetchFn: () => {
+        turn += 1;
+        const message = turn === 1
+          ? {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              id: "call-truncated-cfc-result",
+              type: "function",
+              function: {
+                name: "bash",
+                arguments: JSON.stringify({ command: "show partial output" }),
+              },
+            }],
+          }
+          : { role: "assistant", content: "Done." };
+        return Promise.resolve(
+          new Response(JSON.stringify(
+            responsesBodyFromChatFixture({ choices: [{ index: 0, message }] }),
+          )),
+        );
+      },
+    });
+
+    await loop.runPrompt({
+      prompt: "Run a direct command.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const omissions = JSON.parse(
+      await Deno.readTextFile(
+        join(artifactStore.runRoot, "transcript-omissions.json"),
+      ),
+    ) as HarnessTranscriptOmissions;
+    assertEquals(omissions.results.length, 1);
+    assertEquals(omissions.results[0].rules, [{
+      rule: "model-context-truncation",
+      locations: ["/stdout", "/stderr"].map((jsonPointer) => ({
+        artifactPath: join(
+          artifactStore.runRoot,
+          "tool-outputs",
+          `${runId}_bash_1-bash.json`,
+        ),
+        jsonPointer,
+      })),
+    }]);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
+
 const labelHasConfidentialityValue = (
   label: unknown,
   value: unknown,
@@ -5123,6 +6381,8 @@ Deno.test("CfHarnessPromptLoop denies read_file content without CFC metadata in 
       ]),
       runId: "run-read-file-missing-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run denies read_file content that carries no mediation
+      // metadata. The tool message is compared against that denial.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (() => {
@@ -5200,6 +6460,9 @@ Deno.test("CfHarnessPromptLoop redacts read_file filesystem-status failures in e
       ]),
       runId: "run-read-file-status-redacted",
       model: "gpt-5.4",
+      // An enforcing run redacts the filesystem-status failure, and the
+      // assertions compare the model-facing path and error against their
+      // redacted forms.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (() => {
@@ -5290,6 +6553,8 @@ Deno.test("CfHarnessPromptLoop warns but exposes read_file filesystem-status fai
       ]),
       runId: "run-read-file-status-observe",
       model: "gpt-5.4",
+      // An observing run exposes the filesystem-status failure and records a
+      // warning. The assertions read both the warning and the exposed error.
       cfcEnforcementMode: "observe",
     }),
     fetchFn: (() => {
@@ -5370,7 +6635,6 @@ Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks mod
       ]),
       runId: "run-read-file-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -5484,7 +6748,6 @@ Deno.test("CfHarnessPromptLoop carries observed CFC labels into later write_file
       ]),
       runId: "run-write-file-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -5608,7 +6871,6 @@ Deno.test("CfHarnessPromptLoop carries observed CFC labels into edit_file write 
       ]),
       runId: "run-edit-file-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -5782,6 +7044,9 @@ Deno.test("CfHarnessPromptLoop denies edit_file success when an internal read la
       ]),
       runId: "run-edit-file-missing-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run denies the edit_file result whose internal read
+      // carried no mediation metadata. The assertions read that denial and
+      // its handle.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -5872,6 +7137,9 @@ Deno.test("CfHarnessPromptLoop redacts recoverable edit_file errors in enforce m
       ]),
       runId: "run-edit-file-error-redaction",
       model: "gpt-5.4",
+      // An enforcing run redacts the recoverable edit_file error, and the
+      // assertions compare the model-facing path and error against
+      // `[redacted]`.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -5983,7 +7251,6 @@ Deno.test("CfHarnessPromptLoop accumulates observed CFC labels for the next mode
       ]),
       runId: "run-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -6098,7 +7365,6 @@ Deno.test("CfHarnessPromptLoop does not taint sibling tool calls from one assist
       ]),
       runId: "run-cfc-model-context-siblings",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -6219,7 +7485,6 @@ Deno.test("CfHarnessPromptLoop ignores opaque and denied CFC observations for mo
       ]),
       runId: "run-cfc-model-context-opaque",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -6294,6 +7559,119 @@ Deno.test("CfHarnessPromptLoop ignores opaque and denied CFC observations for mo
   );
 });
 
+Deno.test("CfHarnessPromptLoop withholds opaque CFC stdout from the model", async (t) => {
+  const opaqueLabel = "did:key:opaque-stdout";
+  const printedBytes = "withheld-stdout-marker";
+  const withheldByteLength = new TextEncoder()
+    .encode(`${printedBytes}\n`).length;
+  // Mediation of a CFC result does not consult the enforcement rung. A rung
+  // that released the bytes would be a hole in the boundary this case guards,
+  // so each one runs the same assertions, and a rung added later joins them.
+  for (const cfcEnforcementMode of CFC_ENFORCEMENT_MODES) {
+    await t.step(cfcEnforcementMode, async () => {
+      const fetchCalls: RequestInit[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          // The sandbox prints these bytes and CFC marks the stdout channel
+          // opaque. stderr and the exit code stay observed, which isolates the
+          // stdout channel; the docker route marks all three of a command's
+          // channels together, so this shape comes from the contract rather
+          // than from that route.
+          sandboxRuntime: new FakeSandboxRuntime([
+            {
+              stdout: `${printedBytes}\n`,
+              stderr: "",
+              exitCode: 0,
+              cfcResult: {
+                ...observedCfcResult(""),
+                stdout: {
+                  channel: "stdout",
+                  policy: "opaque",
+                  label: { confidentiality: [opaqueLabel] },
+                  byteLength: withheldByteLength,
+                },
+              },
+            },
+          ]),
+          runId: "run-cfc-opaque-stdout-withheld",
+          model: "gpt-5.4",
+          cfcEnforcementMode,
+        }),
+        fetchFn: twoTurnBashFetch(
+          fetchCalls,
+          { command: "cat opaque.txt" },
+          "The output was withheld.",
+        ),
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Read the opaque file.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      // Withholding a stream is mediation rather than a denial, so the run
+      // carries on and the model gets the second turn that reads the result.
+      assertEquals(result.runState.status, "completed");
+      assertEquals(result.runState.policyEvents, []);
+      assertEquals(fetchCalls.length, 2);
+      const secondBody = String(fetchCalls[1]?.body);
+      const toolMessage = chatViewOfRequest(JSON.parse(secondBody))
+        .messages.at(-1);
+      assert(toolMessage !== undefined && toolMessage.role === "tool");
+      assertEquals(toolMessage.tool_call_id, "call-1");
+      // The bytes are absent from the whole request, not only from the message
+      // the exact match below pins.
+      assertEquals(secondBody.includes(printedBytes), false);
+      // What the model reads in place of the bytes. The `denied` policy
+      // renders a denial through the same `stdout` field, so the reason and
+      // the handle's `passThrough` flag are what tell the two apart. Pinning
+      // the whole message also pins the `cfc` descriptor, which is where the
+      // label and the size of what was withheld travel.
+      const content = JSON.parse(toolMessage.content);
+      assertEquals(content, {
+        outputId: "run-cfc-opaque-stdout-withheld:bash:1",
+        stdout: {
+          type: "cf-harness.observation-denied",
+          reason: "needs-opaque-pass-through",
+          detail: "stdout was not released by CFC policy",
+          handle: {
+            type: "cf-harness.opaque-handle",
+            handleId: "run-cfc-opaque-stdout-withheld:bash:1:stdout",
+            scope: "run",
+            createdAt: content.stdout?.handle?.createdAt,
+            passThrough: true,
+          },
+        },
+        stderr: "",
+        exitCode: 0,
+        cwd: "/workspace",
+        cfc: {
+          version: 1,
+          stdout: {
+            channel: "stdout",
+            policy: "opaque",
+            label: { confidentiality: [opaqueLabel] },
+            byteLength: withheldByteLength,
+          },
+          stderr: {
+            channel: "stderr",
+            policy: "observed",
+            label: { confidentiality: ["public"] },
+          },
+          exitCode: {
+            policy: "observed",
+            label: { confidentiality: ["public"] },
+            value: 0,
+          },
+        },
+      });
+    });
+  }
+  // The released direction is covered by "exposes mediated bash output
+  // instead of raw stdout in enforce mode" earlier in this file.
+});
+
 Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforce-explicit mode", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
@@ -6302,6 +7680,8 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-enforce-explicit",
       model: "gpt-5.4",
+      // The expected policy event and the model-facing tool message both name
+      // this mode in their denial detail.
       cfcEnforcementMode: "enforce-explicit",
       now: (() => {
         const timestamps = [
@@ -6420,6 +7800,7 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-tool-allowlist-denied",
       model: "gpt-5.4",
+      // The expected policy event carries this mode in its `mode` field.
       cfcEnforcementMode: "disabled",
       now: (() => {
         const timestamps = [
@@ -6522,6 +7903,8 @@ Deno.test("CfHarnessPromptLoop includes read_file input summaries on strict-mode
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-read-file-strict",
       model: "gpt-5.4",
+      // Strict enforcement denies the read, and the assertions read the input
+      // summary that denial carried.
       cfcEnforcementMode: "enforce-strict",
     }),
     fetchFn: (_input, init) => {
@@ -6590,6 +7973,7 @@ Deno.test("CfHarnessPromptLoop includes prompt slot context on policy events", a
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-policy-context",
       model: "gpt-5.4",
+      // The expected policy event names this mode in its denial detail.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -6656,4 +8040,348 @@ Deno.test("CfHarnessPromptLoop includes prompt slot context on policy events", a
     result.runState.policyEvents[0]?.detail,
     "write_file requires direct-command authorization in enforce-explicit",
   );
+});
+
+Deno.test("CfHarnessPromptLoop applies the compaction threshold to delegated work", async () => {
+  // A run-wide setting has to reach children too. Without this, `0` would
+  // disable compaction in the parent while children fall back to the derived
+  // default and compact anyway.
+  for (const threshold of [12_000, 0]) {
+    const seen: (number | undefined)[] = [];
+    let parentTurns = 0;
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) => {
+        seen.push(request.compactThreshold);
+        if (request.model !== "gpt-5.6-terra") {
+          return Promise.resolve({
+            assistant: { role: "assistant", content: "child done" },
+          });
+        }
+        parentTurns += 1;
+        return Promise.resolve({
+          assistant: parentTurns === 1
+            ? {
+              role: "assistant" as const,
+              content: "",
+              toolCalls: [{
+                id: `call-delegate-${threshold}`,
+                type: "function" as const,
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Do the isolated part.",
+                    profile: "default",
+                  }),
+                },
+              }],
+            }
+            : { role: "assistant" as const, content: "parent done" },
+        });
+      },
+    };
+    const loop = new CfHarnessPromptLoop({
+      modelClient,
+      compactThreshold: threshold,
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-child-compaction-${threshold}`,
+        model: "gpt-5.6-terra",
+      }),
+    });
+
+    await loop.runPrompt({ prompt: "Delegate and continue." });
+
+    assert(seen.length >= 2, "expected a parent turn and a child turn");
+    assertEquals(
+      seen.every((value) => value === threshold),
+      true,
+      `every turn should carry compactThreshold ${threshold}, saw ${
+        JSON.stringify(seen)
+      }`,
+    );
+  }
+});
+
+Deno.test("CfHarnessPromptLoop keeps a positive threshold off profile-overridden child models", async () => {
+  // web_search overrides the child model, so the parent's number — calibrated
+  // to the parent model's input budget — must not follow it there: on the
+  // chat-routed override it would be rejected outright, and on any other it
+  // would be the wrong model's threshold. `0` still propagates: the
+  // off-switch is run-wide.
+  for (
+    const { threshold, expectedChild } of [
+      { threshold: 12_000, expectedChild: undefined },
+      { threshold: 0, expectedChild: 0 },
+    ]
+  ) {
+    const childSeen: (number | undefined)[] = [];
+    let parentTurns = 0;
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) => {
+        if (request.model !== "gpt-5.6-terra") {
+          childSeen.push(request.compactThreshold);
+          return Promise.resolve({
+            assistant: { role: "assistant", content: "child done" },
+          });
+        }
+        parentTurns += 1;
+        return Promise.resolve({
+          assistant: parentTurns === 1
+            ? {
+              role: "assistant" as const,
+              content: "",
+              toolCalls: [{
+                id: `call-web-search-${threshold}`,
+                type: "function" as const,
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Find the latest release notes.",
+                    profile: "web_search",
+                  }),
+                },
+              }],
+            }
+            : { role: "assistant" as const, content: "parent done" },
+        });
+      },
+    };
+    const loop = new CfHarnessPromptLoop({
+      modelClient,
+      compactThreshold: threshold,
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["web_search"],
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-override-compaction-${threshold}`,
+        model: "gpt-5.6-terra",
+      }),
+    });
+
+    await loop.runPrompt({
+      prompt: "Delegate and continue.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    assert(childSeen.length >= 1, "expected at least one child turn");
+    assertEquals(
+      childSeen.every((value) => value === expectedChild),
+      true,
+      `child turns should carry compactThreshold ${expectedChild}, saw ${
+        JSON.stringify(childSeen)
+      }`,
+    );
+  }
+});
+
+Deno.test("CfHarnessPromptLoop grounds host-command children in the workspace, not the parent cwd", async () => {
+  // A browser child executes host commands, so its paths — including its
+  // cwd — must resolve against its own host-backed mounts, which are
+  // workspace-only. A parent working elsewhere (Loom capture runs sit at
+  // /file-cabinet) previously killed every browser child at its first host
+  // command with "path escapes host-backed sandbox roots" (CT-1984).
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["browser"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: "/tmp/project",
+      cwd: "/file-cabinet",
+      runId: "run-delegate-browser-cwd",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-browser-cwd",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Snapshot the local app with agent-browser.",
+                    profile: "browser",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: requestBodies.length === 2
+                ? "Browser child completed."
+                : "Parent completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate browser work from the file cabinet.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.runState.status, "completed");
+  // The parent keeps its own working directory…
+  assertEquals(result.runState.currentDir, "/file-cabinet");
+  // …while the host-command child is grounded in the workspace.
+  assertEquals(
+    chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
+      "Current sandbox directory: /workspace",
+    ),
+    true,
+  );
+  assertEquals(
+    chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
+      "/file-cabinet",
+    ),
+    false,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop surfaces a child's ok:false return as a coded failure rather than a schema mismatch", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-structured-return-child-failure",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-structured-child-failure",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Return structured facts.",
+                    returnSchema: {
+                      type: "object",
+                      properties: {
+                        ok: { type: "boolean", const: true },
+                        resultRef: { type: "string" },
+                      },
+                      required: ["ok", "resultRef"],
+                      additionalProperties: false,
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                ok: false,
+                code: "compile-error",
+                detail: "prompt injection text",
+              }),
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent saw the reported failure.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a mismatched structured return.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Parent saw the reported failure.");
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  assertEquals(toolMessage.content.includes("prompt injection text"), false);
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      status: string;
+      summary: string;
+      structuredReturn: {
+        status: string;
+        failureCode: string;
+        value: unknown;
+        validationError?: string;
+      };
+    };
+  };
+  assertEquals(output.subagent.status, "failed");
+  assertEquals(
+    output.subagent.summary,
+    "Subagent reported failure (compile-error).",
+  );
+  assertEquals(
+    output.subagent.structuredReturn.status,
+    "child-reported-failure",
+  );
+  assertEquals(output.subagent.structuredReturn.failureCode, "compile-error");
+  assertEquals(output.subagent.structuredReturn.value, {
+    ok: false,
+    code: "compile-error",
+  });
+  assertEquals(output.subagent.structuredReturn.validationError, undefined);
 });

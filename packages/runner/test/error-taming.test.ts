@@ -16,7 +16,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
+import { tagFromNativeValue } from "@commonfabric/data-model";
 import { restoreErrorIsError } from "../src/sandbox/error-taming.ts";
 import {
   ensureSESLockdown,
@@ -58,8 +58,11 @@ describe("Error.isError under SES lockdown", () => {
     });
 
     it("installs nothing when handed a non-function", () => {
-      // How a runtime without `Error.isError` declines. The pinned browser
-      // integration runtime takes this path. The shim defines nothing because
+      // How a runtime without `Error.isError` declines. Nothing this project
+      // runs on takes this path any more: a browser test drives a system
+      // Chrome, and astral's own download -- the one browser old enough to
+      // lack the method -- is reached only on a machine that has no browser
+      // installed at all. The shim defines nothing because
       // an `undefined` property fails SES's `isError: fn` permit and gets
       // stripped back out with an unpermitted-intrinsic report.
       //
@@ -92,7 +95,7 @@ describe("Error.isError under SES lockdown", () => {
     it("recognizes an error handed in from the host", () => {
       // The reason to restore the genuine intrinsic rather than polyfill with
       // `instanceof`: the compartment's `Error` is not the host's, so only the
-      // internal-slot test answers this correctly.
+      // internal-slot test is correct here.
       const check = evaluateFunctionSourceInSES(
         `function (value) { return Error.isError(value); }`,
         { lockdown: true },

@@ -12,11 +12,12 @@
  * machinery to recompute the id with.
  */
 import { env } from "@commonfabric/integration";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertStringIncludes } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   initializePiecesController,
   PieceController,
@@ -36,13 +37,14 @@ describe("note appendLink integration", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });
     const sourcePath = join(import.meta.dirname!, "..", "notes", "note.tsx");
-    const program = await cc.manager().runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath },
     );
     host = await cc.create(program, {
       input: { title: "Host Note", content: "" },
@@ -53,8 +55,19 @@ describe("note appendLink integration", () => {
       start: true,
     });
     // Keep both pieces reactive (pull mode) so handlers run on send.
-    cancels.push(cc.manager().getResult(host.getCell()).sink(() => {}));
-    cancels.push(cc.manager().getResult(target.getCell()).sink(() => {}));
+    cancels.push(cc.getResult(host.getCell()).sink(() => {}));
+    cancels.push(cc.getResult(target.getCell()).sink(() => {}));
+    // `create` resolves once the piece exists, not once its result has been
+    // derived: the pattern runs on whichever side the space's execution
+    // posture puts it, so under server execution the value arrives over the
+    // wire afterwards. Sending the event reads through the payload's link to
+    // hold it against the stream's contract, so the target has to be loaded
+    // before it can be linked to.
+    await waitForCellValue(
+      cc.runtime,
+      target.getCell(),
+      (v) => v !== undefined,
+    );
   });
 
   afterAll(async () => {
@@ -69,8 +82,8 @@ describe("note appendLink integration", () => {
       { piece: target.getCell() },
       ["appendLink"],
     );
-    await cc.manager().runtime.idle();
-    await cc.manager().synced();
+    await cc.runtime.idle();
+    await cc.synced();
 
     const content = await host.result.get(["content"]) as string;
     assert(typeof content === "string", "content is not a string");

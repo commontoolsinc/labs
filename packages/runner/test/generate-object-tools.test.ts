@@ -1,4 +1,5 @@
 /// <reference path="./clock.d.ts" />
+
 /**
  * Integration tests for generateObject with tool calling support.
  *
@@ -8,15 +9,17 @@
  * 3. Maintains backward compatibility when no tools are provided
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   DataUnavailable,
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   addMockObjectResponse,
   addMockResponse,
@@ -25,26 +28,26 @@ import {
   loadConversationFixture,
   setMockResponseGate,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
-import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForLlmSettled } from "./support/llm-result.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
+
+import { createBuilder } from "../src/builder/factory.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
+import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
+import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
-import { cfcAtom } from "@commonfabric/api/cfc";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // D1b (cfc-llm-derived-stamp-builtins.test.ts): generateObject stamps LlmDerived
 // on EVERY node of the result schema so the mark rides split child-document
 // writes too. So instruction-inert result paths carry [InjectionSafe, LlmDerived]
 // and non-inert paths carry [LlmDerived].
 const LLM_DERIVED_ATOM = cfcAtom.llmDerived();
-import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getMetaLink, parseLink } from "../src/link-utils.ts";
-import { generateObjectState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -73,9 +76,15 @@ describe("generateObject with tools", () => {
   beforeEach(() => {
     clearMockResponses(); // Clear mocks from previous tests
     storageManager = StorageManager.emulate({ as: signer });
+    // The suite characterizes the generateObject tool loop at the
+    // enforce-explicit, flow-off rung its recorded mocks were captured
+    // against: flow-derived labels change the redaction inputs, and with
+    // them the request the mocks match on.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     tx = runtime.edit();
 
@@ -1725,7 +1734,8 @@ describe("generateObject with tools", () => {
 
     const promptRisk = {
       type: "https://commonfabric.org/cfc/atom/Caveat",
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: "of:hostile",
     } as const;
     const promptInfluence = {
@@ -2077,7 +2087,8 @@ describe("generateObject with tools", () => {
   it("redacts free-form strings from a userland dynamic subagent messages result", async () => {
     const promptRisk = {
       type: "https://commonfabric.org/cfc/atom/Caveat",
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: "of:hostile",
     } as const;
     const promptInfluence = {

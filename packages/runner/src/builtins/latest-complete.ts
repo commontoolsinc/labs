@@ -1,5 +1,4 @@
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary, type FabricValue } from "@commonfabric/data-model";
 import {
   DataUnavailable,
   isDataUnavailable,

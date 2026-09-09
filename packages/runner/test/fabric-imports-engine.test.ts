@@ -12,6 +12,7 @@ import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("fabric imports engine test");
 const space = signer.did();
@@ -93,7 +94,7 @@ describe("Engine fabric imports", () => {
       cellWithTx.setMetaRaw("patternIdentity", {
         identity: entryIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     return { cell };
   }
@@ -175,7 +176,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     expect(evaluated.main?.y()).toBe(42);
     expect(await runPattern(evaluated.main?.default, 1)).toEqual({
@@ -232,7 +233,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const reference = (evaluated.main?.schema as {
       ifc?: { confidentiality?: Record<string, unknown>[] };
@@ -285,7 +286,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const findWriterIdentity = (
       value: unknown,
@@ -383,7 +384,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      importerProgram("cf:dep").files,
+      importerProgram("cf:dep"),
     );
     expect(evaluated.main?.y()).toBe(10);
   });
@@ -404,7 +405,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      importerProgram(`cf:dep@${dependency.entryIdentity}`).files,
+      importerProgram(`cf:dep@${dependency.entryIdentity}`),
     );
     expect(evaluated.main?.y()).toBe(12);
   });
@@ -443,7 +444,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     expect(evaluated.main?.total()).toBe(4);
   });
@@ -498,7 +499,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     expect(evaluated.main?.total()).toBe(30);
 
@@ -628,7 +629,7 @@ describe("Engine fabric imports", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     expect(evaluated.main?.y()).toBe(102);
   });
@@ -676,7 +677,7 @@ describe("Engine fabric imports", () => {
       second.id,
       second.graph,
       second.mainSpecifier,
-      program.files,
+      program,
     );
     expect(evaluated.main?.y()).toBe(7);
   });

@@ -2,36 +2,44 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+
+import { getLogger } from "../../utils/src/logger.ts";
 // Relative import (not "@commonfabric/utils/types") for the same rollup
 // reason as traverse.ts.
-import { isRecord } from "../../utils/src/types.ts";
-import { getLogger } from "../../utils/src/logger.ts";
-import { type Cell, isCell, isStream } from "./cell.ts";
-import { isSigilLink } from "./link-types.ts";
-import { parseLink } from "./link-utils.ts";
-import { resolveLink } from "./link-resolution.ts";
-import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
-import type { MemorySpace } from "./storage/interface.ts";
+import { isObjectOrArray } from "../../utils/src/types.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
-import type { Runtime } from "./runtime.ts";
+import { type Cell, isCell } from "./cell.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
+import { cfcSchemaChildRoot } from "./cfc/schema-refs.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+import { resolveLink } from "./link-resolution.ts";
+import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
+import { parseLink } from "./link-utils.ts";
+import type { Runtime } from "./runtime.ts";
+import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "./storage/interface.ts";
 
 const logger = getLogger("piece-helpers");
 
 export type CellPath = (string | number)[];
 
+/**
+ * Splits a slash-separated cell path into its segments, converting each one
+ * through {@link linkPathSegmentToCellPathSegment} so that a path written on
+ * the command line addresses the same cells as the same path embedded in a
+ * reference. An empty path is no segments at all.
+ */
 export function parseCellPath(path: string): CellPath {
   if (!path || path.trim() === "") {
     return [];
   }
-  return path.split("/").map((segment) => {
-    if (segment === "") {
-      return segment;
-    }
-    const num = Number(segment);
-    return Number.isInteger(num) && num >= 0 ? num : segment;
-  });
+  return path.split("/").map(linkPathSegmentToCellPathSegment);
 }
 
 export function resolveCellPath<T>(
@@ -63,8 +71,13 @@ export function resolveCellPath<T>(
 
   const resolvedValue = currentCell.get();
   const segment = path[path.length - 1];
+  // `Object.hasOwn`, not `in`: `segment` names data. `in` walks the prototype
+  // chain, so a segment called `toString` looked present on every record and
+  // this returned `undefined` instead of raising the documented "property not
+  // found" error. The `availableKeys` hint below already uses `Object.keys` —
+  // own-only — so the two disagreed about what the record actually carries.
   const keyMissing = parentValue != null && typeof parentValue === "object"
-    ? !(segment in (parentValue as object))
+    ? !Object.hasOwn(parentValue as object, segment as string)
     : resolvedValue === undefined;
   if (path.length > 0 && keyMissing) {
     const availableKeys = parentValue != null && typeof parentValue === "object"
@@ -102,8 +115,9 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
  * ENTIRE object (`traverseObjectWithSchema`'s required check) — so a path-less
  * piece read returns `undefined` while every child-path read works. Per the
  * #4746 contract, partial visibility must be expressed in the schema rather
- * than special-cased in the traverser; this helper is the piece read boundary
- * doing exactly that, driven by the stored links' own declared scopes.
+ * than special-cased in the traverser; piece reads apply this helper at both
+ * the root and a selected subtree boundary, driven by the stored links' own
+ * declared scopes.
  *
  * Also relaxed: a property whose chain resolution is SCOPE-BLOCKED (a schema
  * scope cap forbade following a narrower link, CT-1642) — the member is just
@@ -132,13 +146,48 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   rawValue: unknown,
   base: Cell<unknown>,
   tx?: IExtendedStorageTransaction,
+  root?: JSONSchema,
 ): JSONSchema | undefined {
   if (
-    !isRecord(schema) || !isRecord(rawValue) || isSigilLink(rawValue) ||
+    !isObjectOrArray(schema) || !isObjectOrArray(rawValue) ||
+    isSigilLink(rawValue) ||
     Array.isArray(rawValue)
   ) {
     return schema;
   }
+
+  // A schema at rest can be a content-addressed reference
+  // (`docs/specs/content-addressed-schemas.md`), which carries no structure
+  // to walk. Judge the relaxation on the resolved document; a reference
+  // whose closure has not arrived stays a reference, which the walk below
+  // finds nothing to relax in — the same conservative fallback as a chain
+  // the resolver cannot complete. A member of a recursive group arrives as
+  // a LOCAL pointer whose definitions live on the owning document the
+  // recursion carries as `root`; resolving against it is what lets the
+  // relaxation see `properties` and `required` inside a nested definition.
+  // Either miss keeps the strict pre-existing behavior.
+  let structural = resolveExternalRootRefForStructure(schema);
+  let structuralRoot: JSONSchema;
+  if (structural !== schema) {
+    structuralRoot = structural;
+  } else {
+    // A schema declaring its own `$defs` opens a scope: local references
+    // under it resolve against IT, not the inherited document — the same
+    // child-root rule the CFC schema walkers apply.
+    structuralRoot = cfcSchemaChildRoot(structural, root ?? structural);
+    const ref = (structural as { $ref?: unknown }).$ref;
+    if (typeof ref === "string" && ref.startsWith("#")) {
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        structural as Parameters<
+          typeof ContextualFlowControl.resolveSchemaRefs
+        >[0],
+        structuralRoot,
+      );
+      if (!isObjectOrArray(resolved)) return schema;
+      structural = resolved;
+    }
+  }
+  structuralRoot = cfcSchemaChildRoot(structural, structuralRoot);
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.
@@ -194,7 +243,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 
   let changed = false;
 
-  let required = schema.required;
+  let required = structural.required;
   if (Array.isArray(required)) {
     const kept = required.filter(
       (prop) =>
@@ -207,8 +256,8 @@ export function schemaWithScopedLinkRequiredsRelaxed(
     }
   }
 
-  let properties = schema.properties;
-  if (isRecord(properties)) {
+  let properties = structural.properties;
+  if (isObjectOrArray(properties)) {
     let newProperties: Record<string, JSONSchema> | undefined;
     for (const [key, propSchema] of Object.entries(properties)) {
       const propValue = (rawValue as Record<string, unknown>)[key];
@@ -219,6 +268,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
         propValue,
         base,
         tx,
+        structuralRoot,
       );
       if (relaxed !== propSchema) {
         newProperties ??= { ...(properties as Record<string, JSONSchema>) };
@@ -233,17 +283,18 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 
   if (!changed) return schema;
   return {
-    ...schema,
+    ...structural,
     ...(properties !== undefined ? { properties } : {}),
     ...(required !== undefined ? { required } : {}),
   } as JSONSchema;
 }
 
 /**
- * Return `cell` re-schema'd for a terminal whole-object read: `required`
- * entries that point at narrower-scoped stored links are relaxed via
- * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged
- * when it carries no schema, the raw value is unreadable, or nothing needed
+ * Return `cell` re-schema'd for a terminal object read, whether it is the piece
+ * root or a selected subtree: `required` entries that point at
+ * narrower-scoped stored links are relaxed via
+ * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged when
+ * it carries no schema, the raw value is unreadable, or nothing needed
  * relaxing.
  */
 export function cellWithScopedLinkRequiredsRelaxed<T>(
@@ -276,38 +327,14 @@ export function getResultCellWithSourceSchema<T = unknown>(
   if (link.schema === undefined) {
     const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
     if (resultSchema !== undefined) {
-      const schema = cell.runtime.cfc.schemaAtPath(resultSchema, link.path);
+      const schema = ContextualFlowControl.schemaAtPath(
+        resultSchema,
+        link.path,
+      );
       return cell.asSchema<T>(schema);
     }
   }
   return cell;
-}
-
-const DEFAULT_APP_PATTERN_SOURCE = "/api/patterns/system/default-app.tsx";
-
-/**
- * Identifies a persisted default-app-shaped root that still exposes its piece
- * registry under the retired field. Provenance-free roots and roots tracking
- * the official default app qualify; custom sourced roots do not.
- */
-export function isLegacyPieceRegistryRoot(
-  root: Cell<unknown>,
-): boolean {
-  const patternIdentity = root.getMetaRaw("patternIdentity");
-  const patternSource = root.getMetaRaw("patternSource");
-  if (
-    !isRecord(patternIdentity) ||
-    typeof patternIdentity.identity !== "string" ||
-    typeof patternIdentity.symbol !== "string" ||
-    (patternSource !== undefined &&
-      patternSource !== DEFAULT_APP_PATTERN_SOURCE)
-  ) {
-    return false;
-  }
-
-  return root.key("pieceRegistry").getRaw() === undefined &&
-    root.key("allPieces").getRaw() !== undefined &&
-    isStream(root.key("addPiece").resolveAsCell());
 }
 
 /**

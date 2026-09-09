@@ -18,6 +18,7 @@ import type {
   JSONSchema,
 } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -27,7 +28,7 @@ import {
 } from "../src/builtins/llm-schemas.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
-import { generateObjectState } from "../src/builder/built-in.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -145,9 +146,8 @@ describe("llmDialog", () => {
     await result.pull();
 
     const addMessage = await result.key("addMessage").pull();
-    const settled = waitForDialogPendingFalse(result);
     addMessage.send({ role: "user", content: "Present a result" });
-    await settled;
+    await waitForLlmMessages(runtime, result, 1);
 
     const unavailable = result.key("result").getRaw();
     expect(isDataUnavailable(unavailable)).toBe(true);
@@ -210,14 +210,12 @@ describe("llmDialog", () => {
     await result.pull();
 
     const addMessage = await result.key("addMessage").pull();
-    const firstTurn = waitForDialogPendingFalse(result);
     addMessage.send({ role: "user", content: "First turn" });
-    await firstTurn;
+    await waitForLlmMessages(runtime, result, 4);
     expect(result.key("result").get()).toEqual({ answer: 42 });
 
-    const secondTurn = waitForDialogPendingFalse(result);
     addMessage.send({ role: "user", content: "Second turn" });
-    await secondTurn;
+    await waitForLlmMessages(runtime, result, 5);
     expect(result.key("result").get()).toEqual({ answer: 42 });
     expect(result.key("error").get()).toMatch(/no matching mock response/);
   });
@@ -275,9 +273,8 @@ describe("llmDialog", () => {
     await result.pull();
 
     const addMessage = await result.key("addMessage").pull();
-    let settled = waitForDialogPendingFalse(result);
     addMessage.send({ role: "user", content: "Invalid turn" });
-    await settled;
+    await waitForLlmMessages(runtime, result, 4);
 
     expect(result.key("result").getRaw()).toBe(
       DataUnavailable.schemaMismatch(),
@@ -285,9 +282,8 @@ describe("llmDialog", () => {
     expect(result.key("error").get()).toMatch(/schema validation/);
 
     clearMockResponses();
-    settled = waitForDialogPendingFalse(result);
     addMessage.send({ role: "user", content: "Failed retry" });
-    await settled;
+    await waitForLlmMessages(runtime, result, 5);
     const retryFailure = result.key("result").getRaw();
     expect(isDataUnavailable(retryFailure)).toBe(true);
     if (isDataUnavailable(retryFailure)) {
@@ -322,9 +318,8 @@ describe("llmDialog", () => {
         },
       ],
     });
-    settled = waitForDialogPendingFalse(result);
     addMessage.send({ role: "user", content: "Valid turn" });
-    await settled;
+    await waitForLlmMessages(runtime, result, 9);
 
     expect(result.key("result").get()).toEqual({ answer: "valid" });
     expect(result.key("error").get()).toBeUndefined();
@@ -397,11 +392,11 @@ describe("llmDialog", () => {
 
     // Turn 1: send greeting
     addMessage.send({ role: "user", content: "Hello" });
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     // Turn 2: send follow-up
     addMessage.send({ role: "user", content: "How are you?" });
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     const msgs = (await result.key("messages").pull())!;
     expect(msgs[0].content).toBe("Hello");
@@ -483,7 +478,7 @@ describe("llmDialog", () => {
     const run = await result.key("run").pull();
     run.send({});
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     const msgs = (await result.key("messages").pull())!;
     expect(msgs[0].content).toBe("Hello from handler");
@@ -593,7 +588,7 @@ describe("llmDialog", () => {
     });
 
     // user msg + assistant tool-call + tool result + assistant final = 4
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     expect(toolCalled).toBe(true);
 
@@ -706,7 +701,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Send the email." });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
     expect(capturedToolSchema).toMatchObject({
       type: "object",
       properties: {
@@ -1292,7 +1287,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Start the safe workflow." });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
     const messages = (await result.key("messages").pull())!;
     expect(messages.at(-1)?.content).toBe("Tool catalog is available.");
   });
@@ -1427,7 +1422,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Start the workflow." });
 
-    await expect(waitForMessages(result, 6)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 6);
 
     const messages = (await result.key("messages").pull())!;
     expect(messages[4].role).toBe("tool");
@@ -1523,7 +1518,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
 
     addMessage.send({ role: "user", content: "Please pin this cell" });
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     const pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
@@ -1644,7 +1639,7 @@ describe("llmDialog", () => {
 
     // First pin a cell
     addMessage.send({ role: "user", content: "Please pin this cell" });
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     let pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells?.length).toBe(1);
@@ -1652,7 +1647,7 @@ describe("llmDialog", () => {
 
     // Now unpin it
     addMessage.send({ role: "user", content: "Please unpin that cell" });
-    await expect(waitForMessages(result, 8)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 8);
 
     pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
@@ -1749,7 +1744,7 @@ describe("llmDialog", () => {
     });
 
     // Wait for response
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     // Verify context cells appear in pinnedCells output
     const pinnedCells = await result.key("pinnedCells").pull();
@@ -1890,7 +1885,7 @@ describe("llmDialog", () => {
     });
 
     // Wait for: user message, assistant tool call, tool result, final response
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     // Verify pinnedCells output contains both context cell and tool-pinned cell
     const pinnedCells = await result.key("pinnedCells").pull();
@@ -1990,15 +1985,183 @@ describe("llmDialog", () => {
       content: "Reply without built-in tools.",
     });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
     expect(capturedRequest.system).not.toContain("# Link and Cell Model");
-    expect(capturedRequest.system).not.toContain("call listRecent()");
+    expect(capturedRequest.system).not.toContain("call listItems()");
 
     const flattenedTools = await result.key("flattenedTools").pull();
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
+  });
+
+  it("should keep pattern-supplied tools out of its standing guidance", async () => {
+    const requests: any[] = [];
+
+    addMockResponse(
+      (req) => {
+        requests.push(req);
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Noted.",
+        id: "mock-guidance-scope-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const listItemsTool = pattern(
+      () => "items",
+      { type: "object" },
+      { type: "string" },
+    );
+
+    // The dialog's own guidance describes what the dialog provides. A tool the
+    // pattern supplies is the pattern's to introduce, in the system prompt it
+    // passes — the dialog naming one would be guidance it cannot keep true.
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          tools: {
+            listItems: patternTool(
+              listItemsTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-guidance-scope-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Something vague." });
+
+    await waitForLlmMessages(runtime, result, 2);
+
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests[0].system).not.toContain("listItems");
+    // The guidance for what the dialog does provide is unaffected.
+    expect(requests[0].system).toContain("# Link and Cell Model");
+  });
+
+  it("should advertise presentResult whenever a resultSchema is given", async () => {
+    let capturedRequest: any;
+
+    addMockResponse(
+      (req) => {
+        capturedRequest = req;
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Noted.",
+        id: "mock-present-result-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const pingTool = pattern(
+      () => "pong",
+      { type: "object" },
+      { type: "string" },
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          // presentResult rides resultSchema, not this flag: with the six
+          // built-ins off it must still be advertised.
+          builtinTools: false,
+          resultSchema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+          },
+          tools: {
+            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-present-result-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Give me a structured answer." });
+
+    await waitForLlmMessages(runtime, result, 2);
+
+    expect(capturedRequest).toBeDefined();
+    expect(Object.keys(capturedRequest.tools ?? {}).sort()).toEqual([
+      "ping",
+      "presentResult",
+    ]);
+    expect(capturedRequest.tools.presentResult.inputSchema.properties.answer)
+      .toBeDefined();
   });
 
   it("should omit built-in tools even when llmDialog params are cast to any", async () => {
@@ -2079,7 +2242,7 @@ describe("llmDialog", () => {
       content: "Reply without built-in tools.",
     });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
@@ -2178,7 +2341,7 @@ describe("llmDialog", () => {
       content: "Reply with handler tools available.",
     });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
@@ -2269,7 +2432,6 @@ describe("llmDialog", () => {
     const ceilingRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: ceilingStorageManager,
-      cfcEnforcementMode: "enforce-explicit",
       // Deployment ceiling: the llmDialog sink may carry no confidentiality.
       cfcSinkMaxConfidentiality: { llmDialog: [] },
     });
@@ -2314,7 +2476,7 @@ describe("llmDialog", () => {
       addMessage.send({ role: "user", content: "Read the briefing." });
 
       // user, assistant(tool-call), tool(result), assistant(final).
-      await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+      await waitForLlmMessages(ceilingRuntime, result, 4);
 
       const messages = (await result.key("messages").pull())!;
       const toolMessage = messages[2];
@@ -2499,7 +2661,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Start the workflow." });
 
-    await waitForMessages(result, 4);
+    await waitForLlmMessages(runtime, result, 4);
     const messages = (await result.key("messages").pull())!;
     // The conversation reaches its third request whether the delegate returned
     // data or an error, so the closing assertion below cannot see an abandoned
@@ -2516,43 +2678,3 @@ describe("llmDialog", () => {
     expect(messages.at(-1)?.content).toBe("Delegate completed.");
   });
 });
-
-function waitForMessages(result: any, expectedCount: number) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(
-        new Error(
-          `Timeout waiting for ${expectedCount} messages and pending=false`,
-        ),
-      );
-    }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
-      if (pending === false && messages?.length === expectedCount) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
-}
-
-function waitForDialogPendingFalse(result: any) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  let sawPending = result.key("pending").get() === true;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Timeout waiting for llmDialog pending=false"));
-    }, 5000);
-    cancel = result.sink(({ pending }: any = {}) => {
-      if (pending === true) sawPending = true;
-      if (sawPending && pending === false) resolve();
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
-}

@@ -14,8 +14,10 @@ import {
 const signer = await Identity.fromPassphrase("map-op-by-identity");
 const space = signer.did();
 
-// Unit coverage for the sentinel shape + resolver, independent of the runtime.
 describe("op-pattern-ref helpers", () => {
+  // Unit coverage for the sentinel shape + resolver, independent of the
+  // runtime.
+
   it("recognizes a well-formed sentinel and rejects others", () => {
     expect(
       isPatternRefSentinel({
@@ -80,12 +82,13 @@ describe("op-pattern-ref helpers", () => {
   });
 });
 
-// End-to-end: the `op` pattern of a `.map` node is
-// passed by its content-addressed `{ identity, symbol }` reference (a
-// `{ $patternRef }` sentinel) and resolved synchronously at runtime via
-// `artifactFromIdentitySync`, instead of being deserialized from an embedded
-// pattern graph.
 describe("map op passed by identity", () => {
+  // End-to-end: the `op` pattern of a `.map` node is passed by its
+  // content-addressed `{ identity, symbol }` reference (a `{ $patternRef }`
+  // sentinel) and resolved synchronously at runtime via
+  // `artifactFromIdentitySync`, instead of being deserialized from an embedded
+  // pattern graph.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

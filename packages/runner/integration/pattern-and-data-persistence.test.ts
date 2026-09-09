@@ -1,8 +1,6 @@
 #!/usr/bin/env -S deno run -A
 
 /**
- * Integration test: Pattern and Data Persistence
- *
  * This test demonstrates the full layered persistence model:
  * 1. Pattern source code stored in `datum` table (content-addressed)
  * 2. Precious data stored in `datum` table
@@ -15,18 +13,23 @@
  */
 
 import { assert, assertEquals } from "@std/assert";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import {
+  type Cell,
+  experimentalOptionsFromEnv,
+  type JSONSchema,
+  type MemorySpace,
+  Runtime,
+  type RuntimeProgram,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { env } from "@commonfabric/integration";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
 
 /** A content-addressed pattern pointer. */
 type PatternRef = { identity: string; symbol: string };
-import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
-
-const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 const keyConfig: IdentityCreateConfig = {
   implementation: "noble",
@@ -86,9 +89,9 @@ const inputDataSchema: JSONSchema = {
 type InputData = { values: number[]; label: string };
 type ResultData = { sum: number; result: string };
 
-// ============================================================
+//
 // Helper types and functions
-// ============================================================
+//
 
 interface TestContext {
   runtime: Runtime;
@@ -102,6 +105,17 @@ function createTestContext(identity: Identity): TestContext {
   });
   const runtime = new Runtime({
     apiUrl: API_URL,
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager,
   });
   return { runtime, storageManager };
@@ -130,9 +144,9 @@ function getResultCell(
   return runtime.getCell<ResultData>(space, cellId, undefined, tx);
 }
 
-// ============================================================
+//
 // Phase functions
-// ============================================================
+//
 
 /**
  * Phase 1: Save pattern and initial data to storage.
@@ -413,9 +427,9 @@ async function phase4CrossSessionReactivity(
   console.log("Runtime 4 disposed");
 }
 
-// ============================================================
+//
 // Main test
-// ============================================================
+//
 
 async function testPatternAndDataPersistence() {
   console.log("\n=== TEST: Pattern and Data Persistence ===");
@@ -437,20 +451,7 @@ async function testPatternAndDataPersistence() {
 
 Deno.test({
   name: "pattern and data persistence - full reactive cycle",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([testPatternAndDataPersistence(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: testPatternAndDataPersistence,
   sanitizeResources: false,
   sanitizeOps: false,
 });

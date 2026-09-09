@@ -1,9 +1,13 @@
-// Completed runtime benchmark artifacts persisted across dashboard restarts.
-// One workflow run attempt is immutable, including the absence of a usable artifact.
+/**
+ * Keeps the completed runtime benchmark artifacts across dashboard restarts.
+ * One workflow run attempt is immutable, including the absence of a usable
+ * artifact.
+ */
 
 import { dashboardCacheFile } from "./history-files.ts";
 
 export const BENCHMARK_HISTORY_CACHE_DAYS = 60;
+export const BENCHMARK_HISTORY_SAMPLING_VERSION = 1;
 
 const DAY_MS = 86_400_000;
 const STORE_VERSION = 1;
@@ -42,6 +46,7 @@ interface BenchmarkRunReference {
 
 export interface BenchmarkRefreshManifest {
   refreshedAt: number;
+  samplingVersion?: number;
   runs: BenchmarkRunReference[];
   result: BenchmarkRefreshResult;
 }
@@ -109,6 +114,9 @@ const isRefreshManifest = (
   if (typeof value !== "object" || value === null) return false;
   const refresh = value as BenchmarkRefreshManifest;
   return Number.isFinite(refresh.refreshedAt) && refresh.refreshedAt >= 0 &&
+    (refresh.samplingVersion === undefined ||
+      Number.isInteger(refresh.samplingVersion) &&
+        refresh.samplingVersion > 0) &&
     Array.isArray(refresh.runs) && refresh.runs.every(isRunReference) &&
     (refresh.result === undefined ||
       ["data", "no-runs", "data-unavailable", "no-metric"].includes(
@@ -225,6 +233,9 @@ export class BenchmarkHistoryStore {
         ) {
           refresh = {
             refreshedAt: value.refresh.refreshedAt,
+            ...(value.refresh.samplingVersion === undefined
+              ? {}
+              : { samplingVersion: value.refresh.samplingVersion }),
             runs: value.refresh.runs.map((run) => ({ ...run })),
             result: value.refresh.result ??
               (value.refresh.runs.length ? "data" : "no-runs"),
@@ -342,6 +353,8 @@ export class BenchmarkHistoryStore {
 
   get refreshedAt(): number {
     return this.#refresh && this.#refresh.refreshedAt > this.#invalidatedAt &&
+        this.#refresh.samplingVersion ===
+          BENCHMARK_HISTORY_SAMPLING_VERSION &&
         this.#refresh.refreshedAt <= Date.now()
       ? this.#refresh.refreshedAt
       : 0;
@@ -351,6 +364,9 @@ export class BenchmarkHistoryStore {
     if (!this.#refresh || !this.#resolve(this.#refresh)) return null;
     return {
       refreshedAt: this.#refresh.refreshedAt,
+      ...(this.#refresh.samplingVersion === undefined
+        ? {}
+        : { samplingVersion: this.#refresh.samplingVersion }),
       runs: this.#refresh.runs.map((run) => ({ ...run })),
       result: this.#refresh.result,
     };
@@ -373,7 +389,12 @@ export class BenchmarkHistoryStore {
       runId: run.runId,
       runAttempt: run.runAttempt,
     }));
-    const refresh = { refreshedAt: at, runs: references, result };
+    const refresh = {
+      refreshedAt: at,
+      samplingVersion: BENCHMARK_HISTORY_SAMPLING_VERSION,
+      runs: references,
+      result,
+    };
     if (!this.#resolve(refresh)) {
       throw new Error("Runtime benchmark refresh contains an uncached run.");
     }

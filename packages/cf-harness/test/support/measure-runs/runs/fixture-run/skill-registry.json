@@ -1,0 +1,18 @@
+{
+  "type": "cf-harness.skill-registry",
+  "version": 1,
+  "skillsRoot": "/repo/skills",
+  "sandboxSkillsRoot": "/workspace/skills",
+  "generatedAt": "2026-08-28T21:00:00.000Z",
+  "skills": [
+    {
+      "name": "pattern-dev",
+      "description": "Authoring guide."
+    },
+    {
+      "name": "pattern-ui",
+      "description": "UI guide."
+    }
+  ],
+  "diagnostics": []
+}

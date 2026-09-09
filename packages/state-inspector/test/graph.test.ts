@@ -65,7 +65,10 @@ function seed(path: string) {
     JSON.stringify({
       value: { $NAME: "My Notebook", $UI: {}, link: link("of:owned") },
       argument: link("of:input"),
-      internal: [{ partialCause: "q", link: link("of:owned") }],
+      internal: [
+        { partialCause: "q", link: link("of:owned") },
+        { partialCause: "d", link: link("of:gone") },
+      ],
       patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
       schema: { type: "object", properties: {}, $defs: {} },
     }),
@@ -83,6 +86,17 @@ function seed(path: string) {
   );
   commit.run(5, 5);
   rev.run("of:free", 5, JSON.stringify({ value: "x" }), 5);
+
+  // A tombstone the piece links to. The enumeration drops it, so the only way
+  // an edge into it can be labeled is by resolving the target on demand.
+  const op = db.prepare(
+    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, 0, ?, ?, ?)`,
+  );
+  commit.run(6, 6);
+  op.run("of:gone", 6, "set", JSON.stringify({ value: 1 }), 6);
+  commit.run(7, 7);
+  op.run("of:gone", 7, "delete", null, 7);
 
   db.close();
 }
@@ -130,6 +144,16 @@ Deno.test("entity graph: nodes, edges, neighborhood, dot", async (t) => {
         assert(ids.has("of:piece"));
         // the unrelated free cell is not within 1 hop of the input cell.
         assert(!ids.has("of:free"));
+      });
+
+      await t.step("an absent target says which kind of absent", () => {
+        const byId = Object.fromEntries(g.nodes.map((n) => [n.id, n]));
+        // `visibleEntityRows` drops tombstones, so this target is not among the
+        // rows the graph walked: the stub resolved it on demand, and says
+        // `deleted` rather than the "(absent)" every absent target once shared.
+        assertEquals(byId["of:gone"].kind, "deleted");
+        assertEquals(byId["of:gone"].label, "(deleted)");
+        assertEquals(byId["of:gone"].present, false);
       });
 
       await t.step("graphToDot emits a digraph with the piece node", () => {

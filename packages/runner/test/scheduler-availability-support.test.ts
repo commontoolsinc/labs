@@ -156,6 +156,7 @@ describe("availability scheduler support", () => {
       handler,
       event: 1,
       retry: false,
+      enqueueSeq: 0,
     };
     let clearCalls = 0;
     let releaseCalls = 0;

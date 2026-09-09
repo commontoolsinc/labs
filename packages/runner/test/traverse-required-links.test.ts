@@ -7,32 +7,41 @@
  * in their schema by making the property optional or accepting `undefined`.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  getLogger,
-  getLoggerCountsBreakdown,
-} from "@commonfabric/utils/logger";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
+import {
+  createDefaultTraversalContext,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 function getTraverser(
   store: Map<string, Revision<State>>,
@@ -41,7 +50,11 @@ function getTraverser(
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+  );
 }
 
 function putDoc(
@@ -54,7 +67,6 @@ function putDoc(
     the: TYPE,
     of: uri as Entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: uri as Entity }),
     since,
   };
   store.set(`${revision.of}/${revision.the}`, revision);
@@ -189,12 +201,13 @@ describe("required link-valued properties", () => {
 });
 
 describe("array-void diagnosability", () => {
-  // The 2026-07-10 board outage presented as a blanked array with a bare
-  // "Item doesn't match" log — nothing named WHICH element was at fault. Pin
-  // that the (unchanged) strict void now leaves an info breadcrumb carrying
-  // the failing index + doc address (the message body is a lazy lambda: it
-  // only runs when the level admits it).
   it("still voids on a mismatched element, and names the failing index + doc at info", () => {
+    // The 2026-07-10 board outage presented as a blanked array with a bare
+    // "Item doesn't match" log — nothing named WHICH element was at fault. Pin
+    // that the (unchanged) strict void now leaves an info breadcrumb carrying
+    // the failing index + doc address (the message body is a lazy lambda: it
+    // only runs when the level admits it).
+
     const traverseLogger = getLogger("traverse");
     const priorLevel = traverseLogger.level;
     traverseLogger.level = "info";

@@ -1,15 +1,18 @@
-// Pins the CURRENT behavior of the `widenLiterals` generation option
-// (mapping spec §8/§14; quirk §16.3). The flag is consulted by
-// PrimitiveFormatter (single literals) and by the anyOf merge pass
-// (mergeIdenticalSchemas), but NOT by the all-literal-union branch
-// (union-formatter.ts ~:176-214), which runs first. The resulting boundary
-// is incoherent and pinned here so any deliberate fix flips these
-// expectations consciously:
-//   - a pure literal union does NOT widen ("a" | "b" stays an enum), but
-//   - the same literal members DO widen when a non-literal member joins
-//     the union (mixed-union case), and
-//   - inside one object, a single-literal property widens while a
-//     literal-union sibling does not.
+/**
+ * Pins the CURRENT behavior of the `widenLiterals` generation option
+ * (mapping spec §8/§14; quirk §16.3). The flag is consulted by
+ * PrimitiveFormatter (single literals) and by the anyOf merge pass
+ * (mergeIdenticalSchemas), but NOT by the all-literal-union branch
+ * (union-formatter.ts ~:176-214), which runs first. The resulting boundary
+ * is incoherent and pinned here so any deliberate fix flips these
+ * expectations consciously:
+ *   - a pure literal union does NOT widen ("a" | "b" stays an enum), but
+ *   - the same literal members DO widen when a non-literal member joins
+ *     the union (mixed-union case), and
+ *   - inside one object, a single-literal property widens while a
+ *     literal-union sibling does not.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../src/schema-generator.ts";

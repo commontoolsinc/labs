@@ -1,15 +1,20 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessBrowserAccessLease } from "./browser-access.ts";
 import type { HarnessImageAttachment } from "./image.ts";
+import type { HarnessInputCellSpec } from "./input-cells.ts";
+import type { HarnessPatternRefSpec } from "./pattern-refs.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
   type BuiltinToolId,
   DEFAULT_PARENT_TOOL_IDS,
+  LOOM_AUTHORING_TOOL_IDS,
 } from "./tool-descriptor.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   type HarnessSubagentProfile,
 } from "./subagent.ts";
+import type { HarnessModelUsage } from "../model/client.ts";
 
 export const HARNESS_CHAT_PROTOCOL_VERSION = 1 as const;
 export const HARNESS_CHAT_REQUEST_TYPE = "cf-harness.chat.request" as const;
@@ -132,10 +137,21 @@ const READONLY_INTERACTIVE_CHAT_TOOL_ID_SET = new Set<BuiltinToolId>(
 export const resolveHarnessChatPolicy = (
   policy: HarnessChatPolicy = DEFAULT_HARNESS_CHAT_POLICY,
   context?: HarnessChatContext,
+  allowCommentLoomAuthoring = false,
 ): HarnessChatPolicy => {
   if (context?.type === "comment-thread") {
     return {
       ...COMMENT_THREAD_HARNESS_CHAT_POLICY,
+      ...(allowCommentLoomAuthoring
+        ? {
+          allowedToolIds: [
+            ...READONLY_INTERACTIVE_CHAT_TOOL_IDS,
+            ...policy.allowedToolIds.filter((id) =>
+              LOOM_AUTHORING_TOOL_IDS.has(id)
+            ),
+          ],
+        }
+        : {}),
       ...(policy.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: policy.cfcEnforcementMode }
         : {}),
@@ -159,6 +175,9 @@ export const resolveHarnessChatPolicy = (
 
 export interface HarnessChatTurnInput {
   text: string;
+
+  /** Originating Loom supplied by the caller, persisted with this turn only. */
+  loomId?: string;
   imageAttachments?: readonly HarnessImageAttachment[];
 }
 
@@ -181,6 +200,23 @@ export interface HarnessChatStartTurnParams {
   input: HarnessChatTurnInput;
   policy?: HarnessChatPolicy;
   browserAccess?: HarnessChatBrowserAccessLease;
+
+  /**
+   * Cells the caller attaches to this turn by reference, each under a name the
+   * model sees. A turn is its own run with its own handle table, so input
+   * cells are named per turn rather than per session: the tokens the model is
+   * given are the ones this turn's run minted.
+   */
+  inputCells?: readonly HarnessInputCellSpec[];
+
+  /**
+   * Published patterns the caller attaches to this turn by index id, resolved
+   * before the turn's first model turn and seeded into its run as searched
+   * hits. Named per turn for the same reason an input cell is: the run that
+   * holds them is this turn's.
+   */
+  patternRefs?: readonly HarnessPatternRefSpec[];
+
   metadata?: Record<string, unknown>;
 }
 
@@ -242,8 +278,13 @@ export interface HarnessChatError {
     | "turn_already_running"
     | "turn_canceled"
     | "session_closed"
+    | "incomplete_transcript"
     | "browser_access_required"
     | "policy_denied"
+    | "provider-configuration-required"
+    | "provider-auth-required"
+    | "provider-mismatch"
+    | "provider-unavailable"
     | "internal_error";
   message: string;
   retryable?: boolean;
@@ -293,7 +334,7 @@ export interface HarnessChatSessionStatus {
   workspace?: HarnessChatWorkspace;
   context?: HarnessChatContext;
   model?: string;
-  harnessRunId?: string;
+  loomLocalHostBinding?: LoomLocalHostBinding;
   artifactRoot?: string;
   capabilities: HarnessChatCapabilities;
   policy: HarnessChatPolicy;
@@ -331,19 +372,26 @@ export interface HarnessChatFileChange {
   summary?: string;
 }
 
-export interface HarnessChatSubagentSummary {
+/**
+ * The `delegate_task` child an event belongs to. Events derived from a child's
+ * transcript carry it so a consumer can nest them under the parent tool call
+ * that started the child, which is the only identifier the parent feed already
+ * shows.
+ */
+export interface HarnessChatSubagentRef {
   parentToolCallId: string;
   childRunId?: string;
   profile: HarnessSubagentProfile;
+}
+
+export interface HarnessChatSubagentSummary extends HarnessChatSubagentRef {
+  /** The task the parent delegated, as the parent worded it. */
+  goal?: string;
+
   summary?: string;
 }
 
-export interface HarnessChatGatewayUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  costUsd?: number;
-}
+export type HarnessChatGatewayUsage = HarnessModelUsage;
 
 export type HarnessChatStructuredEvent =
   | {
@@ -357,20 +405,24 @@ export type HarnessChatStructuredEvent =
   | {
     kind: "assistant_delta";
     text: string;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "assistant_completed";
     text: string;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "tool_started";
     tool: HarnessChatToolCallSummary;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "tool_progress";
     toolCallId: string;
     message: string;
     data?: Record<string, unknown>;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "tool_completed";
@@ -378,10 +430,12 @@ export type HarnessChatStructuredEvent =
     status: "completed" | "failed" | "denied";
     resultSummary?: string;
     error?: HarnessChatError;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "file_changed";
     change: HarnessChatFileChange;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "subagent_started";
@@ -453,7 +507,7 @@ export interface CreateHarnessChatSessionStatusOptions {
   workspace?: HarnessChatWorkspace;
   context?: HarnessChatContext;
   model?: string;
-  harnessRunId?: string;
+  loomLocalHostBinding?: LoomLocalHostBinding;
   artifactRoot?: string;
   capabilities?: Partial<HarnessChatCapabilities>;
   policy?: HarnessChatPolicy;
@@ -477,8 +531,8 @@ export const createHarnessChatSessionStatus = (
       : {}),
     ...(options.context !== undefined ? { context: options.context } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
-    ...(options.harnessRunId !== undefined
-      ? { harnessRunId: options.harnessRunId }
+    ...(options.loomLocalHostBinding !== undefined
+      ? { loomLocalHostBinding: structuredClone(options.loomLocalHostBinding) }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }

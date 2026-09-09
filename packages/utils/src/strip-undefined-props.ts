@@ -8,7 +8,7 @@ import { isPlainObject } from "./types.ts";
  *
  * Intended use is to canonicalize an object shape for stable comparison
  * (e.g. content-hashing), where a property that's present-but-`undefined`
- * should be treated the same as an omitted property. The fabric-value layer
+ * should be treated the same as an omitted property. The `FabricValue` layer
  * preserves `undefined`-valued properties, so callers that need this
  * normalization must apply it directly.
  */
@@ -23,9 +23,7 @@ export function stripUndefinedProps(
     // rather than triggering the prototype setter on `out` (which would
     // pollute the prototype chain of the returned object).
     Object.defineProperty(out, key, {
-      value: isPlainObject(val)
-        ? stripUndefinedProps(val as Record<string, unknown>)
-        : val,
+      value: isPlainObject(val) ? stripUndefinedProps(val) : val,
       enumerable: true,
       configurable: true,
       writable: true,

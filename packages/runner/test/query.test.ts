@@ -1,9 +1,24 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
+import type {
+  MIME,
+  Revision,
+  State,
+  URI,
+} from "@commonfabric/memory/interface";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { JSONObject, type JSONSchema } from "../src/index.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   CompoundCycleTracker,
   createTraversalContext,
@@ -12,24 +27,16 @@ import {
   MapSetStringToPathSelectors,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { ContextualFlowControl } from "../src/cfc.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import type { SchemaPathSelector } from "@commonfabric/api";
-import type {
-  MIME,
-  Revision,
-  State,
-  URI,
-} from "@commonfabric/memory/interface";
-import { Runtime } from "../src/runtime.ts";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Identity } from "@commonfabric/identity";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E); these fixtures use space-scoped docs.
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 describe("Query", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -84,10 +91,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId1}`,
       is: { value: testCell1.get() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
     const docValue2 = {
@@ -114,10 +117,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId2}`,
       is: { value: docValue2 },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId2}`,
-      }),
       since: 2,
     };
 
@@ -140,8 +139,8 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -187,10 +186,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId1}`,
       is: { value: testCell1.get() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
     const testCell2 = runtime.getCell<
@@ -217,10 +212,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId2}`,
       is: { value: docValue2 },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId2}`,
-      }),
       since: 2,
     };
 
@@ -236,8 +227,8 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -317,10 +308,6 @@ describe("Query", () => {
           },
         },
       },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
     store.set(`${assert1.of}/${assert1.the}`, assert1);
@@ -330,8 +317,8 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -399,7 +386,6 @@ describe("Query", () => {
           },
         },
       },
-      cause: hashOf({ the: "application/json", of: testCell1.sourceURI }),
       since: 1,
     };
 
@@ -420,7 +406,6 @@ describe("Query", () => {
           },
         },
       },
-      cause: hashOf({ the: "application/json", of: testCell2.sourceURI }),
       since: 2,
     };
 
@@ -455,8 +440,8 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -506,10 +491,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId1}`,
       is: { value: testCell1.get() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
 
@@ -544,10 +525,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId2}`,
       is: { value: testCell2.getRaw() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId2}`,
-      }),
       since: 2,
     };
 
@@ -560,8 +537,8 @@ describe("Query", () => {
       selector,
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );

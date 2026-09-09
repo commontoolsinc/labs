@@ -42,6 +42,7 @@ const DEVICE_LINK_PREFIX = "#k=";
 
 /** 32 bytes of BIP39 entropy is exactly 43 unpadded base64url characters. */
 const ENCODED_LENGTH = 43;
+
 const ENTROPY_BYTES = 32;
 
 const ENCODED_PATTERN = new RegExp(`^[A-Za-z0-9_-]{${ENCODED_LENGTH}}$`);
@@ -84,6 +85,7 @@ export function looksLikeDeviceLink(hash: string): boolean {
 
 /** What the URL turned out to contain. */
 export type DeviceLinkFragment =
+
   /** No device link present — boot normally, say nothing. */
   | { kind: "absent" }
   /** A well-formed device link. */

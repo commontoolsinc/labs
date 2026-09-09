@@ -4,6 +4,7 @@ import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type JSONSchema, NAME } from "../src/builder/types.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { wishStateSchemaForResult } from "../src/builtins/wish-schema.ts";
@@ -230,15 +231,15 @@ Deno.test(
         expect(wishResult?.candidates?.length).toBe(30);
       }
       expect(
-        rawLinkSchema(results[0].key("result").getRaw()),
-      ).toEqual(
-        sanitizeSchemaForLinks(wishStateSchemaForResult(nameOnlyWishSchema)),
-      );
+        resolvedSchema(
+          rawLinkSchema(results[0].key("result").getRaw()) as JSONSchema,
+        ),
+      ).toEqual(nameOnlyWishSchema);
       expect(
-        rawLinkSchema(results[1].key("result").getRaw()),
-      ).toEqual(
-        sanitizeSchemaForLinks(wishStateSchemaForResult(bodyOnlyWishSchema)),
-      );
+        resolvedSchema(
+          rawLinkSchema(results[1].key("result").getRaw()) as JSONSchema,
+        ),
+      ).toEqual(bodyOnlyWishSchema);
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -1,17 +1,18 @@
+import type { Schema } from "@commonfabric/api/schema";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
+import { classMap } from "lit/directives/class-map.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
-import type { Schema } from "@commonfabric/api/schema";
 import { createCellController } from "../../core/cell-controller.ts";
-import { consume } from "@lit/context";
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { classMap } from "lit/directives/class-map.js";
 
 // Schema for LocationData
 const LocationDataSchema = {
@@ -41,20 +42,28 @@ type LocationState = "idle" | "requesting" | "watching" | "error";
 export interface LocationData {
   /** Unique ID for this location capture */
   id: string;
+
   /** Latitude in decimal degrees */
   latitude: number;
+
   /** Longitude in decimal degrees */
   longitude: number;
+
   /** Accuracy of the position in meters */
   accuracy: number;
+
   /** Altitude in meters above sea level (if available) */
   altitude?: number;
+
   /** Accuracy of altitude in meters (if available) */
   altitudeAccuracy?: number;
+
   /** Direction of travel in degrees (0-360, if available) */
   heading?: number;
+
   /** Speed in meters per second (if available) */
   speed?: number;
+
   /** Unix timestamp in milliseconds when the location was captured */
   timestamp: number;
 }
@@ -239,12 +248,12 @@ export class CFLocation extends BaseElement {
     `,
   ];
 
-  // Theme context
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
-  // Cell binding for location data
+  /** The location data, or a cell binding for it. */
   @property({ attribute: false })
   accessor location: CellHandle<LocationData | null> | LocationData | null =
     null;

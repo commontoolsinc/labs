@@ -10,6 +10,7 @@ import {
   pattern,
   resultOf,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -37,6 +38,8 @@ interface LobbyInput {
 }
 
 export interface LobbyOutput {
+  [NAME]: string;
+  [UI]: VNode;
   chatName: string | Default<"Group Chat">;
   messages: Writable<Message[] | Default<[]>>;
   users: Writable<User[] | Default<[]>>;

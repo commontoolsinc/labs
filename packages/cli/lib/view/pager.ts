@@ -9,6 +9,7 @@
  * PagerDeps} so the driver's control flow can be exercised without a real TTY;
  * {@link realPagerDeps} supplies the genuine Deno calls.
  */
+
 import { CSI, term } from "./ansi.ts";
 import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";
@@ -52,15 +53,20 @@ export interface PagerTty {
 export interface PagerDeps {
   /** Open the controlling terminal for reading; throws when there is none. */
   openTty(): PagerTty;
+
   write(text: string): void;
+
   /** The terminal size; may throw when there is no console. */
   consoleSize(): { columns: number; rows: number };
+
   env(key: string): string | undefined;
   addSignalListener(signal: Deno.Signal, handler: () => void): void;
   removeSignalListener(signal: Deno.Signal, handler: () => void): void;
   exit(code: number): never;
+
   /** Schedule `handler` after `ms`; returns a function that cancels it. */
   setTimer(handler: () => void, ms: number): () => void;
+
   /** Resolve after `ms`. Used to hold a frame on screen for a moment on a path
    * that then tears the screen down, where a cancellable timer has nothing left
    * to run in. */
@@ -107,8 +113,8 @@ export async function runPager(
 
   // The terminal fills the area outside the character grid (the sub-cell padding
   // below the last row) with its default background. Set that to the status
-  // bar's colour so the strip beneath the last line blends in instead of showing
-  // the terminal's own background; restore it on exit. Only with colour on.
+  // bar's color so the strip beneath the last line blends in instead of showing
+  // the terminal's own background; restore it on exit. Only with color on.
   const padBg = options.color ? ui.statusBar.bg : undefined;
 
   const session = new Session(
@@ -238,10 +244,12 @@ export async function runPager(
     try {
       tty.setRaw(false);
     } catch { /* ignore */ }
-    deps.write(
-      `${CSI}?7h${term.showCursor}` +
-        (padBg ? term.resetDefaultBg : "") + term.leaveAltScreen,
-    );
+    try {
+      deps.write(
+        `${term.disableMouse}${CSI}?7h${term.showCursor}` +
+          (padBg ? term.resetDefaultBg : "") + term.leaveAltScreen,
+      );
+    } catch { /* ignore */ }
     try {
       tty.close();
     } catch { /* ignore */ }
@@ -281,15 +289,14 @@ export async function runPager(
   deps.addSignalListener("SIGINT", onInterrupt);
   deps.addSignalListener("SIGTERM", onTerminate);
 
-  tty.setRaw(true);
-  deps.write(
-    `${term.enterAltScreen}${term.hideCursor}` +
-      (padBg ? term.setDefaultBg(padBg) : ""),
-  );
-
   const buf = new Uint8Array(4096);
   let leftover: Uint8Array = new Uint8Array(0);
   try {
+    tty.setRaw(true);
+    deps.write(
+      `${term.enterAltScreen}${term.enableMouse}${term.hideCursor}` +
+        (padBg ? term.setDefaultBg(padBg) : ""),
+    );
     draw();
     // Warm the TypeScript program after the first frame is on screen, while the
     // user is reading it and before any keypress arrives, so the first info card

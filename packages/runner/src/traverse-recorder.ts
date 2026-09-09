@@ -1,7 +1,11 @@
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import type { SchemaPathSelector } from "@commonfabric/api";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+  hashStringOf,
+} from "@commonfabric/data-model";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";
 import type {
@@ -44,14 +48,19 @@ export type TraverseFixtureAddress = {
 export type TraverseFixtureInvocation = {
   /** Address passed to `SchemaObjectTraverser.traverse()`. */
   address: TraverseFixtureAddress;
+
   /** Index into the fixture's `selectors` table. */
   selector: number;
+
   /** Index into the fixture's `links` table, when traverse() got a link. */
   link?: number;
+
   /** `TraversalContext.includeMeta` (true on the query path). */
   includeMeta: boolean;
+
   /** Invocations sharing this id shared one `TraversalContext`. */
   context: number;
+
   /** Invocations sharing this id shared one `SchemaMemo`. */
   memo?: number;
 };
@@ -66,8 +75,10 @@ export type TraverseFixture = {
   };
   selectors: SchemaPathSelector[];
   links: NormalizedFullLink[];
+
   /** Full fact values keyed by `space|scope|id|type`. */
   docs: Record<string, FabricValue>;
+
   invocations: TraverseFixtureInvocation[];
 };
 
@@ -82,21 +93,27 @@ const DEFAULT_MAX_INVOCATIONS = 20_000;
 
 /** @internal Exported for focused capture tests. */
 export class TraverseCaptureRecorder {
-  private docs = new Map<string, FabricValue>();
-  private invocations: TraverseFixtureInvocation[] = [];
-  private selectors: SchemaPathSelector[] = [];
-  private selectorIndex = new Map<string, number>();
-  private links: NormalizedFullLink[] = [];
-  private linkIndex = new Map<string, number>();
-  private contextIds = new WeakMap<object, number>();
-  private nextContextId = 0;
-  private memoIds = new WeakMap<object, number>();
-  private nextMemoId = 0;
-  private capHit = false;
+  #docs = new Map<string, FabricValue>();
 
-  constructor(private maxInvocations = DEFAULT_MAX_INVOCATIONS) {}
+  #invocations: TraverseFixtureInvocation[] = [];
 
-  private idFor(map: WeakMap<object, number>, obj: object, next: () => number) {
+  #selectors: SchemaPathSelector[] = [];
+  #selectorIndex = new Map<string, number>();
+  #links: NormalizedFullLink[] = [];
+  #linkIndex = new Map<string, number>();
+  #contextIds = new WeakMap<object, number>();
+  #nextContextId = 0;
+  #memoIds = new WeakMap<object, number>();
+  #nextMemoId = 0;
+  #capHit = false;
+  #maxInvocations: number;
+
+  /** Constructs an instance that records at most `maxInvocations`. */
+  constructor(maxInvocations = DEFAULT_MAX_INVOCATIONS) {
+    this.#maxInvocations = maxInvocations;
+  }
+
+  #idFor(map: WeakMap<object, number>, obj: object, next: () => number) {
     let id = map.get(obj);
     if (id === undefined) {
       id = next();
@@ -105,32 +122,32 @@ export class TraverseCaptureRecorder {
     return id;
   }
 
-  private internSelector(selector: SchemaPathSelector): number {
+  #internSelector(selector: SchemaPathSelector): number {
     const key = hashStringOf(selector);
-    let index = this.selectorIndex.get(key);
+    let index = this.#selectorIndex.get(key);
     if (index === undefined) {
-      index = this.selectors.length;
+      index = this.#selectors.length;
       // Snapshot via deep-frozen clone (identity-passes already-frozen
       // selectors): callers may mutate or intern them later.
-      this.selectors.push(
-        cloneIfNecessary(selector as FabricValue) as SchemaPathSelector,
+      this.#selectors.push(
+        cloneIfNecessary(selector) as SchemaPathSelector,
       );
-      this.selectorIndex.set(key, index);
+      this.#selectorIndex.set(key, index);
     }
     return index;
   }
 
-  private internLink(link: NormalizedFullLink): number {
+  #internLink(link: NormalizedFullLink): number {
     const key = hashStringOf(link);
-    let index = this.linkIndex.get(key);
+    let index = this.#linkIndex.get(key);
     if (index === undefined) {
-      index = this.links.length;
-      this.links.push(
+      index = this.#links.length;
+      this.#links.push(
         cloneIfNecessary(
-          link as unknown as FabricValue,
+          link,
         ) as unknown as NormalizedFullLink,
       );
-      this.linkIndex.set(key, index);
+      this.#linkIndex.set(key, index);
     }
     return index;
   }
@@ -142,18 +159,18 @@ export class TraverseCaptureRecorder {
     context: { includeMeta: boolean },
     memo: object | undefined,
   ): void {
-    if (this.invocations.length >= this.maxInvocations) {
-      if (!this.capHit) {
-        this.capHit = true;
+    if (this.#invocations.length >= this.#maxInvocations) {
+      if (!this.#capHit) {
+        this.#capHit = true;
         logger.warn("capture", () => [
-          `invocation cap (${this.maxInvocations}) hit; later traversals ` +
+          `invocation cap (${this.#maxInvocations}) hit; later traversals ` +
           "are not recorded (docs still are)",
         ]);
       }
       return;
     }
     const { space, id, type, path, scope } = doc.address;
-    this.invocations.push({
+    this.#invocations.push({
       address: {
         space,
         id,
@@ -161,16 +178,16 @@ export class TraverseCaptureRecorder {
         path: [...path],
         scope,
       },
-      selector: this.internSelector(selector),
-      ...(link !== undefined && { link: this.internLink(link) }),
+      selector: this.#internSelector(selector),
+      ...(link !== undefined && { link: this.#internLink(link) }),
       includeMeta: context.includeMeta,
-      context: this.idFor(
-        this.contextIds,
+      context: this.#idFor(
+        this.#contextIds,
         context,
-        () => this.nextContextId++,
+        () => this.#nextContextId++,
       ),
       ...(memo !== undefined && {
-        memo: this.idFor(this.memoIds, memo, () => this.nextMemoId++),
+        memo: this.#idFor(this.#memoIds, memo, () => this.#nextMemoId++),
       }),
     });
   }
@@ -180,14 +197,14 @@ export class TraverseCaptureRecorder {
    * Reads through the *unwrapped* tx with a scheduling-ignored meta so the
    * extra read does not perturb reactivity logs.
    */
-  private captureDoc(
+  #captureDoc(
     tx: IExtendedStorageTransaction,
     address: IMemorySpaceAddress,
   ): void {
     // data: URIs carry their value in the id; replay decodes them directly.
-    if (address.id.startsWith("data:")) return;
+    if (hasDataUriScheme(address.id)) return;
     const key = fixtureDocKey(address);
-    if (this.docs.has(key)) return;
+    if (this.#docs.has(key)) return;
     const { ok } = tx.read(
       {
         space: address.space,
@@ -199,9 +216,9 @@ export class TraverseCaptureRecorder {
       { meta: ignoreReadForScheduling },
     );
     if (ok !== undefined && ok.value !== undefined) {
-      this.docs.set(
+      this.#docs.set(
         key,
-        cloneIfNecessary(ok.value as FabricValue) as FabricValue,
+        cloneIfNecessary(ok.value),
       );
     }
   }
@@ -218,7 +235,7 @@ export class TraverseCaptureRecorder {
       get(target, prop) {
         if (prop === "read" || prop === "readOrThrow") {
           return (address: IMemorySpaceAddress, options?: IReadOptions) => {
-            recorder.captureDoc(target, address);
+            recorder.#captureDoc(target, address);
             // deno-lint-ignore no-explicit-any
             return (target as any)[prop](address, options);
           };
@@ -231,7 +248,7 @@ export class TraverseCaptureRecorder {
           ) => {
             const firstPath = paths[0];
             if (firstPath !== undefined) {
-              recorder.captureDoc(target, {
+              recorder.#captureDoc(target, {
                 ...address,
                 path: [...firstPath],
               });
@@ -254,26 +271,29 @@ export class TraverseCaptureRecorder {
         source,
         capturedAt: new Date().toISOString(),
       },
-      selectors: this.selectors,
-      links: this.links,
+      selectors: this.#selectors,
+      links: this.#links,
       docs: Object.fromEntries(
-        [...this.docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
+        [...this.#docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
       ),
-      invocations: this.invocations,
+      invocations: this.#invocations,
     };
   }
 
-  // Writes plain JSON (this module is bundled for browsers, so no node:zlib
-  // here); gzip the output afterwards to check it in as a fixture.
+  /**
+   * Writes the capture to `path` as plain JSON (this module is bundled for
+   * browsers, so no `node:zlib` here); gzip the output afterwards to check it
+   * in as a fixture.
+   */
   flush(path: string): void {
     const name = path.split("/").pop()?.replace(/\.json(\.gz)?$/, "") ??
       "capture";
     const fixture = this.toFixture(name, `CF_TRAVERSE_CAPTURE=${path}`);
     Deno.writeTextFileSync(path, JSON.stringify(fixture));
     logger.info("capture", () => [
-      `wrote ${path}: ${this.docs.size} docs, ` +
-      `${this.invocations.length} invocations, ` +
-      `${this.selectors.length} selectors, ${this.links.length} links`,
+      `wrote ${path}: ${this.#docs.size} docs, ` +
+      `${this.#invocations.length} invocations, ` +
+      `${this.#selectors.length} selectors, ${this.#links.length} links`,
     ]);
   }
 }

@@ -1,24 +1,24 @@
 /**
- * Minimal repro for CT-1173: Array push() via query result proxy doesn't add [ID] to items
- *
- * This test verifies that when using .push() on arrays accessed via query result proxies,
- * new items get [ID] symbols added automatically, ensuring they're stored as separate
- * entity documents rather than inline data.
+ * `Cell.push` anchors an element that carries no explicit identity, so it is
+ * stored as its own entity document and the array holds a link to it rather
+ * than inline data (CT-1173).
  */
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
-import { Runtime } from "../src/runtime.ts";
-import { createQueryResultProxy } from "../src/query-result-proxy.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { isPrimitiveCellLink } from "../src/link-utils.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { isPrimitiveCellLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("CT-1173: array push via query-result-proxy", () => {
+describe("CT-1173: array push anchors its elements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -38,7 +38,7 @@ describe("CT-1173: array push via query-result-proxy", () => {
     await storageManager?.close();
   });
 
-  it("should add [ID] to objects pushed via query-result-proxy", () => {
+  it("anchors objects pushed without an explicit identity", () => {
     // Create a cell with an empty array
     const arrayCell = runtime.getCell<{ name: string }[]>(
       space,
@@ -60,20 +60,17 @@ describe("CT-1173: array push via query-result-proxy", () => {
     pushFrame(frame);
 
     try {
-      // Get a query result proxy (this is what patterns use when they access
-      // writable arrays via their input/output bindings)
-      const proxy = createQueryResultProxy<{ name: string }[]>(
-        runtime,
+      // Minted inside the frame: `Cell.push` anchors from the frame its cell was
+      // constructed in. Pushed without an explicit identity, so anchoring is
+      // what turns each element into its own entity.
+      const inFrame = runtime.getCell<{ name: string }[]>(
+        space,
+        "test-array-push-id",
+        undefined,
         tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true, // writable
       );
-
-      // Push objects WITHOUT explicitly adding [ID]
-      // The bug was that [ID] should be added automatically but wasn't
-      proxy.push({ name: "Alice" });
-      proxy.push({ name: "Bob" });
+      inFrame.push({ name: "Alice" });
+      inFrame.push({ name: "Bob" });
     } finally {
       popFrame();
     }
@@ -88,9 +85,9 @@ describe("CT-1173: array push via query-result-proxy", () => {
     // The array should have 2 items
     expect(result.length).toBe(2);
 
-    // Each item should be stored as a cell link (entity reference), not inline data
-    // If [ID] was added correctly, diffAndUpdate would have created entity documents
-    // and stored links to them in the array
+    // Each item should be stored as a cell link (entity reference), not
+    // inline data: anchoring creates an entity document per pushed object
+    // and stores a link to it in the array.
     for (let i = 0; i < result.length; i++) {
       const item = result[i];
       console.log(`Item ${i}:`, item, "isLink:", isPrimitiveCellLink(item));
@@ -124,20 +121,10 @@ describe("CT-1173: array push via query-result-proxy", () => {
     pushFrame(frame);
 
     try {
-      const proxy = createQueryResultProxy<
-        { name: string; priority: number; createdAt: number }[]
-      >(
-        runtime,
-        tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true,
-      );
-
       // Push multiple items with all fields populated
-      proxy.push({ name: "Alice", priority: 1, createdAt: 1000 });
-      proxy.push({ name: "Bob", priority: 2, createdAt: 2000 });
-      proxy.push({ name: "Charlie", priority: 3, createdAt: 3000 });
+      arrayCell.push({ name: "Alice", priority: 1, createdAt: 1000 });
+      arrayCell.push({ name: "Bob", priority: 2, createdAt: 2000 });
+      arrayCell.push({ name: "Charlie", priority: 3, createdAt: 3000 });
     } finally {
       popFrame();
     }

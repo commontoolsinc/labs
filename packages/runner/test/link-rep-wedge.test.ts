@@ -1,3 +1,12 @@
+/**
+ * Exercises the modern-cell-rep flag end to end at the link boundary: the
+ * representation a `Cell` hands out for `getAsLink`, and — crucially — that a
+ * link written into storage round-trips and still resolves. In modern mode a
+ * link is a {@link FabricLink} instance stored as one atomic leaf, so the
+ * storage path-walk that link resolution relies on must find it without the
+ * legacy `{ "/": { "link@1": … } }` sub-tree to descend into.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -13,14 +22,6 @@ import { Runtime } from "../src/runtime.ts";
 const signer = await Identity.fromPassphrase("link-rep wedge");
 const space = signer.did();
 
-/**
- * Exercises the modern-cell-rep flag end to end at the link boundary: the
- * representation a `Cell` hands out for `getAsLink`, and — crucially — that a
- * link written into storage round-trips and still resolves. In modern mode a
- * link is a {@link FabricLink} instance stored as one atomic leaf, so the
- * storage path-walk that link resolution relies on must find it without the
- * legacy `{ "/": { "link@1": … } }` sub-tree to descend into.
- */
 describe("modern-cell-rep link wedge", () => {
   afterEach(() => {
     // Runtime.dispose already resets, but guard against an early failure that

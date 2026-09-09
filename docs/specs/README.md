@@ -5,7 +5,7 @@ live documentation: when the behavior a spec describes changes, the spec must
 change in the same commit (see [`../README.md`](../README.md)).
 
 Two kinds of documents graduate out of this tree into
-[`../history/specs/`](../history/README.md):
+[`../history/specs/`](../history/specs/):
 
 - an implementation plan or work order whose work is complete or abandoned;
 - a design document for a change that shipped, where the document describes
@@ -21,6 +21,7 @@ decision is reversed or superseded).
 ### Pattern construction and authoring
 
 - [Pattern testing](PATTERN_TESTING_SPEC.md)
+- [Pattern update testing](pattern-update-testing.md)
 - [Pattern construction](pattern-construction/README.md)
 - [Pattern imports](pattern-imports/README.md)
 - [TypeScript transformer](ts-transformer/README.md)
@@ -29,23 +30,33 @@ decision is reversed or superseded).
 - [Content-addressed action identity](content-addressed-action-identity.md)
 - [Content-addressed module loading](module-loading.md)
 - [Piece source lifecycle](piece-source-lifecycle.md)
+- [Hosted pattern authoring](hosted-pattern-authoring.md)
 - [Scoped cell instances](scoped-cell-instances.md)
+
+### Agent execution
+
+- [Agent harness](agent-harness/README.md)
 
 ### Data, storage, and execution
 
 - [JSON Schema](json_schema.md)
+- [Link-schema precedence](link-schema-precedence.md)
+- [Content-addressed schemas](content-addressed-schemas.md)
 - [Sigil data model](data-model/sigil.md)
 - [Sparse-array preservation](sparse-array-preservation.md)
 - [Space model](space-model/README.md)
 - [Formal space-model data specification](space-model-formal-spec/README.md)
+- [Naming in collections](collection-naming.md)
 - [Memory v2](memory-v2/README.md)
 - [FUSE filesystem](fuse-filesystem/README.md)
 - [SQLite builtins](sqlite-builtin/README.md)
-- [Persistent scheduler state](persistent-scheduler-state.md)
+- [Runner child-run ownership](runner-child-run-ownership.md)
 - [Scheduler v2](scheduler-v2/README.md)
 - [Server-primary execution](server-side-execution/README.md)
 - [Verifiable execution](verifiable-execution/README.md)
 - [Webhook ingress](webhook-ingress/README.md)
+- [Test-run records](test-records.md)
+- [Choosing which tests a change runs](test-selection.md)
 
 ### Contextual flow control and security
 

@@ -59,9 +59,12 @@ const handlerExplicit = handler({
             properties: {
                 message: {
                     type: "string"
+                },
+                unused: {
+                    type: "number"
                 }
             },
-            required: ["message"]
+            required: ["message", "unused"]
         }
     },
     required: ["detail"]

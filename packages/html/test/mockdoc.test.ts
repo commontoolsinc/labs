@@ -1,6 +1,7 @@
-import { describe, it } from "@std/testing/bdd";
-import { MockDoc } from "../src/mock-doc.ts";
 import { assert, assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import { MockDoc } from "../src/mock-doc.ts";
 
 describe("MockDoc", () => {
   it("should render as innerHTML", () => {

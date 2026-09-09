@@ -1,7 +1,9 @@
 # Pattern verb contract
 
-**Status:** design draft — not implemented, not agreed. This document exists to
-be argued with before any code is written.
+**Status:** design draft, partially implemented. The contract itself (Part 1) is
+not agreed. Part 2's runtime and dispatch pieces have since landed — see the
+2026-07-30 amendment below — so this document is still argued with, but no
+longer ahead of all its code.
 
 **Summary.** A pattern's declared verbs are its agent API: the CLI is a generic
 projection of them, so each pattern defines its own command surface and no
@@ -30,13 +32,30 @@ interfaces — along with the unsettled question of how a verb is identified,
 which that machinery depends on. Rule 6 and the schema-evolution section each
 gain the second reason they are load-bearing.
 
+**Amendment (2026-07-30)**, from repointing this document's source citations at
+symbols rather than line numbers. Verifying each one against the tree showed
+that WS-D has landed whole, and the claims below are corrected in place:
+`Cell.send` accepts a caller-supplied event id and scopes it by the session
+that chose it and the stream it was sent to; `resolveInvocationIdentity` mints
+the id–session pair for every `cf piece call`, so the pair is always supplied
+rather than only when a caller passes `--invocation`;
+`executeResolvedCallable` forwards it, then reads the handling's outcome back
+off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
+on a receipt-exists collision, where the original handling's outcome settles
+the retry. The plain-JSON-return-into-the-receipt change exists behind the
+`plainResultReceipts` option — default-on since the three-topic integration
+proof (#5244) satisfied governing decision 2's gate (the flip's staging is
+recorded in the implementation plan). What remains open is all of Part 1.
+
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
-topic on the team board takes six CLI invocations, returns no handle, hides
-rejections, and duplicates on retry. The fix is smaller than it looks, because
-the hard parts already exist in the runtime: a durable id per event, a
-per-invocation result cell addressed by it, and an exactly-once receipt.
+topic on the team board took six CLI invocations, returned no handle, hid
+rejections, and duplicated on retry; `topics` is now down to three and surfaces
+its refusals, which is what adopting this contract buys. The fix was smaller
+than it looked, because the hard parts already exist in the runtime: a durable
+id per event, a per-invocation result cell addressed by it, and an exactly-once
+receipt. Retry idempotence is the part still outstanding.
 
 The design is two halves. **Part 1, the verb contract**: rules pattern authors
 adopt so their verbs are drivable — pattern-owned vocabulary, no new machinery.
@@ -48,30 +67,31 @@ results back. Patterns choose the words; the runtime carries them.
 
 ## The problem
 
-Filing one topic headlessly takes six CLI invocations:
+Filing one topic headlessly takes three CLI invocations:
 
 | invocations | what | cause |
 | --- | --- | --- |
-| 1 | `addTopic {title, agentName}` | the create itself |
-| 1 | `get crossrefs --step` to learn the new fid | create returns no handle |
-| 3 | `setBody` / `addComment` / `addLink` | the body cannot ride the create; the comment and link are the real work |
-| 1 | a verification read (`get … --step`) | no result to inspect |
+| 1 | `addTopic {title, body, agentName}` | the create itself, carrying the body and handing back the topic it made |
+| 2 | `addComment` / `addLink` | the real work, and not protocol tax |
 
-Half of this is protocol tax: the fid lookup and the verification read exist
-only because nothing is returned, and `setBody` rides every create only
-because the create cannot carry a body.
+That is what this contract asks of a create, and `topics` has reached it: the
+body rides the create, so no `setBody` finishes one; a declared result hands
+the topic back, so the caller neither searches a list for what it just made nor
+reads it back to learn whether the call did anything; and a refusal throws
+rather than returning quietly. What remains below is stated against the shape
+that got here.
 
-Three consequences:
+Three consequences the contract exists to remove, two of them now removed in
+`topics`:
 
-- **Create returns no handle.** `addTopic` returns nothing, so the caller reads
-  `crossrefs` to learn which topic it made — and `TopicCrossref.fid` reads `""`
-  until known. (Sub-piece addressability by fid itself works — #4758; only the
-  return value is missing.)
+- **A create with no declared result returns no handle**, leaving the caller to
+  search a list for the thing it just made. `addTopic` declares one
+  (`AddTopicResult.topic`) and hands back the piece itself, which is the shape
+  this contract asks of every create.
 - **Semantic rejection is invisible.** Runtime failures surface; a verb
-  declining on its own terms does not. `addTopic` early-returns on an empty
-  title and on a blank `agentName`, both indistinguishable from success.
-  (Throwing instead would surface today — as prose in a failure message, not a
-  typed code.)
+  declining on its own terms does not. `addTopic` now throws through
+  `rejectMutation` on an empty title and on a blank `agentName`, which surfaces
+  — as prose in a failure message, not yet as a typed code.
 - **Retries can duplicate.** One reported headless session saw creates report a
   sync timeout after the write had committed, so retrying minted duplicates.
   The topics skill advises "retry once" on an initial-sync timeout — safe only
@@ -82,45 +102,61 @@ of its properties are load-bearing, and then changes only the rest.
 
 ## What already exists
 
-The CLI has two callable contracts (`packages/cli/lib/callable.ts:260-286`), and
-both of them block:
+The CLI has two callable contracts (`callableCommandSpec`,
+`packages/cli/lib/callable.ts`), and both of them block:
 
 **`handler`** — default verb `invoke`, input schema only. Execution sends into
 the stream, awaits `runtime.idle()` and `manager.synced()`, then inspects the
-transaction and throws on runtime failure (`:294-320`). It returns nothing.
+transaction and throws on runtime failure (`executeResolvedCallable`'s handler
+branch, same file). It returned nothing when this was written; it now returns
+an `invocation` carrying the id, status, and the result read back off the
+receipt.
 
 **`tool`** — default verb `run`, input schema plus `outputSchemaSummary`. A tool
 is a *bound sub-pattern*: execution calls
 `runtime.run(tx, pattern, mergeToolInput(input, extraParams), resultCell)` to
 instantiate the pattern with the caller's arguments merged over the bound ones,
 into a freshly minted result cell (`runtime.getCell(space, crypto.randomUUID(),
-…)`), then returns that cell's value as `outputText` (`:330-391`).
+…)`), then returns that cell's value as `outputText` (`executeResolvedCallable`'s
+tool branch, same file).
 
 And beneath the CLI, the scheduler already has invocation machinery that the
 callable layer predates:
 
 - Every event gets a **durable event id minted at send time**
   (`packages/runner/src/scheduler/event-identity.ts`; spec scheduler-v2 §7.5),
-  and `queueEvent` already accepts a **caller-supplied id** —
-  `opts.eventId?` (`packages/runner/src/scheduler/facade.ts:1308`), with its
+  and `queueEvent` already accepts a **caller-supplied id** — its `opts.eventId?`
+  (`Scheduler.queueEvent`, `packages/runner/src/scheduler/facade.ts`), with its
   own passing test suite
-  (`packages/runner/test/scheduler-event-receipts.test.ts`). The `cell.send()`
-  path simply never passes one (`packages/runner/src/cell.ts:1276`).
+  (`packages/runner/test/scheduler-event-receipts.test.ts`). `Cell.send` now
+  takes that id as its third argument and `Cell.set`'s stream branch forwards
+  it through `scopeCallerEventId` (`packages/runner/src/cell.ts`), which binds
+  an opaque caller key to the specific stream so two verbs sharing input
+  bindings cannot collide on one receipt.
 - Every handling gets a **canonical per-invocation result cell** addressed
   `{ resultFor: cause }`, where `cause = { $ctx: <bound closure>, $event:
-  <event id> }` (`packages/runner/src/runner.ts:4098-4101`, `:3696-3745`) — so
-  the address folds in the handler's binding, not the id alone. A return value
+  <event id> }` — `Runner.#instantiateJavaScriptHandlerNode` builds the `cause`
+  (`$event: tx.dispatchedEventId ?? crypto.randomUUID()`) and
+  `Runner.#handleJavaScriptHandlerResult` mints the cell from it, both in
+  `packages/runner/src/runner.ts`; the `$ctx`/`$event` argument shape comes
+  from `generateHandlerSchema` (`packages/runner/src/schema.ts`). So the
+  address folds in the handler's binding, not the id alone. A return value
   **containing reactives or cells** is run as a result pattern into that cell
-  (`navigateTo` is the existing UI consumer); a **plain JSON return is
-  discarded** — the receipt-only branch writes `{}`.
+  (`navigateTo` is the existing UI consumer); a **plain JSON return projects
+  into the receipt** under the `plainResultReceipts` experimental option
+  (default on — an explicit `false` restores the discard, where the
+  receipt-only branch writes `{}`). The receipt write uses the standard
+  cell-write conversion, so a bare cell return that launches nothing — e.g.
+  the chained return of an expression-body `action(() => cell.set(...))` —
+  records as a link to that cell.
 - That result cell doubles as the **exactly-once receipt**: its create is
   create-only, so a second handling of the same id — including from another
   replica against a shared server — collides, and its commit is rejected as
   `PreconditionFailedError` / `precondition: "receipt-exists"`,
   programmatically distinguishable from a real failure (spec §7.6, invariant
   I11). The governing `commitPreconditions` flag is on by default on the CLI's
-  runtime path (`runtime-presets.ts:207` →
-  `experimentalOptionsFromEnv`). Exactly-once is **per commit, not per
+  runtime path (its entry in `runtime-presets.ts`'s experimental-option table
+  → `experimentalOptionsFromEnv`). Exactly-once is **per commit, not per
   execution**: a colliding delivery still runs the handler body and then loses
   the commit, so a handler must keep side effects in its writes — which the
   model already demands.
@@ -128,12 +164,21 @@ callable layer predates:
 Measured against the problem above, what is absent is not machinery but
 plumbing through the callable layer:
 
-1. **No caller-supplied id from the CLI.** `cf piece call` sends without an
-   `eventId`, so a client retry mints a fresh event and re-executes rather than
-   colliding on the receipt.
-2. **No readback.** The CLI handler branch awaits commit and returns `{}`
-   (`callable.ts:294-320`); the per-invocation result cell exists at a
-   computable address, and nobody reads it.
+1. **No caller-supplied id from the CLI.** *Closed.* Written when `cf piece
+   call` sent without an `eventId`, so a client retry minted a fresh event and
+   re-executed rather than colliding on the receipt. `resolveInvocationIdentity`
+   (`packages/cli/commands/piece.ts`) now mints the id–session pair whenever
+   neither is named — refusing an `--invocation` named without its session —
+   and `executeResolvedCallable`'s handler branch
+   (`packages/cli/lib/callable.ts`) forwards it as
+   `{ eventId: invocation.id, session: invocation.session }`.
+2. **No readback.** *Closed.* The same handler branch reads the receipt at
+   `tx.handlingReceiptLink` through `runtime.getCellFromLink`, pulls it, and
+   returns the value as `invocation.result`, treating a value-less verb's
+   empty record as existence-only. A receipt-exists collision reads back the
+   ORIGINAL handling's outcome, so a retry settles as a success without
+   committing again — the redelivered body still runs, and then loses the
+   race for the receipt.
 3. **Patterns return nothing.** All of `topics` is handlers that return no
    value — `addTopic: Stream<AddTopicEvent>` on the board, and the
    `AgentAuthoredEvent` family (`addComment`, `addLink`, `setBody`) on the
@@ -150,7 +195,7 @@ flag a wrong assumption before it becomes a wrong choice: the redesign keeps
 what is load-bearing and changes only what is not.
 
 **Fire-and-forget streams are essential** — in a narrow sense worth pinning
-down, because the loom FUSE audit calls a neighbouring behaviour a bug.
+down, because the loom FUSE audit calls a neighboring behavior a bug.
 Essential: a handler's *effect* is writes that propagate, not a value returned
 into the stream. *Not* essential, and what the audit flags as a spec violation,
 is *acknowledging a write before its transaction commits*. The runtime's own
@@ -163,8 +208,8 @@ model; it exposes it.
 the result cell are omissions in the callable layer, not properties the system
 relies on. Closing them is safe; what it costs is two commitments:
 
-- **Honouring caller-supplied ids** obliges us to define what a repeated id
-  means and to trust callers not to collide — though the collision behaviour
+- **Honoring caller-supplied ids** obliges us to define what a repeated id
+  means and to trust callers not to collide — though the collision behavior
   itself (create-only receipt) is already the scheduler's invariant, not new
   machinery.
 - **Handing out result-cell addresses** commits the runtime to those addresses
@@ -226,8 +271,10 @@ relies on. Closing them is safe; what it costs is two commitments:
    and returns a value. A verb that produces nothing says so.
 4. **Rejection is a value.** Invalid input, wrong turn, precondition unmet — a
    typed error with a stable code. (Authorization is not the contract's job:
-   CFC already rejects unauthorized commits and the runner surfaces the error,
-   `packages/runner/src/runner.ts:835-840`.)
+   CFC already rejects unauthorized commits and the runner surfaces the error —
+   `Runner.setup`'s `editWithRetry` branch rethrows the
+   `"CFC enforcement rejected commit"` abort instead of swallowing it as a lost
+   race, `packages/runner/src/runner.ts`.)
 5. **Address by identity, never by position.** Pass a child reference, or a
    client-rendered fid/path derived from one, never `{ index }`; indices shift
    under concurrent writes. A pattern need not and generally cannot manufacture
@@ -257,7 +304,8 @@ before mutating is the rule 6 race in its purest form. They are separate
 facts and belong at different layers:
 
 - The **principal** — whose key authorized the write — stays fabric-level:
-  CFC carries it in its integrity labels (`packages/api/cfc.ts:829-841`). For
+  CFC carries it in its integrity labels (`RepresentsCurrentUser` /
+  `AuthoredByCurrentUser` over `CurrentPrincipal`, `packages/api/cfc.ts`). For
   display, the browser path resolves the viewer's canonical Profile
   (`wish({ query: "#profileName" })`;
   `docs/common/patterns/multi-user-patterns.md:263-272` — "the viewer is
@@ -269,7 +317,8 @@ facts and belong at different layers:
   metadata can carry more than a display name: for example an agent role,
   session/tool context, or a protected reference to the triggering request.
   CFC already has runtime-minted provenance families such as `ExternalIngest`,
-  `LlmDerived`, and `TransformedBy` (`packages/api/cfc.ts:66-85,111-113`), but
+  `LlmDerived`, and `TransformedBy` (all three in the atom-URI table in
+  `packages/api/cfc.ts`), but
   no `AgentActor` atom exists and the external `cf` call path does not yet
   preserve this distinction.
 
@@ -300,58 +349,68 @@ board one read. The pattern owns the reference and summary; the client, which
 can inspect the backing cells, owns rendering the reference as a fid or full
 path.
 
-`topics.crossrefs` already carries each `topic` reference, but it is the
-cross-reference graph, not a compact index: each row's `topic`, `refsOut`, and
-`referencedBy` expand to full pieces on read
-(`packages/patterns/topics/main.tsx:70-78`), and a headless survey of the live
-board through it produced over 300k tokens of output. Its explicit `fid` field
-is not the general model either: it is derived indirectly from runtime-only
-cell surface, reads `""` while unresolved, and a pattern cannot reliably see
-its own runtime address. The index is therefore a separate result — one
-reference-plus-summary row per child, reference edges as sibling references,
-never expanded pieces — and generic clients render identity on top: a coarse
-exploration mode such as `--include-ids` can annotate every point where the
-backing identity changes, with a narrower path-selected form to follow if the
-broad form proves too noisy. Both are projections of existing references, not
-fields every pattern must maintain. Acceptance for an index: its serialization
+`topics.index` is the worked example: one reference-plus-summary row per child,
+the reference declared through a title-only schema so no row can expand a topic
+(the `TopicIndexRow` interface, `packages/patterns/topics/main.tsx`). A
+reference-bearing result that does not do this is not an index — a row whose
+reference expands to the full piece made a headless survey of the live board
+produce over 300k tokens of output. Acceptance for an index: its serialization
 contains no expanded piece, action, or runtime values, and a full-board read
 stays bounded.
+
+A row carries no authored identifier, and that is the general model: the row IS
+the child, read through the narrow schema, so its address is the child's and a
+survey can be followed without the pattern maintaining an address field it
+cannot reliably see. A client asks for that address where it wants one —
+`--select index[].@` names it, the `@` suffix being the concise address form.
+Identity is a projection of a reference the result already holds, so no pattern
+has to publish one.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
 the CLI dispatching a nested piece's streams, which today fails with
 `Transaction required for .set()`** (the non-stream branch of `Cell.set`,
-`packages/runner/src/cell.ts:1347`; its own
+`packages/runner/src/cell.ts`; its own
 board topic). Until that lands, board-level routing
 (`addComment {topicFid, body}`) is the documented workaround — pragmatic, not
 the target shape.
 
-Two client affordances surfaced in review (2026-07-28) and are deferred,
-blocking nothing: `cf piece get` could grow flags that let an agent control
-how much data a read returns when exploring the fabric interactively — a
-`--schema` override reading through a narrower schema (the runtime's
-`asSchema`; the CLI already narrows its own internal reads this way, e.g.
-`packages/cli/lib/piece-render.ts:41`), and a limit on the number of records
-returned from a large array. Adjacent CLI work for when board scale demands it,
-recorded here so the deferral is deliberate; neither is an ask on any
-workstream in the implementation plan.
+`cf cell get` lets an agent control how much data an exploratory read returns:
+`--filter` narrows array membership and `--schema` constructs a projected value
+from source-schema-selected reads. Both execute through computed pattern nodes
+so their CFC behavior matches pattern expressions, without returning an
+identity alias that can widen to a linked target's schema. A limit on the
+number of records returned from a large array remains deferred, blocking
+nothing. It is adjacent CLI work for when board scale demands it, not an ask on
+any workstream in this implementation plan.
 
-**A set of verbs wants to be a structural interface, and the machinery for that
-already exists.** Schemas are the type system, so a verb set is a schema
-fragment and conformance is a subset check the repo already computes
-(`schemaSubsetIssue`). Its variance is already correct for the purpose: an
-implementer must accept at least the declared payload and return at most the
-declared result, which is exactly the argument/result direction pair above.
-Interface conformance and schema evolution are the same rule — evolution is
-conformance to one's past self. So no type machinery needs building, and any
-explicit interface mechanism (nominal declaration, discovery *by* interface) is
-deferred until a concrete need appears.
+**A set of verbs is checkable as a structural interface with the machinery that
+exists.** Schemas are the type system, so a verb set is a schema fragment and
+conformance is a subset check the repo already computes (`schemaSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). Its variance is already correct
+for the purpose: an implementer must accept at least the declared payload and
+return at most the declared result, which is exactly the argument/result
+direction pair above. Interface conformance and schema evolution are the same
+rule — evolution is conformance to one's past self.
+
+That covers the structural half and stops there.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for what a verb's interface is and how it changes, and it puts an explicit
+interface mechanism — **named, versioned interfaces**, with nominal
+declaration and discovery by interface — on the road rather than in reserve,
+because a name is a claim about meaning that no structural demand can make.
+It is also the most machinery of anything in that design: an identity, a
+registry, a place in the shape, a member-to-field mapping, and a
+compatibility rule of its own, where what a version bump means and how a
+declared minimum resolves against what a piece provides are both still to be
+designed. So the subset check is the default and the interim, not an argument
+that the named mechanism is unnecessary.
 
 What is **not** yet true is the premise all of that rests on: that a piece's
 verbs can be identified from its schema. Verb-ness has three independent
 encodings — the cell's construction kind, `asCell: ["stream"]` in the schema,
 and a stored `{$stream: true}` value — and `Cell.isStream` accepts any one of
-them (`packages/runner/src/cell.ts:936-958`). A conformance check filtering on
+them (`Cell.isStream`, `packages/runner/src/cell.ts`). A conformance check filtering on
 the schema marker therefore misses verbs carried only by the stored one, and
 the CLI keeps a forced-stream fallback specifically to dispatch such handlers.
 Note where this does and does not bite: schema *generation* is not exposed to
@@ -408,14 +467,16 @@ required field later stops the sugar applying rather than silently misbinding.
 
 ### Applied to `topics`
 
-`topics` already satisfies the interim atomic-attribution rule; filing is six
-invocations. The rest of Part 1 — a body argument on `addTopic` so `setBody`
-becomes an editing verb rather than part of every create, and thrown rejections
-in place of silent early-returns — makes it five. The remaining waste — the
-handle lookup and the verification read — is exactly what a returned child
-reference removes, and that is Part 2's job: with it, filing is `addTopic`,
-`addComment`, `addLink` — one call per thing the author meant to do. The CLI
-renders the returned reference as a usable fid/path.
+`topics` already satisfies the interim atomic-attribution rule, and Part 1 has
+landed there: filing is `addTopic` (carrying the body, handing back the topic),
+`addComment`, `addLink` — three invocations, one per thing the author meant to
+do. The handle lookup and the verification read are gone with the declared
+result, `setBody` is an editing verb rather than part of every create, and
+`rejectMutation` throws where the verbs used to return quietly. The CLI renders
+the returned reference as a usable address.
+
+What is still owed is the typed rejection code — a refusal surfaces as prose in
+a failure message — and Part 2's retry idempotence.
 
 ## Part 2 — the invocation protocol
 
@@ -478,12 +539,12 @@ with fan-out.
 This is not a new semantic — it is when the receipt commits today. But the CLI
 waits for far more than that: the handler branch awaits `runtime.idle()` and
 `manager.synced()` — the whole reactive graph quiescing, then full sync — so
-acknowledgement of an already-committed write is held hostage to every derived
-recomputation it triggered. On the live topics board that is `crossrefs`
-re-deriving over the whole board; mutations were observed taking 60–80 s. The
+acknowledgment of an already-committed write is held hostage to every derived
+recomputation it triggered. On the live topics board that is the board's own
+index re-deriving over every topic; mutations were observed taking 60–80 s. The
 work is exposure *and narrowing*: await this handling's commit, sync the
 receipt, return — never the graph going quiet. An acceptance test must prove a
-slow derived recomputation cannot delay acknowledgement (implementation plan,
+slow derived recomputation cannot delay acknowledgment (implementation plan,
 WS-D).
 
 Waiting is a caller-side choice — whether to wait at all, and for how long. The
@@ -498,8 +559,10 @@ Caller-supplied opaque string; the client generates a UUID by default and lets
 the caller pass one explicitly. It flows through as the durable event id —
 `queueEvent` already accepts `opts.eventId`, and `mintEventId`'s own contract
 anticipates it: "ingress callers that already own a durable delivery id pass it
-through instead." The CLI becomes such an ingress caller; the gap is one
-plumbing hop in `cell.send()`, which today passes no id.
+through instead." The CLI is now such an ingress caller: `Cell.send` takes the
+id as its third argument, and `Cell.set`'s stream branch binds it to the
+specific stream through `scopeCallerEventId` before handing it to
+`queueEvent`.
 
 Content-derived ids are available to a caller that wants them, but are not the
 default, since posting the same message twice is a legitimate thing to want. A
@@ -534,10 +597,11 @@ once.)
 
 Records carry the same scoping as the callable that produced them. Tool result
 cells already inherit `resultScope` from the callable cell
-(`packages/cli/lib/callable.ts:340-346`), so the mechanism exists; today those
+(`executeResolvedCallable`, `packages/cli/lib/callable.ts`), so the mechanism
+exists; today those
 cells are unlinked and merely unguessable.
 
-Scope is not the whole confidentiality story: a result derived from labelled
+Scope is not the whole confidentiality story: a result derived from labeled
 data carries CFC confidentiality labels of its own, so a stored invocation
 record is subject to the same label rules as any other cell
 (`docs/specs/cfc-label-metadata-confidentiality.md`). Retention and readback
@@ -571,51 +635,86 @@ pattern to follow rather than in the runtime.
 A verb's result schema declares whether it carries a live piece reference or a
 self-contained snapshot — the pattern knows which is meaningful for that verb.
 
-The result schema is part of the piece's public contract, and the repo already
-checks pattern schema evolution: `assertPatternSchemasBackwardCompatible`
-(`packages/piece/src/schema-compatibility.ts:125`) runs on every `setsrc` unless
+The repo checks **a pattern's own** schema evolution:
+`assertPatternSchemasBackwardCompatible`
+(`packages/piece/src/schema-compatibility.ts`) runs on every `setsrc` unless
 `--dangerously-allow-incompatible-schema` is passed
-(`packages/piece/src/ops/piece-controller.ts:2723-2724`). It checks arguments
-and results in **opposite directions** (`:151-183`):
+(`dangerouslyAllowIncompatibleSchema`,
+`packages/piece/src/ops/piece-controller.ts`). It compares four schemas and no
+others — the previous and candidate `Pattern`'s `argumentSchema` and
+`resultSchema` — and it compares the two roles in **opposite directions**:
 
 - **Arguments**: previous ⊆ candidate. Inputs may widen but not narrow; a new
   required field is incompatible.
 - **Results**: candidate ⊆ previous. Results may narrow freely — but *adding* a
   result field is only compatible if the previous schema was open-world.
 
-That second direction matters here: a declared result is easier to shrink than
-to extend, so the result shape wants to be right early, or deliberately
-open-world. The `Invocation` shape is the first schema this applies to — it
-must be authored open-world so protocol fields such as a payload digest or
-retention metadata can be added later.
+That second direction matters here: a pattern's declared result is easier to
+shrink than to extend, so the result shape wants to be right early, or
+deliberately open-world. The `Invocation` shape is the first schema this
+applies to — it must be authored open-world so protocol fields such as a
+payload digest or retention metadata can be added later.
 
 "Results may narrow freely" governs *values*, not *named fields*. Removing a
-named property is rejected outright in either direction — `objectSubsetIssue`
+named property from a **result** is rejected outright — `objectSubsetIssue`
 returns "existing result field was removed" whenever the comparison is an
-evolution, on the stated principle that "pattern evolution preserves named
-fields as part of the public contract, even when the candidate object is
-otherwise open" (`packages/piece/src/schema-compatibility.ts:437-444`). A
-verb's `asCell` marker is pinned the same way: it is a semantic extension key
-compared for exact equality (`:100-106`, `:329-333`), so a field cannot change
-between data and verb across a deploy. Verb names and their verb-ness are
-therefore already a contract with teeth, before this document adds any rule.
+evolution, on the stated principle that a result's named fields are the
+contract consumers read (`objectSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). An argument's named fields are
+not held that way: dropping one gives up a demand, which the same function
+accepts wherever the candidate object can still hold the value the piece
+carries. The removed-field check recurses, so a nested removal is rejected on
+a nested path
+(`result.topic.title: existing result field was removed`) exactly as a flat one
+is. Adding a **required** field is rejected at any depth unless it carries a
+default; adding an **optional** one is allowed at any depth; narrowing a
+*value* type is allowed at any depth. Nesting a pattern's result under a single
+key therefore buys it nothing: "results may narrow freely" is true of values
+and never of names, at every depth.
 
-The practical consequence for verb results: return the value inside an
-envelope under a single key rather than spreading it across top-level fields.
-Every top-level name published is permanent; a value nested under one key
-leaves only that key permanent and everything beneath it free to narrow. The
-llm-dialog tool path already returns exactly this shape from both of its
-branches — an `@resultLocation` link, the value, and its schema together
-(`packages/runner/src/builtins/llm-dialog.ts:2841-2847` and `:2869-2875`).
+A verb's `asCell` marker is pinned the same way: it is a semantic extension key
+compared for exact equality (`SEMANTIC_EXTENSION_KEYS`,
+`packages/piece/src/schema-compatibility.ts`), so a field cannot change between
+data and verb across a deploy. Verb names and their verb-ness are therefore
+already a contract with teeth, before this document adds any rule.
+
+**What a verb hands back sits outside all of it.** A verb's declared result
+travels on `module.resultSchema` — the `CELL_RESULT_TYPE` doc comment
+(`packages/api/index.ts`) states this, and `declaredVerbResults`
+(`packages/cli/lib/piece.ts`) is what reads it back off a piece's compiled
+graph — while the comparison above sees only `Pattern.argumentSchema` and
+`Pattern.resultSchema`. There a verb is a property carrying its
+`asCell: ["stream"]` marker and a reference to its event schema, and nothing
+about its output. So no gate compares a verb's result across a deploy:
+renaming a field of what a verb returns passes every check and breaks its
+callers silently.
+
+The advice stands; its enforcement does not. Publish as few names as the verb
+can live with, and treat **every name a verb's result publishes as permanent
+regardless of depth, with every later addition optional** — a discipline the
+author and review hold, not one the update gate holds for them.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for how a verb's interface changes, and it carries the same rule to its
+conclusion: because nothing checks an output, a change to what a verb hands
+back is treated exactly like a rename and gets a new verb name, until
+Fabric-types records outputs in the shape and a check replaces the convention.
+
+An envelope remains a reasonable readability choice — the llm-dialog tool path
+returns a single-key shape from both of its branches, an `@resultLocation`
+link, the value, and its schema together (both `"@resultLocation"` sites in
+`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`).
 
 ### Authoring
 
 ```tsx
 // Shown for illustration only.
-const addTopic = action(
-  ({ title, body }: AddTopicInput): AddTopicResult => {
+// The result is declared by explicit type arguments — never inferred from
+// the body, and a return-type annotation on the callback alone does not
+// declare one.
+const addTopic = action<AddTopicInput, AddTopicResult>(
+  ({ title, body }) => {
     const trimmed = (title ?? "").trim();
-    if (!trimmed) throw new VerbError("EMPTY_TITLE", "title must be non-empty");
+    if (!trimmed) throw new Error("title must be non-empty");
     const piece = Topic({ title: trimmed, body, mentionable: topics });
     topics.push(piece);
     return { topic: piece };
@@ -623,24 +722,30 @@ const addTopic = action(
 );
 ```
 
-`throw` becomes `status: "failed"` with the code; `return` becomes
-`status: "settled"` with the result. Only settlement is durable — a failed
-status is returned to the caller, not recorded (Retries and failure).
+`throw` becomes `status: "failed"`; `return` becomes `status: "settled"` with
+the result. Only settlement is durable — a failed status is returned to the
+caller, not recorded (Retries and failure). The typed-rejection carrier that
+puts a stable `code` beside the message is deliberately not minted as its own
+class: a separate `FabricError` effort is underway, and the verb-rejection
+type will derive from it. Until then a rejection is a plain thrown `Error`
+and the message is the whole signal.
 
 ### Verb discovery
 
 An agent holding a piece URL must be able to ask "what can I call here?"
 without reading pattern source. The pieces exist:
 
-- **Per verb**, `cf piece call <piece> <verb> --help --json` already emits the
+- **Per verb**, `cf piece call --piece <piece> <verb> --help --json` already emits the
   machine-readable command spec — kind, default verb, input schema — derived
-  from the pattern's own types (`packages/cli/lib/callable.ts:260-286`).
+  from the pattern's own types (`callableCommandSpec`,
+  `packages/cli/lib/callable.ts`).
 - **Enumeration**: `cf piece verbs --json` lists every callable — name, kind
   (handler/tool), which cell it lives on, and its input schema (tools also
   carry their output schema) — walking result-then-input with the same
   classification `cf piece call` resolves through, so the listing and the
   dispatcher cannot disagree. FUSE independently classifies the same entries
-  (`packages/fuse/callables.ts:88`) into `.handler` / `.tool` files plus a
+  (`classifyCallableEntry`, `packages/fuse/callables.ts`) into `.handler` /
+  `.tool` files plus a
   `.handlers` listing — flagged on the board as neither universal nor
   complete.
 
@@ -676,25 +781,33 @@ contract.
 ### Client surface
 
 ```text
+# An invocation id deduplicates only within the session it was chosen in,
+# so a run mints one session and every call of that run shares it.
+$ export CF_INVOCATION_SESSION="$(cf invocation-session new)"
+
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --body @body.md
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The client mints the id before sending and prints it even when its wait
-# times out. Retrying with it returns the original — no re-execution.
-$ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
-    --title "Verb contract" --invocation inv_7f3a
+# The client mints the id before sending and prints it — beside its session —
+# even when its wait times out. Retrying the pair returns the original
+# outcome: the body re-runs and loses the create-only receipt race, so
+# nothing commits twice. An --invocation named without a session is refused.
+$ cf piece call --url "$TOPICS_BOARD_URL" --invocation inv_7f3a addTopic \
+    --title "Verb contract"
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The caller chooses whether and how long to wait
-$ cf piece call --url "$TOPICS_BOARD_URL" summarize \
-    --topic fid1:abc --no-wait
-{ "invocation": "inv_9c1b", "status": "pending" }
-$ cf piece invocation --url "$TOPICS_BOARD_URL" inv_9c1b --await
-{ "invocation": "inv_9c1b", "status": "settled",
-  "result": { "summary": "..." } }
+# The caller chooses whether to wait: a detached call exits at the commit
+# acknowledgment with the receipt's address, and collecting the outcome
+# later is an ordinary read of that address.
+$ cf piece call --url "$TOPICS_BOARD_URL" --no-wait summarize \
+    --topic fid1:abc
+{ "invocation": "inv_9c1b", "status": "committed",
+  "receipt": "/of:fid1:…" }
+$ cf cell get --piece /of:fid1:… summary
+"..."
 ```
 
 Client-local `@name` bindings are deferred. They can encode host + space +
@@ -771,15 +884,16 @@ miniature. Its **handler** path mints a result cell at a *caller-supplied* id
 (`toolCall.id`), hands that cell to the handler as `result` — the code's own
 comment reads "doesn't HAVE to be used, but can be" — and resolves off the
 commit callback: `handler.withTx(tx).send({...input, result}, (completedTx) =>
-…)` (`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts:2756-2761`).
+…)` (`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`).
 That is this design's shape, already in production. Two qualifications keep the
 citation honest. It is specifically the handler branch that is the precedent;
-the sibling `runtime.run(tx, pattern, invocationArgs, result)` branch (`:2754`)
+the sibling `runtime.run(tx, pattern, invocationArgs, result)` branch of the
+same `if (pattern) … else if (handler)` in `handleInvoke`
 is the tool-as-bound-sub-pattern path this document defers, and it resolves off
 a sink rather than a commit. And llm-dialog bounds its caller-side wait with a
-120-second `TOOL_CALL_TIMEOUT` (`:131`), whose sibling `REQUEST_TIMEOUT` drops
-a user's message outright when one is pending (the `addMessage` guard,
-`:3105-3111`) — the fixed-wait
+five-minute `REQUEST_TIMEOUT`, which also drops a user's message outright
+when a turn is still running (the `addMessage` handler's pending guard, same
+file) — the fixed-wait
 failure class this document's own live-session evidence names one paragraph
 above. So the precedent is precise: the ergonomics of a caller-supplied id
 resolving to a durable result cell are proven, and the bounded wait wrapped
@@ -820,13 +934,18 @@ client retry needs.
    agent identity. Nothing here forecloses delegation or delivers it.
 3. **How do plain JSON returns reach the receipt?** A return value containing
    reactives/cells projects into the receipt, while a **plain JSON return is
-   discarded** (the receipt-only branch writes `{}`, `runner.ts:3713-3725`).
-   For `topics` this mostly does not bite — `{ topic: piece }` carries a
-   cell — but "retry reads back the original result" is incomplete without it.
-   Options: a small runtime change writing the validated plain return into the
-   receipt instead of `{}`, or a contract rule that results carry at least one
-   reactive. The first looks right; it is the one place this design asks the
-   runtime for new behaviour rather than exposure.
+   discarded** — the receipt-only branch of
+   `Runner.#handleJavaScriptHandlerResult` (`packages/runner/src/runner.ts`)
+   writes `{}`. For `topics` this mostly does not bite — `{ topic: piece }`
+   carries a cell — but "retry reads back the original result" is incomplete
+   without it. Options: a small runtime change writing the validated plain
+   return into the receipt instead of `{}`, or a contract rule that results
+   carry at least one reactive. The first looks right; it is the one place this
+   design asks the runtime for new behavior rather than exposure. That change
+   now exists behind the `plainResultReceipts` experimental option (WS-C),
+   default-on since the three-topic integration proof (#5244), so neither the
+   mechanism nor the default remains open — an explicit `false` stays the
+   rollback override while the flag exists.
 
 ## Design decisions worth recording
 
@@ -855,7 +974,7 @@ client retry needs.
   patterns return child references), and the payload model must be able to
   express a *declared but not caller-suppliable* field. The second already
   exists at the type layer as `FrameworkProvided<T>` and
-  `FrameworkProvidedKeys<>` (`packages/api/index.ts:2264-2282`, used for the
+  `FrameworkProvidedKeys<>` (`packages/api/index.ts`, used for the
   bash tool's `sandboxId`);
   only the runtime's strip list is hardcoded. Rule 1 should be worded so a
   declared field may be framework-owned rather than caller-supplied.
@@ -880,9 +999,10 @@ client retry needs.
 
 ## Staging
 
-The engineering breakdown — workstreams, phases, issue graph — lives in
-[`pattern-verb-contract-implementation.md`](pattern-verb-contract-implementation.md);
-the steps below are the design-level order.
+The engineering breakdown — what remains, in what order, and what each item
+waits behind — lives in
+[`verbs-implementation.md`](verbs-implementation.md); the steps below are the
+design-level order.
 
 1. Agree this document — particularly the open questions.
 2. Finish the Part 1 rework of `topics` / `topic` — the attribution rules

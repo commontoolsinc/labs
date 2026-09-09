@@ -5,7 +5,7 @@ import {
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
 import { isPlainObject } from "@commonfabric/utils/types";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 
 import { type Cell, getCellWithStatus } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";

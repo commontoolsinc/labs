@@ -15,16 +15,19 @@ import {
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
-import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeValue } from "./native-type-tags.ts";
+import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
+import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -48,10 +51,11 @@ const TAG_STRING = 0x24;
 const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
-const TAG_EPOCH_DAYS = 0x28;
+const TAG_EPOCH_DAY = 0x28;
 const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
+const TAG_KEY_PAIR = 0x2c;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -73,10 +77,11 @@ const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
-const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
+const TAG_EPOCH_DAY_BYTES = new Uint8Array([TAG_EPOCH_DAY]);
 const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
+const TAG_KEY_PAIR_BYTES = new Uint8Array([TAG_KEY_PAIR]);
 
 //
 // Core: recursive value feeding
@@ -89,9 +94,7 @@ const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
  */
 const MAX_DIRECT_STRING_LENGTH = 64;
 
-/**
- * Maximum value (inclusive) of the small-length-number cache.
- */
+/** Maximum value (inclusive) of the small-length-number cache. */
 const MAX_CACHED_SMALL_LENGTH = 500;
 
 /** Shared TextEncoder for UTF-8 string encoding. */
@@ -121,9 +124,17 @@ const CANONICAL_NAN_BYTES = new Uint8Array([
   0x00,
 ]);
 
-/** LRU cache for string representations. */
+/**
+ * LRU cache for string representations. The entry count suits the short,
+ * repeated strings this mostly sees — property names, ids, tags. The byte
+ * budget covers the rest: values reach this hasher as whole documents and
+ * inlined data URIs that run to tens of kilobytes each, and 50,000 of those
+ * held by their key alone would be gigabytes.
+ */
 const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
+  weigh: (key, value) => key.length * 2 + value.length + 64,
+  maxWeight: 8 * 1024 * 1024,
 });
 
 /** Prepopulated cache of encoded small-length numbers. */
@@ -179,8 +190,8 @@ function feedLength(hasher: IncrementalHasher, value: number): void {
 }
 
 /**
- * Feeds a single `FabricValue` into the hasher, using the type-tagged
- * byte format from the byte-level spec.
+ * Feeds a single `FabricValue` into the hasher, using the type-tagged byte
+ * format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
   switch (typeof value) {
@@ -235,15 +246,15 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `hashOf: unsupported type: ${typeof value}`,
+        `\`hashOf()\`: unsupported type \`${typeof value}\``,
       );
   }
 }
 
 /**
- * Feed an object-typed value (special primitives, `FabricInstance`, `Array`,
+ * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
- * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
+ * `VALUE_TAGS` for recognized types. The `null` case is handled by the
  * caller (`feedValue()`).
  */
 function feedObjectValue(
@@ -253,7 +264,7 @@ function feedObjectValue(
   const nativeTag = tagFromNativeValue(value);
 
   switch (nativeTag) {
-    case NATIVE_TAGS.EpochNsec: {
+    case VALUE_TAGS.EpochNsec: {
       hasher.update(TAG_EPOCH_NSEC_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
@@ -263,8 +274,8 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.EpochDays: {
-      hasher.update(TAG_EPOCH_DAYS_BYTES);
+    case VALUE_TAGS.EpochDay: {
+      hasher.update(TAG_EPOCH_DAY_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
       );
@@ -273,7 +284,7 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.Hash: {
+    case VALUE_TAGS.Hash: {
       const cid = value as FabricHash;
       hasher.update(TAG_HASH_BYTES);
       hasher.update(getStringRep(cid.tag));
@@ -285,15 +296,15 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.Array:
+    case VALUE_TAGS.Array:
       feedArray(hasher, value as unknown[]);
       return;
 
-    case NATIVE_TAGS.Object:
+    case VALUE_TAGS.Object:
       feedPlainObject(hasher, value as Record<string, unknown>);
       return;
 
-    case NATIVE_TAGS.FabricBytes: {
+    case VALUE_TAGS.FabricBytes: {
       hasher.update(TAG_BYTES_BYTES);
       const fab = value as FabricBytes;
       feedLength(hasher, fab.length);
@@ -301,17 +312,34 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.FabricInstance: {
+    case VALUE_TAGS.FabricInstance: {
       const fabInst = value as BaseFabricInstance;
       hasher.update(TAG_INSTANCE_BYTES);
       const codec = codecOf(fabInst);
       hasher.update(getStringRep(codec.tagForValue(fabInst)));
-      const state = codec.encode(fabInst);
+      const state = codec.encode(fabInst, NULL_LIVE_ENVIRONMENT);
       feedValue(hasher, state);
       return;
     }
 
-    case NATIVE_TAGS.FabricRegExp: {
+    case VALUE_TAGS.FabricKeyPair: {
+      const fab = value as FabricKeyPair;
+      if (!fab.hasMaterial) {
+        // A pair holding handles has no content to hash: its material is
+        // unreachable, and the algorithm alone is shared by every key that
+        // uses it.
+        throw new Error(
+          "`hashOf()`: cannot hash a key pair that holds handles.",
+        );
+      }
+      hasher.update(TAG_KEY_PAIR_BYTES);
+      feedValue(hasher, fab.algorithm);
+      feedValue(hasher, fab.publicKeyBytes);
+      feedValue(hasher, fab.privateKeyBytes);
+      return;
+    }
+
+    case VALUE_TAGS.FabricRegExp: {
       const fab = value as FabricRegExp;
       hasher.update(TAG_REGEXP_BYTES);
       feedValue(hasher, fab.source);
@@ -320,9 +348,9 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.RegExp:
-    case NATIVE_TAGS.Uint8Array: {
+    case VALUE_TAGS.Date:
+    case VALUE_TAGS.RegExp:
+    case VALUE_TAGS.Uint8Array: {
       // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
       const converted = shallowFabricFromNativeValue(value, false);
@@ -332,19 +360,17 @@ function feedObjectValue(
 
     default: {
       // Nothing else is handled. As of this writing, specifically missing are
-      // `Map`, `Set`, `Error`, and `HasToJSON`.
+      // `Map`, `Set`, and `Error`.
       throw new Error(
-        `hashOf: unsupported object type: ${
-          value?.constructor?.name ?? typeof value
+        `\`hashOf()\`: unsupported object type ${
+          backtickQuote(value?.constructor?.name ?? typeof value)
         }`,
       );
     }
   }
 }
 
-/**
- * Feed an array value with sparse hole handling, terminated by `TAG_END`.
- */
+/** Feed an array value with sparse hole handling, terminated by `TAG_END`. */
 function feedArray(hasher: IncrementalHasher, value: unknown[]): void {
   hasher.update(TAG_ARRAY_BYTES);
   let i = 0;
@@ -396,13 +422,11 @@ function feedPlainObject(
 // Uncached hash computation
 //
 
-/**
- * Computes the hash of a value without consulting or populating any cache.
- */
+/** Computes the hash of a value without consulting or populating any cache. */
 function computeHash(value: unknown): FabricHash {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return new FabricHash(hasher.digest(), "fid1");
+  return new FabricHash(hasher.digest(), "fid1", true);
 }
 
 /**
@@ -419,11 +443,19 @@ function computeHashAsString(value: unknown): string {
 // Caches
 //
 
-/** Pre-computed constant hashes (these values never change). */
+/** Pre-computed hash of `null`. */
 const NULL_HASH = computeHash(null);
+
+/** Pre-computed hash of `undefined`. */
 const UNDEFINED_HASH = computeHash(undefined);
+
+/** Pre-computed hash of `true`. */
 const TRUE_HASH = computeHash(true);
+
+/** Pre-computed hash of `false`. */
 const FALSE_HASH = computeHash(false);
+
+/** Pre-computed hash of negative zero. */
 const NEGATIVE_ZERO_HASH = computeHash(-0);
 
 /**
@@ -431,12 +463,20 @@ const NEGATIVE_ZERO_HASH = computeHash(-0);
  * bigints, registry-interned symbols) can't be WeakMap keys, so they use a
  * bounded cache. Sizing is based on historical testing (expected ~97% hit
  * rate in practice).
+ *
+ * A string key is held by the cache itself, and a hashed string can be a
+ * whole document: an inline document's `data:` URI runs to tens of thousands
+ * of characters. The entry count alone would let 50,000 of those add up to
+ * gigabytes, so the same byte budget `stringRepCache` carries applies here,
+ * and the count bounds the short keys that make up the rest.
  */
 const primitiveHashCache = new LRUCache<
   string | number | bigint | symbol,
   FabricHash
 >({
   capacity: 50_000,
+  weigh: (key) => (typeof key === "string" ? key.length * 2 : 16) + 96,
+  maxWeight: 8 * 1024 * 1024,
 });
 
 /**
@@ -445,6 +485,15 @@ const primitiveHashCache = new LRUCache<
  * Mutable objects are always recomputed.
  */
 const frozenObjectHashCache = new WeakMap<object, FabricHash>();
+
+/**
+ * Returns an already computed immutable hash without reading the value.
+ *
+ * @internal Used by equality to reuse hashes without expanding a value graph.
+ */
+export function cachedHashStringOf(value: object): string | undefined {
+  return frozenObjectHashCache.get(value)?.hashString;
+}
 
 /**
  * Looks up the given primitive in the LRU cache, computing and storing on
@@ -533,7 +582,7 @@ function hashOfInternal(
     }
 
     default: {
-      throw new Error(`Cannot hash value of type ${typeof value}`);
+      throw new Error(`Cannot hash value of type \`${typeof value}\``);
     }
   }
 }

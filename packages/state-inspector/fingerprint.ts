@@ -15,23 +15,23 @@
 // Estuary Topics store: all 20 write-storm cells (192,381 revisions, 90.3% of
 // every revision) are `$generated`, and NONE of them is authored content.
 //
-// Hashing goes through `@commonfabric/data-model/value-hash` — the same
+// Hashing goes through `@commonfabric/data-model` — the same
 // canonicalizing hash the runtime derives entity ids with, so this cannot drift
 // from the engine's notion of value identity.
 
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import type { SpaceDb } from "./db.ts";
 import { type EntityModel, listEntityModels } from "./model.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { type EntityAddress, reconstructDocument } from "./reconstruct.ts";
 import { listScopes } from "./scopes.ts";
 
 /**
  * `listEntityModels` caps at 5,000 by default — a real Estuary space already
  * exceeds that. A fingerprint computed over a truncated enumeration would still
  * return a confident-looking hash, which is the exact failure this whole module
- * exists to prevent, so we raise the cap and REFUSE when even that is reached
- * rather than hash a partial space.
+ * exists to prevent, so we raise the cap and REFUSE the listing that reports
+ * itself truncated rather than hash a partial space.
  */
 const ENUMERATION_CAP = 1_000_000;
 
@@ -70,29 +70,65 @@ function allEntities(
 ): EntityModel[] {
   const out: EntityModel[] = [];
   for (const scope of listScopes(space, { branch })) {
-    const models = listEntityModels(space, {
+    const listing = listEntityModels(space, {
       branch,
       scope: scope.raw,
       limit: cap,
     });
-    if (models.length >= cap) {
+    if (listing.extent.truncated) {
       throw new Error(
-        `scope ${scope.raw} enumerates ${models.length}+ entities, at or above ` +
-          `the ${cap} cap; refusing to fingerprint a possibly truncated ` +
-          `enumeration.`,
+        `scope ${scope.raw} holds ${listing.extent.total} entities, past the ` +
+          `${cap} cap; refusing to fingerprint a truncated enumeration.`,
       );
     }
-    out.push(...models);
+    out.push(...listing.entities);
   }
   return out;
+}
+
+/**
+ * An {@link EntityAddress} whose scope is known — which, for anything this
+ * module reports, it always is.
+ *
+ * An id is NOT unique on its own: one id can hold a shared space value plus
+ * per-user/per-session overrides that are genuinely different entities. So a
+ * report names the pair it computed over. A bare id forces every caller to
+ * re-associate it with a scope by guessing — a lookup that silently lets the
+ * last scope win, misclassifying exactly the per-kind precision ("74 pieces vs
+ * 73 cells") the diff exists to provide.
+ *
+ * Being an `EntityAddress` is the useful part: what a diff entry is FOR is
+ * looking the entity up, and this hands straight to `reconstructDocument`.
+ */
+export type ScopedEntity = EntityAddress & { scope: string };
+
+/**
+ * The composite key an entity address indexes by — one spelling, exported, so
+ * two sides of a comparison cannot key differently and quietly disagree about
+ * which entity is which.
+ *
+ * The separator is NUL because it has to be a byte neither field can hold. A
+ * minted id is `of:fid1:<base64url>`, `computed:fid1:<…>` or a DID, and a scope
+ * key is `space` or `user:`/`session:` over percent-encoded segments, so no
+ * value the runtime writes contains a control byte. A printable separator has
+ * no such floor under it: this tool reads stores it did not write, where both
+ * columns are opaque TEXT, and `("of:a", "b c")` and `("of:a b", "c")` would
+ * then share a key. That is not a cosmetic collision — `verifyClone` subtracts
+ * generated exclusions by this key, so an alias could clear a removal that
+ * really happened, which is the one verdict this module must never soften.
+ */
+export function entityAddressKey(at: ScopedEntity): string {
+  return `${at.id}\x00${at.scope}`;
 }
 
 /** One entity's content hash at head. */
 export interface EntityFingerprint {
   id: string;
   scope: string;
+
   /** Entity classification (`piece`, `cell`, …) as the model reports it. */
   kind: string;
+
   /** `hashOf` the entity's durable `value`, or null when it has no value. */
   hash: string | null;
 }
@@ -100,10 +136,29 @@ export interface EntityFingerprint {
 export interface FingerprintReport {
   /** Hash over every included entity's (id, scope, hash) — the one number. */
   hash: string;
+
   /** Entities included in `hash`. */
   entities: number;
+
   /** Internal cells skipped because a manifest calls them compiler-generated. */
   excludedGenerated: number;
+
+  /**
+   * The entities behind {@link excludedGenerated}, by address. A diff against a
+   * fingerprint taken from another store must subtract these before calling
+   * anything removed: the two stores compute their exclusions independently, so
+   * a cell no manifest listed THERE and this manifest calls generated HERE is
+   * present in both and absent from one list. Reporting that as removed content
+   * is the loudest verdict this module has, spent on a filter disagreement.
+   *
+   * The scope travels with the id because the subtraction is only sound per
+   * (id, scope). A manifest link carries an id and no scope, so calling a cell
+   * generated excludes EVERY scope that holds the id; subtracting by id alone
+   * would then clear the alarm for a scope whose rows are gone, reporting
+   * destroyed per-user state as a filter disagreement.
+   */
+  excludedGeneratedAddresses: ScopedEntity[];
+
   /**
    * Ids some manifest calls generated and another calls named. Counted as
    * generated (rotation-prone wins, so the fingerprint stays stable) but
@@ -111,20 +166,25 @@ export interface FingerprintReport {
    * be silent. Zero on every store observed so far.
    */
   ambiguous: string[];
+
   /** Entities whose value could not be hashed, with the reason. Never silent. */
   unhashable: { id: string; reason: string }[];
+
   /** Per-entity hashes, id-sorted — the input to `diffFingerprints`. */
   perEntity: EntityFingerprint[];
 }
 
 export interface FingerprintOptions {
   branch?: string;
+
   /**
-   * Refuse rather than fingerprint a space whose scope enumerates at or above
-   * this many entities, since the enumeration may have been truncated. Defaults
-   * to 1,000,000 — far above any real space; raise it only knowingly.
+   * Refuse rather than fingerprint a space whose scope enumerates more than
+   * this many entities, since the enumeration was truncated. A scope holding
+   * exactly the cap is complete and accepted. Defaults to 1,000,000 — far above
+   * any real space; raise it only knowingly.
    */
   enumerationCap?: number;
+
   /**
    * Include compiler-generated internal cells. Default false. Turning this on
    * makes the fingerprint change on every pattern update by design; it exists
@@ -158,6 +218,7 @@ export function generatedInternalCellIds(
     const doc = reconstructDocument(space, {
       id: model.id,
       scope: model.scope,
+      branch: options.branch ?? "",
     });
     const internal = (doc as Record<string, unknown> | undefined)?.internal;
     if (!Array.isArray(internal)) continue;
@@ -210,16 +271,20 @@ export function contentFingerprint(
   );
   const perEntity: EntityFingerprint[] = [];
   const unhashable: { id: string; reason: string }[] = [];
-  let excludedGenerated = 0;
+  const excludedGeneratedAddresses: ScopedEntity[] = [];
 
   for (const model of allEntities(space, branch, options.enumerationCap)) {
     if (generated.has(model.id)) {
-      excludedGenerated++;
+      excludedGeneratedAddresses.push({ id: model.id, scope: model.scope });
       continue;
     }
+    // The models come from this branch, so the values must too — reading the
+    // default branch here would hash a parent's content under a child's name
+    // and certify two different spaces as identical.
     const doc = reconstructDocument(space, {
       id: model.id,
       scope: model.scope,
+      branch,
     });
     const value = (doc as Record<string, unknown> | undefined)?.value;
     let hash: string | null = null;
@@ -249,7 +314,8 @@ export function contentFingerprint(
       perEntity.map((e) => [e.id, e.scope, e.hash] as const),
     ).toString(),
     entities: perEntity.length,
-    excludedGenerated,
+    excludedGenerated: excludedGeneratedAddresses.length,
+    excludedGeneratedAddresses,
     ambiguous,
     unhashable,
     perEntity,
@@ -258,9 +324,9 @@ export function contentFingerprint(
 
 export interface FingerprintDiff {
   equal: boolean;
-  added: string[];
-  removed: string[];
-  changed: string[];
+  added: ScopedEntity[];
+  removed: ScopedEntity[];
+  changed: ScopedEntity[];
 }
 
 /**
@@ -271,24 +337,29 @@ export function diffFingerprints(
   before: FingerprintReport,
   after: FingerprintReport,
 ): FingerprintDiff {
-  const key = (e: EntityFingerprint) => `${e.id} ${e.scope}`;
-  const a = new Map(before.perEntity.map((e) => [key(e), e]));
-  const b = new Map(after.perEntity.map((e) => [key(e), e]));
+  const a = new Map(before.perEntity.map((e) => [entityAddressKey(e), e]));
+  const b = new Map(after.perEntity.map((e) => [entityAddressKey(e), e]));
 
-  const added: string[] = [];
-  const removed: string[] = [];
-  const changed: string[] = [];
+  const added: ScopedEntity[] = [];
+  const removed: ScopedEntity[] = [];
+  const changed: ScopedEntity[] = [];
+  const at = (e: EntityFingerprint): ScopedEntity => ({
+    id: e.id,
+    scope: e.scope,
+  });
 
-  for (const [k, e] of b) if (!a.has(k)) added.push(e.id);
+  for (const [k, e] of b) if (!a.has(k)) added.push(at(e));
   for (const [k, e] of a) {
     const other = b.get(k);
-    if (other === undefined) removed.push(e.id);
-    else if (other.hash !== e.hash) changed.push(e.id);
+    if (other === undefined) removed.push(at(e));
+    else if (other.hash !== e.hash) changed.push(at(e));
   }
 
-  added.sort(utf8Compare);
-  removed.sort(utf8Compare);
-  changed.sort(utf8Compare);
+  const byAddress = (x: ScopedEntity, y: ScopedEntity) =>
+    x.id === y.id ? utf8Compare(x.scope, y.scope) : utf8Compare(x.id, y.id);
+  added.sort(byAddress);
+  removed.sort(byAddress);
+  changed.sort(byAddress);
   return {
     equal: added.length === 0 && removed.length === 0 && changed.length === 0,
     added,

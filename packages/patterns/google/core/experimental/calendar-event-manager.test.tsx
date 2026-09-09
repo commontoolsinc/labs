@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/calendar-event-manager.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI } from "commonfabric";
+import { assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElementByText,
   hasText,
@@ -48,7 +48,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_auth_requirement_is_visible },
       { assertion: assert_create_button_disabled_without_auth },
       { assertion: assert_confirmation_is_not_rendered_without_auth },

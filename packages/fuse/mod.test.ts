@@ -6,6 +6,7 @@ import {
   cfcWritebackXattrResultErrno,
   createSupervisorStatusWriter,
   decodeFuseNamespaceName,
+  decodeSourceWriteText,
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
   disconnectedWriteErrno,
@@ -15,6 +16,7 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import { finalizeCommittedSourceWrite } from "./source-write-finalize.ts";
 import { HandleMap } from "./handles.ts";
 import {
   closeKernelFileHandle,
@@ -159,6 +161,113 @@ Deno.test("source writeback re-encodes decoded source relpaths for tree lookup",
     sourceRelPathToTreeSegments("src/has:colon.tsx"),
     ["src", "has%3Acolon.tsx"],
   );
+});
+
+Deno.test("source writeback retains attached test roots", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes("sourceRoots: program.sourceRoots"),
+    "source writeback must pass the recovered source roots to setPattern",
+  );
+});
+
+Deno.test("source writeback retains attached data files", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes("dataFiles: program.dataFiles"),
+    "source writeback must pass the recovered data files to setPattern",
+  );
+});
+
+Deno.test("source writeback finalizes its receipt and persists every warning", async () => {
+  // Finalizing rebuilds `.src` and mints a fresh empty `error.log`, so the
+  // receipt goes into the operation performing that rebuild. The outer flush
+  // then persists the finalizer's complete diagnostic, which retains both
+  // failures when the running-piece refresh and the projection fail. Read from
+  // the source because driving the flush needs a mounted filesystem, in the
+  // same way as the two cases above.
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes(
+      "bridge.finalizeSourceWritePath(writeTarget.target, receipt)",
+    ),
+    "source writeback must hand the update receipt to the finalize",
+  );
+  assert(
+    sourceWriteback.includes(
+      "finalized.logWarning",
+    ),
+    "source writeback must persist the complete post-commit diagnostic",
+  );
+});
+
+Deno.test("source projection failures after commit become warnings, not rejected writes", async () => {
+  const receipt = {
+    status: "committed" as const,
+    ref: { identity: "A".repeat(43), symbol: "default" },
+    revisionId: "revision-committed-before-finalize",
+    detachedOrigin: null,
+    refresh: { status: "completed" as const },
+  };
+  const failure = new Error("projection rebuild failed");
+
+  const failed = await finalizeCommittedSourceWrite(receipt, () => {
+    throw failure;
+  });
+  assertEquals(failed, {
+    status: "failed",
+    warning:
+      `Source revision revision-committed-before-finalize committed as ` +
+      `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
+      `projection failed: projection rebuild failed`,
+    logWarning:
+      `Source revision revision-committed-before-finalize committed as ` +
+      `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
+      `projection failed: projection rebuild failed`,
+    error: failure,
+  });
+
+  assertEquals(
+    await finalizeCommittedSourceWrite(receipt, () => Promise.resolve()),
+    { status: "completed" },
+  );
+});
+
+Deno.test("source writes decode as strict UTF-8 text", () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+  assertEquals(
+    decodeSourceWriteText(encode("export default 1;")),
+    "export default 1;",
+  );
+  assertEquals(decodeSourceWriteText(new Uint8Array(0)), "");
+});
+
+Deno.test("source writes keep a byte order mark", () => {
+  // The mark is content: an attached data file is stored byte-for-byte.
+  const withMark = new Uint8Array([0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
+  assertEquals(decodeSourceWriteText(withMark), "\uFEFF{}");
+});
+
+Deno.test("source writes that are not UTF-8 text decode to undefined", () => {
+  // Storing replacement characters here would deploy something other than what
+  // was written, so the write has to be refused instead.
+  assertEquals(
+    decodeSourceWriteText(new Uint8Array([0xff, 0xfe, 0x00])),
+    undefined,
+  );
+  assertEquals(decodeSourceWriteText(new Uint8Array([0xc3, 0x28])), undefined);
 });
 
 Deno.test("no-handle truncate opens only the bounded target prefix", () => {

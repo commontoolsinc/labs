@@ -15,9 +15,9 @@ export interface ReactionMessageInput {
 }
 
 interface ReactionEvent {
-  messageId?: unknown;
-  reaction?: unknown;
-  delta?: unknown;
+  messageId?: string;
+  reaction?: string;
+  delta?: number;
 }
 
 export interface NormalizedMessage {

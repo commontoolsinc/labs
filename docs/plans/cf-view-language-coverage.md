@@ -1,21 +1,41 @@
 # `cf view` language and syntax coverage plan
 
-Status: In progress. Unknown named files and filename-free source without a
-recognized shebang use plain text, while filename-free transformed compiler
-output keeps its TypeScript default. Piped source can select a language directly
-or through a virtual filename. Declarative metadata can now describe extensions,
-exact names, compound patterns, explicit aliases, and direct interpreter
-shebangs. Python files with recognized extensions now have syntax highlighting.
+Status: In progress.
+
+Unknown named files and filename-free source without a recognized shebang use
+plain text, while filename-free transformed compiler output keeps its TypeScript
+default. Piped source can select a language directly or through a virtual
+filename. Declarative metadata can now describe extensions, exact names,
+compound patterns, explicit aliases, direct interpreter shebangs, and
+extensions that several syntaxes share. JSON Lines and NDJSON use the JSON
+tokenizer with independent lexical state for each record. JSON also covers the
+surveyed names that no `.json` suffix announces: web manifests, TLDraw
+documents, Deno lock files, editor workspace files, Swift package resolutions,
+and the `.cfg` files whose source opens a JSON object. Python files with
+recognized extensions now have syntax highlighting.
+
 Automatic container detection is limited to structurally identified raw unified
-diffs and standard Git commit output. Recognized shebangs and transformed
-compiler headers remain explicit source selectors.
-The order is provisional because recent activity was measured in six of the 24
+diffs and standard Git commit output. Source evidence otherwise settles only an
+extension that several syntaxes share. Each of those extensions is paired in
+metadata with the evidence one language claims it on, and a view with no source
+text leaves such a name unclaimed. Recognized shebangs and transformed compiler
+headers remain explicit source selectors. Binary is a supported, read-only
+language with raw-byte decoding and a hex-dump rendered view. Known binary
+filenames, NUL-containing input, and invalid UTF-8 select it before text
+decoding. Interactive binary views use a bounded preview, while redirected
+output streams the complete dump. Text saves use the encoder paired with the
+decoded source, including preservation of a UTF-8 byte order mark. Binary files
+remain outside diff editing and semantic source loading.
+
+Parser-backed Python, Go, shell, and HTML implementations use Tree-sitter
+through a shared, language-neutral adapter and official grammar packages.
+The order is provisional because recent activity was measured in six of the 26
 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
-JSON and JSONC, YAML, extension-based Python highlighting, and diff support to
-honest handling of every textual syntax in the active `commontoolsinc`
-repositories.
+JSON, JSONC, JSON Lines, YAML, extension-based Python highlighting, and diff
+support to honest handling of every textual syntax in the active
+`commontoolsinc` repositories.
 
 The frozen evidence is in the
 [July 2026 coverage survey](../history/packages/cli/cf-view-language-coverage-2026-07.md).
@@ -95,13 +115,141 @@ relative value. Record the reason in this plan.
 - [x] Represent extensions, exact filenames, compound filename patterns,
   aliases, and shebang interpreters as language metadata.
 - [x] Keep content detection only for unambiguous containers such as unified
-  diffs.
-- [ ] Detect known binary files and NUL-containing input before source
+  diffs, and for the evidence a shared extension pairs with one language.
+- [x] Detect known binary files and NUL-containing input before source
   decoding.
-- [ ] Build a fixture corpus with direct-file, diff, incomplete-edit, and
+- [x] Build a fixture corpus with direct-file, diff, incomplete-edit, and
   selection cases from the survey.
-- [ ] Run a parser-adapter spike on Python, Go, shell, and HTML.
-- [ ] Record the parser decision before implementing Stage 2.
+- [x] Run a parser-adapter spike on Python, Go, shell, and HTML. The
+  [August 2026 report](../history/packages/cli/cf-view-parser-adapter-spike-2026-08.md)
+  records the measurements and leaves the decision to the next item.
+- [x] Record the parser decision before the remaining Stage 2 work.
+- [x] Before the first Tree-sitter-backed implementation, measure the lazy
+  selected-language path and record accepted maximums for 95th-percentile
+  initialization, full highlighting, and incremental editing; shipped parser
+  bytes; downloaded or unpacked dependency bytes; owned non-generated adapter
+  and workaround source lines; and parser-specific build and deployment steps.
+  The
+  [August 2026 operating-envelope report](../history/packages/cli/cf-view-tree-sitter-operating-envelope-2026-08.md)
+  records the measurements and raw samples.
+
+### Parser operating maximums
+
+The common adapter and every parser-backed language must stay within these
+limits on a comparable arm64 macOS machine. Timing uses a 100-kilobyte source
+and a warm dependency cache. Initialization starts at the first statement in a
+fresh Deno process and includes dynamic imports, runtime initialization, the
+selected grammar and query, and one empty highlight.
+
+| Dimension | Python measurement | Accepted maximum |
+| --- | ---: | ---: |
+| 95th-percentile lazy initialization | 40.36 ms | 75 ms |
+| 95th-percentile full highlighting | 32.65 ms | 50 ms |
+| 95th-percentile incremental edit and changed-line highlight | 1.44 ms | 5 ms |
+| Compiled `cf` increase | 12.03 MiB | 14 MiB for runtime and first grammar |
+| Unpacked dependencies | 11.96 MiB | 14 MiB for runtime and first grammar |
+| Owned source | 131 probe lines | 500 shipped lines |
+| Parser-specific build and deployment steps | 0 | 0 |
+
+Each later host grammar may add at most 10 MiB to both byte measures and 200
+owned source lines. The common runtime and the Python, Go, Bash, and HTML host
+grammars together may occupy at most 40 MiB and 1,000 owned source lines. Tests,
+fixtures, and generated code do not count toward the source limit. The separate
+nested-HTML measurement sets the limits for its CSS and JavaScript grammars
+before Stage 5.
+
+### Parser decision
+
+Use `web-tree-sitter` 0.26.12, with pinned official Tree-sitter grammar
+packages, for parser-backed Python, Go, shell, and HTML implementations. Put
+parser initialization, gapless range normalization, incomplete-input recovery,
+incremental edits, and structure extraction behind one adapter that accepts
+language-specific highlight-capture and structure mappings. Treat Tree-sitter
+as the default for later source languages only after checking their grammar
+coverage and integration cost.
+
+The current language selection and parsing interfaces are synchronous, while
+Tree-sitter initialization and grammar loading are asynchronous. Add and test an
+asynchronous initialization boundary before adopting the adapter. Load the
+runtime and only the grammars required by the selected language when a view
+needs them. The spike's startup measurement loaded all four host grammars, so it
+does not establish the cost of that lazy path.
+
+The measured four-grammar setup initialized in 37.2 milliseconds and highlighted
+about 100 kilobytes in 14.03 to 28.29 milliseconds at the 95th percentile. Its
+incremental parses took 0.13 to 1.60 milliseconds at the 95th percentile. Those
+costs leave enough room for an interactive view. Tree-sitter also preserved
+complete, incomplete, edited, and diff source exactly. The measured mappings
+exposed Python classes and functions; Go types, functions, and methods; shell
+functions; and HTML elements and style and script host ranges. Each language
+stage must extend and test that mapping for structures the spike did not cover,
+including decorated Python definitions and Go packages.
+
+Tree-sitter's official grammars cover Python, Go, Bash, and HTML. The Bash
+grammar accepted the complete generated Bash fixture and classified its heredoc
+body. The separately maintained Lezer Bash grammar marked that fixture as
+containing an error and left the heredoc body unclassified. Lezer's smaller
+runtime and built-in HTML nesting do not outweigh using two parser families or
+accepting weaker shell coverage. Focused scanners remain suitable for simple
+data formats, but the existing Python scanner's 862 lines and YAML scanner's 970
+lines make one custom scanner per measured source language the larger
+maintenance surface. They also require a second implementation for structure.
+
+Depend on the complete npm packages rather than checking selected WebAssembly
+artifacts into the repository. The measured packages occupy 35.66 MiB when
+unpacked, while the JavaScript and WebAssembly files used at runtime occupy 2.30
+MiB. Keeping the packages intact leaves grammar builds, licenses, and release
+synchronization with their publishers. The adapter must pin the observed
+JavaScript string-offset behavior with non-ASCII contract tests. HTML embedding
+must dispatch the grammar's injection ranges to the official Tree-sitter CSS and
+JavaScript grammars rather than treating the host grammar as if it parsed those
+regions. The Tree-sitter startup and dependency-size measurements exclude those
+two embedded grammars. The startup measurement does not describe the nested
+setup, while the dependency-size measurements are lower bounds for the
+cumulative parser packages. Measure and record the complete nested-HTML setup
+before implementing Stage 5.
+
+The focused Python scanner remains in place until the Stage 2 structure change
+replaces it through the shared adapter. Do not add another focused scanner for
+Python, Go, shell, or HTML.
+
+#### Reconsidering the dependency
+
+Reopen the parser decision for a language when any of these conditions becomes
+true:
+
+- the shared fixture contract or stage-specific tests cannot pass without a
+  grammar fork or local grammar patch;
+- measured initialization, full highlighting, incremental editing, shipped
+  bytes, downloaded or unpacked dependency bytes, owned adapter or workaround
+  source lines, or build and deployment work exceeds a recorded maximum;
+- the runtime or grammar is archived, or has no release compatible with the
+  supported Deno version or with a required security fix; or
+- an unresolved license or security problem prevents shipping the dependency.
+
+A trigger starts a new measured comparison; it does not select the replacement.
+Before switching, require the focused implementation to pass the shared fixture
+contract and every stage-specific selection, highlighting, structure, and
+embedded-language test. If the dependency cannot ship or cannot meet those
+contracts, switch when the focused implementation passes them and remains within
+the recorded operating maximums.
+
+Otherwise compare these dimensions separately: owned non-generated parser,
+adapter, and workaround source lines; local patches or forks; 95th-percentile
+initialization, full-highlight, and incremental-edit latency; shipped runtime
+bytes; downloaded or unpacked dependency bytes; and parser-specific build and
+deployment steps. Compare only the marginal costs that the proposed switch would
+remove. Count language-specific grammar bytes, capture and structure mappings,
+workarounds, and selected-language latency as marginal costs. Treat the common
+adapter core, runtime package bytes, and shared deployment steps as unchanged
+while another language still uses them; count them as removable only when the
+switch removes their final consumer. Switch automatically only when the focused
+implementation is no worse in every dimension and strictly better in at least
+one. When the dimensions trade off, record a new parser decision with the
+individual measurements and priorities instead of combining unlike units into a
+single cost score. Carrying a grammar fork is sufficient to start the comparison
+because it takes on grammar maintenance while retaining the external runtime and
+integration costs.
 
 The parser spike must compare available Deno-compatible parsers with focused
 scanners. Measure startup cost, dependency size, exact source preservation,
@@ -112,13 +260,34 @@ itself.
 
 Completion gate: unknown text and binary input are no longer presented as
 TypeScript. Exact names, compound names, shebangs, and explicit overrides use
-one tested selection path. The parser decision is recorded with measurements.
+one tested selection path. The parser decision and operating maximums are
+recorded with measurements.
 
 ## Stage 1: JSON aliases and line-oriented JSON
 
-- [ ] Reuse the JSON tokenizer for `.jsonl` and `.ndjson`.
-- [ ] Isolate malformed lines so one line cannot affect the next.
-- [ ] Recognize `.webmanifest`, `.tldr`, Deno lock files, JSON-shaped `.cfg`
+The August 18, 2026 refresh found 43 `.jsonl` and `.ndjson` files across seven
+of the 26 active organization repositories. The six-repository history sample
+contains 40 path-change events on current JSON Lines paths since February 18,
+2026. This activity and the existing tokenizer reuse keep Stage 1 ahead of new
+grammar work.
+
+A September 2, 2026 check read the JSON-shaped special cases in the local
+`labs`, `loom`, `gvisor`, `common-cluster`, `infra`, and `specs` checkouts. All
+three surveyed web manifests are there, one in Labs and two in Loom, along with
+the Labs TLDraw document, the Labs and Loom Deno lock files, and the gVisor
+syzkaller `.cfg`. Each of those files opens a JSON object. The check also read
+the two syntaxes that `.cfg` has to be told apart from. TLC configuration in
+Labs and Common Cluster opens with a `\*` comment or a directive, and the
+Ansible configuration in Infra opens with a `[defaults]` section header. An
+opening brace is therefore the evidence for claiming a `.cfg` file as JSON, and
+an opening bracket is not. These six checkouts hold neither the surveyed editor
+workspace file nor the surveyed Swift package resolution, so those two names
+rest on the survey alone. The check confirms the recorded forms in the
+repositories it covers; it does not refresh any count.
+
+- [x] Reuse the JSON tokenizer for `.jsonl` and `.ndjson`.
+- [x] Isolate malformed lines so one line cannot affect the next.
+- [x] Recognize `.webmanifest`, `.tldr`, Deno lock files, JSON-shaped `.cfg`
   files, VS Code workspace files, and Swift `Package.resolved`.
 - [ ] Add Jupyter notebook container recognition for `.ipynb`.
 - [ ] Leave notebook cell-language delegation for the matching language phase.

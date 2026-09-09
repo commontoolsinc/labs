@@ -1,3 +1,11 @@
+/**
+ * Keeps the tab's favicon showing the worst status on the page. This runs in
+ * the browser, reading the rendered tiles rather than any data behind them, so
+ * it stays right as tiles update in place. A page that has been red long
+ * enough switches to the crying face, and the age it measures against starts
+ * from when the server first went red rather than from when this page loaded.
+ */
+
 type ClientFaviconFace = "good" | "warn" | "bad" | "bad-crying";
 
 export function paintStatusFavicon(

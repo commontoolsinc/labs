@@ -1,0 +1,33 @@
+{
+  "argumentSchema": {
+    "type": "unknown"
+  },
+  "pattern": "cfc-authorship-chat/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "forgedClaim": {
+        "type": "string"
+      },
+      "unsignedState": {
+        "type": "string"
+      },
+      "verifiedAuthor": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "verifiedAuthor",
+      "forgedClaim",
+      "unsignedState",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -1,15 +1,17 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
+
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { Action } from "../src/scheduler.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { Action } from "../src/scheduler.ts";
-import type { URI } from "@commonfabric/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");

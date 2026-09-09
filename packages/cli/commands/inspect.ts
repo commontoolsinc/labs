@@ -19,9 +19,9 @@ import {
   commitChurn,
   commitsPerMinute,
   contendedEntities,
-  convergence,
-  type ConvergenceResult,
-  convergenceScan,
+  convergenceExact,
+  convergenceScanExact,
+  DEFAULT_SCAN_LIMIT,
   // Remote acquisition (`cf inspect --remote` / `pull`).
   defaultCacheDir,
   describeIdentity,
@@ -30,13 +30,19 @@ import {
   discoverSpaceDbs,
   entityConflicts,
   entityHistory,
+  entityKinds,
   entityTimeline,
+  escapeTerminalText,
+  type ExactConvergenceResult,
   fetchSpaceDb,
   getValueAt,
   graphToDot,
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
+  inspectOperationFields,
+  isCompleteScan,
+  isEntityKind,
   listCommits,
   listEntityModels,
   listRemoteSpaces,
@@ -49,12 +55,15 @@ import {
   renderInspectorHtml,
   type RequestSigner,
   resolveSpace,
+  rowLimit,
+  type ScanExtent,
   type Scope,
   scopeOverlay,
   type SpaceGraph,
   spaceParticipants,
   type SpaceRef,
   spaceTimeline,
+  stringifyInspectorJson,
   subgraphAround,
   summarize,
   summarizeSpace,
@@ -71,13 +80,190 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
 }
 
-function out(json: boolean, data: unknown, render: () => void): void {
-  if (json) console.log(JSON.stringify(data, null, 2));
+type OutputStringifier = (value: unknown) => string | undefined;
+
+const prettyJson: OutputStringifier = (value) => JSON.stringify(value, null, 2);
+
+function out(
+  json: boolean,
+  data: unknown,
+  render: () => void,
+  stringify: OutputStringifier = prettyJson,
+): void {
+  if (json) console.log(stringify(data));
   else render();
 }
 
+/**
+ * Report a capped result on stderr, before any of it reaches stdout.
+ *
+ * A capped listing is a SUBSET that looks exactly like a complete one, so it
+ * has to announce itself — and stderr is the one channel that reaches both
+ * readers. A human sees it beside the table; a `--json` consumer sees it
+ * without the parsed bytes on stdout changing shape, which is what an envelope
+ * around the array would have cost every caller for a condition most runs
+ * never hit. Silence on stderr means the result IS the whole set.
+ *
+ * A notice only reaches a reader who is looking. `--require-complete` is for
+ * the caller who cannot afford to miss it — a script whose output is a backup
+ * or a rollback payload — and turns the same condition into a nonzero exit with
+ * nothing written to stdout at all.
+ */
+function noteIncompleteScan(
+  extent: ScanExtent,
+  what: string,
+  requireComplete?: boolean,
+): void {
+  if (isCompleteScan(extent)) return;
+  const reasons: string[] = [];
+  if (extent.truncated) {
+    reasons.push(
+      `capped at --limit ${extent.limit} ${what}; the space holds ` +
+        `${extent.total} entities in all — raise --limit for the rest`,
+    );
+  }
+  if (extent.unreadable > 0) {
+    // Named apart from the cap, because the remedy is different: a raised
+    // limit does not recover an entity whose payload will not decode.
+    reasons.push(
+      `${extent.unreadable} of ${extent.total} entities could not be ` +
+        `reconstructed and are absent from this result — raising --limit ` +
+        `will not recover them`,
+    );
+  }
+  if (requireComplete) {
+    throw new Error(
+      `${reasons.join("; ")}. --require-complete refuses a partial result.`,
+    );
+  }
+  for (const reason of reasons) console.error(`NOTE: ${reason}.`);
+}
+
+/**
+ * The cap a scan will apply, refusing anything an entity count could not reach.
+ * A fractional `--limit` is a typo with a silent failure mode — entities are
+ * counted one at a time, so a cap of 1.5 is a cap nothing ever equals — and a
+ * negative one asks for a listing that cannot exist.
+ */
+function validatedLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new ValidationError(
+      `\`--limit\` must be a whole number of entities, not ${limit}.`,
+    );
+  }
+  return limit;
+}
+
+/**
+ * The row limit a listing will apply, refusing what its SQL used to refuse.
+ *
+ * Distinct from `validatedLimit`, which governs a reconstruction cap and takes
+ * no negative: these listings were `LIMIT ?` clauses, where SQLite reads a
+ * negative as UNLIMITED and answers a fractional or non-finite one with a
+ * datatype mismatch. Any integer passes; everything else is the typo it looks
+ * like, and rounding it silently is how a listing under-reports.
+ */
+function validatedRowLimit(limit: number): number {
+  try {
+    // `rowLimit` owns the RULE — which limits a row listing accepts, and why.
+    // This owns only how a CLI user hears it: a ValidationError before the
+    // space is opened, rather than the library's stack trace after.
+    rowLimit(limit);
+    return limit;
+  } catch {
+    throw new ValidationError(
+      `\`--limit\` must be a whole number of rows, not ${limit}.`,
+    );
+  }
+}
+
+/** The flag that turns a capped result into a failure. Shared by every scan. */
+const requireCompleteOption = [
+  "--require-complete",
+  "Exit nonzero instead of returning a capped result.",
+] as const;
+
 function splitPath(p?: string): string[] {
   return p ? p.split("/").filter(Boolean) : [];
+}
+
+interface PathOptions {
+  path?: string;
+  pathJson?: string;
+  doc?: boolean;
+}
+
+/**
+ * Parses one of the supported path options into exact string segments.
+ *
+ * @throws {ValidationError} When path options conflict or `pathJson` is not a
+ * JSON array of strings.
+ */
+function parsePathOptions(options: PathOptions): string[] {
+  if (options.path !== undefined && options.pathJson !== undefined) {
+    throw new ValidationError(
+      "Use either `--path` or `--path-json`, not both.",
+    );
+  }
+  if (
+    options.doc &&
+    (options.path !== undefined || options.pathJson !== undefined)
+  ) {
+    throw new ValidationError(
+      "Use `--doc` without `--path` or `--path-json`.",
+    );
+  }
+  if (options.pathJson === undefined) return splitPath(options.path);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(options.pathJson);
+  } catch {
+    throw new ValidationError(
+      "`--path-json` must contain a JSON array of string segments.",
+    );
+  }
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every((segment) => typeof segment === "string")
+  ) {
+    throw new ValidationError(
+      "`--path-json` must contain a JSON array of string segments.",
+    );
+  }
+  return parsed;
+}
+
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_$@.:%+~-]+$/;
+
+function stringifyPathSegments(segments: string[]): string {
+  return JSON.stringify(segments).replace(
+    /[^\x20-\x7E]/g,
+    (character) =>
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+function formatChangePath(path: string, segments: string[]): string {
+  if (segments.length === 0) return "(root)";
+  return segments.every((segment) => SAFE_PATH_SEGMENT.test(segment))
+    ? path
+    : stringifyPathSegments(segments);
+}
+
+function formatSelectedPath(segments: string[], exact: boolean): string {
+  return exact || !segments.every((segment) => SAFE_PATH_SEGMENT.test(segment))
+    ? stringifyPathSegments(segments)
+    : `/${segments.join("/")}`;
+}
+
+function summarizeChangeValue(
+  value: unknown,
+  isUndefined?: true,
+  valueKind?: string,
+): string {
+  const summary = isUndefined ? "undefined" : summarize(value);
+  return valueKind ? `${summary} [${valueKind}]` : summary;
 }
 
 // did:key:z6Mk…wQ2n  ->  z6Mk…wQ2n  (compact, still recognizable)
@@ -111,10 +297,13 @@ function fmtSession(s: string): string {
   return decoded.length > 22 ? `${decoded.slice(0, 21)}…` : decoded;
 }
 
-// ── Remote acquisition (`cf inspect --remote`) ──────────────────────────────
+//
+// Remote acquisition (`cf inspect --remote`)
+//
 // The autopsy stays 100% offline; --remote only changes where the SQLite file
 // comes from: instead of the local on-disk store, fetch a read-only snapshot
 // from a toolshed dump endpoint into the local cache, then open it as usual.
+//
 
 interface RemoteOpts {
   remote?: string | boolean;
@@ -201,16 +390,39 @@ async function resolveMultiSpaces(opts: {
   remote?: string | boolean;
   identity?: string;
 }): Promise<SpaceRef[]> {
+  const spaceTokens = opts.spaces?.split(",").map((token) => token.trim())
+    .filter(Boolean);
+  const selectorCount = Number(opts.all === true) +
+    Number(opts.spaces !== undefined) + Number(opts.dir !== undefined);
+  if (selectorCount > 1) {
+    throw new ValidationError(
+      "Use only one of `--all`, `--spaces`, or `--dir`.",
+    );
+  }
+  if (selectorCount === 0) {
+    throw new ValidationError(
+      "Use one of `--all`, `--spaces`, or `--dir`.",
+    );
+  }
+  if (opts.spaces !== undefined && spaceTokens?.length === 0) {
+    throw new ValidationError(
+      "`--spaces` must contain at least one space.",
+    );
+  }
+  if (
+    opts.dir !== undefined && opts.remote !== undefined && opts.remote !== false
+  ) {
+    throw new ValidationError("`--dir` cannot be used with `--remote`.");
+  }
   const base = remoteBaseUrl(opts);
   if (base) {
     const sign = await remoteSigner(opts);
     let dids: string[];
     if (opts.all) {
       dids = (await listRemoteSpaces(base, { sign })).map((s) => s.space);
-    } else if (opts.spaces) {
+    } else if (spaceTokens) {
       dids = await Promise.all(
-        opts.spaces.split(",").map((t) => t.trim()).filter(Boolean)
-          .map((t) => resolveRemoteDid(t, base, sign)),
+        spaceTokens.map((token) => resolveRemoteDid(token, base, sign)),
       );
     } else {
       throw new Error("with --remote, provide --all or --spaces <a,b,…>.");
@@ -221,21 +433,17 @@ async function resolveMultiSpaces(opts: {
   }
   if (opts.dir) return openSpaces(listSqliteFiles(opts.dir));
   if (opts.all) return openSpaces(discoverSpaceDbs().map((s) => s.path));
-  if (opts.spaces) {
+  if (spaceTokens) {
     const discovered = discoverSpaceDbs();
     const paths = await Promise.all(
-      opts.spaces
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .map((t) => resolveSpace(t, discovered)),
+      spaceTokens.map((token) => resolveSpace(token, discovered)),
     );
     return openSpaces(paths);
   }
   throw new Error("provide --all, --spaces <a,b,…>, or --dir <dir>");
 }
 
-function relTag(r: ConvergenceResult): string {
+function relTag(r: ExactConvergenceResult): string {
   return r.relationship === "cross-space-linked"
     ? "DRIFT"
     : r.relationship === "no-cross-space-link"
@@ -536,14 +744,75 @@ export const inspect = new Command()
           }`,
         );
         console.log(
-          `scheduler: ${
-            !sum.hasSchedulerTables
-              ? "absent"
-              : sum.schedulerObservations > 0
-              ? `${sum.schedulerObservations} observations`
-              : "tables present, empty (persistentSchedulerState off)"
+          `scheduler basis: ${
+            !sum.hasSchedulerBasisTable
+              ? "absent (pre-migration store)"
+              : sum.schedulerBasisRows > 0
+              ? `${sum.schedulerBasisRows} rows`
+              : "table present, empty"
           }`,
         );
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect operations */
+  .command(
+    "operations <space:string> [entity:string]",
+    "Collaborative field epochs, cursors, histories, and checkpoint health.",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Exact resolved scope key.")
+  .option("--limit <limit:integer>", "Maximum fields (default 50).")
+  .option(
+    "--history-limit <limit:integer>",
+    "Maximum submissions and integrated operations per field (default 100).",
+  )
+  .option(
+    "--submission-after-seq <seq:integer>",
+    "Return submitted history after this commit sequence.",
+  )
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
+    try {
+      const report = inspectOperationFields(s, {
+        id: entity,
+        branch: options.branch,
+        scope: options.scope,
+        fieldLimit: options.limit,
+        historyLimit: options.historyLimit,
+        submissionAfterSeq: options.submissionAfterSeq,
+      });
+      out(!!options.json, report, () => {
+        if (!report.available) {
+          console.log("operation tables are absent");
+          return;
+        }
+        if (report.fields.length === 0) {
+          console.log("no collaborative operation fields");
+          return;
+        }
+        for (const field of report.fields) {
+          console.log(
+            `${field.active ? "active" : "inactive"}\t${field.address.id}` +
+              `\t${field.address.scope}\t${field.address.pathPointer}` +
+              `\t${field.codec}` +
+              `\t${field.cursor.epoch}:${field.cursor.version}` +
+              `\tretained=${field.retainedFrom.version}` +
+              `\t${field.consistency.healthy ? "healthy" : "INCONSISTENT"}`,
+          );
+          console.log(
+            `  submissions=${field.submissions.length}` +
+              `${field.pagination.submissionsTruncated ? "+" : ""}` +
+              ` integrated=${field.integrated.length}` +
+              `${field.pagination.integratedTruncated ? "+" : ""}` +
+              ` checkpoints=${field.checkpoints.length}`,
+          );
+        }
+        if (report.fieldsTruncated) {
+          console.log(`field list truncated at ${report.fieldLimit}`);
+        }
       });
     } finally {
       s.close();
@@ -655,15 +924,15 @@ export const inspect = new Command()
     "hot <space:string>",
     "Entities ranked by write count (contention proxy).",
   )
-  .option("--limit <n:number>", "Max rows.", { default: 20 })
+  .option("--limit <n:number>", "Max rows; a negative returns every row.", {
+    default: 20,
+  })
   .option("--branch <branch:string>", "Branch (default: '').")
   .action(async (options, space) => {
+    const limit = validatedRowLimit(options.limit);
     const s = await openByToken(space, options);
     try {
-      const rows = hotEntities(s, {
-        limit: options.limit,
-        branch: options.branch,
-      });
+      const rows = hotEntities(s, { limit, branch: options.branch });
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
@@ -684,8 +953,18 @@ export const inspect = new Command()
   .option("--bucket <seconds:number>", "Bucket width in seconds.", {
     default: 60,
   })
-  .option("--since <time:string>", "Lower bound on commit time (inclusive).")
-  .option("--until <time:string>", "Upper bound on commit time (exclusive).")
+  .option(
+    "--since <time:string>",
+    "Lower bound on commit time (inclusive). Also widens the curve to cover " +
+      "the whole window asked for.",
+  )
+  .option(
+    "--until <time:string>",
+    "Upper bound on commit time (exclusive). This is the observation " +
+      "boundary: pass the moment you stopped watching and the trailing quiet " +
+      "buckets are reported, which is what shows a storm SETTLED rather than " +
+      "merely ended at the last write.",
+  )
   .option("--top <n:number>", "Entities to attribute the peak bucket to.", {
     default: 10,
   })
@@ -721,7 +1000,13 @@ export const inspect = new Command()
               `revisions over ${report.buckets.length} × ${report.bucketSeconds}s` +
               `\npeak ${report.peak.start}: ${
                 commitsPerMinute(report.peak, report.bucketSeconds).toFixed(1)
-              } commits/min`,
+              } commits/min` +
+              // Where writing stopped, against where watching stopped. A curve
+              // that merely ran out of data ends on its last write; one that
+              // was observed through a quiet period ends after it. Only the
+              // second is evidence of a settle, and they render identically
+              // without both numbers.
+              `\nlast commit ${report.lastCommit}, observed through ${report.to}`,
           );
           for (const e of report.peakEntities) {
             console.log(
@@ -747,8 +1032,13 @@ export const inspect = new Command()
   )
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
-  .option("--limit <n:number>", "Max contested entities.", { default: 100 })
+  .option(
+    "--limit <n:number>",
+    "Max contested entities; a negative returns every one.",
+    { default: 100 },
+  )
   .action(async (options, space, entity) => {
+    const limit = validatedRowLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       if (entity) {
@@ -803,7 +1093,7 @@ export const inspect = new Command()
       const rows = contendedEntities(s, {
         branch: options.branch,
         scope: options.scope,
-        limit: options.limit,
+        limit,
       });
       out(!!options.json, rows, () => {
         if (rows.length === 0) {
@@ -839,20 +1129,37 @@ export const inspect = new Command()
   )
   .option(
     "--kind <kind:string>",
-    "Filter: piece | module | stream | schema | owned-cell | free-cell | unknown.",
+    `Filter: ${entityKinds.join(" | ")}. --limit then counts entities of ` +
+      `this kind, not entities scanned to find them.`,
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .option("--limit <n:number>", "Max entities to reconstruct.", {
-    default: 5000,
-  })
+  .option(
+    "--limit <n:number>",
+    "Max entities to return; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const kind = options.kind;
+    if (kind !== undefined && !isEntityKind(kind)) {
+      throw new ValidationError(
+        `Unknown --kind "${kind}". Expected one of: ${entityKinds.join(", ")}.`,
+      );
+    }
+    const limit = validatedLimit(options.limit);
     const s = await openByToken(space, options);
     try {
-      let rows = listEntityModels(s, {
-        limit: options.limit,
+      const listing = listEntityModels(s, {
+        limit,
         branch: options.branch,
+        kind,
       });
-      if (options.kind) rows = rows.filter((r) => r.kind === options.kind);
+      const rows = listing.entities;
+      noteIncompleteScan(
+        listing.extent,
+        kind ? `${kind} entities` : "entities",
+        options.requireComplete,
+      );
       out(!!options.json, rows, () => {
         if (rows.length === 0) {
           console.log("(no entities)");
@@ -954,19 +1261,24 @@ export const inspect = new Command()
   .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).", {
     conflicts: ["json"],
   })
-  .option("--limit <n:number>", "Max entities to reconstruct.", {
-    default: 5000,
-  })
+  .option(
+    "--limit <n:number>",
+    "Max entities to reconstruct; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const limit = validatedLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       let g: SpaceGraph = buildSpaceGraph(s, {
         branch: options.branch,
         scope: options.scope,
-        limit: options.limit,
+        limit,
         includeLinks: options.links !== false,
       });
       if (options.root) g = subgraphAround(g, options.root, options.depth);
+      noteIncompleteScan(g.extent, "entities", options.requireComplete);
       if (options.dot) {
         console.log(graphToDot(g));
         return;
@@ -1049,7 +1361,14 @@ export const inspect = new Command()
     "--app-url <url:string>",
     "Live shell base origin for deep links (e.g. https://host).",
   )
+  .option(
+    "--limit <n:number>",
+    "Max entities to reconstruct; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const limit = validatedLimit(options.limit);
     if (options.json) {
       throw new ValidationError(
         'Option "--json" and the "html" command are mutually exclusive.',
@@ -1062,7 +1381,9 @@ export const inspect = new Command()
         scope: options.scope,
         generatedAt: new Date().toISOString(),
         liveBase: options.appUrl,
+        limit,
       });
+      noteIncompleteScan(bundle.extent, "entities", options.requireComplete);
       const html = renderInspectorHtml(bundle);
       if (options.out) {
         Deno.writeTextFileSync(options.out, html);
@@ -1117,6 +1438,10 @@ export const inspect = new Command()
     "Reconstruct as of this commit seq (default: latest).",
   )
   .option("--path <path:string>", "Navigate into value, e.g. value/count.")
+  .option(
+    "--path-json <segments:string>",
+    'Navigate with an exact JSON string array, e.g. ["value","count"].',
+  )
   .option("--scope <scope:string>", "Raw scope key (default: space).")
   .option(
     "--as <did:string>",
@@ -1126,21 +1451,50 @@ export const inspect = new Command()
   .option("--session <sid:string>", "With --as: a specific session id.")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--doc", "Show the whole document, not just value.")
+  .option(
+    "--full-depth",
+    "Do not truncate nested values or link schemas in annotated output.",
+  )
   .action(async (options, space, entity) => {
+    const path = parsePathOptions(options);
+    if (options.as !== undefined && options.as.length === 0) {
+      throw new ValidationError("`--as` must not be empty.");
+    }
+    if (options.session !== undefined && options.session.length === 0) {
+      throw new ValidationError("`--session` must not be empty.");
+    }
+    if (options.as !== undefined && options.scope !== undefined) {
+      throw new ValidationError(
+        "Use either `--as` or `--scope`, not both.",
+      );
+    }
+    if (options.as === undefined && options.session !== undefined) {
+      throw new ValidationError("`--session` requires `--as`.");
+    }
     const s = await openByToken(space, options);
     try {
+      const fullDepth = options.fullDepth === true;
+      const annotationDepth = fullDepth ? Number.POSITIVE_INFINITY : 8;
+      const stringify = fullDepth ? stringifyInspectorJson : prettyJson;
       // --as composes the per-identity overlay; otherwise a single raw scope.
-      if (options.as) {
+      if (options.as !== undefined) {
         const r = valueAsIdentity(s, {
           id: entity,
           identity: options.as,
           sessionId: options.session,
           branch: options.branch,
           atSeq: options.seq,
+          path: options.doc ? undefined : path,
+          doc: !!options.doc,
+          annotationDepth,
         });
         out(!!options.json, r, () => {
           if (!r.exists) {
             console.log("(absent for this identity)");
+            return;
+          }
+          if (!options.doc && !r.pathExists) {
+            console.log("(entity present, but nothing at that path)");
             return;
           }
           console.log(
@@ -1148,8 +1502,8 @@ export const inspect = new Command()
               `(most-specific stored; NOT a runtime read — see \`overlay\`)` +
               (r.overrides ? "  (overrides a more-general scope)" : ""),
           );
-          console.log(JSON.stringify(r.value, null, 2));
-        });
+          console.log(stringify(r.value));
+        }, stringify);
         return;
       }
       const res = getValueAt(
@@ -1160,18 +1514,21 @@ export const inspect = new Command()
           branch: options.branch,
           atSeq: options.seq,
         },
-        splitPath(options.path),
+        path,
       );
       const shown = options.doc ? res.document : res.value;
+      const pathExists = options.doc ? res.exists : res.pathExists;
+      const annotated = annotate(shown, annotationDepth);
       out(
         !!options.json,
-        { exists: res.exists, value: annotate(shown) },
+        { exists: res.exists, pathExists, value: annotated },
         () => {
           if (!res.exists) console.log("(absent at this seq)");
-          else if (shown === undefined) {
+          else if (!pathExists) {
             console.log("(entity present, but nothing at that path)");
-          } else console.log(JSON.stringify(annotate(shown), null, 2));
+          } else console.log(stringify(annotated));
         },
+        stringify,
       );
     } finally {
       s.close();
@@ -1225,10 +1582,15 @@ export const inspect = new Command()
   .option("--from <n:number>", "From seq (default: entity's birth / seq 0).")
   .option("--to <n:number>", "To seq (default: latest).")
   .option("--path <path:string>", "Focus inside value, e.g. items/0/title.")
+  .option(
+    "--path-json <segments:string>",
+    'Focus with an exact JSON string array, e.g. ["items","0","title"].',
+  )
   .option("--doc", "Diff the whole document, not just value.")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .action(async (options, space, entity) => {
+    const path = parsePathOptions(options);
     const s = await openByToken(space, options);
     try {
       const d = diffEntity(s, {
@@ -1237,7 +1599,7 @@ export const inspect = new Command()
         branch: options.branch,
         fromSeq: options.from,
         toSeq: options.to,
-        path: splitPath(options.path),
+        path: options.doc ? undefined : path,
         doc: !!options.doc,
       });
       out(!!options.json, d, () => {
@@ -1250,15 +1612,33 @@ export const inspect = new Command()
           return;
         }
         for (const c of d.changes) {
-          const at = c.path || "(root)";
+          const at = formatChangePath(c.path, c.pathSegments);
           if (c.kind === "changed") {
             console.log(
-              `  ~ ${at}: ${summarize(c.before)} → ${summarize(c.after)}`,
+              `  ~ ${at}: ${
+                summarizeChangeValue(
+                  c.before,
+                  c.beforeIsUndefined,
+                  c.beforeValueKind,
+                )
+              } → ${
+                summarizeChangeValue(
+                  c.after,
+                  c.afterIsUndefined,
+                  c.afterValueKind,
+                )
+              }${c.annotationCollision ? " (display annotations match)" : ""}`,
             );
           } else if (c.kind === "added") {
-            console.log(`  + ${at}: ${summarize(c.after)}`);
+            console.log(
+              `  + ${at}: ${summarizeChangeValue(c.after, c.afterIsUndefined)}`,
+            );
           } else {
-            console.log(`  - ${at}: ${summarize(c.before)}`);
+            console.log(
+              `  - ${at}: ${
+                summarizeChangeValue(c.before, c.beforeIsUndefined)
+              }`,
+            );
           }
         }
       });
@@ -1289,7 +1669,11 @@ export const inspect = new Command()
           for (const st of steps) {
             console.log(
               `  seq=${st.seq}\t${st.op}\t${
-                st.changes ? `${st.changes} changes` : "—"
+                st.changesKnown === false
+                  ? "? changes"
+                  : st.changes
+                  ? `${st.changes} changes`
+                  : "—"
               }\t${st.summary}\t${fmtSession(st.session)}\t${st.createdAt}`,
             );
           }
@@ -1325,22 +1709,27 @@ export const inspect = new Command()
   .option("--spaces <list:string>", "Comma-separated DIDs/prefixes/paths.")
   .option("--dir <dir:string>", "Directory of *.sqlite files.")
   .option("--path <path:string>", "Navigate into value, e.g. value/count.")
+  .option(
+    "--path-json <segments:string>",
+    'Navigate with an exact JSON string array, e.g. ["value","count"].',
+  )
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .action(async (options, entity) => {
+    const path = parsePathOptions(options);
     const refs = await resolveMultiSpaces(options);
     try {
       const index = buildCrossSpaceLinkIndex(refs, {
         scope: options.scope,
         branch: options.branch,
       });
-      const r = convergence(
+      const r = convergenceExact(
         refs,
         {
           id: entity,
           scope: options.scope,
           branch: options.branch,
-          path: splitPath(options.path),
+          path,
         },
         index,
       );
@@ -1353,20 +1742,38 @@ export const inspect = new Command()
         );
         console.log(
           `entity:  ${r.id}` +
-            (r.path.length ? `  path=/${r.path.join("/")}` : ""),
+            (r.path.length
+              ? `  path=${
+                formatSelectedPath(
+                  r.path,
+                  options.pathJson !== undefined,
+                )
+              }`
+              : ""),
         );
         for (const v of r.views) {
           if (!v.present) {
-            console.log(`  ${v.label}\tABSENT`);
+            console.log(`  ${escapeTerminalText(v.label)}\tABSENT`);
+            continue;
+          }
+          if (v.error) {
+            console.log(
+              `  ${escapeTerminalText(v.label)}\tERROR\t${
+                escapeTerminalText(v.error)
+              }`,
+            );
             continue;
           }
           const cluster = r.clusters.findIndex((c) =>
             c.valueKey === v.valueKey
           ) + 1;
           console.log(
-            `  ${v.label}\thead=${v.headSeq}\trevs=${v.revisions}\tlast=${
+            `  ${
+              escapeTerminalText(v.label)
+            }\thead=${v.headSeq}\trevs=${v.revisions}\tlast=${
               v.lastSession ? fmtSession(v.lastSession) : "?"
-            }\tcluster#${cluster}`,
+            }\tcluster#${cluster}` +
+              (v.pathExists === false ? "\tpath=MISSING" : ""),
           );
         }
         console.log(`note: ${r.caveat}`);
@@ -1385,7 +1792,7 @@ export const inspect = new Command()
   .action(async (options) => {
     const refs = await resolveMultiSpaces(options);
     try {
-      const result = convergenceScan(refs, {
+      const result = convergenceScanExact(refs, {
         limit: options.limit,
         branch: options.branch,
       });
@@ -1395,9 +1802,13 @@ export const inspect = new Command()
         );
         console.log(
           `cross-space link edges: ${result.crossSpaceLinkEdges}  ` +
-            `(${result.linkedFindings} real-drift / ${result.unlinkedFindings} likely-independent)`,
+            `(${result.linkedFindings} real-drift / ` +
+            `${result.unlinkedFindings} likely-independent / ` +
+            `${result.unknownFindings} unknown)`,
         );
-        console.log(`findings (diverged/partial): ${result.findings.length}`);
+        console.log(
+          `findings (diverged/partial/unknown): ${result.findings.length}`,
+        );
         for (const f of result.findings) {
           const present = f.views.filter((v) => v.present).length;
           const missing = f.views.length - present;

@@ -63,12 +63,12 @@
  * - clear() - Clear the selection
  */
 
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { html, PropertyValues, unsafeCSS } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { radioGroupStyles } from "./styles.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
@@ -76,6 +76,7 @@ import {
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
+import { radioGroupStyles } from "./styles.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
 // matching the prior phase-1 token migration pattern.
@@ -86,8 +87,10 @@ import {
 export interface RadioItem {
   /** Text shown to the user */
   label: string;
+
   /** Value returned when this option is selected */
   value: unknown;
+
   /** Disabled state for this option */
   disabled?: boolean;
 }
@@ -97,7 +100,7 @@ export type RadioGroupOrientation = "vertical" | "horizontal";
 export class CFRadioGroup extends BaseElement {
   static override styles = unsafeCSS(radioGroupStyles);
 
-  /* ---------- Cell controller for value binding ---------- */
+  /** Cell controller for value binding */
   private _cellController = createCellController<unknown>(this, {
     timing: { strategy: "immediate" }, // Radio changes should be immediate
     onChange: (newValue, oldValue) => {
@@ -161,7 +164,7 @@ export class CFRadioGroup extends BaseElement {
     this.removeEventListener("keydown", this.handleKeydown);
   }
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;

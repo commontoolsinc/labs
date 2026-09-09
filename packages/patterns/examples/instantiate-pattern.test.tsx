@@ -1,4 +1,4 @@
-import { assert, NAME, pattern } from "commonfabric";
+import { assert, NAME, pattern, TESTS } from "commonfabric";
 import Factory, { Counter } from "./instantiate-pattern.tsx";
 
 // Covers both patterns this example file defines: the Counter it hands to
@@ -20,7 +20,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_counter_reports_its_value },
       { assertion: assert_counter_name_tracks_the_value },
       { assertion: assert_factory_instantiates },

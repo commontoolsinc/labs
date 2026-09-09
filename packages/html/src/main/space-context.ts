@@ -1,34 +1,137 @@
-/**
- * The element-level "space" context: the worker reconciler stamps each
- * create-element op with the space of the cell whose render produced it
- * (elided when the parent's matches), and the applicator answers the
- * standard context-request protocol for it here — dependency-free.
- *
- * The KEY is the string "space": @lit/context's createContext returns
- * its key argument verbatim, so consumers built with
- * createContext("space") (e.g. @commonfabric/ui's spaceContext) match
- * this provider by value with no shared import. Nearest provider wins
- * by event propagation, which is exactly right for cross-space
- * transclusion: a transcluded subtree's boundary element answers
- * before any outer piece or view provider.
- */
+/** Element-level render contexts supplied through the standard protocol. */
+
+import type { CellHandle } from "@commonfabric/runtime-client";
+
 export const SPACE_CONTEXT_KEY = "space";
+const PIECE_BOUNDARY_CONTEXT_KEY = Symbol("commonfabric-piece-boundary");
+
+export interface PieceBoundaryContext {
+  cell: CellHandle;
+  element: Element;
+}
 
 type ContextRequestEvent = Event & {
   context: unknown;
-  callback: (value: string | undefined, unsubscribe?: () => void) => void;
+  callback: (value: unknown, unsubscribe?: () => void) => void;
   subscribe?: boolean;
+  accept?: (value: PieceBoundaryContext) => boolean;
 };
 
-export function provideElementSpace(element: EventTarget, space: string) {
+interface ElementContextState {
+  space?: string;
+  piece?: PieceBoundaryContext;
+  pieceChanges?: EventTarget;
+}
+
+const elementContexts = new WeakMap<EventTarget, ElementContextState>();
+
+function ensureElementContext(element: EventTarget): ElementContextState {
+  const existing = elementContexts.get(element);
+  if (existing) return existing;
+
+  const state: ElementContextState = {};
+  elementContexts.set(element, state);
   element.addEventListener("context-request", (event) => {
     const request = event as ContextRequestEvent;
-    if (request.context !== SPACE_CONTEXT_KEY) return;
     if (typeof request.callback !== "function") return;
+
+    if (request.context === SPACE_CONTEXT_KEY && state.space !== undefined) {
+      event.stopPropagation();
+      request.callback(state.space, () => {});
+      return;
+    }
+
+    if (
+      request.context !== PIECE_BOUNDARY_CONTEXT_KEY || !state.piece ||
+      (request.accept && !request.accept(state.piece))
+    ) return;
     event.stopPropagation();
-    // The value is fixed for the element's lifetime (the reconciler
-    // replaces the element when its producing cell changes spaces), so
-    // a single callback satisfies both one-shot and subscribe modes.
-    request.callback(space, () => {});
+    if (request.subscribe) {
+      const changes = state.pieceChanges ??= new EventTarget();
+      const notify = () => request.callback(state.piece);
+      changes.addEventListener("change", notify);
+      request.callback(
+        state.piece,
+        () => changes.removeEventListener("change", notify),
+      );
+    } else {
+      request.callback(state.piece);
+    }
   });
+  return state;
+}
+
+/**
+ * Provide the producing space at a render boundary. The string key matches
+ * `createContext("space")` consumers without a shared import.
+ */
+export function provideElementSpace(element: EventTarget, space: string) {
+  ensureElementContext(element).space = space;
+}
+
+/** Provide the piece whose UI begins at an existing render root element. */
+export function providePieceBoundary(element: Element, cell: CellHandle): void {
+  const state = ensureElementContext(element);
+  if (state.piece?.cell.equals(cell)) return;
+  state.piece = { cell, element };
+  state.pieceChanges?.dispatchEvent(new Event("change"));
+}
+
+/** Clear a piece boundary while leaving other element contexts intact. */
+export function clearPieceBoundary(element: Element): void {
+  const state = elementContexts.get(element);
+  if (!state?.piece) return;
+  state.piece = undefined;
+  state.pieceChanges?.dispatchEvent(new Event("change"));
+}
+
+function dispatchPieceBoundaryRequest(
+  target: unknown,
+  callback: ContextRequestEvent["callback"],
+  subscribe = false,
+  accept?: ContextRequestEvent["accept"],
+): void {
+  if (
+    !target || typeof target !== "object" || !("dispatchEvent" in target) ||
+    typeof target.dispatchEvent !== "function"
+  ) return;
+  const event = Object.assign(
+    new Event("context-request", { bubbles: true, composed: true }),
+    { context: PIECE_BOUNDARY_CONTEXT_KEY, callback, subscribe, accept },
+  );
+  target.dispatchEvent(event);
+}
+
+/** Get the nearest piece boundary provided by an element or its ancestors. */
+export function getPieceBoundary(
+  target: unknown,
+  accept?: (piece: PieceBoundaryContext) => boolean,
+): PieceBoundaryContext | undefined {
+  let result: PieceBoundaryContext | undefined;
+  dispatchPieceBoundaryRequest(
+    target,
+    (value) => {
+      result = value as PieceBoundaryContext;
+    },
+    false,
+    accept,
+  );
+  return result;
+}
+
+/** Subscribe to changes from the nearest current piece boundary. */
+export function subscribePieceBoundary(
+  target: unknown,
+  callback: (piece: PieceBoundaryContext | undefined) => void,
+): () => void {
+  let unsubscribe = () => {};
+  dispatchPieceBoundaryRequest(
+    target,
+    (value, dispose) => {
+      if (dispose) unsubscribe = dispose;
+      callback(value as PieceBoundaryContext | undefined);
+    },
+    true,
+  );
+  return () => unsubscribe();
 }

@@ -21,13 +21,12 @@
 
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaDefinition } from "@commonfabric/runner/cfc";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { type FabricValue, hashStringOf } from "@commonfabric/data-model";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import {
-  JsonEncodingContext,
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { assertPatternSchemasBackwardCompatible } from "../packages/piece/src/schema-compatibility.ts";
 
 /**
@@ -48,6 +47,7 @@ export interface Baseline {
 }
 
 export type Finding =
+
   /** The current contract is not recorded, so nothing pins it for the next PR. */
   | { kind: "missing-baseline"; pattern: string; hash: string }
   /** The current contract cannot be applied over a deployed one. */
@@ -158,8 +158,8 @@ export interface StoredBaseline extends PatternContract {
  */
 export function encodeBaseline(stored: StoredBaseline): string {
   const body = JSON.parse(
-    JsonEncodingContext.unwrapEncodedValueForTesting(
-      jsonFromValue(stored as unknown as FabricValue),
+    JsonCodecEngine.unwrapEncodedValueForTesting(
+      jsonFromFabricValue(stored as unknown as FabricValue),
     ),
   );
   return `${JSON.stringify(body, null, 2)}\n`;
@@ -167,8 +167,8 @@ export function encodeBaseline(stored: StoredBaseline): string {
 
 /** Inverse of {@link encodeBaseline}. */
 export function decodeBaseline(text: string): StoredBaseline {
-  return valueFromJson(
-    JsonEncodingContext.wrapEncodedValueForTesting(text.trim()),
+  return fabricFromJsonValue(
+    JsonCodecEngine.wrapEncodedValueForTesting(text.trim()),
   ) as unknown as StoredBaseline;
 }
 
@@ -262,12 +262,12 @@ export function checkPattern(
   return findings;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Baseline store
 //
 // Parameterized by directory so these are testable against a temp tree rather
 // than only against the real `packages/patterns` layout.
-// ---------------------------------------------------------------------------
+//
 
 /** Read every recorded contract for a pattern. Absent directory → none. */
 export async function readBaselines(
@@ -344,18 +344,14 @@ export async function collectBaselineKeys(
  */
 export async function findRetired(
   baselinesDir: string,
-  patternsDir: string,
+  currentPatterns: ReadonlySet<string>,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const key of await collectBaselineKeys(baselinesDir)) {
-    try {
-      Deno.statSync(`${patternsDir}/${key}`);
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      findings.push(
-        ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
-      );
-    }
+    if (currentPatterns.has(key)) continue;
+    findings.push(
+      ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
+    );
   }
   return findings;
 }
@@ -392,4 +388,80 @@ export async function writeBaseline(
  */
 export function shouldRecord(findings: readonly Finding[]): boolean {
   return findings.length === 1 && findings[0].kind === "missing-baseline";
+}
+
+/**
+ * One `(pattern, baseline)` pair an accepted break forgives.
+ *
+ * NUL is the separator because it is the one byte neither half can contain,
+ * so no two pairs can produce the same key. It is written as an ESCAPE: the
+ * literal byte in the source would make the whole file read as binary, which
+ * `deno task check-control-characters` refuses for exactly that reason.
+ */
+export const acceptedBreakKey = (pattern: string, baseline: string): string =>
+  `${pattern}\x00${baseline}`;
+
+/**
+ * The schema paths an incompatibility finding blames.
+ *
+ * `assertPatternSchemasBackwardCompatible` throws one error listing its issues
+ * as `- <path>: <reason>` lines, so a finding's `detail` names which paths
+ * failed rather than only that something did. That is what lets an acceptance
+ * be scoped to the removal it was granted for.
+ *
+ * A line that does not parse comes back whole, deliberately. It matches no
+ * accepted path, so an unrecognised message shape fails closed — the finding
+ * stands — rather than being forgiven on the strength of a format assumption.
+ */
+export function incompatibilityPaths(detail: string): string[] {
+  const paths: string[] = [];
+  for (const line of detail.split("\n")) {
+    const issue = line.trimStart();
+    if (!issue.startsWith("- ")) continue;
+    const body = issue.slice(2);
+    const cut = body.indexOf(": ");
+    paths.push(cut === -1 ? body : body.slice(0, cut));
+  }
+  return paths;
+}
+
+/**
+ * Split findings into the ones that stand and the accepted breaks among them.
+ *
+ * Only an `incompatible` finding can be accepted. Everything else — a contract
+ * that is not recorded, a schema that is invalid on its own terms, baselines
+ * that outlived their source — describes work still to do, and an accepted
+ * break says nothing about any of them.
+ *
+ * A finding is forgiven only when EVERY path it blames is one the entry named.
+ * The pair alone is not enough: one finding carries every issue the proof found
+ * against that baseline, so forgiving by pair would also suppress an unintended
+ * break that landed in the same change — and `--update` would then record the
+ * broken contract as the new baseline. A finding whose paths cannot be read
+ * yields none, which is not a match either.
+ *
+ * The forgiven ones come back rather than being dropped, because an exemption
+ * nobody sees is an exemption nobody reviews: the run prints what it forgave,
+ * and uses the same list to fail on a pair that no longer needs forgiving.
+ */
+export function partitionAcceptedBreaks(
+  findings: readonly Finding[],
+  accepted: ReadonlyMap<string, ReadonlySet<string>>,
+): { standing: Finding[]; forgiven: Finding[] } {
+  const standing: Finding[] = [];
+  const forgiven: Finding[] = [];
+  for (const finding of findings) {
+    if (finding.kind !== "incompatible") {
+      standing.push(finding);
+      continue;
+    }
+    const paths = accepted.get(
+      acceptedBreakKey(finding.pattern, finding.baseline),
+    );
+    const blamed = incompatibilityPaths(finding.detail);
+    const isAccepted = paths !== undefined && blamed.length > 0 &&
+      blamed.every((path) => paths.has(path));
+    (isAccepted ? forgiven : standing).push(finding);
+  }
+  return { standing, forgiven };
 }

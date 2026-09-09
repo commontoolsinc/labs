@@ -1,5 +1,4 @@
 import { assertEquals } from "@std/assert";
-import "@commonfabric/api/schema";
 import type {
   DataUnavailableVariant,
   Default,
@@ -16,6 +15,9 @@ import type {
   WishState,
   Writable,
 } from "@commonfabric/api";
+// Evaluating this module is what installs the ambient schema declarations
+// the assertions below rest on.
+import * as schemaModule from "@commonfabric/api/schema";
 import type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 type MustBeTrue<T extends true> = T;
@@ -74,7 +76,7 @@ const _roomBinding: MustBeTrue<
 
 const _handlerFactory: MustBeTrue<
   AssertAssignable<
-    HandlerFactory<HandlerState, void>,
+    HandlerFactory<void, HandlerState>,
     (inputs: HandlerBinding) => unknown
   >
 > = true;
@@ -128,9 +130,7 @@ const _schemaWishOverload: MustBeTrue<
   SchemaWishOverloadAcceptsFactoryInput
 > = true;
 
-Deno.test("FactoryInput accepts reactive cell handles in factory bindings", async () => {
-  const schemaModule = await import("@commonfabric/api/schema");
-
+Deno.test("FactoryInput accepts reactive cell handles in factory bindings", () => {
   assertEquals(
     [
       typeof schemaModule,

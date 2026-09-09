@@ -1,3 +1,5 @@
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
 /**
  * Test pattern to validate generateObject error handling snippet for LLM.md
  *

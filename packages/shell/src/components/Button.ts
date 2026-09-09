@@ -57,7 +57,7 @@ export class XButtonElement extends LitElement {
   @property({ attribute: true })
   accessor variant: VariantType = "none";
 
-  private onClick(e: Event) {
+  #onClick(e: Event) {
     // If this is a "submit" button, then we need
     // to handle execution as the shadow DOM prevents
     // default mapping of the button to a parent form.
@@ -81,7 +81,7 @@ export class XButtonElement extends LitElement {
   override render() {
     return html`
       <button
-        @click="${this.onClick}"
+        @click="${this.#onClick}"
         type="${this.type}"
         ?disabled="${this.disabled}"
         x-variant="${this.variant}"

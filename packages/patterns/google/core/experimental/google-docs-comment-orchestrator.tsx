@@ -459,8 +459,7 @@ const regenerateResponse = handler<
 >((_, { commentStates, commentId }) => {
   const current = commentStates.get() ?? {};
   const state = current[commentId] ?? { regenerateNonce: 0, status: "pending" };
-  commentStates.set({
-    ...current,
+  commentStates.update({
     [commentId]: {
       ...state,
       regenerateNonce: state.regenerateNonce + 1,
@@ -526,8 +525,7 @@ const skipComment = handler<
   }
 >((_, { commentId, commentStates, expandedCommentId }) => {
   const current = commentStates.get() ?? {};
-  commentStates.set({
-    ...current,
+  commentStates.update({
     [commentId]: {
       ...(current[commentId] ?? { regenerateNonce: 0 }),
       status: "skipped",

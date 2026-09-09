@@ -1,13 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { SchemaPathSelector } from "@commonfabric/api";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import type {
   MemorySpace,
   Revision,
   State,
 } from "@commonfabric/memory/interface";
 import {
+  createDefaultTraversalContext,
   createSchemaMemo,
   type IMemorySpaceValueAttestation,
   ManagedStorageTransaction,
@@ -15,6 +16,13 @@ import {
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 describe("SchemaObjectTraverser shared schema memo", () => {
   it("does not alias the same document id across address scopes", () => {
@@ -31,7 +39,7 @@ describe("SchemaObjectTraverser shared schema memo", () => {
     const traverser = new SchemaObjectTraverser<FabricValue>(
       tx,
       selector,
-      undefined,
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
       undefined,
       createSchemaMemo(),
     );

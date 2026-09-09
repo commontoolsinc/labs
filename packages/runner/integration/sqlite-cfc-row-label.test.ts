@@ -10,13 +10,13 @@
  * rule-bearing table fails closed, and a declared output ceiling with
  * onExceed:"skip" returns exactly the fitting rows.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
+import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
-
-const TIMEOUT_MS = 180000;
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(
@@ -24,6 +24,15 @@ async function runTest(base: URL) {
   );
   const runtime = new Runtime({
     apiUrl: base,
+    // Server-execution v2 posture (testing.md §2): this test serves
+    // toolshed's `app.ts` IN-PROCESS (`Deno.serve` below) with NO
+    // ExecutorHost, so it is a single-process harness — client and memory
+    // server in one process, nothing serving — and its client is OFF BY
+    // CONSTRUCTION, whatever EXPERIMENTAL_SERVER_EXECUTION says (a flag-ON
+    // client here would divert its derivations to a server that does not
+    // exist and wedge). The CI ON lane's env does not reach this file;
+    // only the tests that talk to the lane's toolshed (API_URL) declare
+    // the posture from the env (P7 review finding 7).
     storageManager: StorageManager.open({
       as: account,
       memoryHost: new URL(base),
@@ -34,7 +43,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./sqlite-cfc-row-label.test.tsx", import.meta.url),
+      new URL("./sqlite-cfc-row-label.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,
@@ -93,7 +102,7 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- THE POINT: distinct per-row labels, re-derived from row data. ---
+      // THE POINT: distinct per-row labels, re-derived from row data.
       // Reading row[i] traverses pattern result -> query result -> the row's
       // own entity doc; the labels the consumer observes accumulate across
       // those dereferences (per-row ROOT label + per-column field labels).
@@ -185,7 +194,7 @@ async function runTest(base: URL) {
         "row 1 integrity",
       );
 
-      // --- Aggregate on a rule-bearing table fails closed. ---
+      // Aggregate on a rule-bearing table fails closed.
       const countUnavailable = result.key("qCount").resolveAsCell().getRaw() as
         | { reason?: string; error?: { message?: string } }
         | undefined;
@@ -202,8 +211,8 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- Declared ceiling + onExceed:"skip": exactly row 1 survives. ---
-      const skim = result.key("qSkim").key("rows").get() as
+      // Declared ceiling + onExceed:"skip": exactly row 1 survives.
+      const skim = result.key("qSkim").key("result").get() as
         | { id: number }[]
         | undefined;
       if (!Array.isArray(skim) || skim.length !== 1 || skim[0].id !== 1) {
@@ -214,10 +223,11 @@ async function runTest(base: URL) {
         );
       }
 
-      // --- Read-time clearance (Phase 3.b): the owner satisfies no row's
+      // Read-time clearance (Phase 3.b): the owner satisfies no row's
       // conjunctive rule (the did:mailto participants are required too), so a
-      // cleared query returns zero rows and reports withheld: 2. ---
-      const cleared = result.key("qClear").key("rows").get() as
+      // cleared query returns zero rows and reports withheld: 2.
+      const clearErr = result.key("qClear").key("error").getRaw();
+      const cleared = result.key("qClear").key("result").get() as
         | unknown[]
         | undefined;
       const withheld = result.key("qClear").key("withheld").get() as unknown;
@@ -253,17 +263,9 @@ Deno.test({
   fn: async () => {
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`)),
-        TIMEOUT_MS,
-      );
-    });
     try {
-      await Promise.race([runTest(base), timeoutPromise]);
+      await runTest(base);
     } finally {
-      clearTimeout(timeoutHandle!);
       await server.shutdown();
     }
   },

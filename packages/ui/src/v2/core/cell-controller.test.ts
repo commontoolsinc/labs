@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { FakeTime } from "@std/testing/time";
-import type { ReactiveControllerHost } from "lit";
+
 import {
   CellHandle,
   type CellRef,
   isCellHandle,
 } from "@commonfabric/runtime-client";
+import type { ReactiveControllerHost } from "lit";
+
 import {
   createMockCellHandle,
   pushUpdate,
@@ -32,9 +34,9 @@ function createMockHost(): ReactiveControllerHost {
   } as unknown as ReactiveControllerHost;
 }
 
-// ---------------------------------------------------------------------------
+//
 // createMockCellHandle sanity checks
-// ---------------------------------------------------------------------------
+//
 
 describe("createMockCellHandle", () => {
   it("passes isCellHandle()", () => {
@@ -123,9 +125,9 @@ describe("createMockCellHandle", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // CellController
-// ---------------------------------------------------------------------------
+//
 
 describe("CellController", () => {
   it("binds a CellHandle and reads its value", () => {
@@ -401,9 +403,9 @@ describe("CellController", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // CellController.flush()
-// ---------------------------------------------------------------------------
+//
 
 describe("CellController — flush", () => {
   it("runs a pending debounced write immediately", () => {
@@ -431,9 +433,9 @@ describe("CellController — flush", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // StringCellController
-// ---------------------------------------------------------------------------
+//
 
 describe("StringCellController", () => {
   it("defaults to empty string for undefined cell value", () => {
@@ -467,9 +469,9 @@ describe("StringCellController", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // BooleanCellController
-// ---------------------------------------------------------------------------
+//
 
 describe("BooleanCellController", () => {
   it("defaults to false for undefined cell value", () => {
@@ -498,9 +500,9 @@ describe("BooleanCellController", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // ArrayCellController
-// ---------------------------------------------------------------------------
+//
 
 describe("ArrayCellController", () => {
   it("defaults to empty array for undefined cell value", () => {
@@ -576,9 +578,9 @@ describe("ArrayCellController", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Factory functions
-// ---------------------------------------------------------------------------
+//
 
 describe("factory functions", () => {
   it("createCellController returns CellController", () => {
@@ -602,9 +604,9 @@ describe("factory functions", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // CellController — timing integration
-// ---------------------------------------------------------------------------
+//
 
 describe("CellController — timing integration", () => {
   let time: FakeTime;
@@ -685,25 +687,9 @@ describe("CellController — timing integration", () => {
     ctrl.setValue("instant");
     expect(cell.get()).toBe("instant");
   });
-
-  it("onFocus/onBlur call custom option callbacks", () => {
-    const events: string[] = [];
-    const host = createMockHost();
-    const ctrl = new CellController<string>(host, {
-      timing: { strategy: "immediate" },
-      onFocus: () => events.push("focus"),
-      onBlur: () => events.push("blur"),
-    });
-    const cell = createMockCellHandle("x");
-    ctrl.bind(cell);
-
-    ctrl.onFocus();
-    ctrl.onBlur();
-    expect(events).toEqual(["focus", "blur"]);
-  });
 });
 
-// ---------------------------------------------------------------------------
+//
 // CellController — pending local edits vs stale bound state
 //
 // Regression coverage for the cf-input early-boot wipe: a user types before
@@ -714,7 +700,7 @@ describe("CellController — timing integration", () => {
 // state, and the next repaint wiped the user's typed text until the backend
 // echo restored it. The local edit must win until the echo confirms it or a
 // genuinely newer remote value arrives.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * A cfcLabelView that differs from the (absent) label view on the default mock
@@ -1082,18 +1068,6 @@ describe("CellController — pending local edits vs stale bound state", () => {
     expect(objCtrl.getValue()).toEqual({ k: "v" });
   });
 
-  it("manual transaction strategy still routes the write through the setter", () => {
-    const ctrl = new CellController<string>(createMockHost(), {
-      timing: { strategy: "immediate" },
-      transactionStrategy: "manual",
-    });
-    const cell = createMockCellHandle<string>("before");
-    ctrl.bind(cell);
-    ctrl.setValue("after");
-    expect(cell.get()).toBe("after");
-    expect(ctrl.getValue()).toBe("after");
-  });
-
   it("setValue on a plain (non-cell) binding leaves the value to the host property system", () => {
     const changes: Array<[string, string]> = [];
     const ctrl = new StringCellController(createMockHost(), {
@@ -1108,9 +1082,9 @@ describe("CellController — pending local edits vs stale bound state", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // CellController — custom options
-// ---------------------------------------------------------------------------
+//
 
 describe("CellController — custom options", () => {
   it("custom getValue transforms the cell value", () => {

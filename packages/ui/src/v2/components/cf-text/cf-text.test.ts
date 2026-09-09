@@ -1,6 +1,7 @@
 /**
  * Tests for CFText component
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFText } from "./index.ts";

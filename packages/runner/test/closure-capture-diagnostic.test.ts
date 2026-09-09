@@ -41,6 +41,33 @@ describe("closureCaptureErrorMessage (CT-1626)", () => {
     expect(message).not.toContain("\n  at ");
   });
 
+  it("names the callback by its body preview when no location resolved", () => {
+    const message = closureCaptureErrorMessage({
+      capturedCell: { name: "x" },
+      sourceLocation: null,
+      implementationPreview: "(item) => item.total + subtotal.get()",
+    });
+    expect(message).toContain("in (item) => item.total + subtotal.get()");
+  });
+
+  it("prefers a resolved location over the body preview", () => {
+    const message = closureCaptureErrorMessage({
+      sourceLocation: "/main.tsx:23:7",
+      implementationPreview: "(item) => item.total",
+    });
+    expect(message).toContain("at /main.tsx:23:7");
+    expect(message).not.toContain("\n  in ");
+  });
+
+  it("collapses and truncates a long body preview to one line", () => {
+    const message = closureCaptureErrorMessage({
+      implementationPreview: `(item) => {\n  return ${"y".repeat(80)};\n}`,
+    });
+    const line = message.split("\n").find((l) => l.startsWith("  in "))!;
+    expect(line.length).toBeLessThanOrEqual(70);
+    expect(line).toContain("\u2026");
+  });
+
   it("recommends the real escape hatches (mapWithPattern / computed)", () => {
     const message = closureCaptureErrorMessage();
     expect(message).toContain("mapWithPattern");

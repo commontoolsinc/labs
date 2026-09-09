@@ -6,7 +6,9 @@ function at(b: EditBuffer): [number, number] {
   return [b.row, b.col];
 }
 
-// --- motion -----------------------------------------------------------------
+//
+// motion
+//
 
 Deno.test("editbuffer: left/right cross line boundaries", () => {
   const b = new EditBuffer("ab\ncd");
@@ -42,7 +44,9 @@ Deno.test("editbuffer: line and word motion", () => {
   assertEquals(b.col, 6, "back to start of `bar`");
 });
 
-// --- insertion / deletion ---------------------------------------------------
+//
+// insertion / deletion
+//
 
 Deno.test("editbuffer: insert characters and a newline", () => {
   const b = new EditBuffer("ac");
@@ -70,6 +74,58 @@ Deno.test("editbuffer: backspace joins lines, delete-forward too", () => {
   assertEquals(b.text(), "acd");
 });
 
+Deno.test("editbuffer: structural edits preserve source-owned CRLF transport", () => {
+  const split = new EditBuffer("ab\r\ncd\r\n");
+  split.col = 2;
+  split.insertNewline(2);
+  assertEquals(split.text(), "ab\r\n\r\ncd\r\n");
+
+  const backward = new EditBuffer("ab\r\ncd\r\n");
+  backward.row = 1;
+  backward.deleteBackward(2);
+  assertEquals(backward.text(), "abcd\r\n");
+  assertEquals(at(backward), [0, 2]);
+
+  const forward = new EditBuffer("ab\r\ncd\r\n");
+  forward.col = 2;
+  forward.deleteForward(2);
+  assertEquals(forward.text(), "abcd\r\n");
+
+  const killed = new EditBuffer("ab\r\ncd\r\n");
+  killed.col = 2;
+  killed.killLine(2);
+  assertEquals(killed.text(), "abcd\r\n");
+  assertEquals(killed.killRing[0], "\r\n");
+  killed.yank();
+  assertEquals(killed.text(), "ab\r\ncd\r\n");
+
+  const terminal = new EditBuffer("ab\r\n");
+  terminal.moveBufferEnd();
+  terminal.insertNewline(0, "\r");
+  assertEquals(terminal.text(), "ab\r\n\r\n");
+});
+
+Deno.test("editbuffer: structural edits carry exact line-ending provenance", () => {
+  const crlf = { ending: "\r\n", bodyCarriesCrlfEnding: true } as const;
+  const lf = { ending: "\n", bodyCarriesCrlfEnding: false } as const;
+  const split = new EditBuffer("a\nb", [crlf, lf]);
+  split.col = 1;
+  split.insertNewline();
+  assertEquals(split.lineEndingProvenance(), [crlf, crlf, lf]);
+  split.deleteBackward();
+  assertEquals(split.lineEndingProvenance(), [crlf, lf]);
+
+  const replaced = new EditBuffer("a\nb", [crlf, lf]);
+  replaced.spliceLines(0, 1, ["head", "tail"], 0, 0);
+  assertEquals(replaced.lineEndingProvenance(), [crlf, crlf, lf]);
+  replaced.spliceLines(0, 2, ["joined"], 0, 0);
+  assertEquals(replaced.lineEndingProvenance(), [crlf, lf]);
+  replaced.spliceLines(1, 0, ["inserted"], 0, 0);
+  assertEquals(replaced.lineEndingProvenance(), [crlf, undefined, lf]);
+  replaced.setLineEndingProvenance([lf]);
+  assertEquals(replaced.lineEndingProvenance(), [lf, undefined, undefined]);
+});
+
 Deno.test("editbuffer: dirty tracks against the original", () => {
   const b = new EditBuffer("x");
   assert(!b.dirty());
@@ -93,7 +149,9 @@ Deno.test("editbuffer: commitSaved makes the current text clean", () => {
   assert(b.dirty(), "a later edit is measured against the saved text");
 });
 
-// --- kill / yank ------------------------------------------------------------
+//
+// kill / yank
+//
 
 Deno.test("editbuffer: kill-line then yank round-trips", () => {
   const b = new EditBuffer("hello world");
@@ -138,6 +196,13 @@ Deno.test("editbuffer: kill-whole-line of the last line keeps no trailing newlin
   d.yank();
   assertEquals(d.text(), "x\ny");
   assert(!d.dirty());
+
+  const crlf = { ending: "\r\n", bodyCarriesCrlfEnding: true } as const;
+  const eof = { ending: "", bodyCarriesCrlfEnding: false } as const;
+  const endings = new EditBuffer("a\nb", [crlf, eof]);
+  endings.row = 1;
+  endings.killWholeLine();
+  assertEquals(endings.lineEndingProvenance(), [eof]);
 });
 
 Deno.test("editbuffer: consecutive kills accrete into one ring entry", () => {
@@ -197,7 +262,9 @@ Deno.test("editbuffer: yank-pop cycles through the ring", () => {
   assertEquals(b.text(), "A", "wraps around the ring");
 });
 
-// --- case ops ---------------------------------------------------------------
+//
+// case ops
+//
 
 Deno.test("editbuffer: case operations transform the next word, advancing", () => {
   const b = new EditBuffer("foo BAR baz");
@@ -214,7 +281,9 @@ Deno.test("editbuffer: case operations transform the next word, advancing", () =
   assertEquals(b.text(), "foo BAR Baz");
 });
 
-// --- non-BMP ----------------------------------------------------------------
+//
+// non-BMP
+//
 
 Deno.test("editbuffer: cursor steps whole code points past an emoji", () => {
   const b = new EditBuffer("a😀b");
@@ -231,7 +300,9 @@ Deno.test("editbuffer: cursor steps whole code points past an emoji", () => {
   assertEquals(b.text(), "ab");
 });
 
-// --- key decoding -----------------------------------------------------------
+//
+// key decoding
+//
 
 function decode1(bytes: number[]) {
   const { keys } = decodeKeys(new Uint8Array(bytes));

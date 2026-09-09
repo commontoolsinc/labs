@@ -1,7 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { CODEC } from "@commonfabric/data-model/codec-common";
+import {
+  CODEC,
+  NULL_LIVE_ENVIRONMENT,
+} from "@commonfabric/data-model/codec-common";
 import {
   DataUnavailable,
   FabricError,
@@ -185,7 +188,7 @@ describe("fetchProgram state-machine edge paths", () => {
         inputHash,
         state: {
           type: "error",
-          error: FabricError[CODEC].encode(fabricError),
+          error: FabricError[CODEC].encode(fabricError, NULL_LIVE_ENVIRONMENT),
         },
       },
     });

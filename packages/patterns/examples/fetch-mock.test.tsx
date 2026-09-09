@@ -15,6 +15,7 @@ import {
   isPending,
   pattern,
   resultOf,
+  TESTS,
 } from "commonfabric";
 
 export const fetchMocks = [
@@ -41,7 +42,7 @@ export default pattern(() => {
   const no_error = assert(() => !hasError(fetched));
 
   return {
-    tests: [
+    [TESTS]: [
       // Drive the in-flight fetchJson (mutex -> mock fetch -> result write) to
       // completion before the assertions read the result.
       { settle: true },

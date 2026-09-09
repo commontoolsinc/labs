@@ -137,6 +137,7 @@ interface TrackedThread {
   settings: ThreadSettings;
   isDue: boolean;
   shouldGiveUp: boolean;
+
   /** Most recent message ID (for threading replies) */
   lastMessageId: string;
 }
@@ -267,8 +268,7 @@ const updateContext = handler<
   const existing = current[threadId];
   const defaults = DEFAULT_SETTINGS[newContext];
 
-  threadMetadata.set({
-    ...current,
+  threadMetadata.update({
     [threadId]: {
       pingCount: existing?.pingCount || 0,
       settings: {
@@ -295,8 +295,7 @@ const updateDaysThreshold = handler<
   const current = threadMetadata.get();
   const existing = current[threadId];
 
-  threadMetadata.set({
-    ...current,
+  threadMetadata.update({
     [threadId]: {
       pingCount: existing?.pingCount || 0,
       settings: {
@@ -325,8 +324,7 @@ const updateMaxPings = handler<
   const current = threadMetadata.get();
   const existing = current[threadId];
 
-  threadMetadata.set({
-    ...current,
+  threadMetadata.update({
     [threadId]: {
       pingCount: existing?.pingCount || 0,
       settings: {
@@ -346,9 +344,7 @@ const updateDraft = handler<
   { target: { value: string } },
   { drafts: Writable<Record<string, string>>; threadId: string }
 >(({ target }, { drafts, threadId }) => {
-  const current = drafts.get();
-  drafts.set({
-    ...current,
+  drafts.update({
     [threadId]: target.value,
   });
 });
@@ -834,8 +830,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
       const current = drafts.get();
       // Idempotent check: only mutate if value changed
       if (current[threadId] !== generatedDraft) {
-        drafts.set({
-          ...current,
+        drafts.update({
           [threadId]: generatedDraft,
         });
       }
@@ -859,8 +854,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
       // Increment ping count
       const currentMeta = threadMetadata.get();
       const existing = currentMeta[threadId];
-      threadMetadata.set({
-        ...currentMeta,
+      threadMetadata.update({
         [threadId]: {
           ...existing,
           pingCount: (existing?.pingCount || 0) + 1,

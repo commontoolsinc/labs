@@ -63,14 +63,12 @@ export const deletePiece = handler<
       pieces.set(nextPieces as BGPieceEntry[]);
     }
   },
-  { proxy: true },
 );
 
 export const togglePiece = handler<never, { piece: Cell<BGPieceEntry> }>(
   (_, { piece }) => {
     piece.set(toggledPiece(piece.get()));
   },
-  { proxy: true },
 );
 
 // Minimal "moment" style formatting to get a string

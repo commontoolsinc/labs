@@ -6,7 +6,10 @@ import type {
   SyntheticReactiveCollectionRegistry,
   TypeRegistry,
 } from "./transformers.ts";
-import type { CfcPolicyCompilerManifestV1 } from "./runtime-contract.ts";
+import type {
+  BuilderSourceSitesV1,
+  CfcPolicyCompilerManifestV1,
+} from "./runtime-contract.ts";
 import type { AvailabilityObservation } from "../availability/types.ts";
 
 /**
@@ -25,6 +28,7 @@ import type { AvailabilityObservation } from "../availability/types.ts";
 export interface NodeTypeLinks {
   /** Cached per-function capability summary (was `capabilitySummaryRegistry`). */
   capabilitySummary?: FunctionCapabilitySummary;
+
   /**
    * Whether SchemaInjection has finalized this builder call/new node (was
    * `schemaInjectedRegistry`). A bare presence flag with NO getOriginalNode
@@ -32,6 +36,20 @@ export interface NodeTypeLinks {
    * pre-injection user call, which must NOT read as injected.
    */
   schemaInjected?: true;
+
+  /**
+   * For a `toSchema` call SchemaInjection created to describe a pattern's
+   * RESULT, the authored node a diagnostic about that schema points at. The
+   * schema call is synthetic and carries no source position of its own, so the
+   * anchor is what gives the reader a line to look at.
+   *
+   * SchemaGeneration is the stage that turns the call into a schema literal,
+   * and it is the only stage that can see what the declared result type
+   * generated. This channel is what tells it which of the many `toSchema` calls
+   * in a file is a pattern result rather than an argument, a handler's event,
+   * or a nested claim.
+   */
+  patternResultAnchor?: ts.Node;
 }
 
 /**
@@ -66,10 +84,22 @@ export interface NodeTypeLinks {
  *     `mark*` methods here do not invalidate — the context wrapper does.)
  */
 export class CrossStageState {
+  readonly #builderSourceSites = new Map<string, BuilderSourceSitesV1>();
   readonly #policyManifests = new Map<
     string,
     readonly CfcPolicyCompilerManifestV1[]
   >();
+
+  recordBuilderSourceSites(
+    fileName: string,
+    sidecar: BuilderSourceSitesV1,
+  ): void {
+    this.#builderSourceSites.set(fileName, sidecar);
+  }
+
+  getBuilderSourceSites(): ReadonlyMap<string, BuilderSourceSitesV1> {
+    return this.#builderSourceSites;
+  }
 
   recordPolicyManifests(
     fileName: string,
@@ -84,12 +114,16 @@ export class CrossStageState {
   > {
     return this.#policyManifests;
   }
+
   /**
-   * Bare cross-package channels (the published boundary contract). Read
-   * directly by the schema-generator package as plain WeakMaps; they must NOT
-   * be folded into `nodeLinks`. See `core/mod.ts`.
+   * One of the two bare cross-package channels making up the published
+   * boundary contract, `schemaHints` below being the other. Both are read
+   * directly by the schema-generator package as plain WeakMaps, and so must
+   * NOT be folded into `nodeLinks`. See `core/mod.ts`.
    */
   readonly typeRegistry: TypeRegistry = new WeakMap();
+
+  /** The other such channel, held to the same contract. */
   readonly schemaHints: SchemaHints = new WeakMap();
 
   /**
@@ -105,10 +139,22 @@ export class CrossStageState {
    */
   readonly #reportedDiagnosticKeys = new Set<string>();
 
-  /** Marker family — keyed by node/symbol identity; cache-coupled via context. */
+  /**
+   * First of the four marker-family WeakSets — with
+   * `syntheticComputeCallbackRegistry`, `syntheticComputeOwnedNodeRegistry`,
+   * and `syntheticReactiveCollectionRegistry` below. Each is keyed by
+   * node/symbol identity, with its context-level mutators coupled to
+   * reactive-analysis cache invalidation; `core/mod.ts` defines the family.
+   */
   readonly mapCallbackRegistry = new WeakSet<ts.Node>();
+
+  /** The second marker-family WeakSet, held to the same contract. */
   readonly syntheticComputeCallbackRegistry = new WeakSet<ts.Node>();
+
+  /** The third marker-family WeakSet, held to the same contract. */
   readonly syntheticComputeOwnedNodeRegistry = new WeakSet<ts.Node>();
+
+  /** The fourth marker-family WeakSet, held to the same contract. */
   readonly syntheticReactiveCollectionRegistry:
     SyntheticReactiveCollectionRegistry = new WeakSet();
   readonly availabilityObservationNodeRegistry = new WeakMap<
@@ -131,7 +177,9 @@ export class CrossStageState {
     return links;
   }
 
-  // --- mapCallbackRegistry ---
+  //
+  // mapCallbackRegistry
+  //
 
   markArrayMethodCallback(node: ts.Node): void {
     this.mapCallbackRegistry.add(node);
@@ -141,7 +189,9 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.mapCallbackRegistry, node);
   }
 
-  // --- syntheticComputeCallbackRegistry ---
+  //
+  // syntheticComputeCallbackRegistry
+  //
 
   markSyntheticComputeCallback(node: ts.Node): void {
     this.syntheticComputeCallbackRegistry.add(node);
@@ -151,7 +201,9 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.syntheticComputeCallbackRegistry, node);
   }
 
-  // --- syntheticComputeOwnedNodeRegistry ---
+  //
+  // syntheticComputeOwnedNodeRegistry
+  //
 
   markSyntheticComputeOwnedSubtree(node: ts.Node): void {
     const registry = this.syntheticComputeOwnedNodeRegistry;
@@ -166,7 +218,9 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.syntheticComputeOwnedNodeRegistry, node);
   }
 
-  // --- syntheticReactiveCollectionRegistry (keyed by ts.Symbol) ---
+  //
+  // syntheticReactiveCollectionRegistry (keyed by ts.Symbol)
+  //
 
   markSyntheticReactiveCollection(symbol: ts.Symbol): void {
     this.syntheticReactiveCollectionRegistry.add(symbol);
@@ -176,7 +230,9 @@ export class CrossStageState {
     return this.syntheticReactiveCollectionRegistry.has(symbol);
   }
 
-  // --- availability observation provenance ---
+  //
+  // availability observation provenance
+  //
 
   recordAvailabilityObservation(
     key: ts.Node | ts.Symbol,
@@ -211,7 +267,9 @@ export class CrossStageState {
     return this.availabilityVariantTypes.get(name);
   }
 
-  // --- schemaHints ---
+  //
+  // schemaHints
+  //
 
   recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
     this.schemaHints.set(node, hint);
@@ -226,7 +284,9 @@ export class CrossStageState {
       this.schemaHints.get(ts.getOriginalNode(node));
   }
 
-  // --- capabilitySummary (nodeLinks-backed) ---
+  //
+  // capabilitySummary (nodeLinks-backed)
+  //
 
   recordCapabilitySummary(
     fn: ts.Node,
@@ -239,7 +299,23 @@ export class CrossStageState {
     return this.nodeLinks.get(fn)?.capabilitySummary;
   }
 
-  // --- schemaInjected (nodeLinks-backed) ---
+  //
+  // patternResultAnchor (nodeLinks-backed)
+  //
+
+  recordPatternResultSchemaCall(schemaCall: ts.Node, anchor: ts.Node): void {
+    this.#linksFor(schemaCall).patternResultAnchor = anchor;
+  }
+
+  lookupPatternResultSchemaAnchor(schemaCall: ts.Node): ts.Node | undefined {
+    // Plain identity lookup with NO getOriginalNode fallback: the marker sits
+    // on the synthetic call SchemaInjection built, and that node reaches
+    // SchemaGeneration as the same object.
+    return this.nodeLinks.get(schemaCall)?.patternResultAnchor;
+  }
+
+  //
+  // schemaInjected (nodeLinks-backed)
   //
   // Marks builder call/new nodes that SchemaInjection has already finalized,
   // so a later re-traversal of the transformer's own output skips re-injection
@@ -251,6 +327,7 @@ export class CrossStageState {
   // user call. Falling back to the original would wrongly report a
   // not-yet-injected user node as injected. (This is why it is a `nodeLinks`
   // field rather than a member of the getOriginalNode-fallback marker family.)
+  //
 
   markSchemaInjected(node: ts.Node): void {
     this.#linksFor(node).schemaInjected = true;
@@ -261,7 +338,9 @@ export class CrossStageState {
     return this.nodeLinks.get(node)?.schemaInjected === true;
   }
 
-  // --- diagnostic dedup ---
+  //
+  // diagnostic dedup
+  //
 
   /**
    * Records that a diagnostic with `key` is being emitted. Returns true the
@@ -276,7 +355,9 @@ export class CrossStageState {
     return true;
   }
 
-  // --- shared helper: membership check with getOriginalNode fallback ---
+  //
+  // shared helper: membership check with getOriginalNode fallback
+  //
 
   #hasWithOriginal(set: WeakSet<ts.Node>, node: ts.Node): boolean {
     if (set.has(node)) return true;

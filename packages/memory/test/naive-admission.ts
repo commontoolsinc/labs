@@ -1,7 +1,7 @@
 // Naive reference model for commit admission and value application.
 //
 // This is the "obviously correct, unoptimized" half of the differential
-// consistency harness (v2-differential-consistency-test.ts): no SQL, no
+// consistency harness (v2-differential-consistency.test.ts): no SQL, no
 // tier shortcuts, no memoization — a direct transcription of the admission
 // rules in docs/specs/memory-v2/03-commit-model.md §3.6 over an in-memory
 // history of accepted commits.
@@ -17,10 +17,12 @@
 //     coarser than this, never finer.
 //   - Pending-read staleness: a read declaring its true confirmed basis
 //     (`basisSeq`, the CT-1910 repair) is scanned over the FULL interval
-//     from that basis, excluding only the reader's own session's TRUE
-//     PREDECESSOR commits (localSeq below the reader's — the layers its
-//     view included; an own write accepted out of submission order
-//     conflicts like a foreign one). A legacy read (no `basisSeq`) is
+//     from that basis, excluding only the own-session layers the read's
+//     dependency array NAMES — the layers whose inclusion in the reader's
+//     view the array attests. An own write the array does not name
+//     conflicts like a foreign one, whether accepted out of submission
+//     order or omitted while durably integrated (the declared-set
+//     validation of §3.6.3). A legacy read (no `basisSeq`) is
 //     based at the HIGHEST dependency's resolution seq — the pre-repair
 //     semantics whose over-advance is recorded against INV-1 in
 //     09-invariants.md and kept here as the reference for legacy traffic.
@@ -32,6 +34,7 @@ import type { ClientCommit, Operation, PatchOp } from "../v2.ts";
 export interface NaiveOp {
   id: string;
   kind: "set" | "patch";
+
   /** Leaf value paths touched by a patch (unused for `set`). */
   leafPaths: string[][];
 }
@@ -45,6 +48,7 @@ export interface NaiveCommit {
 
 export interface NaiveHistory {
   accepted: NaiveCommit[];
+
   /** sessionId -> localSeq -> resolution seq (accepted commits only). */
   resolution: Map<string, Map<number, number>>;
 }
@@ -98,17 +102,19 @@ const conflictSeq = (
   id: string,
   readPath: readonly string[],
   afterSeq: number,
-  // CT-1910 true-basis scans exclude the reader's own session's TRUE
-  // PREDECESSOR commits (localSeq below the reader's): those were part of
-  // its materialized view. An own write with a higher localSeq accepted
-  // first (out-of-order submission) conflicts like a foreign write.
-  exclude?: { sessionId: string; beforeLocalSeq: number },
+  // CT-1910 true-basis scans exclude the own-session layers the read
+  // NAMES in its dependency array: those are the layers whose inclusion in
+  // the reader's materialized view the array attests. Any own write the
+  // array does not name — a higher localSeq accepted first (out-of-order
+  // submission) or an omitted predecessor whose write is durable —
+  // conflicts like a foreign write.
+  exclude?: { sessionId: string; namedLocalSeqs: readonly number[] },
 ): number | null => {
   for (const commit of history.accepted) {
     if (commit.seq <= afterSeq) continue;
     if (
       exclude !== undefined && commit.sessionId === exclude.sessionId &&
-      commit.localSeq < exclude.beforeLocalSeq
+      exclude.namedLocalSeqs.includes(commit.localSeq)
     ) {
       continue;
     }
@@ -156,7 +162,7 @@ export const naiveAdmit = (
     const cs = read.basisSeq !== undefined
       ? conflictSeq(history, read.id, read.path, read.basisSeq, {
         sessionId,
-        beforeLocalSeq: commit.localSeq,
+        namedLocalSeqs: layers,
       })
       : conflictSeq(history, read.id, read.path, basis!);
     if (cs !== null) {
@@ -190,7 +196,9 @@ export const naiveRecord = (
   sessionRes.set(commit.localSeq, seq);
 };
 
-// --- Reference value semantics (INV-9's naive fold) ---------------------
+//
+// Reference value semantics (INV-9's naive fold)
+//
 
 const clone = <T>(value: T): T => structuredClone(value);
 

@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/airtable/core/util/airtable-auth-manager.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 import { hasText } from "../../../test/vnode-helpers.ts";
 import {
   AirtableAuthManager,
@@ -13,7 +13,7 @@ import {
 } from "./airtable-auth-manager.tsx";
 
 interface TestOutput {
-  tests: unknown[];
+  [TESTS]: unknown[];
   manager: AirtableAuthManagerOutput;
 }
 
@@ -44,7 +44,7 @@ export default pattern<Record<string, never>, TestOutput>(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_loading_state },
       { assertion: assert_availability_is_loading },
       { assertion: assert_auth_info_matches_availability },

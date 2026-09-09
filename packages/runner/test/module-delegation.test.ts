@@ -68,7 +68,6 @@ describe("module identity delegation", () => {
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
   });
 
@@ -126,12 +125,7 @@ describe("module identity delegation", () => {
   });
 
   it("rejects an update when the predecessor source closure is unavailable", async () => {
-    const manager = runtime.patternManager as unknown as {
-      loadPreviousSourceClosure(
-        space: string,
-        entryIdentity: string,
-      ): Promise<Map<string, SourceDoc>>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     await expect(
       manager.loadPreviousSourceClosure(space, "missing-predecessor"),

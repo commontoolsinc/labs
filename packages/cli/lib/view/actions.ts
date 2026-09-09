@@ -3,6 +3,7 @@
  * navigation, and scroll clamping. Kept free of terminal I/O so the navigation
  * model can be unit-tested without a TTY.
  */
+
 import type { Document, StructureNode } from "./model.ts";
 import type { Match } from "./render.ts";
 import { cpLen } from "./ansi.ts";
@@ -130,7 +131,8 @@ export function nextMatchIndex(
   return matches.length - 1; // wrap
 }
 
-// --- Structure-tree navigation (over the flattened pre-order list) -----------
+//
+// Structure-tree navigation (over the flattened pre-order list)
 //
 // WASD walk the AST outline by family relationship:
 //   w -> previous sibling   s -> next sibling   a -> parent   d -> first child
@@ -139,6 +141,7 @@ export function nextMatchIndex(
 // so it never gets stuck. At the first sibling, `w` steps up to the parent node
 // itself. Tab/Shift-Tab navigate the same nodes by depth-first (pre-order)
 // traversal instead, descending into children.
+//
 
 /**
  * Next sibling at the same depth; if none, exit the parent and take the
@@ -238,7 +241,7 @@ export function nodeAtLine(
 }
 
 /**
- * Frame a node's source range nicely: if the whole node fits on screen, centre
+ * Frame a node's source range nicely: if the whole node fits on screen, center
  * it vertically; otherwise put its top line about a tenth of the way down so
  * there is a little lead-in but most of the screen shows the node. Used by `z`.
  */

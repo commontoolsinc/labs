@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/test-reactivity-jsx-automatic.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElementByText,
   propsOf,
@@ -72,7 +72,7 @@ export default pattern(() => {
   const assert_count_after_third = assert(() => subject.count === 3);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_count },
       { assertion: assert_initial_user },
       { assertion: assert_initial_items },

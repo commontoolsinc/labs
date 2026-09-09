@@ -1,20 +1,16 @@
+import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   type EntityRef,
   getModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { NullLiveEnvironment } from "@commonfabric/data-model/codec-common";
 import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type {
-  FabricPlainObject,
-  FabricValue,
-  SchemaPathSelector,
-} from "@commonfabric/api";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { isObject, isRecord } from "@commonfabric/utils/types";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { internPathSelector } from "@commonfabric/data-model-schema";
+import { isObjectNotArray, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
@@ -24,7 +20,741 @@ export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
 export type CellScope = "space" | "user" | "session";
-export type JobId = `job:${string}`;
+
+/**
+ * Protocol-level failure: a request whose SHAPE or identity preconditions
+ * are invalid at this protocol layer (as opposed to a storage conflict or
+ * an authorization denial). Defined here in the wire-shape module because
+ * the shared scope-key vocabulary below throws it; `engine.ts` re-exports
+ * it, so `Engine.ProtocolError` remains the same class object.
+ */
+export class ProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProtocolError";
+  }
+}
+
+/**
+ * The `scope_key` vocabulary — PROTOCOL vocabulary, defined ONCE here
+ * beside {@link CellScope} (ledger LD3, owner 2026-08-03;
+ * docs/specs/server-side-execution/key-vocabulary.md §3).
+ *
+ * A scope key names one INSTANCE of a scoped document: `space` (the one
+ * shared instance), `user:<principal>` (one per user), or
+ * `session:<principal>:<sessionId>` (one per session). Storage rows are
+ * keyed by it, derived-commit write annotations carry it
+ * ({@link DerivedWriteAnnotation}), lease-holder reads may name it
+ * (protocol.md §2's read row), and the runner's in-memory identity keys
+ * are built from it (the key-vocabulary.md §1 nine-site closure).
+ * Segments are encodeURIComponent-encoded, so `:` splits segments
+ * exactly and a key never contains `/`.
+ *
+ * Two rules keep this the ONE definition (key-vocabulary.md §4):
+ * neither the engine's row keys nor the runner's in-memory keys may
+ * restate the format, and a key is only ever CONSTRUCTED from an
+ * explicitly supplied identity — the memory server derives that identity
+ * from the authenticated session at admission for `authored` traffic; a
+ * runner-side run receives it with the work (the demand for derivations,
+ * the server-stamped `firedAt` for handlers; in the OFF arm it is the
+ * runtime's own authenticated session) — never resolved from ambient
+ * state.
+ */
+export type ScopeKey =
+  | "space"
+  | `user:${string}`
+  | `session:${string}:${string}`;
+
+/**
+ * The identity a {@link resolveScopeKey} construction resolves against.
+ * Supplied explicitly by the caller — see the construction rule on
+ * {@link ScopeKey}.
+ */
+export type ScopeKeyIdentity = {
+  principal?: string;
+  sessionId?: SessionId;
+};
+
+const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
+const decodeScopeKeyPart = (part: string): string => decodeURIComponent(part);
+
+/**
+ * Whether `part` is a CANONICAL scope-key segment: non-empty and
+ * byte-identical to what {@link encodeScopeKeyPart} emits for the
+ * segment's own decoding — i.e. an element of the encoder's image, the
+ * fixed points of encode∘decode. This is what makes accepted keys safe
+ * to embed in delimited composite keys and to percent-decode: no raw
+ * `/`, `:`, or any other character the encoder escapes; no malformed
+ * escape (decoding an accepted segment never throws); no decodable but
+ * non-canonical escape (`%2f` where the encoder emits `%2F`, `%41` for
+ * plain `A`), so one identity has exactly ONE accepted spelling and
+ * construction stays injective. Malformed input — a bad escape (decode
+ * throws) or a lone surrogate (re-encode throws) — REFUSES with false,
+ * never a URIError.
+ */
+const isCanonicalScopeKeyPart = (part: string): boolean => {
+  if (part.length === 0) return false;
+  try {
+    return encodeScopeKeyPart(decodeScopeKeyPart(part)) === part;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Constructor for the `session:<principal>:<sessionId>` key form, shared
+ * between scope keys and the engine's commit session keys (which store the
+ * same form for principal-carrying sessions).
+ */
+export const resolvePrincipalSessionKey = (
+  principal: string,
+  sessionId: SessionId,
+): ScopeKey =>
+  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
+
+/**
+ * Principal segment of a `session:<principal>:<sessionId>` key (scope key
+ * or stored commit session key — same form). Principal-less commit
+ * session keys store the bare session id — no principal — and yield
+ * `undefined` here. The segments are encodeURIComponent-encoded, so
+ * splitting on ":" is exact.
+ */
+export const principalOfSessionKey = (key: string): string | undefined => {
+  if (!key.startsWith("session:")) return undefined;
+  const parts = key.split(":");
+  if (parts.length !== 3) return undefined;
+  try {
+    return decodeURIComponent(parts[1]);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * THE shared `(scope, identity) → scope_key` constructor (LD3,
+ * key-vocabulary.md §3). Pure: it is the caller that supplies the
+ * identity — see the construction rule on {@link ScopeKey}. Throws
+ * {@link ProtocolError} when the requested scope needs an identity
+ * component the caller did not supply; it never invents or defaults one.
+ */
+export const resolveScopeKey = (
+  scope: CellScope | undefined,
+  identity: ScopeKeyIdentity,
+): ScopeKey => {
+  switch (scope ?? "space") {
+    case "space":
+      return "space";
+    case "user":
+      if (!identity.principal) {
+        throw new ProtocolError(
+          "user scoped memory operations require a principal",
+        );
+      }
+      return `user:${encodeScopeKeyPart(identity.principal)}`;
+    case "session":
+      if (!identity.principal) {
+        throw new ProtocolError(
+          "session scoped memory operations require a principal",
+        );
+      }
+      if (!identity.sessionId) {
+        throw new ProtocolError(
+          "session scoped memory operations require a session id",
+        );
+      }
+      return resolvePrincipalSessionKey(identity.principal, identity.sessionId);
+  }
+};
+
+/**
+ * Inspect half of the vocabulary: the {@link CellScope} a scope key is an
+ * instance of. Total — any string without a `user:`/`session:` prefix
+ * reads as the space scope; use {@link isScopeKey} first where a value
+ * needs validating rather than classifying.
+ */
+export const scopeOfScopeKey = (scopeKey: string): CellScope => {
+  if (scopeKey.startsWith("session:")) {
+    return "session";
+  }
+  if (scopeKey.startsWith("user:")) {
+    return "user";
+  }
+  return "space";
+};
+
+/**
+ * The canonical (id, scope key) -> dirty/demand key encoding — the ONE
+ * identity every demand/dirtiness surface keys instances by (the memory
+ * server's dirty marking, the serving loop's demand registry, the warm
+ * request's staged-instance capture). Lives HERE, on the shared
+ * browser-safe vocabulary surface beside {@link resolveScopeKey}, so
+ * client-bundled modules (the runner's wave carriage among them) can
+ * key with it without importing any server-only module.
+ */
+export const toDirtyKey = (
+  id: string,
+  scopeKey: ScopeKey = "space",
+): string => `${scopeKey}\0${id}`;
+
+/**
+ * Whether a scope key is in the APPLICABLE SET of the given identity
+ * (protocol.md §3): `space`, `user:<me>`, `session:<me>:<sid>`. Push is
+ * filtered per recipient by this predicate — a subscriber receives only
+ * rows whose scope_key is applicable to it; the remaining rows are
+ * absent, not redacted. The lease-holder exemption (the SpaceServer
+ * legitimately reads and receives every instance — protocol.md §2's read
+ * row) is decided by the CALLER, not here.
+ */
+export const scopeKeyApplicableTo = (
+  scopeKey: string,
+  identity: ScopeKeyIdentity,
+): boolean => {
+  const scope = scopeOfScopeKey(scopeKey);
+  if (scope === "space") return true;
+  if (!canResolveScopeKey(scope, identity)) return false;
+  return resolveScopeKey(scope, identity) === scopeKey;
+};
+
+/**
+ * Whether a string is a CANONICAL {@link ScopeKey} — one
+ * {@link resolveScopeKey} could have constructed: `space`, or
+ * `user:`/`session:` with every identity segment satisfying
+ * {@link isCanonicalScopeKeyPart}. Prefix-shaped keys with raw
+ * delimiters (`user:a/b`, `user:did:key:x`), malformed escapes
+ * (`%`, `%GG`), or non-canonical escapes (`%2f` for the encoder's
+ * `%2F`) are REJECTED, not just unusual: admission surfaces gate on
+ * this predicate, and descendant surfaces place admitted keys into
+ * `/`-delimited composite keys and percent-decode their segments, so
+ * a merely prefix-shaped key corrupts that addressing or throws
+ * mid-serving. Refusal, never a throw.
+ */
+export const isScopeKey = (value: string): value is ScopeKey => {
+  if (value === "space") return true;
+  if (value.startsWith("user:")) {
+    return isCanonicalScopeKeyPart(value.slice("user:".length));
+  }
+  if (value.startsWith("session:")) {
+    const parts = value.split(":");
+    return parts.length === 3 && isCanonicalScopeKeyPart(parts[1]) &&
+      isCanonicalScopeKeyPart(parts[2]);
+  }
+  return false;
+};
+
+/**
+ * Whether {@link resolveScopeKey} can construct a key for `scope` from
+ * `identity` — i.e. every identity component that scope requires is
+ * supplied. The predicate twin of the constructor's throw conditions, for
+ * paths that must SKIP unresolvable scopes (e.g. a session with no
+ * principal reacting to another principal's user-scoped dirtiness) rather
+ * than fail.
+ */
+export const canResolveScopeKey = (
+  scope: CellScope | undefined,
+  identity: ScopeKeyIdentity,
+): boolean => {
+  switch (scope ?? "space") {
+    case "space":
+      return true;
+    case "user":
+      return !!identity.principal;
+    case "session":
+      return !!identity.principal && !!identity.sessionId;
+  }
+};
+
+/**
+ * Protocol-level rejection of a DUPLICATE event append (events.md §4's
+ * dedupe horizon): the commit declared an `eventId` that already exists
+ * among the stream's entries above its `eventWatermark` (or in a not-yet-
+ * consequenced seq-less entry — the stage-G interim arm, which retires as
+ * processing marks entries consequenced). Distinguished by NAME from the
+ * generic {@link ProtocolError} so a client discharging its offline queue
+ * (events.md §5, LT9) can treat "already appended" as delivered rather
+ * than as a failure to surface: the first append landed, its consequences
+ * are (or will be) the authoritative outcome, and re-raising would
+ * re-discharge forever.
+ */
+export class EventAppendDuplicateError extends ProtocolError {
+  constructor(message: string) {
+    super(message);
+    this.name = "EventAppendDuplicateError";
+  }
+}
+
+/**
+ * The commit classes of server-execution v2
+ * (docs/specs/server-side-execution/protocol.md §1). A closed set of three:
+ * `authored` (any authorized session's own writes and event appends),
+ * `derived` (the space's lease-holding SpaceServer committing derivation
+ * results), `system` (the memory server itself: bootstrap-style direct
+ * writes). The class is SERVER-DETERMINED at admission — assigned by which
+ * admission path processed the commit, never a client-supplied field — and
+ * every commit carries one in both flag arms; only the ON arm enforces the
+ * per-class admission rows (protocol.md §2). Protocol vocabulary, so it is
+ * defined once here in the wire-shape module (protocol.md §7).
+ */
+export type CommitClass = "authored" | "derived" | "system";
+
+/** The same closed set, enumerable at run time. */
+export const COMMIT_CLASSES: readonly CommitClass[] = [
+  "authored",
+  "derived",
+  "system",
+];
+
+/**
+ * The well-known watermark doc, one per space (protocol.md §4): "derived
+ * state is current through commit seq N." A SPACE-scoped instance
+ * (`scope_key = "space"`), updated inside the same transaction as derived
+ * commits — never its own commit. Protocol vocabulary: clients read it for
+ * settledness (`waitForSettled`, testing.md §3) and sync indicators, the
+ * serving loop writes it, so the id is defined once here. The document
+ * value is {@link WatermarkDocValue}.
+ */
+export const SERVER_EXECUTION_WATERMARK_DOC_ID =
+  "of:server-execution-watermark";
+
+/** The watermark doc's value shape (protocol.md §4): W is ONE integer per
+ * space — not per doc, not per piece, never vectorized. */
+export type WatermarkDocValue = { seq: number };
+
+/** The well-known SPACE-scoped discovery index for unresolved event delivery
+ * attention. Entries are safe summaries only; the referenced stream entry is
+ * authoritative and must be resolved before presenting recovery actions. */
+export const SERVER_EXECUTION_ATTENTION_DOC_ID =
+  "of:server-execution-attention";
+
+/** Encode an attention-index map key without admitting JavaScript prototype
+ * names. JSON string literals are injective for strings and always begin with
+ * `"`, so dynamic stream and event identifiers remain ordinary own keys. */
+export function eventAttentionIndexKey(value: string): string {
+  return JSON.stringify(value);
+}
+
+/** Encode one immutable stream-entry identity for the attention index. Event
+ * ids may be admitted again below the stream watermark, so the engine-stamped
+ * sequence is the part that distinguishes two entries in the same stream.
+ * Legacy seq-less entries use the protocol's sequence-zero identity. */
+export function eventAttentionEntryKey(
+  eventId: string,
+  seq: number | undefined,
+): string {
+  return JSON.stringify([eventId, seq ?? 0]);
+}
+
+export type UnresolvedEventAttention = {
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  code: DeliveryAttention["code"];
+  firstFailureAt: number;
+};
+
+/** Durable idempotency record for a resolved attention entry. It survives
+ * ordinary stream compaction so a caller replaying after a lost response gets
+ * the recorded Retry/Dismiss winner instead of creating a second outcome. */
+export type ResolvedEventAttention = {
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  principal: string;
+  resolution: EventAttentionResolution;
+};
+
+export type EventAttentionIndexValue = {
+  entries?: Record<string, Record<string, UnresolvedEventAttention>>;
+  resolutions?: Record<string, Record<string, ResolvedEventAttention>>;
+};
+
+// Events-down (server-execution v2 Phase 3, D-v2-1;
+// docs/specs/server-side-execution/events.md). The event is an AUTHORED
+// APPEND to a stream document — the client's only computational commit
+// under the flag. Protocol vocabulary, defined once here (protocol.md §7:
+// `eventId`/`firedAt` are commit-metadata additions for event appends).
+
+/**
+ * The stream-entries SIDECAR doc id for one stream (events.md §1's "stream
+ * document", concretely). A pattern's stream VALUE lives at a path inside
+ * a piece's result doc, and that doc is derivation-owned — a result
+ * recompute writes it wholesale, so durable event entries could never
+ * live there. Each stream therefore gets ONE dedicated entries doc,
+ * derived DETERMINISTICALLY from the stream's link (id + path + scope) so
+ * every party — the firing client, the SpaceServer's drain, a foreign
+ * space's outbox delivery — addresses the same doc with no coordination.
+ * The sidecar IS the spec's stream document: `eventWatermark` is a field
+ * on it (events.md §4), the dropped-event notice annotates its entries
+ * (events.md §5 T7), and compaction trims it (§4's allowance).
+ *
+ * The id is content-derived (`hashStringOf` — type-tagged,
+ * length-prefixed, deterministic across processes), so distinct streams
+ * never collide and no component can impersonate another.
+ */
+export const STREAM_ENTRIES_DOC_PREFIX = "of:stream-events:";
+
+/** The stream link a sidecar doc (and each of its entries) names: enough
+ * to reconstruct the scheduler event link — `areNormalizedLinksSame`
+ * compares id + space + scope + path, and space is implicit (the sidecar
+ * lives in the stream's own space). */
+export type StreamLinkRef = {
+  id: EntityId;
+  path: readonly string[];
+  scope?: CellScope;
+};
+
+export const streamEntriesDocId = (stream: StreamLinkRef): EntityId =>
+  `${STREAM_ENTRIES_DOC_PREFIX}${
+    hashStringOf({
+      id: stream.id,
+      path: [...stream.path],
+      scope: stream.scope ?? "space",
+    })
+  }`;
+
+/**
+ * `firedAt` — SERVER-STAMPED at admission (events.md §1, protocol.md §2):
+ * `user` and `session` come from the authenticated commit envelope (or,
+ * for delegated appends, the validated carried actor; for wave-carried
+ * same-space entries, the inherited actor the one-trust-environment
+ * derived commit wrote — LT1). `session` is the literal `"server"` for a
+ * chain with no acting session. `clientSeq` is the ONLY client-minted
+ * part: it orders one client session's own appends and steers nothing;
+ * server-originated entries never carry it (LT7).
+ */
+export type StreamEventFiredAt = {
+  user?: string;
+  session: SessionId | "server";
+  clientSeq?: number;
+};
+
+export type DeliveryFailurePhase =
+  | "dispatch-load"
+  | "commit-preparation"
+  | "commit-finalization";
+
+export type DeliveryFailureClass =
+  | "session-revoked"
+  | "connection"
+  | "authorization"
+  | "protocol"
+  | "timeout"
+  | "unknown";
+
+/** Durable processing state for an event whose runnable handler has not yet
+ * reached a provably safe consequence commit. Failed time is cumulative across
+ * recovery attempts; `recovering` time is settlement and is not charged. */
+export type DeliveryDeferral = {
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  failureCount: number;
+  activeFailureStartedAt?: number;
+  state: "failed" | "recovering";
+  recoveryEpoch?: string;
+
+  /** Positive versioned producer evidence that this failure is permanent. */
+  permanentEvidence?: true;
+};
+
+export type DeliveryAttention = {
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  code:
+    | "delivery-failure-budget-exhausted"
+    | "permanent-delivery-failure";
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  failureCount: number;
+  recovery: "explicit-retry";
+};
+
+export type EventAttentionResolution =
+  | { kind: "retried"; eventId: string }
+  | { kind: "dismissed" };
+
+/**
+ * One durable event entry on a stream's sidecar doc (`value.entries[i]`).
+ * `payload` is the only client-authored content field (events.md §1);
+ * `seq` is ENGINE-STAMPED at apply time with the appending commit's seq —
+ * the stream seq the idempotency rule keys on (events.md §4) — and
+ * `firedAt` is server-stamped per the class of the admitting commit.
+ * `consequenced`/`error`/`status`/`reason` and the OW54 delivery fields are
+ * PROCESSING-side fields
+ * written only by the space's SpaceServer as the event's consequence
+ * (events.md §5: an error/drop IS the consequence); admission REFUSES an
+ * incoming append that pre-supplies any of them.
+ */
+export type StreamEventEntry = {
+  eventId: string;
+
+  /** The stream this entry targets — self-describing so the drain, the
+   * dropped-notice reader, and compaction never need a reverse map. */
+  stream: StreamLinkRef;
+
+  payload?: FabricValue;
+  firedAt?: StreamEventFiredAt;
+
+  /** Engine-stamped: the appending commit's seq. */
+  seq?: number;
+
+  /** Runtime-injection provenance for the payload's injected keys,
+   * carried so the server-side handler run's closed-world gate judges
+   * the payload as the firing client's runtime did (same in-process
+   * trust as today's client-side enforcement). */
+  runtimeInjectedEventKeys?: string[];
+
+  /** The firing RUNTIME's attestation that the sent event was
+   * RENDERER-TRUSTED — it carried the process-local renderer-trust mark
+   * (`markRendererTrustedEvent`, set by the renderer's dispatch and
+   * unreachable from pattern code) when the runtime appended it
+   * (server-execution v2 fan-out stage B; the sister of
+   * `runtimeInjectedEventKeys`, carried and re-minted with the same
+   * in-process trust argument: the entry was committed under the firing
+   * client's own admission, and the served dispatch re-marks the payload
+   * so the served handler's UI-contract-gated write records the
+   * trusted-event policy input the CFC ladder requires — verification-
+   * coverage.md OW34). Set ONLY by the runtime, only when the mark was
+   * present; a present value must be `true` (admission refuses any
+   * other). Absent = not attested. */
+  rendererTrusted?: true;
+
+  /** Processing-side (SpaceServer-written): consequences committed. */
+  consequenced?: boolean;
+
+  /** Processing-side: the handler threw — the error IS the consequence
+   * (events.md §5). */
+  error?: string;
+
+  /** Processing-side: how the entry ended, where it did not simply run.
+   * `"dropped"` is the dropped-event notice (events.md §5 T7);
+   * `"needs-attention"` has its detail in `attention` below. */
+  status?: "dropped" | "needs-attention";
+
+  /** The dropped-event notice's reason, the other half of
+   * `{ status: "dropped", reason }` on the entry itself. */
+  reason?: string;
+
+  /** Processing-side checkpoint. It is not a consequence and advances no
+   * watermark. Only the SpaceServer may write it. */
+  deliveryDeferral?: DeliveryDeferral;
+
+  /** Authoritative client-safe terminal detail for `needs-attention`. */
+  attention?: DeliveryAttention;
+
+  /** Server-owned resolution of an attention notice. */
+  resolution?: EventAttentionResolution;
+
+  /** Server-derived audit link on the one retry appended for an original
+   * attention notice. Authored clients cannot supply it. */
+  retryOf?: string;
+
+  /** Processing-side (OW14, protocol.md §2b's LT4 ruling): failure
+   * notices for CROSS-SPACE appends this event's handler emitted whose
+   * DELIVERY was refused deterministically at the target — written by
+   * the source SpaceServer's outbox BEFORE the refused row retires,
+   * deduped by the refused append's eventId. The source event's own
+   * consequences stand (they committed long before); this annotates
+   * the entry per events.md §5's error-is-the-consequence shape. */
+  deliveryFailures?: Array<{
+    eventId: string;
+    targetSpace: string;
+    reason: string;
+  }>;
+};
+
+/** The sidecar doc's value shape: the entry log plus the per-stream
+ * processing watermark (events.md §4 — written only in the same derived
+ * commit as the consequences it covers, never its own commit). */
+export type StreamEventsDocValue = {
+  entries?: StreamEventEntry[];
+  eventWatermark?: number;
+};
+
+/**
+ * One declared event append on a commit (protocol.md §2's authored
+ * event-append row; §7's `eventId` envelope classification): names the
+ * sidecar doc and the eventId so admission can locate the appended entry
+ * in the commit's operations, run the dedupe-horizon CAS, and stamp
+ * `firedAt` + `seq`. Carried on `ClientCommit` for client fires, on wave
+ * batches for LT1 same-space carriage, and constructed server-side for
+ * delegated deliveries — one stamping site, three identity sources
+ * (protocol.md §2's three rows).
+ */
+export type EventAppendDecl = {
+  /** The stream's sidecar doc ({@link streamEntriesDocId}). */
+  id: EntityId;
+
+  scope?: CellScope;
+  eventId: string;
+};
+
+// The client-effect channel (server-execution v2 Phase 4;
+// docs/specs/server-side-execution/protocol.md §5). Session-scoped,
+// server-computed, client-enacted effects: the SpaceServer writes INTENT
+// entries into the acting session's instance of the ONE well-known effects
+// doc, the session's client enacts and ACKS by nonce (an ordinary authored
+// write into its own instance), and the next wave retires acked entries.
+// Protocol vocabulary, defined once here (the LD3 direction).
+
+/**
+ * The well-known client-effects doc, one id per space (protocol.md §5,
+ * T9): the effects doc is a SESSION-SCOPED INSTANCE of this one doc id —
+ * `scope_key = session:<principal>:<sessionId>` — never a path
+ * convention. The SpaceServer writes intents into the acting session's
+ * instance by naming that key (seal-time addressing annotations); the
+ * session's own client resolves the same instance from its authenticated
+ * session and never names a key. The document value is
+ * {@link SessionEffectsDocValue}. Session-lifetime: a retired session's
+ * unacked intents retire with its effects instance under the SAME
+ * session-data GC as every other session instance (scopes.md §3).
+ */
+export const SERVER_EXECUTION_EFFECTS_DOC_ID = "of:server-execution-effects";
+
+/** The navigation target an intent carries (builtins.md §4): an entity
+ * link. `space` is absent for a target within the computing space (the
+ * common case). A cross-space TARGET is legal — LT3 defers the
+ * cross-space CONTEXT (the acting session must be connected to the
+ * COMPUTING space), not the destination: "the CONTEXT is same-space
+ * even when the navigation TARGET is a cross-space link". */
+export type EffectIntentTarget = {
+  space?: string;
+  id: EntityId;
+  path: readonly string[];
+  scope?: CellScope;
+};
+
+/**
+ * One client-effect intent entry (protocol.md §5's shape): `{ nonce,
+ * kind, args, issuedIn }`. v2 ships exactly ONE kind — `navigate` — and
+ * a new kind is a protocol.md §5 spec edit first.
+ *
+ * `nonce` is minted server-side as a DETERMINISTIC function of the
+ * firing event and the navigateTo instance ({@link effectIntentNonce}),
+ * which is what lets the client's OPTIMISTIC enactment (speculation.md
+ * §2's local enact) predict the same nonce and converge on the
+ * authoritative intent without re-enacting — exactly-once per nonce is
+ * the CLIENT's duty (T2.Q2/Q7).
+ *
+ * `issuedIn` is the derived commit seq that issued the intent —
+ * ENGINE-STAMPED at apply time (the stream-entry `seq` precedent): the
+ * producer writes the `null` sentinel (the wave's own seq is allocated
+ * only at the commit step), and the engine stamps derived-class writes
+ * of this doc. Informational: nothing in the ack/retirement lifecycle
+ * reads it.
+ */
+export type EffectIntentEntry = {
+  nonce: string;
+  kind: "navigate";
+  args: { target: EffectIntentTarget };
+  issuedIn: number | null;
+};
+
+/**
+ * The effects doc's value shape (protocol.md §5): the intent append-list
+ * plus the session's ack marks. The ACK is an ordinary AUTHORED write by
+ * the owning session into its own instance — `acks[nonce] = true`, one
+ * mark per nonce so concurrent acks of distinct intents never overwrite
+ * each other (ack-by-nonce is once-per-nonce; a scalar last-ack field
+ * would lose an earlier unretired ack under two quick intents). The
+ * SpaceServer's next-wave retirement removes acked entries AND their
+ * marks in one bookkeeping-stamped write (serving-loop.md §3d).
+ */
+export type SessionEffectsDocValue = {
+  entries?: EffectIntentEntry[];
+  acks?: Record<string, true>;
+};
+
+/**
+ * THE nonce constructor (protocol.md §5; T2.Q2's "nonce minted
+ * server-side" with T2.Q7's convergence): deterministic over the firing
+ * event's durable id and the navigateTo instance's cause-derived result
+ * doc id. Both sides compute it — the SERVED half when it writes the
+ * intent, the client's SPECULATIVE run when it optimistically enacts —
+ * so the optimistic enactment carries the same nonce the authoritative
+ * intent arrives with (result-as-pattern children converge by
+ * cause-derived identity, speculation.md §2; the instance id is that
+ * convergence). One event × one navigateTo instance ⇒ one nonce, so a
+ * re-run of either side is idempotent by presence check.
+ */
+export const effectIntentNonce = (
+  eventId: string,
+  instanceId: string,
+): string => `nav:${hashStringOf({ eventId, instance: instanceId })}`;
+
+/**
+ * Inspect half for instance keys (the retirement writer's parse): the
+ * {@link ScopeKeyIdentity} embedded in a `user:`/`session:` scope key,
+ * or undefined for `space` and malformed keys. The segments are
+ * encodeURIComponent-encoded, so `:`-splitting is exact
+ * (key-vocabulary.md §Anchors).
+ */
+export const identityOfScopeKey = (
+  scopeKey: string,
+): ScopeKeyIdentity | undefined => {
+  if (scopeKey.startsWith("session:")) {
+    const parts = scopeKey.split(":");
+    if (parts.length !== 3) return undefined;
+    try {
+      return {
+        principal: decodeURIComponent(parts[1]),
+        sessionId: decodeURIComponent(parts[2]),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+  if (scopeKey.startsWith("user:")) {
+    const part = scopeKey.slice("user:".length);
+    if (part.length === 0) return undefined;
+    try {
+      return { principal: decodeURIComponent(part) };
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The identity annotation on one write WITHIN a derived-class commit's body
+ * (protocol.md §1's transaction identity model, §7's closed metadata list).
+ * The wave's envelope carries the SpaceServer's service identity — no user
+ * principal, no session — so the identity the envelope can no longer
+ * express rides here, per write, at action-run granularity. Two distinct
+ * things, never conflated:
+ *
+ * - ADDRESSING — `scopeKey`, the explicit instance a scoped write lands
+ *   in. The engine keys rows by it; admission REQUIRES it on every scoped
+ *   write of a derived commit (a service envelope has no session for
+ *   `resolveScopeKey` to derive a key from, and silently resolving
+ *   `user:<serviceDID>` is the empty-instance trap protocol.md §2 exists
+ *   to prevent).
+ * - ATTRIBUTION — `actingUser`/`actingSession`, the acting identity of the
+ *   action RUN that produced the write (`action × instance`, never the
+ *   action). Recorded, not read: no enforcement path consumes it today
+ *   (protocol.md §1 — audit/forensics, and the anticipated signature
+ *   graduation).
+ *
+ * Server-internal carriage like `commitClass` and `holder`: `ClientCommit`
+ * cannot express annotations, and no session-facing path supplies them.
+ * Defined once here in the wire-shape module beside `CommitClass` so the
+ * engine and the runner's wave machinery share one shape (the LD3
+ * direction; stage E moves the full scope_key format here too).
+ */
+export type DerivedWriteAnnotation = {
+  /** Index into the commit's operations array. */
+  op: number;
+
+  scopeKey?: string;
+  actingUser?: string;
+  actingSession?: string;
+};
+
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
@@ -129,6 +859,79 @@ export type DeleteOperation = {
   scope?: CellScope;
 };
 
+export type OpCursor = {
+  epoch: number;
+  version: number;
+};
+
+export const CODEMIRROR_CHANGESET_CODEC = "codemirror-changeset@1";
+
+export type OperationFieldAddress = {
+  id: EntityId;
+  scope?: CellScope;
+  path: ValuePath;
+};
+
+export type ApplyOpOperation = OperationFieldAddress & {
+  op: "apply-op";
+  codec: string;
+  submissionId: string;
+  base: OpCursor | null;
+  baselineHash?: string;
+  payload: FabricValue;
+};
+
+export type ReleaseOpFieldOperation = OperationFieldAddress & {
+  op: "release-op-field";
+  codec: string;
+  cursor: OpCursor;
+};
+
+export type IntegratedOperation = {
+  opId: string;
+  cursor: OpCursor;
+  submissionId: string;
+  payload: FabricValue;
+};
+
+export type ApplyOpResolution = {
+  operationIndex: number;
+  address: OperationFieldAddress & {
+    branch: BranchName;
+    scopeKey: string;
+  };
+  codec: string;
+  submissionId: string;
+  from: OpCursor;
+  to: OpCursor;
+  operations: IntegratedOperation[];
+  duplicate: boolean;
+};
+
+export type OperationFieldQuery = OperationFieldAddress & {
+  branch?: BranchName;
+  after?: OpCursor;
+  principal?: string;
+  sessionId?: SessionId;
+};
+
+export type OperationFieldSnapshot = OperationFieldAddress & {
+  branch: BranchName;
+  scopeKey: string;
+  active: boolean;
+  codec: string | null;
+  cursor: OpCursor | null;
+  baselineHash: string;
+  materialized: FabricValue;
+  operations: IntegratedOperation[];
+
+  /** Lowest cursor from which the retained integrated suffix is contiguous. */
+  retainedFrom?: OpCursor;
+
+  /** Replace local codec state from `materialized` before continuing. */
+  reset?: boolean;
+};
+
 /**
  * A SQLite write folded into the commit, applied inside the same transaction as
  * the cell ops (atomic). It is NOT an entity revision — it has no `id` and never
@@ -146,6 +949,8 @@ export type Operation =
   | SetOperation
   | PatchOperation
   | DeleteOperation
+  | ApplyOpOperation
+  | ReleaseOpFieldOperation
   | SqliteOperation;
 
 export type ConfirmedRead = {
@@ -154,6 +959,7 @@ export type ConfirmedRead = {
   branch?: BranchName;
   path: ReadPath;
   seq: number;
+
   /**
    * When true, this is a SHALLOW (shape-only) read — the reader observed the
    * container at `path` (its key set / existence) but did NOT depend on the deep
@@ -170,6 +976,7 @@ export type PendingRead = {
   id: EntityId;
   scope?: CellScope;
   path: ReadPath;
+
   /**
    * The reader's pending-stack dependency set for this document. An array
    * lists EVERY pending layer the read's materialized view sat on; each
@@ -183,6 +990,7 @@ export type PendingRead = {
    * lower-layer dependencies).
    */
   localSeq: number | number[];
+
   /**
    * The reader's confirmed basis for THIS document, in the SERVER's
    * space-log seq space (an accepted-commit `seq`, NOT the session's
@@ -191,11 +999,17 @@ export type PendingRead = {
    * document its subscriptions never covered.
    *
    * When present, the staleness scan covers the FULL interval
-   * `(basisSeq, head]`, excluding only the session's own TRUE PREDECESSOR
-   * commits — those with a localSeq below the reader's, the accepted layers
-   * its materialized view included. An own write with a higher localSeq
-   * accepted first (out-of-order submission) conflicts like a foreign
-   * write, so soundness does not depend on wire-order discipline. This is
+   * `(basisSeq, head]`, excluding only the own-session layers this read's
+   * `localSeq` array NAMES — the accepted layers whose inclusion in the
+   * reader's materialized view the array attests. Any own write the array
+   * does not name conflicts like a foreign write: a higher localSeq
+   * accepted first (out-of-order submission), or an omitted layer whose
+   * write is durably integrated — so the server verifies that `basisSeq`
+   * plus the named layers fully account for the document's durable history
+   * at the read path, rather than trusting client discipline. (What it
+   * cannot verify is the phantom direction: an omitted REJECTED
+   * contributor left nothing durable to compare against — that stays in
+   * the fabricated-read trust class.) This is
    * the CT-1910 repair
    * (`PendingStacks_Repaired.cfg` certifies it); when absent (a legacy
    * client), staleness is based at the HIGHEST dependency's resolution seq,
@@ -203,25 +1017,15 @@ export type PendingRead = {
    * docs/specs/memory-v2/09-invariants.md.
    */
   basisSeq?: number;
+
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
-};
-
-export type SchedulerObservationCommit = {
-  localSeq: number;
-  reads: {
-    confirmed: ConfirmedRead[];
-    pending: PendingRead[];
-  };
-  /** The observation, opaque here: this layer stores and forwards it, and
-   *  the runner owns its shape and validation. `FabricValue` says only what
-   *  the wire requires of it. */
-  schedulerObservation: FabricValue;
 };
 
 export type CommitPrecondition =
   | {
     kind: "origin-committed";
+
     /** localSeq of a commit from the SAME session in this space. */
     originLocalSeq: number;
   }
@@ -230,8 +1034,8 @@ export type CommitPrecondition =
     id: EntityId;
     scope?: CellScope;
   }
+  /** Security-critical exact value pin, including null for absent/deleted. */
   | {
-    /** Security-critical exact value pin, including null for absent/deleted. */
     kind: "entity-value-hash";
     id: EntityId;
     scope?: CellScope;
@@ -246,11 +1050,6 @@ export type ClientCommit = {
   };
   operations: Operation[];
   preconditions?: CommitPrecondition[];
-  /** The observation, opaque here: this layer stores and forwards it, and
-   *  the runner owns its shape and validation. `FabricValue` says only what
-   *  the wire requires of it. */
-  schedulerObservation?: FabricValue;
-  schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
@@ -259,19 +1058,13 @@ export type ClientCommit = {
     baseBranch: BranchName;
     baseSeq: number;
   };
-};
 
-export type SessionOpenArgs = {
-  sessionId?: SessionId;
-  seenSeq?: number;
-  sessionToken?: SessionToken;
-};
-
-export type SessionOpenCommand = {
-  cmd: "session.open";
-  id: JobId;
-  protocol: typeof MEMORY_PROTOCOL;
-  args: SessionOpenArgs;
+  /** Server-execution v2 Phase 3 (events.md §1): the commit's declared
+   * event appends. Only flag-ON clients produce this; admission under
+   * the flag runs the dedupe-horizon CAS and stamps `firedAt` + `seq`
+   * into the appended entries ({@link EventAppendDecl}). Refused when
+   * the flag is off. */
+  eventAppends?: EventAppendDecl[];
 };
 
 export type SessionOpenResult = {
@@ -286,12 +1079,20 @@ export type SessionOpenResult = {
 
 export type MemoryProtocolFlags = {
   modernCellRep: boolean;
-  persistentSchedulerState: boolean;
   commitPreconditions: boolean;
-  /** Legacy CT-1775 draft capability: index-keyed per-frame schema table. */
-  syncSchemaTable: boolean;
+
+  /** The server integrates durable collaborative operation streams. */
+  applyOp: boolean;
+
+  /** Versioned operation codecs registered by this server build. */
+  operationCodecs?: readonly string[];
+
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
+
+  /** The peer can exchange versioned binary gzip message envelopes. */
+  messageCompressionV1: boolean;
+
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -303,6 +1104,7 @@ export type MemoryProtocolFlags = {
    * (not configuration), so a server of this version always advertises it.
    */
   sqliteCommitRowLabelEval: boolean;
+
   /**
    * Server capability (CT-1872 1c): pending reads may carry an ARRAY
    * `localSeq` naming every pending layer the read sat on (resolution
@@ -315,12 +1117,47 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   pendingReadStacks: boolean;
+
+  /**
+   * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
+   * catch-up obligation for every accept and every conflict rejection —
+   * other rejection kinds carry none — so the batched fan-out's next frame to the
+   * committing session carries a marker covering the verdict (an
+   * otherwise-empty frame if nothing it watches is dirty). The CLIENT keys
+   * verdict parking on this: it holds an accepted commit's promotion
+   * (pending overlay to confirmed mirror) until the marker covers it, so
+   * promotion extrapolates over a base reflecting the foreign novelty the
+   * accept was applied on top of. A client that sees this absent (an older
+   * server that stamps markers only for conflicts) applies verdicts
+   * immediately, as before. Inherent to the build, so a server of this
+   * version always advertises it.
+   */
+  verdictCatchUpMarkers: boolean;
+
   /** The server can list live space-scoped entity identifiers without values. */
   entityIdListing: boolean;
+
   /** The server can page one stable entity-identifier snapshot. */
   entityIdPagination: boolean;
+
   /** The server can test one entity identifier without loading its value. */
   entityIdLookup: boolean;
+
+  /**
+   * The server diffs a reconnecting client's delivery against the client's
+   * DECLARED holdings — the `holdings` a resuming `session.open` and a
+   * re-establishing `session.watch.set` may carry (04-protocol.md §4.1.2,
+   * §4.3.5) — instead of against its own per-session delivery memory or
+   * from nothing. Inherent to the build, so a server of this version always
+   * advertises it. A client that sees it absent splits by consumer
+   * (04-protocol.md §4.1.1): a session with no holdings provider declares
+   * nothing and keeps the declaration-less paths (a resumed session diffed
+   * against the server's memory of it, a fresh one delivered in full),
+   * while a provider-bearing session connects initially but terminates at
+   * restore rather than silently rejoining those paths
+   * (`SpaceSession.restore`).
+   */
+  sessionHoldings: boolean;
 };
 
 /**
@@ -328,15 +1165,18 @@ export type MemoryProtocolFlags = {
  */
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
-  persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
-  syncSchemaTable?: boolean;
+  applyOp?: boolean;
+  operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
+  messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
+  verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
   entityIdLookup?: boolean;
+  sessionHoldings?: boolean;
 };
 
 export type HelloMessage = {
@@ -366,6 +1206,49 @@ export type SessionDescriptor = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
+
+  /**
+   * The session-level delegated READ binding (OW31, READ side RULED
+   * 2026-08-19: the service identity reads a space's ACL only; every
+   * other served read runs under the acting USER's identity). A session
+   * opened with `actingAs: "space-owner"` by a principal in the memory
+   * ACL's DELEGATING class (`acl.delegatingDids` — under the flag, the
+   * co-hosted process identity; the LT5 trust footing of the write
+   * plane's carried actors) has its READ-class capability decisions
+   * resolved as the space's ACL OWNER — the user whose space it is —
+   * which the server resolves itself from the ACL (the ruled
+   * service-identity ACL read). WRITE/OWNER-class requirements keep
+   * resolving against the ENVELOPE principal: the binding grants no
+   * write path (served writes ride the wave's §2b delegated carriage).
+   * A non-delegating principal sending the marker is refused. Spaces
+   * with no valid concrete-owner ACL bind nothing (today's rules
+   * apply). Signed into the session.open invocation with the rest of
+   * this descriptor.
+   */
+  actingAs?: "space-owner";
+};
+
+/**
+ * One document a reconnecting client declares it HOLDS — the client's own
+ * statement of its replica, in exactly the terms the server's delivery
+ * diff compares (`sameSnapshot`: id, scope instance, seq, deletedness),
+ * so the server can rebuild the diff base from the client rather than
+ * from its own memory of the session. `scope` names the scope; the
+ * instance resolves from the session's identity as it does for every
+ * wire frame (protocol.md §1). `seq` is the server seq of the covering
+ * commit the client has confirmed for the document; `deleted` marks a
+ * known tombstone at that seq. `branch` names the branch the holding is of
+ * (absent = the default branch): the diff keys by branch, so a same-id
+ * document on another branch is a different holding and never stands in
+ * for this one. A document the client does not list is one it does not
+ * hold, whatever the server remembers delivering.
+ */
+export type SessionHolding = {
+  id: EntityId;
+  scope?: CellScope;
+  branch?: BranchName;
+  seq: number;
+  deleted?: true;
 };
 
 export type SessionOpenRequest = {
@@ -375,11 +1258,37 @@ export type SessionOpenRequest = {
   session: SessionDescriptor;
   invocation?: Record<string, unknown>;
   authorization?: FabricValue;
+
+  /**
+   * The client's declared holdings for this space (see
+   * {@link SessionHolding}), sent when RESUMING a session. A server that
+   * resumes the session replaces its per-session delivery memory with
+   * these before computing the catch-up frame, so the frame re-delivers
+   * whatever the client does not hold — a document the server remembers
+   * sending but the client failed to absorb, or lost with a replaced
+   * replica — and elides what it does. Outside the signed descriptor:
+   * it shapes only what this session is re-sent, never what it may read.
+   */
+  holdings?: SessionHolding[];
 };
 
 export type GraphQueryRoot = {
   id: EntityId;
   scope?: CellScope;
+
+  /**
+   * The explicit scope INSTANCE this read names (protocol.md §2's read
+   * row; the read half of §1's transaction identity model, ledger LD5).
+   * The ONE read-side addition to the wire: admissible only for a live
+   * lease holder on the co-hosted memory server — a non-holder naming one
+   * is REJECTED — and a read naming none resolves from the authenticated
+   * session as today (the shared `resolveScopeKey`). Exists because a
+   * SpaceServer reading under its service envelope would otherwise
+   * silently resolve `user:<serviceDID>` — an empty instance, not an
+   * error (the silent-empty-instance trap).
+   */
+  entityScopeKey?: ScopeKey;
+
   selector: SchemaPathSelector;
 };
 
@@ -394,8 +1303,26 @@ export type EntitySnapshot = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+
+  /**
+   * The scope INSTANCE this snapshot is of (server-execution v2 stage A,
+   * OW17's wire leg): present ONLY in responses to a lease-holder session
+   * that named explicit instances (`GraphQueryRoot.entityScopeKey`), so
+   * two instances of one (branch, id, scope) — which such a session may
+   * legitimately hold at once — stay distinguishable. Every other
+   * session's responses carry scope NAMES only and resolve instances from
+   * their own identity as always (protocol.md §1); the OFF-arm wire is
+   * byte-identical.
+   */
+  scopeKey?: ScopeKey;
+
   seq: number;
   document: EntityDocument | null;
+
+  /** As on {@link SessionSyncUpsert}: the covering commit's class,
+   * populated only under the server-execution flag and only for
+   * `seq > 0` (a seq-0 snapshot has no covering commit). */
+  coverClass?: CommitClass;
 };
 
 export type GraphQueryResult = {
@@ -435,21 +1362,66 @@ export type GraphWatchSpec = {
   query: GraphQuery;
 };
 
-export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
+export type OperationWatchSpec = {
+  id: string;
+  kind: "operation";
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
+};
+
+export type WatchSpec = QueryWatchSpec | GraphWatchSpec | OperationWatchSpec;
+
+export type OperationFieldDelivery = {
+  watchId: string;
+  field: OperationFieldSnapshot;
+};
 
 export type SessionSyncUpsert = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+
+  /**
+   * The scope INSTANCE this upsert is of (server-execution v2 stage A,
+   * OW17's wire leg — the ONE write-side addition to the frame shape).
+   * Populated ONLY on frames to a session whose lease-holder read
+   * exemption is live (`SessionState.leaseHolderReads`, armed by an
+   * admitted `entityScopeKey` read — protocol.md §2's read row): that
+   * session legitimately receives EVERY instance it serves, including
+   * two instances of one (branch, id, scope), which the scope NAME alone
+   * cannot distinguish. Every other session's frames carry names only
+   * and resolve instances from their own identity as always
+   * (protocol.md §1, §3); the OFF-arm wire is byte-identical.
+   */
+  scopeKey?: ScopeKey;
+
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
+
+  /**
+   * The commit CLASS of the covering commit — the commit whose write
+   * produced this snapshot's `seq` (`commit.seq` is unique, and every
+   * revision's seq IS its commit's seq, so the seq names exactly one
+   * commit). Consumed by the speculation overlay's arrival-witness
+   * predicate (speculation.md §4, RULED 2026-08-22): a cover AT an
+   * entry's floor witnesses the authoritative derivation's arrival only
+   * when it is derived-class — an authored structure write at the floor
+   * is the entry's own setup, not the derivation. Populated only under
+   * the server-execution flag; absent on the OFF arm (the OFF wire is
+   * byte-identical), on pre-predicate servers, and on `seq: 0` entries
+   * (no covering commit). Absence reads as "class unknown", which never
+   * witnesses arrival at the floor.
+   */
+  coverClass?: CommitClass;
 };
 
 export type SessionSyncRemove = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+
+  /** As on {@link SessionSyncUpsert}: the instance, lease-holder frames only. */
+  scopeKey?: ScopeKey;
 };
 
 export type SessionSync = {
@@ -459,15 +1431,7 @@ export type SessionSync = {
   caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
-  // Scheduler observation rows for commits inside this sync's
-  // (fromSeq, toSeq] window, so subscribers can ADOPT the writer's action
-  // runs instead of re-running them
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
-  // Present only when both the server flag and the receiving connection's
-  // negotiated persistentSchedulerState flag are on. Same row shape as the
-  // scheduler.snapshot.list result; `observation` is intentionally
-  // `unknown` — the runner owns validation.
-  observations?: SchedulerActionSnapshotResult[];
+  operationFields?: OperationFieldDelivery[];
 };
 
 export type WatchSetResult = {
@@ -500,6 +1464,19 @@ export type GraphQueryRequest = {
   query: GraphQuery;
 };
 
+export type OperationFieldQueryResult = {
+  serverSeq: number;
+  field: OperationFieldSnapshot;
+};
+
+export type OperationFieldQueryRequest = {
+  type: "op.query";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
+};
+
 export type EntityIdListRequest = {
   type: "entity-id.list";
   requestId: string;
@@ -518,12 +1495,18 @@ export type EntityIdLookupRequest = {
   id: EntityId;
 };
 
-// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+//
+// SQLite builtins (docs/specs/sqlite-builtin)
+//
 
 /** Wire form of SQLite bind parameters. */
 export type SqliteParamsWire =
   | ReadonlyArray<FabricValue>
   | Record<string, FabricValue>;
+
+/** Key-safe transport for named SQLite parameters whose names are reserved by
+ * the Fabric object codec. Mutually exclusive with `params` on a query. */
+export type SqliteNamedParamsWire = Array<[string, FabricValue]>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
  *  entity id) plus the declared table schemas (for additive create/migrate).
@@ -536,11 +1519,22 @@ export type SqliteDbRef = {
   id: string;
   tables?: Record<string, FabricValue>;
   scope?: CellScope;
+
   /** The db's owner — the principal that created the SqliteDb cell. Resolves
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
   owner?: string;
 };
+
+/** Whether `value` is a SQLite db handle. The `id` is the whole of the test:
+ *  it is the one field every consumer needs and the one the runner's own
+ *  handle read validates, and the rest of the shape is optional. Shared so
+ *  that a reader deciding "is this a database?" and the runner deciding "may
+ *  I query it?" cannot drift apart. */
+export function isSqliteDbRef(value: unknown): value is SqliteDbRef {
+  return !!value && typeof value === "object" &&
+    typeof (value as SqliteDbRef).id === "string";
+}
 
 export type SqliteQueryRequest = {
   type: "sqlite.query";
@@ -550,6 +1544,7 @@ export type SqliteQueryRequest = {
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
+  namedParams?: SqliteNamedParamsWire;
 };
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -597,8 +1592,14 @@ export function dbNeedsColumnProvenance(
   return false;
 }
 
+/** A native SQLite result row. Column names are arbitrary SQLite aliases,
+ *  including names that the Fabric object domain reserves. Values remain
+ *  Fabric values, but the row object itself is not a `FabricPlainObject`. */
+export type SqliteNativeRow = Record<string, FabricValue>;
+
 export type SqliteQueryResult = {
-  rows: FabricPlainObject[];
+  rows: SqliteNativeRow[];
+
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
@@ -606,6 +1607,30 @@ export type SqliteQueryResult = {
    *  otherwise, so unlabeled queries pay nothing. */
   columns?: SqliteResultColumn[];
 };
+
+/** A SQLite row as carried by the memory protocol. Ordinary rows retain the
+ * object representation accepted by older clients. Rows whose column names
+ * are unsafe object keys use entries so the JSON codec can carry them without
+ * losing or rejecting a legal SQLite alias. */
+export type SqliteRowWire =
+  | SqliteNativeRow
+  | Array<[string, FabricValue]>;
+
+/** The transport form of a SQLite query result. */
+export type SqliteQueryWireResult = {
+  rows: SqliteRowWire[];
+  columns?: SqliteResultColumn[];
+};
+
+/** Convert a native query row to the backward-compatible memory wire form. */
+export function sqliteRowToWire(row: SqliteNativeRow): SqliteRowWire {
+  return unsafeObjectKeyIn(row) === undefined ? row : Object.entries(row);
+}
+
+/** Reconstruct a query row after it crosses the memory protocol. */
+export function sqliteRowFromWire(row: SqliteRowWire): SqliteNativeRow {
+  return Array.isArray(row) ? Object.fromEntries(row) as SqliteNativeRow : row;
+}
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
 // fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
@@ -622,8 +1647,10 @@ export type SqliteRegisterDiskSourceRequest = {
   requestId: string;
   space: string;
   sessionId: SessionId;
+
   /** Handle cell id (content-derived from (serviceSpace, absPath); see cf). */
   id: string;
+
   /** Absolute path to the on-disk SQLite file. */
   path: string;
 };
@@ -638,6 +1665,15 @@ export type WatchSetRequest = {
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
+
+  /**
+   * The client's declared holdings (see {@link SessionHolding}): when
+   * present, the response's `sync` is the DIFFERENCE between the new watch
+   * union and these, rather than the whole union — a client that lost its
+   * server session (an expired resume, a restarted server) re-establishes
+   * its watches without downloading again every document it still holds.
+   */
+  holdings?: SessionHolding[];
 };
 
 export type WatchAddRequest = {
@@ -656,144 +1692,20 @@ export type SessionAckRequest = {
   seenSeq: number;
 };
 
-export type SchedulerActionSnapshotQuery = {
-  branch?: BranchName;
-  ownerSpace?: string;
-  pieceId?: string;
-  processGeneration?: number;
-  actionId?: string;
-  // Commit-seq window (exclusive since, inclusive through): rows whose
-  // carrying commit landed inside a subscription sync's (fromSeq, toSeq]
-  // window — the incremental-adoption fan-out query. Rows with a NULL
-  // commit seq never match a window filter.
-  sinceCommitSeq?: number;
-  throughCommitSeq?: number;
-  limit?: number;
-  cursor?: SchedulerActionSnapshotCursor;
-};
-
-/**
- * Server-derived ownership partition for durable scheduler state. The opaque
- * principal and session components use the same encoding as resolved memory
- * scope keys; clients must never construct one to select another context.
- */
-export type SchedulerActionKind =
-  | "computation"
-  | "effect"
-  | "event-handler";
-
-export type SchedulerObservationTransactionKind =
-  | "dependency-collection"
-  | "action-run"
-  | "event-preflight";
-
-export type SchedulerObservationAddress = {
-  space: string;
-  id: EntityId;
-  scope?: CellScope;
-  path: readonly string[];
-};
-
-export type CompleteActionScopeSummary = {
-  version: 1;
-  complete: true;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  piece: SchedulerObservationAddress;
-  reads: SchedulerObservationAddress[];
-  writes: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  directOutputs: SchedulerObservationAddress[];
-};
-
-/**
- * A scheduler action observation as it is stored and carried across the memory
- * boundary.
- *
- * A parallel declaration of the same concept lives in the runner, at
- * `runner/src/scheduler/persistent-observation.ts`. The two are not the same
- * type and differ in strictness:
- *
- * - addresses here are {@link SchedulerObservationAddress} (`space: string`);
- *   the runner uses `IMemorySpaceAddress` (`space: MemorySpace`)
- * - `branch` here is `BranchName`; the runner declares it `string`
- *
- * The runner produces observations and this side stores them, so this one is
- * deliberately the wider of the pair. Nothing checks that they agree: the wire
- * fields that carry an observation (`CommitData.schedulerObservation` and
- * `SchedulerActionSnapshotResult.observation`) are declared `unknown`, so a
- * change to either declaration will not surface at the seam. Keep them in sync
- * by hand until one of them owns the shape.
- */
-export type SchedulerActionObservation = {
-  version: 1 | 2;
-  ownerSpace?: string;
-  branch: BranchName;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  actionKind: SchedulerActionKind;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  completeActionScopeSummary?: CompleteActionScopeSummary;
-  observedAtSeq: number;
-  observedAtLocalSeq?: number;
-  transactionKind: SchedulerObservationTransactionKind;
-  reads: SchedulerObservationAddress[];
-  shallowReads: SchedulerObservationAddress[];
-  actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites: SchedulerObservationAddress[];
-  declaredWrites?: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  ignoredSchedulingWrites?: SchedulerObservationAddress[];
-  actionOptions?: {
-    debounceMs?: number;
-    noDebounce?: boolean;
-    throttleMs?: number;
-  };
-  status: "success" | "failed";
-  errorFingerprint?: string;
-};
-
-export type SchedulerExecutionContextKey =
-  | "space"
-  | `user:${string}`
-  | `session:${string}:${string}`;
-
-export type SchedulerActionSnapshotCursor = {
-  ownerSpace?: string;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  executionContextKey: SchedulerExecutionContextKey;
-};
-
-export type SchedulerActionSnapshotResult = {
-  observationId: number;
-  commitSeq: number | null;
-  observedAtSeq: number;
-  executionContextKey: SchedulerExecutionContextKey;
-  /** The observation, opaque here: this layer stores and forwards it, and the
-   *  runner owns its shape and validation. `FabricValue` says only what the
-   *  wire requires of it. */
-  observation: FabricValue;
-  directDirtySeq?: number;
-  staleSeq?: number;
-  unknownReason?: string;
-};
-
-export type SchedulerSnapshotListResult = {
-  serverSeq: number;
-  snapshots: SchedulerActionSnapshotResult[];
-  nextCursor?: SchedulerActionSnapshotCursor;
-};
-
-export type SchedulerSnapshotListRequest = {
-  type: "scheduler.snapshot.list";
+export type EventAttentionResolveRequest = {
+  type: "event.attention.resolve";
   requestId: string;
   space: string;
   sessionId: SessionId;
-  query: SchedulerActionSnapshotQuery;
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  action: "retry" | "dismiss";
+};
+
+export type EventAttentionResolveResult = {
+  serverSeq: number;
+  resolution: EventAttentionResolution;
 };
 
 export type ResponseMessage<Result> = {
@@ -822,6 +1734,7 @@ export type V2Error = {
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
+
   /**
    * Present on an `AuthorizationError` that a fresh handshake can heal — the
    * connection-challenge and invocation-freshness anti-replay races (an expired,
@@ -832,65 +1745,132 @@ export type V2Error = {
    * client stops reopening the session and surfaces the error instead of looping.
    */
   retriable?: boolean;
+
+  /** Positive evidence that the server made a durable, no-commit verdict. */
+  permanentEvidence?: true;
+
+  /** Engine revision whose ACL state produced an authorization denial. */
+  aclRevision?: number;
 };
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 
-export type TaskReturn<Result> = {
-  the: "task/return";
-  of: JobId;
-  is: Result;
-};
-
-export type Receipt<Result> = TaskReturn<Result>;
-export type LegacyClientMessage = SessionOpenCommand;
-export type LegacyServerMessage = TaskReturn<V2Result<unknown>>;
 export type ClientMessage =
   | HelloMessage
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | OperationFieldQueryRequest
   | EntityIdListRequest
   | EntityIdLookupRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
-  | SchedulerSnapshotListRequest
-  | SessionAckRequest;
+  | SessionAckRequest
+  | EventAttentionResolveRequest;
 export type ServerMessage =
   | HelloOkMessage
   | ResponseMessage<FabricValue>
   | SessionEffectMessage
   | SessionRevokedMessage;
 
-const memoryReconstructionContext = new EmptyReconstructionContext(
+const memoryLiveEnvironment = new NullLiveEnvironment(
   true,
-  "no cell reconstruction at the memory boundary",
+  "no cell decoding at the memory boundary",
 );
 
 // These ambient flags and the memory protocol flags below are catalogued, with
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
-let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let messageCompressionEnabled = true;
+let ownWriteEchoEnabled = true;
+
+export {
+  SERVER_EXECUTION_DEFAULT_ENABLED,
+} from "./v2/server-execution-default.ts";
+
+// The ambient flag's inputs, resolved by getServerExecutionConfig():
+// - the live ENABLER count (below), which forces the flag on — every
+//   explicitly-enabled Runtime and the ExecutorHost claim one;
+// - else an explicit OVERRIDE (`setServerExecutionConfig`: the direct test
+//   seam, and the Runtime constructor's sanctioned explicit-false arm);
+// - else the AMBIENT BASELINE, which is OFF: a BARE construction — no
+//   preset, no explicit flag, nothing else in the process enabling it —
+//   resolves the OFF arm, because a bare construction has no serving host
+//   (the unit-test shape: single-process, the derive-and-commit model by
+//   construction). The FIRST-PARTY default is a different thing: every
+//   deployed-topology entry point resolves an unset flag to
+//   `SERVER_EXECUTION_DEFAULT_ENABLED` (v2/server-execution-default.ts) and
+//   constructs its runtimes explicitly, so in a deployed process the
+//   ambient state follows that default through the enabler count.
+let serverExecutionOverride: boolean | undefined = undefined;
 
 /**
- * Ambient runtime flag for persistent scheduler observations and rehydration.
- * The runner owns the feature, but the memory protocol needs the value during
- * client/server handshakes, so it lives beside the memory protocol flags.
+ * Ambient runtime flag for server-execution v2
+ * (`EXPERIMENTAL_SERVER_EXECUTION`; docs/specs/server-side-execution/). OFF is
+ * today's behavior byte-for-byte. The runner owns the feature, but the
+ * per-class commit admission rows (protocol.md §2) are enforced by the memory
+ * server under the flag, so the value lives beside the memory protocol flags.
+ * Not a handshake capability: admission
+ * enforcement is server-local, so nothing about it is negotiated per
+ * connection.
+ *
+ * `enabled` undefined clears the explicit override (back to the ambient
+ * baseline); a boolean sets it. A live enabler (below) wins over an
+ * override either way.
  */
-export function setPersistentSchedulerStateConfig(enabled?: boolean): void {
-  persistentSchedulerStateEnabled = enabled ?? false;
+export function setServerExecutionConfig(enabled?: boolean): void {
+  serverExecutionOverride = enabled;
 }
 
-export function getPersistentSchedulerStateConfig(): boolean {
-  return persistentSchedulerStateEnabled;
+export function getServerExecutionConfig(): boolean {
+  if (serverExecutionEnablers > 0) return true;
+  return serverExecutionOverride ?? false;
 }
 
-export function resetPersistentSchedulerStateConfig(): void {
-  persistentSchedulerStateEnabled = false;
+/** HARD reset of the test seam: override cleared, enabler count zero — the
+ * flag reads the ambient baseline (OFF) again. Never called by product
+ * code. */
+export function resetServerExecutionConfig(): void {
+  serverExecutionOverride = undefined;
+  serverExecutionEnablers = 0;
+}
+
+// The flag is a process-global admission input with SEVERAL owners in a
+// serving process (each explicitly-enabled Runtime, plus the
+// ExecutorHost itself), so its production lifecycle is reference-counted
+// HERE — beside the flag — rather than in any one owner: an owner-local
+// count cannot see the others, and an unconditional reset from one owner
+// un-claims `derived` for every other owner's in-flight commit. The
+// direct set/reset functions above remain the test seam (reset is a HARD
+// reset: override cleared, count zero).
+let serverExecutionEnablers = 0;
+
+/** Live enabler count — consulted by the one sanctioned explicit-disable
+ * arm (a Runtime constructed with `serverExecution: false` writes the
+ * ambient flag only when NO enabler is live). */
+export function serverExecutionEnablerCount(): number {
+  return serverExecutionEnablers;
+}
+
+/**
+ * Claim the ambient server-execution flag, reference-counted. Returns
+ * the matching release; the flag falls back to the override/baseline
+ * resolution only when the LAST live enabler releases. The release is
+ * idempotent per handle, so exception-safe callers can release from both
+ * a rollback and a finally.
+ */
+export function acquireServerExecutionEnabler(): () => void {
+  serverExecutionEnablers += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    serverExecutionEnablers = Math.max(0, serverExecutionEnablers - 1);
+  };
 }
 
 /**
@@ -927,11 +1907,49 @@ export function resetSyncSchemaTableConfig(): void {
   syncSchemaTableEnabled = true;
 }
 
+/**
+ * Ambient capability for binary gzip envelopes on memory WebSocket messages.
+ * Disabling it keeps both peers on ordinary text frames as a rollout backstop.
+ */
+export function setMessageCompressionConfig(enabled?: boolean): void {
+  messageCompressionEnabled = enabled ?? true;
+}
+
+export function getMessageCompressionConfig(): boolean {
+  return messageCompressionEnabled;
+}
+
+export function resetMessageCompressionConfig(): void {
+  messageCompressionEnabled = true;
+}
+
+/**
+ * Ambient server behavior for own-write echo on sync frames (CT-1965): a
+ * session's own accepted patch-produced heads ride the covering frame as full
+ * post-apply documents, so promotion retires the pending overlay against
+ * delivered truth instead of extrapolating merged state it never saw. Set- and
+ * delete-produced heads stay elided — the client provably holds their outcome.
+ * Off restores full echo suppression (the pre-CT-1965 behavior). Not a
+ * protocol capability: every client generation handles the echoed frames.
+ */
+export function setOwnWriteEchoConfig(enabled?: boolean): void {
+  ownWriteEchoEnabled = enabled ?? true;
+}
+
+export function getOwnWriteEchoConfig(): boolean {
+  return ownWriteEchoEnabled;
+}
+
+export function resetOwnWriteEchoConfig(): void {
+  ownWriteEchoEnabled = true;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
-  persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
-  syncSchemaTable: false,
+  applyOp: true,
+  operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
+  messageCompressionV1: getMessageCompressionConfig(),
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -941,19 +1959,26 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // pending reads (resolvePendingReads), so it always advertises it. Clients
   // that see it absent scalarize to top-of-stack before sending.
   pendingReadStacks: true,
+  // Likewise build-inherent: this build's server stages the catch-up
+  // obligation for every verdict (accepts included), so it always
+  // advertises it. Clients that see it absent apply verdicts immediately.
+  verdictCatchUpMarkers: true,
   // The engine answers this request from its identifier index without
   // selecting stored entity values.
   entityIdListing: true,
   entityIdPagination: true,
   entityIdLookup: true,
+  // Build-inherent: this build's server takes a client's declared holdings
+  // as the delivery diff base wherever they are sent.
+  sessionHoldings: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
 /**
- * Scheduler-state persistence and commit preconditions are optional
- * capabilities, not data-model wire contracts. Peers with different scheduler
- * flags can still share memory data; the server's flags control whether
- * scheduler rows and precondition checks are accepted on that connection.
+ * Commit preconditions and the other capability flags are optional
+ * capabilities, not data-model wire contracts. Peers with different
+ * capability flags can still share memory data; the server's flags control
+ * what is accepted on that connection.
  */
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
@@ -967,15 +1992,7 @@ export const compatibleMemoryProtocolFlags = (
 export const parseMemoryProtocolFlags = (
   value: unknown,
 ): MemoryProtocolFlags | null => {
-  if (!isRecord(value) || Array.isArray(value)) {
-    return null;
-  }
-
-  const persistentSchedulerState = value.persistentSchedulerState;
-  if (
-    persistentSchedulerState !== undefined &&
-    typeof persistentSchedulerState !== "boolean"
-  ) {
+  if (!isObjectNotArray(value)) {
     return null;
   }
 
@@ -983,6 +2000,22 @@ export const parseMemoryProtocolFlags = (
   if (
     commitPreconditions !== undefined &&
     typeof commitPreconditions !== "boolean"
+  ) {
+    return null;
+  }
+
+  const applyOp = value.applyOp;
+  if (applyOp !== undefined && typeof applyOp !== "boolean") {
+    return null;
+  }
+
+  const operationCodecs = value.operationCodecs;
+  if (
+    operationCodecs !== undefined &&
+    (!Array.isArray(operationCodecs) ||
+      operationCodecs.some((codec) =>
+        typeof codec !== "string" || !/@[1-9][0-9]*$/.test(codec)
+      ) || new Set(operationCodecs).size !== operationCodecs.length)
   ) {
     return null;
   }
@@ -995,18 +2028,18 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  const syncSchemaTable = value.syncSchemaTable;
-  if (
-    syncSchemaTable !== undefined &&
-    typeof syncSchemaTable !== "boolean"
-  ) {
-    return null;
-  }
-
   const syncSchemaTableV2 = value.syncSchemaTableV2;
   if (
     syncSchemaTableV2 !== undefined &&
     typeof syncSchemaTableV2 !== "boolean"
+  ) {
+    return null;
+  }
+
+  const messageCompressionV1 = value.messageCompressionV1;
+  if (
+    messageCompressionV1 !== undefined &&
+    typeof messageCompressionV1 !== "boolean"
   ) {
     return null;
   }
@@ -1023,6 +2056,14 @@ export const parseMemoryProtocolFlags = (
   if (
     pendingReadStacks !== undefined &&
     typeof pendingReadStacks !== "boolean"
+  ) {
+    return null;
+  }
+
+  const verdictCatchUpMarkers = value.verdictCatchUpMarkers;
+  if (
+    verdictCatchUpMarkers !== undefined &&
+    typeof verdictCatchUpMarkers !== "boolean"
   ) {
     return null;
   }
@@ -1051,21 +2092,40 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const sessionHoldings = value.sessionHoldings;
+  if (
+    sessionHoldings !== undefined &&
+    typeof sessionHoldings !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
-    persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
-    syncSchemaTable: syncSchemaTable === true,
+    applyOp: applyOp === true,
+    ...(operationCodecs === undefined
+      ? {}
+      : { operationCodecs: [...operationCodecs].sort() as string[] }),
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    messageCompressionV1: messageCompressionV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
     // Absent (an older server) parses to false: clients scalarize pending
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
+    // Absent (an older server that stamps markers only for conflicts)
+    // parses to false: clients apply verdicts immediately instead of
+    // parking them on marker coverage.
+    verdictCatchUpMarkers: verdictCatchUpMarkers === true,
     entityIdListing: entityIdListing === true,
     entityIdPagination: entityIdPagination === true,
     entityIdLookup: entityIdLookup === true,
+    // Absent (an older server) parses to false: a provider-less session
+    // declares nothing and reconnects on the declaration-less paths; a
+    // provider-bearing one terminates at restore (see the flag's doc).
+    sessionHoldings: sessionHoldings === true,
   };
 };
 
@@ -1076,15 +2136,20 @@ export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
-  persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
-  syncSchemaTable: flags.syncSchemaTable,
+  applyOp: flags.applyOp,
+  ...(flags.operationCodecs === undefined
+    ? {}
+    : { operationCodecs: flags.operationCodecs }),
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  messageCompressionV1: flags.messageCompressionV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
+  verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,
   entityIdLookup: flags.entityIdLookup,
+  sessionHoldings: flags.sessionHoldings,
 });
 
 /**
@@ -1096,11 +2161,11 @@ export const wireMemoryProtocolFlags = (
  * tag-like strings): the client receive-path expansion gate (v2/client.ts),
  * `containsReservedSchemaRefSubstring` (v2/sync-schema-ref.ts), and the
  * engine's commit/stored-row probes (v2/engine.ts). A pinning test in
- * test/v2-sync-schema-table-test.ts fails loudly if verbatim embedding ever
+ * test/v2-sync-schema-table.test.ts fails loudly if verbatim embedding ever
  * stops holding.
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
-  jsonFromValue(value);
+  jsonFromFabricValue(value);
 
 export const commitPreconditionValueHash = (value: FabricValue): string =>
   hashStringOf(encodeMemoryBoundary(value));
@@ -1108,9 +2173,9 @@ export const commitPreconditionValueHash = (value: FabricValue): string =>
 export const decodeMemoryBoundary = <Value extends FabricValue = FabricValue>(
   source: string,
 ): Value & FabricValue => {
-  const decoded = valueFromJson(
+  const decoded = fabricFromJsonValue(
     source,
-    memoryReconstructionContext,
+    memoryLiveEnvironment,
   );
 
   return decoded as Value;
@@ -1137,7 +2202,63 @@ export const toDocumentSelector = (
 
 export const isEntityDocument = (
   value: unknown,
-): value is EntityDocument => isObject(value);
+): value is EntityDocument => isObjectNotArray(value);
+
+/**
+ * Read a stored document payload: decode it, and refuse a root that is not a
+ * tree of paths.
+ *
+ * `decode` is the caller's, because the readers disagree on which payloads they
+ * accept and only on that: the engine reads what it wrote, through
+ * {@link decodeMemoryBoundary}, while an offline reader over a durable file may
+ * also meet untagged plain-JSON rows and route accordingly. Everything else is
+ * one rule shared here, since a reader that tests the payload for truthiness
+ * instead takes an empty string for an absent one and rebuilds a document the
+ * engine would have rejected.
+ *
+ * An absent payload never reaches the decoder. Handing one a placeholder string
+ * makes the rule depend on which decoder was passed — `decodeMemoryBoundary`
+ * refuses any untagged payload, a plain-JSON decoder accepts one — and two
+ * readers that disagree about an absent payload do not share a rule at all. An
+ * absent document is `null`, which the root check below refuses on its own.
+ */
+export const decodeStoredDocumentPayload = (
+  decode: (source: string) => unknown,
+  data: string | null,
+): EntityDocument => {
+  const parsed = data === null ? null : decode(data);
+  if (!isEntityDocument(parsed)) {
+    const shape = parsed === null
+      ? "null"
+      : Array.isArray(parsed)
+      ? "an array"
+      : `a ${typeof parsed}`;
+    throw new TypeError(
+      `memory v2 stored documents must be plain object roots; got ${shape}`,
+    );
+  }
+  return parsed;
+};
+
+/**
+ * Read a stored patch-list payload through the same rule. An absent payload is
+ * refused rather than read as the empty list: nothing writes a patch row
+ * without one, so an absent payload is a malformed row, and applying it as a
+ * no-op would leave the document reading current.
+ */
+export const decodeStoredPatchListPayload = (
+  decode: (source: string) => unknown,
+  data: string | null,
+): PatchOp[] => {
+  if (data === null) {
+    throw new TypeError("memory v2 stored patches must carry a payload");
+  }
+  const parsed = decode(data);
+  if (!Array.isArray(parsed)) {
+    throw new TypeError("memory v2 stored patches must be arrays");
+  }
+  return parsed as PatchOp[];
+};
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,

@@ -3,7 +3,9 @@
  * a filename or shebang. It remains last in the language registry and is the
  * registry's fallback.
  */
+
 import type { Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import {
   createPlainTextHighlighter,
   plainTextDocument,
@@ -13,12 +15,15 @@ import {
 export const plainTextLanguage: Language = {
   id: "plain-text",
 
+  input: { kind: "text", decoder: utf8Decoder },
+
   metadata: {
     extensions: [".txt"],
     filenames: ["LICENSE", "NOTICE"],
     filenamePatterns: [/^(?:LICENSE|NOTICE)\..+$/i],
     aliases: ["text", "plaintext"],
     interpreters: [],
+    sharedExtensions: [],
   },
 
   parseDocument: (text) => plainTextDocument(text),

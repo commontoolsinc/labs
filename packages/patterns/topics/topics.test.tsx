@@ -3,37 +3,59 @@
  *
  * Complements multi-user.test.tsx (cross-runtime isolation and merge
  * behavior) and topics-rejections.test.tsx (thrown rejections on the mutating
- * verbs — those runs expect runtime errors): this file drives the happy and
- * legacy paths in one runtime — atomic agent signatures, body-at-create,
- * legacy authorship fallback/shadow fields, label defaulting, body updates,
- * activity-based sorting, the derived crossref graph (edges from fids pasted
- * in bodies, comments, and link URLs; never persisted), and the exported pure
- * helpers. UI composer wrappers keep silent guards, exercised here.
+ * verbs — those runs expect runtime errors): this file drives the happy paths
+ * in one runtime — atomic agent signatures, body-at-create, label defaulting,
+ * body updates, activity-based sorting, the board's bounded discovery index,
+ * and the exported pure helpers. UI composer wrappers keep silent guards,
+ * exercised here.
  */
-import { action, assert, Default, NAME, UI, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  Default,
+  equals,
+  NAME,
+  Stream,
+  TESTS,
+  UI,
+  Writable,
+} from "commonfabric";
 import { pattern } from "commonfabric";
+import {
+  type MentionableRow,
+  mentionableRowsOf,
+} from "../collection-naming/mentionable.ts";
+import {
+  type NamesMap,
+  type NamesTableRow,
+} from "../collection-naming/naming.ts";
 import Topics, {
-  crossrefLinkRow,
+  mentionedBy,
+  mentionListsOf,
   submitProfileTopic,
-  topicCellLink,
+  type TopicCrossrefRow,
   type TopicPiece,
-  type TopicReference,
 } from "./main.tsx";
 import Topic, {
-  crossrefJoin,
-  extractFidPayloads,
-  fidPayload,
+  type AddCommentResult,
+  type AddLinkResult,
+  dropMention,
   isSafeLinkUrl,
+  type MentionEvent,
   saveProfileBody,
+  saveProfileTitle,
+  type SetBodyResult,
   snippet,
   submitProfileComment,
   submitProfileLink,
   type TopicAuthor,
   topicAuthorLabel,
   type TopicComment,
-  topicCorpus,
   type TopicLink,
   type TopicLinkKind,
+  type TopicMentionRefMap,
+  type TopicSummary,
+  type UnmentionEvent,
   whenLabel,
 } from "./topic.tsx";
 
@@ -54,13 +76,19 @@ function findAllByTag(
   tag: string,
   found: TestVNode[] = [],
 ): TestVNode[] {
-  if (Array.isArray(node)) {
-    node.forEach((child) => findAllByTag(child, tag, found));
+  // Resolved before either test. A compiled reactive child arrives cell-backed,
+  // and asking `Array.isArray` or `isVNode` of the cell rather than its value
+  // stops the walk one level above what it was looking for — a guard that reds
+  // on a correct render, which is no more use than one that misses a wrong one.
+  // `propValue` returns a non-cell unchanged, so the plain path pays nothing.
+  const resolved = propValue(node);
+  if (Array.isArray(resolved)) {
+    resolved.forEach((child) => findAllByTag(child, tag, found));
     return found;
   }
-  if (!isVNode(node)) return found;
-  if (node.name === tag) found.push(node);
-  for (const child of node.children ?? []) findAllByTag(child, tag, found);
+  if (!isVNode(resolved)) return found;
+  if (resolved.name === tag) found.push(resolved);
+  for (const child of resolved.children ?? []) findAllByTag(child, tag, found);
   return found;
 }
 
@@ -71,15 +99,76 @@ const propValue = (value: any): unknown =>
   value && typeof value.get === "function" ? value.get() : value;
 
 // A faithful pre-authorship Topic projection: the legacy schema has no
-// `createdBy` path at all. Pushing one into a current Topic's retained
-// mentionable list exercises the mixed-version boundary that production
-// migration must preserve.
-const LegacyUnsignedTopic = pattern(() => {
-  const addComment = action((_event: { body: string }) => {});
-  const addLink = action(
-    (_event: { kind: TopicLinkKind; url: string; label: string }) => {},
-  );
-  const setBody = action((_event: { body: string }) => {});
+// `createdBy` path at all, and its verbs declare no results. Pushing one into
+// a current Topic's retained mentionable list exercises the mixed-version
+// boundary that production migration must preserve.
+//
+// Its verbs carry the current declared arity because `Stream<E, R>`
+// deliberately does not satisfy `Stream<E>` and the sibling projection is one
+// contract for the whole list — verb arity is not the legacy dimension under
+// test here, the absent `createdBy` path is. A genuinely older deployed
+// sibling, whose verbs return nothing, stays valid against this same list at
+// runtime: a declared result adds nothing to the generated schema (C3
+// withdrawn — results flow schema-free through receipts), so the stored
+// schema a legacy piece is validated against is unchanged.
+
+/**
+ * What a topic pattern deployed before the current paths existed publishes.
+ *
+ * Declared explicitly rather than inferred, because the shim returns undefined
+ * for the paths it predates and an inferred `unknown` there would make the
+ * output schema carry `{ type: "unknown" }` — which a consumer reads back as
+ * undefined for reasons that have nothing to do with this test. Spelling the
+ * shape out says the real thing: these paths are absent from a legacy sibling,
+ * and `TopicPiece` — where they now carry a default and no `| undefined` — has
+ * to survive being handed one.
+ */
+interface LegacyUnsignedTopicOutput {
+  [NAME]: string | undefined;
+  title: string;
+  body: string;
+  comments: TopicComment[];
+  links: TopicLink[];
+  createdAt: number;
+  createdBy: TopicAuthor | undefined;
+  mentions: unknown[] | undefined;
+  references: TopicMentionRefMap | undefined;
+  mentioned: unknown[] | undefined;
+  referencedBy: TopicSummary[] | undefined;
+  commentCount: number | undefined;
+  lastActivityAt: number | undefined;
+  addComment: Stream<{ body: string }, AddCommentResult>;
+  addLink: Stream<
+    { kind: TopicLinkKind; url: string; label: string },
+    AddLinkResult
+  >;
+  setBody: Stream<{ body: string }, SetBodyResult>;
+  mention: Stream<MentionEvent>;
+  unmention: Stream<UnmentionEvent>;
+}
+
+const LegacyUnsignedTopic = pattern<
+  Record<PropertyKey, never>,
+  LegacyUnsignedTopicOutput
+>(() => {
+  const addComment = action<{ body: string }, AddCommentResult>((event) => ({
+    comment: {
+      author: { kind: "person", name: "" },
+      body: event.body,
+      sentAt: 0,
+    },
+  }));
+  const addLink = action<
+    { kind: TopicLinkKind; url: string; label: string },
+    AddLinkResult
+  >((event) => ({
+    link: { kind: event.kind, url: event.url, label: event.label },
+  }));
+  const setBody = action<{ body: string }, SetBodyResult>((event) => ({
+    body: event.body,
+  }));
+  const mention = action<MentionEvent>(() => {});
+  const unmention = action<UnmentionEvent>(() => {});
   return {
     [NAME]: undefined,
     title: "Legacy unsigned sibling",
@@ -90,12 +179,24 @@ const LegacyUnsignedTopic = pattern(() => {
     // The retained mixed-version link materializes the legacy missing path as
     // a present undefined value, which must survive current list validation.
     createdBy: undefined,
-    createdByName: "Legacy Person",
+    // Absent for the same reason `createdBy` is: this sibling predates these
+    // paths, and the current projection has to accept that.
+    //
+    // These two now declare a default and no `| undefined` on `TopicPiece`,
+    // which is exactly what this sibling is here to exercise: a retained
+    // mixed-version link materializes a missing path as a present undefined,
+    // and current list validation has to survive it.
+    mentions: undefined,
+    references: undefined,
+    mentioned: undefined,
+    referencedBy: undefined,
     commentCount: undefined,
     lastActivityAt: undefined,
     addComment,
     addLink,
     setBody,
+    mention,
+    unmention,
   };
 });
 
@@ -110,25 +211,14 @@ export default pattern(() => {
   });
   // A retained mixed-version list link can project the absent optional
   // createdBy path as an explicit undefined. Keep that sibling in a live
-  // mentionable universe: the consumer must validate and derive crossrefs
-  // without weakening non-empty authorship away from TopicAuthor.
+  // mentionable universe: the consumer must validate it without weakening
+  // non-empty authorship away from TopicAuthor.
   const mixedMentionable = new Writable<
-    TopicReference[] | Default<[]>
+    TopicPiece[] | Default<[]>
   >([]);
   const mixedMentionConsumer = Topic({
     title: "Mixed mention consumer",
     mentionable: mixedMentionable,
-  });
-
-  // Branch pin for the detail derive: a piece with no `mentionable` wired
-  // (the pre-rev corpus, until backfilled) derives empty connection sets.
-  const lone = Topic({ title: "Lone", createdAt: 1, createdByName: "t" });
-  // Pre-migration fields remain accepted and readable.
-  const legacy = Topic({
-    title: "Legacy",
-    createdAt: 1,
-    createdByName: "Legacy Person",
-    comments: [{ authorName: "Old Agent", body: "old", sentAt: 2 }],
   });
 
   // Deterministic bindings for the exact handlers used by Profile-backed UI
@@ -136,8 +226,19 @@ export default pattern(() => {
   // resolved snapshot values directly here rather than inventing a production
   // fallback identity.
   const profileTopics = new Writable<TopicPiece[] | Default<[]>>([]);
+  // Standalone: no board built this, so there is no pivot to read and the topic
+  // it creates simply shows no inbound references. Required rather than
+  // optional so a real composer cannot forget it and silently lose them.
+  const profileBoardCrossrefs = new Writable<TopicCrossrefRow[] | Default<[]>>(
+    [],
+  );
+  // The namespace and the table the composer is handed, standalone for the
+  // same reason: the composer allocates into the one and wires the other onto
+  // the topic it files, so a browser create is named exactly as a headless one
+  // is.
+  const profileBoardNames = new Writable<NamesTableRow[] | Default<[]>>([]);
+  const profileNames = new Writable<NamesMap>({});
   const profileTitleDraft = new Writable("Profile topic");
-  const profileLegacyName = new Writable<string | Default<"">>("");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
   const profileCommentDraft = new Writable("via the profile composer");
   const profileBody = new Writable<string | Default<"">>("old body");
@@ -151,6 +252,16 @@ export default pattern(() => {
   const profileLinkUrlDraft = new Writable("https://example.com/profile-link");
   const profileLinkLabelDraft = new Writable("profile link");
   const profileLinkKindDraft = new Writable<TopicLinkKind>("session");
+  // The durable map starts holding an entry the edit never touches, so a save
+  // that published a stale or empty map would be visible as its loss.
+  // deno-lint-ignore ban-types
+  const profileReferences = new Writable<TopicMentionRefMap | Default<{}>>({
+    kept: { destination: undefined, modifiedTitle: false },
+  });
+  const profileReferencesDraft = new Writable<TopicMentionRefMap>({
+    kept: { destination: undefined, modifiedTitle: false },
+    minted: { destination: undefined, modifiedTitle: true },
+  });
   // Render the same cells the deterministic Profile handlers mutate. This
   // keeps their behavior and the detail UI in one end-to-end test path without
   // inventing a fallback identity for the pattern-test runtime.
@@ -166,8 +277,10 @@ export default pattern(() => {
   const profileSubmitTopic = submitProfileTopic({
     topics: profileTopics,
     mentionable: profileTopics,
+    boardCrossrefs: profileBoardCrossrefs,
+    boardNames: profileBoardNames,
+    names: profileNames,
     newTitle: profileTitleDraft,
-    myName: profileLegacyName,
     profileName: " Ada ",
     profileAvatar: " 🦊 ",
   });
@@ -180,6 +293,8 @@ export default pattern(() => {
   const profileSaveBody = saveProfileBody({
     body: profileBody,
     bodyDraft: profileBodyDraft,
+    references: profileReferences,
+    referencesDraft: profileReferencesDraft,
     editingBody: profileEditingBody,
     bodyUpdatedBy: profileBodyUpdatedBy,
     bodyUpdatedAt: profileBodyUpdatedAt,
@@ -196,6 +311,16 @@ export default pattern(() => {
   });
 
   // --- actions ---
+
+  // The verbs, and every read of what they write, are exercised on a direct
+  // instance. The board's demand carries neither the verbs nor the thread,
+  // links, or update stamps they produce, and a topic built here cannot be put
+  // on a board to be reached through it. `addTopic`'s own create behavior is
+  // still asserted through the board below, on the fields it does demand.
+  const boardVerbTopic = Topic({
+    title: "Board verb target",
+    createdBy: { kind: "agent", name: "Sol" },
+  });
 
   const action_add_first_topic = action(() => {
     board.addTopic.send({ title: "  First topic  ", agentName: "  Sol  " });
@@ -215,48 +340,31 @@ export default pattern(() => {
   });
   const action_link_unsigned_mixed_version_sibling = action(() => {
     mixedMentionable.push(
-      LegacyUnsignedTopic({}) as TopicReference,
+      LegacyUnsignedTopic({}) as TopicPiece,
     );
   });
 
-  // The previous deployed event shapes remain operational while callers
-  // migrate. They use the hidden legacy name cell; new callers always send an
-  // atomic `agentName` instead.
-  const legacyBoard = Topics({});
-  const action_set_legacy_name = action(() => {
-    legacyBoard.setMyName.send({ name: " Legacy User " });
-  });
-  const action_add_legacy_topic = action(() => {
-    legacyBoard.addTopic.send({ title: "Legacy-shaped topic" });
-  });
-  const action_comment_legacy_topic = action(() => {
-    legacyBoard.topics?.[0]?.addComment.send({ body: "legacy comment" });
-  });
-  const action_link_legacy_topic = action(() => {
-    legacyBoard.topics?.[0]?.addLink.send({
-      kind: "web",
-      url: "https://example.com/legacy",
-      label: "legacy link",
-    });
-  });
-  const action_update_legacy_topic_body = action(() => {
-    legacyBoard.topics?.[0]?.setBody.send({ body: "legacy body" });
-  });
-
+  // The unsigned caller is gone. `agentName` is required on every verb, so
+  // there is no legacy board, no hidden name cell, and no unsigned mutation to
+  // exercise — a call without a signature now rejects, which
+  // `topics-rejections.test.tsx` is where it is proven. What that retires with
+  // it: the `myName` fallback, the `createdByName` and `authorName` mirrors it
+  // filled, and the `setBody` path that wrote a body while leaving the
+  // PREVIOUS author's stamps on it.
   const action_comment_signed = action(() => {
-    board.topics?.[0]?.addComment.send({
+    boardVerbTopic.addComment.send({
       body: "hello thread",
       agentName: "Sol",
     });
   });
   const action_set_body = action(() => {
-    board.topics?.[0]?.setBody.send({
+    boardVerbTopic.setBody.send({
       body: "line one\nline two",
       agentName: "Sol",
     });
   });
   const action_link_valid_unlabeled = action(() => {
-    board.topics?.[0]?.addLink.send({
+    boardVerbTopic.addLink.send({
       kind: "pr",
       url: "https://github.com/commontoolsinc/labs/pull/4643",
       label: "  ",
@@ -264,7 +372,7 @@ export default pattern(() => {
     });
   });
   const action_comment_first_again = action(() => {
-    board.topics?.[0]?.addComment.send({
+    boardVerbTopic.addComment.send({
       body: "bumping the first topic",
       agentName: "Sol",
     });
@@ -321,8 +429,9 @@ export default pattern(() => {
     mixedMentionable.get()[0]?.commentCount === 0 &&
     mixedMentionable.get()[0]?.lastActivityAt === 0 &&
     mixedMentionable.get()[0]?.[NAME] === "" &&
-    (mixedMentionConsumer.crossrefs?.refsOut ?? []).length === 0 &&
-    (mixedMentionConsumer.crossrefs?.referencedBy ?? []).length === 0
+    // The consumer holding that list materialized rather than failing argument
+    // validation on the mixed-version link.
+    mixedMentionConsumer[NAME] === "Mixed mention consumer"
   );
 
   const assert_first_topic = assert(() =>
@@ -331,7 +440,6 @@ export default pattern(() => {
     board.topics?.[0]?.body === "" &&
     board.topics?.[0]?.createdBy?.kind === "agent" &&
     board.topics?.[0]?.createdBy?.name === "Sol" &&
-    board.topics?.[0]?.createdByName === "Sol (agent)" &&
     (board.topics?.[0]?.createdAt ?? 0) > 0 &&
     board.topics?.[0]?.commentCount === 0 &&
     board.topics?.[0]?.lastActivityAt === board.topics?.[0]?.createdAt &&
@@ -339,31 +447,29 @@ export default pattern(() => {
   );
 
   const assert_comment_landed = assert(() =>
-    board.topics?.[0]?.commentCount === 1 &&
-    board.topics?.[0]?.comments?.[0]?.author?.kind === "agent" &&
-    board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
-    board.topics?.[0]?.comments?.[0]?.authorName === "Sol (agent)" &&
-    board.topics?.[0]?.comments?.[0]?.body === "hello thread" &&
-    (board.topics?.[0]?.comments?.[0]?.sentAt ?? 0) > 0 &&
-    (board.topics?.[0]?.lastActivityAt ?? 0) >=
-      (board.topics?.[0]?.createdAt ?? 0)
+    boardVerbTopic.commentCount === 1 &&
+    boardVerbTopic.comments?.[0]?.author?.kind === "agent" &&
+    boardVerbTopic.comments?.[0]?.author?.name === "Sol" &&
+    boardVerbTopic.comments?.[0]?.body === "hello thread" &&
+    (boardVerbTopic.comments?.[0]?.sentAt ?? 0) > 0 &&
+    (boardVerbTopic.lastActivityAt ?? 0) >= (boardVerbTopic.createdAt ?? 0)
   );
 
   const assert_body_set = assert(() =>
-    board.topics?.[0]?.body === "line one\nline two" &&
-    board.topics?.[0]?.bodyUpdatedBy?.kind === "agent" &&
-    board.topics?.[0]?.bodyUpdatedBy?.name === "Sol" &&
-    (board.topics?.[0]?.bodyUpdatedAt ?? 0) > 0
+    boardVerbTopic.body === "line one\nline two" &&
+    boardVerbTopic.bodyUpdatedBy?.kind === "agent" &&
+    boardVerbTopic.bodyUpdatedBy?.name === "Sol" &&
+    (boardVerbTopic.bodyUpdatedAt ?? 0) > 0
   );
 
   // A valid https link with a blank label defaults its label to the URL.
   const assert_link_added = assert(() =>
-    (board.topics?.[0]?.links ?? []).length === 1 &&
-    board.topics?.[0]?.links?.[0]?.kind === "pr" &&
-    board.topics?.[0]?.links?.[0]?.label ===
+    (boardVerbTopic.links ?? []).length === 1 &&
+    boardVerbTopic.links?.[0]?.kind === "pr" &&
+    boardVerbTopic.links?.[0]?.label ===
       "https://github.com/commontoolsinc/labs/pull/4643" &&
-    board.topics?.[0]?.links?.[0]?.addedBy?.name === "Sol" &&
-    (board.topics?.[0]?.links?.[0]?.addedAt ?? 0) > 0
+    boardVerbTopic.links?.[0]?.addedBy?.name === "Sol" &&
+    (boardVerbTopic.links?.[0]?.addedAt ?? 0) > 0
   );
 
   const assert_second_topic = assert(() =>
@@ -381,9 +487,11 @@ export default pattern(() => {
     // Body-at-create: preserved VERBATIM (whitespace-sensitive Markdown must
     // survive, matching setBody), and NOT a body update — the update stamps
     // stay unset (createdBy covers create authorship).
-    board.topics?.[2]?.body === "    indented code\nline two\n" &&
-    (board.topics?.[2]?.bodyUpdatedBy?.name ?? "") === "" &&
-    (board.topics?.[2]?.bodyUpdatedAt ?? 0) === 0
+    // Preserved VERBATIM: whitespace-sensitive Markdown must survive, matching
+    // setBody. That it is NOT recorded as a body update reads `bodyUpdatedBy/At`,
+    // which the board does not demand, and is guarded in
+    // `integration/topic-board-child-contract.test.ts`.
+    board.topics?.[2]?.body === "    indented code\nline two\n"
   );
 
   const assert_blank_draft_rejected = assert(() =>
@@ -401,50 +509,6 @@ export default pattern(() => {
     directTopic.body === "line one\nline two"
   );
 
-  const assert_legacy_fields_load = assert(() =>
-    legacy.createdByName === "Legacy Person" &&
-    legacy.createdBy?.kind === "person" &&
-    legacy.createdBy?.name === "Legacy Person" &&
-    legacy.comments?.[0]?.authorName === "Old Agent" &&
-    legacy.comments?.[0]?.author === undefined &&
-    topicAuthorLabel(legacy.createdBy, legacy.createdByName) ===
-      "Legacy Person" &&
-    topicAuthorLabel(
-        legacy.comments?.[0]?.author,
-        legacy.comments?.[0]?.authorName,
-      ) === "Old Agent"
-  );
-
-  const assert_legacy_name_set = assert(() =>
-    legacyBoard.myName === "Legacy User"
-  );
-
-  const assert_legacy_topic_created = assert(() =>
-    legacyBoard.topicCount === 1 &&
-    legacyBoard.topics?.[0]?.title === "Legacy-shaped topic" &&
-    legacyBoard.topics?.[0]?.createdBy?.kind === "person" &&
-    legacyBoard.topics?.[0]?.createdBy?.name === "Legacy User" &&
-    legacyBoard.topics?.[0]?.createdByName === "Legacy User"
-  );
-
-  const assert_legacy_comment_landed = assert(() =>
-    legacyBoard.topics?.[0]?.comments?.[0]?.author === undefined &&
-    legacyBoard.topics?.[0]?.comments?.[0]?.authorName === "Legacy User" &&
-    legacyBoard.topics?.[0]?.comments?.[0]?.body === "legacy comment"
-  );
-
-  const assert_legacy_link_landed = assert(() =>
-    legacyBoard.topics?.[0]?.links?.[0]?.addedBy === undefined &&
-    legacyBoard.topics?.[0]?.links?.[0]?.label === "legacy link"
-  );
-
-  const assert_legacy_body_landed = assert(() =>
-    legacyBoard.topicCount === 1 &&
-    legacyBoard.topics?.[0]?.body === "legacy body" &&
-    (legacyBoard.topics?.[0]?.bodyUpdatedBy?.name ?? "") === "" &&
-    (legacyBoard.topics?.[0]?.bodyUpdatedAt ?? 0) === 0
-  );
-
   const assert_profile_topic_submitted = assert(() => {
     const list = profileTopics.get() ?? [];
     return list.length === 1 &&
@@ -452,9 +516,19 @@ export default pattern(() => {
       list[0]?.createdBy?.kind === "person" &&
       list[0]?.createdBy?.name === "Ada" &&
       list[0]?.createdBy?.avatar === "🦊" &&
-      list[0]?.createdByName === "Ada" &&
       profileTitleDraft.get() === "";
   });
+
+  // The browser composer allocates out of the same namespace the headless
+  // create does, in the same transaction as its append: drop the allocation
+  // and the map stays empty while the topic still lands.
+  const assert_profile_topic_named = assert(() =>
+    Object.keys(profileNames.get()).join(",") === "1" &&
+    equals(
+      profileNames.get()["1"] as object,
+      profileTopics.key(0),
+    )
+  );
 
   const assert_profile_comment_submitted = assert(() => {
     const list = profileComments.get() ?? [];
@@ -463,7 +537,6 @@ export default pattern(() => {
       list[0]?.author?.kind === "person" &&
       list[0]?.author?.name === "Ada" &&
       list[0]?.author?.avatar === "🦊" &&
-      list[0]?.authorName === "Ada" &&
       (list[0]?.sentAt ?? 0) > 0 &&
       profileCommentDraft.get() === "";
   });
@@ -475,6 +548,15 @@ export default pattern(() => {
     profileBodyUpdatedAt.get() > 0 &&
     profileEditingBody.get() === false
   );
+
+  // The staged map publishes with the prose, entry for entry: the one the
+  // draft minted arrives, and the one it inherited survives.
+  const assert_profile_references_published = assert(() => {
+    const published = (profileReferences.get() ?? {}) as TopicMentionRefMap;
+    return Object.keys(published).toSorted().join(",") === "kept,minted" &&
+      published.minted?.modifiedTitle === true &&
+      published.kept?.modifiedTitle === false;
+  });
 
   const assert_profile_link_submitted = assert(() => {
     const list = profileLinks.get() ?? [];
@@ -492,6 +574,42 @@ export default pattern(() => {
   });
 
   // A fresh comment on the FIRST topic makes it the most recently active.
+  // The pivot's join, handed a list a board cannot produce: the SAME topic at
+  // two indices. That is the only shape that separates the rule the pivot
+  // actually holds — exclude by identity — from the one that passes every
+  // board-built test, exclude by array position. With a position check the
+  // twin at index 1 is not excluded, its mention of `twin` matches, and a
+  // topic that only ever mentioned itself is reported as referenced from
+  // elsewhere.
+  const twinA = Topic({ title: "Twin" });
+  const twinB = Topic({ title: "Other" });
+  const assert_self_mention_inert_through_a_twin = assert(() =>
+    mentionedBy(twinA, [twinA, twinA, twinB], [[twinA], [twinA], []])
+        .length === 0 &&
+    // The same list still reports a real inbound edge, so the exclusion is
+    // not simply swallowing everything.
+    mentionedBy(twinB, [twinA, twinA, twinB], [[twinB], [twinB], []])
+        .length === 2
+  );
+
+  // A source mid-sync reads back as undefined, and taking `.mentions` of that
+  // throws — which killed the pivot and, with it, the append that produced the
+  // half-written source. The first two entries are what a settled board looks
+  // like; the third is the one that used to throw. Reading its list as
+  // undefined is exactly what `mentionedBy` above declares and guards.
+  const assert_mention_lists_tolerate_a_mid_sync_source = assert(() => {
+    const settled = (m: unknown[]) => ({ get: () => ({ mentions: m }) });
+    const midSync = { get: () => undefined };
+    const lists = mentionListsOf([settled([twinA]), settled([]), midSync]);
+    return lists.length === 3 &&
+      (lists[0] as unknown[]).length === 1 &&
+      (lists[1] as unknown[]).length === 0 &&
+      lists[2] === undefined &&
+      // And the consumer stays usable on that output rather than merely not
+      // throwing: the mid-sync row contributes no inbound edge.
+      mentionedBy(twinB, [twinA, twinB], [[twinB], undefined]).length === 1;
+  });
+
   const assert_pure_helpers = assert(() =>
     snippet("a b  c", 3) === "a b…" &&
     snippet("hi", 10) === "hi" &&
@@ -501,235 +619,533 @@ export default pattern(() => {
     isSafeLinkUrl("HTTP://EXAMPLE.COM") === true &&
     isSafeLinkUrl("javascript:alert(1)") === false &&
     isSafeLinkUrl("   ") === false &&
-    topicAuthorLabel(
-        { kind: "person", name: "" },
-        "Legacy Person",
-      ) === "Legacy Person"
+    // An author with no name reads as "someone" rather than as blank; the
+    // legacy display name that used to stand in here is retired.
+    topicAuthorLabel({ kind: "person", name: "" }) === "someone" &&
+    topicAuthorLabel({ kind: "agent", name: "Sol" }) === "Sol (agent)"
   );
 
-  // --- crossrefs: the derived prose reference graph ---
+  // --- index: the board's bounded discovery surface ---
 
-  // Fid-free corpus: rows exist (one per topic, self-describing via `topic`),
-  // every fid is a real tagged hash, and no edges are claimed. Pins the
-  // fid1-tag assumption the prose scan relies on — if entity ids ever stop
-  // being fid1-tagged, this fails loudly instead of edges silently vanishing.
-  // Runs at the two-topic point: the edge that follows must exist while the
-  // harness still evaluates the board's card-list computed, so the chip
-  // branches render (and count as covered), not just the data layer.
-  const assert_crossrefs_baseline = assert(() =>
-    (board.crossrefs ?? []).length === 2 &&
-    board.crossrefs?.[0]?.fid?.startsWith("fid1:") === true &&
-    (board.crossrefs?.[0]?.fid ?? "").length > 25 &&
-    board.crossrefs?.[0]?.topic?.title === "First topic" &&
-    board.crossrefs?.[1]?.topic?.title === "Second topic" &&
-    (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 0 &&
-    (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[1]?.referencedBy ?? []).length === 0
+  // Address-plus-summary rows mirror the board at the two-topic point: every
+  // The summary scalars answer the survey questions directly, off the topic
+  // each row is.
+  //
+  // Runs while the harness still evaluates the board's card-list computed, so
+  // the card branches render (and count as covered), not just the data layer.
+  const assert_index_baseline = assert(() =>
+    (board.index ?? []).length === 2 &&
+    board.index?.[0]?.title === "First topic" &&
+    (board.index?.[0]?.createdAt ?? 0) > 0 &&
+    board.index?.[0]?.createdBy?.kind === "agent" &&
+    board.index?.[0]?.createdBy?.name === "Sol" &&
+    (board.index?.[0]?.lastActivityAt ?? 0) >=
+      (board.index?.[0]?.createdAt ?? 0) &&
+    board.index?.[1]?.title === "Second topic"
   );
 
-  // A pasted page URL in a body creates the edge on both ends.
-  const action_body_ref_first = action(() => {
-    const fid = board.crossrefs?.[0]?.fid ?? "";
-    board.topics?.[1]?.setBody.send({
-      body: `relates to https://estuary.example/topics-dev/${fid} directly`,
-      agentName: "Sol",
-    });
+  // The bound itself: serializing the whole index carries no expanded piece
+  // content (body/comments/links), no verb streams, and no runtime values —
+  // the declared schema, not reader discipline, is the guarantee.
+  const assert_index_bounded = assert(() => {
+    const rows = board.index ?? [];
+    if (rows.length < 2) return false;
+    const serialized = JSON.stringify(rows);
+    return !serialized.includes('"body"') &&
+      !serialized.includes('"comments"') &&
+      !serialized.includes('"links"') &&
+      !serialized.includes('"addComment"') &&
+      !serialized.includes('"setBody"') &&
+      !serialized.includes('"addLink"') &&
+      !serialized.includes("vnode");
   });
-  const assert_body_edge = assert(() =>
-    (board.crossrefs?.[1]?.refsOut ?? []).length === 1 &&
-    board.crossrefs?.[1]?.refsOut?.[0]?.title === "First topic" &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
-    board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Second topic" &&
-    (board.crossrefs?.[0]?.refsOut ?? []).length === 0
+
+  // The index tracks the board rather than snapshotting it: a topic added
+  // later gets its own row, with its own scalars.
+  const assert_index_tracks_the_board = assert(() =>
+    (board.index ?? []).length === 3 &&
+    board.index?.[2]?.title === "Composed topic" &&
+    // That a row carries a count updated AFTER the row was built needs a
+    // comment landing on a topic the board holds, and a comment can only be
+    // sent to an instance this test holds directly — which cannot also be on
+    // the board. That claim is guarded in
+    // `integration/topic-board-child-contract.test.ts` ("carries the updated
+    // comment count on the board's index row"); what stays here is that the
+    // index tracks the board's membership.
+    board.index?.[2]?.createdBy?.name === "Sol"
   );
-
-  // Detail-page view of the same edge: each board-created topic derives its
-  // own row from the mentionable siblings wired at creation (piece-valued,
-  // resolved from `mentionable` = the board's own list), while a piece with no
-  // mentionable derives empty sets.
-  const assert_detail_edges = assert(() => {
-    return board.topics?.[1]?.crossrefs?.refsOut?.[0]?.title ===
-        "First topic" &&
-      (board.topics?.[1]?.crossrefs?.refsOut ?? []).length === 1 &&
-      (board.topics?.[1]?.crossrefs?.referencedBy ?? []).length === 0 &&
-      board.topics?.[0]?.crossrefs?.referencedBy?.[0]?.title ===
-        "Second topic" &&
-      (board.topics?.[0]?.crossrefs?.referencedBy ?? []).length === 1 &&
-      (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0;
-  });
-
-  const assert_lone_edgeless = assert(() => {
-    return (lone.crossrefs?.refsOut ?? []).length === 0 &&
-      (lone.crossrefs?.referencedBy ?? []).length === 0;
-  });
 
   // Pin the persisted navigation contract directly. A cold renderer must see
-  // ordinary cf-cell-link destinations, never pattern-owned handler streams.
+  // ordinary cf-cell-link destinations, never pattern-owned handler streams —
+  // a card addresses the topic's own cell, so the markup survives a reload
+  // that no ephemeral event stream would.
   const assert_cell_link_markup = assert(() => {
-    const rows = board.crossrefs ?? [];
-    if (rows.length < 2 || !rows[0]?.fid || !rows[1]?.fid) return false;
-    const row = crossrefLinkRow("references →", [
-      { fid: rows[0].fid, title: rows[0].topic.title },
-      { fid: rows[1].fid, title: rows[1].topic.title },
-    ]);
-    const open = topicCellLink(rows[0].fid, "Open");
-    const rowLinks = findAllByTag(row, "cf-cell-link");
-    const openLinks = findAllByTag(open, "cf-cell-link");
-    return row !== null &&
-      open !== null &&
-      rowLinks.length === 2 &&
-      openLinks.length === 1 &&
-      propValue(rowLinks[0].props.link) === `/of:${rows[0].fid}` &&
-      propValue(rowLinks[1].props.link) === `/of:${rows[1].fid}` &&
-      propValue(openLinks[0].props.link) === `/of:${rows[0].fid}` &&
-      propValue(openLinks[0].props.label) === "Open" &&
-      propValue(openLinks[0].props.static) === true &&
-      openLinks[0].props.onClick === undefined &&
-      openLinks[0].props["oncf-click"] === undefined &&
-      crossrefLinkRow("← referenced by", []) === null &&
-      topicCellLink("", "Open") === null;
-  });
-
-  // A share link in a comment counts too — its colon is percent-encoded.
-  const action_comment_ref_encoded = action(() => {
-    const enc = (board.crossrefs?.[0]?.fid ?? "").replace(":", "%3A");
-    board.topics?.[2]?.addComment.send({
-      body: `shared as ?shared-pattern=estuary%2Ftopics-dev%2F${enc}`,
-      agentName: "Sol",
-    });
-  });
-  const assert_comment_edge = assert(() =>
-    (board.crossrefs?.[2]?.refsOut ?? []).length === 1 &&
-    board.crossrefs?.[2]?.refsOut?.[0]?.title === "First topic" &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
-  );
-
-  // A structured link's URL is part of the corpus (scan ∪ TopicLink).
-  const action_link_ref_second = action(() => {
-    board.topics?.[2]?.addLink.send({
-      kind: "topic",
-      url: `https://estuary.example/topics-dev/${
-        board.crossrefs?.[1]?.fid ?? ""
-      }`,
-      label: "the second topic",
-      agentName: "Sol",
-    });
-  });
-  const assert_link_edge = assert(() =>
-    (board.crossrefs?.[2]?.refsOut ?? []).length === 2 &&
-    board.crossrefs?.[2]?.refsOut?.[1]?.title === "Second topic" &&
-    (board.crossrefs?.[1]?.referencedBy ?? []).length === 1 &&
-    board.crossrefs?.[1]?.referencedBy?.[0]?.title === "Composed topic"
-  );
-
-  // Mentioning yourself or a fid nothing on the board owns adds no edges.
-  const action_self_and_unknown_ref = action(() => {
-    const own = board.crossrefs?.[0]?.fid ?? "";
-    board.topics?.[0]?.setBody.send({
-      body: `self ${own} and unknown fid1:${"Z".repeat(43)} stay edgeless`,
-      agentName: "Sol",
-    });
-  });
-  const assert_self_unknown_ignored = assert(() =>
-    (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
-  );
-
-  // Nothing is persisted: retract the prose and the edge is simply gone.
-  const action_remove_body_ref = action(() => {
-    board.topics?.[1]?.setBody.send({
-      body: "no references anymore",
-      agentName: "Sol",
-    });
-  });
-  const assert_edge_removed = assert(() =>
-    (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
-    board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Composed topic"
-  );
-
-  // The fid-scanning helpers, over every pasted shape (bare, of:-prefixed,
-  // percent-encoded) plus the non-matches (short payloads, non-fid hashes).
-  const P1 = "A".repeat(43);
-  const P2 = "B".repeat(43);
-  const assert_crossref_helpers = assert(() =>
-    extractFidPayloads(
-        `a fid1:${P1} b of:fid1:${P2} c fid1%3A${P1}`,
-      ).join(",") === `${P1},${P2},${P1}` &&
-    extractFidPayloads("no fids here, not even fid1:tooshort").length === 0 &&
-    extractFidPayloads("").length === 0 &&
-    fidPayload(`fid1:${P1}`) === P1 &&
-    fidPayload(` fid1:${P1} `) === P1 &&
-    fidPayload("of:fid1:" + P1) === "" &&
-    fidPayload("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy") === "" &&
-    fidPayload("") === ""
-  );
-
-  // The shared join (the piece notes imports when backlinks-index's write
-  // path retires): one payload→entry map, one scan per corpus. First-mention
-  // order out, ascending referrers in; repeats, self-mentions, and payloads
-  // no entry owns all drop.
-  const assert_crossref_join = assert(() => {
-    const P3 = "C".repeat(43);
-    const joined = crossrefJoin(
-      [
-        `self fid1:${P1} then fid1:${P2}`,
-        "",
-        `fid1:${P2} twice fid1:${P2} then fid1:${P1} unknown fid1:${
-          "Z".repeat(43)
-        }`,
-      ],
-      [P1, P2, P3],
+    const openLinks = findAllByTag(board[UI], "cf-cell-link");
+    if (openLinks.length === 0) return false;
+    const topics = board.topics ?? [];
+    return openLinks.every((link) =>
+      propValue(link.props.label) === "Open" &&
+      propValue(link.props.static) === true &&
+      link.props.onClick === undefined &&
+      link.props["oncf-click"] === undefined &&
+      // What the link points at is half the contract, and the half a rendered
+      // card still looks right without. A binding to anything but the topic —
+      // a view built for the card, a step into the board's own list — renders
+      // the same chip, and only a browser following it finds it leads nowhere.
+      topics.some((topic) => equals(topic, link.props["$cell"]))
     );
-    return joined.refsOut[0].join(",") === "1" &&
-      joined.refsOut[1].join(",") === "" &&
-      joined.refsOut[2].join(",") === "1,0" &&
-      joined.referencedBy[0].join(",") === "2" &&
-      joined.referencedBy[1].join(",") === "0,2" &&
-      joined.referencedBy[2].join(",") === "" &&
-      topicCorpus({
-          body: "b",
-          comments: [{ body: "c" }],
-          links: [{ url: "u" }],
-        }) === "b\nc\nu" &&
-      topicCorpus(undefined) === "";
   });
+
+  // --- mentionable: the board's mention index ---
+
+  // The mention index mirrors the board as COPIES plus a reference: the two
+  // strings the autocomplete needs are in the rows themselves, and `piece`
+  // is the topic each row stands for — the same document, by identity.
+  const assert_mention_index_baseline = assert(() =>
+    (board.mentionable ?? []).length === 2 &&
+    board.mentionable?.[0]?.[NAME] === "First topic" &&
+    board.mentionable?.[0]?.title === "First topic" &&
+    board.mentionable?.[1]?.[NAME] === "Second topic" &&
+    equals(
+      board.mentionable?.[0]?.piece as object,
+      board.topics?.[0] as object,
+    ) &&
+    equals(
+      board.mentionable?.[1]?.piece as object,
+      board.topics?.[1] as object,
+    )
+  );
+
+  // The bound: one self-contained list of scalars and held references.
+  // Serializing every row carries no expanded topic content, no verb
+  // streams, and no runtime values — the copies plus a link each, nothing
+  // else. The declared row schema, not reader discipline, is the guarantee.
+  const assert_mention_index_bounded = assert(() => {
+    const rows = board.mentionable ?? [];
+    if (rows.length < 2) return false;
+    const serialized = JSON.stringify(rows);
+    return !serialized.includes('"body"') &&
+      !serialized.includes('"comments"') &&
+      !serialized.includes('"addComment"') &&
+      !serialized.includes("vnode");
+  });
+
+  // The index tracks the board rather than snapshotting it: a topic added
+  // later gets its own row, standing for the new topic by identity.
+  const assert_mention_index_tracks_the_board = assert(() =>
+    (board.mentionable ?? []).length === 3 &&
+    board.mentionable?.[2]?.[NAME] === "Composed topic" &&
+    equals(
+      board.mentionable?.[2]?.piece as object,
+      board.topics?.[2] as object,
+    )
+  );
+
+  // The derivation's own rules, on sources a board cannot produce mid-run:
+  // a mid-sync entry contributes no row, the display name falls back to the
+  // persisted title until a topic derives its `[NAME]` (and past a blank
+  // one), the collection's name for a member is copied off the member's own
+  // and reads blank where it has none, and a row records its SOURCE as
+  // `piece` — identity, not a copy.
+  const assert_mention_index_rows_pure = assert(() => {
+    const named = {
+      get: () => ({ [NAME]: "Named", title: "Titled", shortName: "42" }),
+    };
+    const cold = {
+      get: () => ({ [NAME]: undefined, title: "Cold title" }),
+    };
+    const blankName = { get: () => ({ [NAME]: "", title: "Blank name" }) };
+    const midSync = { get: () => undefined };
+    const rows = mentionableRowsOf(
+      [named, cold, midSync, blankName, undefined],
+    );
+    return rows.length === 3 &&
+      rows[0]?.[NAME] === "Named" &&
+      rows[0]?.title === "Titled" &&
+      rows[0]?.shortName === "42" &&
+      rows[0]?.piece === named &&
+      rows[1]?.[NAME] === "Cold title" &&
+      rows[1]?.shortName === "" &&
+      rows[2]?.[NAME] === "Blank name" &&
+      rows[2]?.piece === blankName;
+  });
+
+  // A topic accepts the index's rows as its mention universe — the exact
+  // list the backfill rewires onto every existing topic. The consumer
+  // materializing proves the three-string demand validates a row list; the
+  // read-back proves the row landed with its copies intact and its piece
+  // still a reference, not a flattened copy of the cell.
+  const rowPieceTarget = new Writable({ title: "Row piece target" });
+  const rowUniverse = new Writable<MentionableRow[] | Default<[]>>([]);
+  const rowUniverseConsumer = Topic({
+    title: "Row universe consumer",
+    mentionable: rowUniverse,
+  });
+  const action_seed_row_universe = action(() => {
+    rowUniverse.push({
+      [NAME]: "Seeded row",
+      title: "Seeded row",
+      shortName: "7",
+      piece: rowPieceTarget,
+    });
+  });
+  const assert_row_universe_accepted = assert(() =>
+    rowUniverse.get().length === 1 &&
+    rowUniverse.get()[0]?.[NAME] === "Seeded row" &&
+    rowUniverse.get()[0]?.shortName === "7" &&
+    equals(rowUniverse.get()[0]?.piece as object, rowPieceTarget) &&
+    rowUniverseConsumer[NAME] === "Row universe consumer"
+  );
+
+  // --- mention retraction through the UI affordance ---
+
+  // The board's mention PIVOT is no longer exercisable from a pattern test.
+  // Its rules need topics that are on a board and have callable verbs at the
+  // same time, and the board's demand carries no verbs while a topic built
+  // here cannot be put on a board at all — `push` reports a schema mismatch,
+  // seeding the array hits `Cell.of()`'s static-data rule, and the piece
+  // controller's `input` is refused by `assertSchemaSubset`. Those rules moved
+  // rather than went: a pivot row per topic, a self-mention earning no inbound
+  // edge, two mentions each landing their own, and an unmention dropping only
+  // what it retracted are all in
+  // `packages/patterns/integration/topic-board-child-contract.test.ts`, and
+  // the identity-not-position rule the duplicate-listing case guarded is in
+  // `assert_self_mention_inert_through_a_twin` above, which hands
+  // `mentionedBy` a list a board cannot produce.
+  //
+  // What stays here is the part that never needed the pivot: `dropMention` is
+  // a UI affordance over a caller's own list, and it needs two piece
+  // identities and nothing else.
+  // Plain cells rather than Topic pieces. `dropMention` removes by IDENTITY —
+  // `removeByValue` matches a cell by its link — so a cell is a faithful stand
+  // -in for the piece a real caller would hold, and the rule under test is the
+  // same. A piece built in the pattern body cannot be pushed into a list at
+  // all (the write reports a schema mismatch and the action never runs), which
+  // is why the entries a board once supplied cannot simply be rebuilt here.
+  // `mention` and `unmention` themselves, on a directly held topic. The board's
+  // PIVOT needs a board — that is why its cases live in
+  // `integration/topic-board-child-contract.test.ts` — but these verbs do not:
+  // each one writes the topic's OWN `mentioned` list, and the set semantics
+  // that make them mergeable are the part worth pinning here.
+  // --- Stamped removals (Stage C item 1) ---
+  //
+  // A retraction stamps the record and leaves it in place. Driven on a
+  // directly held topic that owns its own cells, for the reason the mention
+  // cases below are: these verbs write the topic's OWN lists, and the caller
+  // has to hand each one a REFERENCE to a stored element, which a projected
+  // array read back off a board cannot supply.
+  const retractionComments = new Writable<TopicComment[]>([]);
+  const retractionLinks = new Writable<TopicLink[]>([]);
+  const retractionSubject = Topic({
+    title: "Retraction subject",
+    comments: retractionComments,
+    links: retractionLinks,
+  });
+
+  const action_retraction_setup = action(() => {
+    retractionSubject.addComment.send({
+      body: "first thought",
+      agentName: "Sol",
+    });
+    // A second comment, so the thread's sort comparator actually compares.
+    // One comment sorts without ever calling it, which leaves the ordering
+    // rule — the thing that decides what a reader sees first — unexercised.
+    retractionSubject.addComment.send({
+      body: "second thought",
+      agentName: "Sol",
+    });
+    retractionSubject.addLink.send({
+      url: "https://example.com/a-page",
+      agentName: "Sol",
+    });
+  });
+
+  const action_edit_comment = action(() => {
+    retractionSubject.editComment.send({
+      comment: retractionComments.key(0),
+      body: "first thought, revised",
+      agentName: "Sol",
+    });
+  });
+
+  // An edit revises the body and stamps `editedAt`, leaving `author` and
+  // `sentAt` alone: an edit changes what was said, not who said it.
+  const assert_comment_edited = assert(() =>
+    retractionSubject.commentCount === 2 &&
+    retractionSubject.comments?.[0]?.body === "first thought, revised" &&
+    retractionSubject.comments?.[0]?.author?.name === "Sol" &&
+    (retractionSubject.comments?.[0]?.editedAt ?? 0) > 0 &&
+    retractionSubject.comments?.[0]?.removedAt === undefined
+  );
+
+  // What the view projection actually carries, which reading the stored
+  // records cannot tell you. `commentsView` filters inside `computed()` and
+  // its lambda touches only `removedAt`, so if this family's demand is
+  // usage-lowered all the way down, the rendered rows would come back with
+  // their bodies absent and every assertion above would still pass. Asserting
+  // through the render is the only place that shows.
+  const assert_rendered_thread_carries_bodies = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return serialized.includes("first thought, revised") &&
+      serialized.includes("Sol");
+  });
+
+  const action_remove_comment = action(() => {
+    retractionSubject.removeComment.send({
+      comment: retractionComments.key(0),
+      agentName: "Sol",
+    });
+  });
+
+  // Stamped, not deleted: the record is still stored and still carries what it
+  // said, while the count stops counting it.
+  const assert_comment_retracted = assert(() =>
+    retractionSubject.commentCount === 1 &&
+    (retractionSubject.comments ?? []).length === 2 &&
+    retractionSubject.comments?.[0]?.body === "first thought, revised" &&
+    (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.comments?.[0]?.removedBy?.name === "Sol"
+  );
+
+  // The reason the design is stamped rather than deleted, stated as the
+  // invariant rather than as a before-and-after. `lastActivityAt` is a max
+  // over what the arrays HOLD, so the retracted comment's own stamps are
+  // still in it — and the retraction, being the newest thing that happened,
+  // is what the max now equals. Skip retracted records in `lastActivityOf`
+  // and this reads the link's older `addedAt` instead, which is exactly the
+  // backwards move that would reorder the board under a reader.
+  const assert_retraction_moved_activity_forward = assert(() =>
+    (retractionSubject.comments?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.lastActivityAt ===
+      retractionSubject.comments?.[0]?.removedAt
+  );
+
+  // And the other direction: a retracted comment leaves the rendered thread,
+  // so the filter that `commentCount` applies is the same one the reader sees.
+  const assert_retracted_comment_leaves_the_render = assert(() => {
+    const serialized = JSON.stringify(retractionSubject[UI]);
+    return !serialized.includes("first thought, revised");
+  });
+
+  const action_remove_link_by_url = action(() => {
+    retractionSubject.removeLink.send({
+      url: "https://example.com/a-page",
+      agentName: "Sol",
+    });
+  });
+
+  // The url spelling reaches a stored record — the spelling that exists
+  // because a link carries no fid for a CLI caller to name.
+  const assert_link_retracted = assert(() =>
+    (retractionSubject.links ?? []).length === 1 &&
+    (retractionSubject.links?.[0]?.removedAt ?? 0) > 0 &&
+    retractionSubject.links?.[0]?.removedBy?.name === "Sol"
+  );
+
+  const mentionSubject = Topic({ title: "Mention subject" });
+  // Plain cells, because `MentionEvent.topic` declares `Writable<{ title }>`
+  // rather than a piece: the verb matches by cell identity, and a piece built
+  // in a pattern body cannot be handed to one anyway.
+  const mentionTargetA = new Writable({ title: "Mention target A" });
+  const mentionTargetB = new Writable({ title: "Mention target B" });
+  // A link on the same topic, so the outbound-reference derivation runs over
+  // all three of its sources rather than two. A web URL names no piece, so it
+  // resolves to nothing and is filtered out — the mention counts below are
+  // unaffected, which is the point: a link that is just a link adds no edge.
+  const action_mention_subject_gets_a_link = action(() => {
+    mentionSubject.addLink.send({
+      url: "https://example.com/not-a-piece",
+      agentName: "Sol",
+    });
+  });
+  const assert_plain_link_is_no_mention = assert(() =>
+    (mentionSubject.links ?? []).length === 1 &&
+    (mentionSubject.mentions ?? []).length === 0
+  );
+
+  const action_mention_one = action(() => {
+    mentionSubject.mention?.send({ topic: mentionTargetA });
+  });
+  const assert_mention_recorded = assert(() =>
+    (mentionSubject.mentions ?? []).length === 1
+  );
+  const action_mention_same_again = action(() => {
+    mentionSubject.mention?.send({ topic: mentionTargetA });
+  });
+  // A set-add, not an append: referencing the same piece twice is one
+  // reference, which is what makes concurrent mentions mergeable.
+  const assert_repeat_mention_is_one = assert(() =>
+    (mentionSubject.mentions ?? []).length === 1
+  );
+  const action_mention_second = action(() => {
+    mentionSubject.mention?.send({ topic: mentionTargetB });
+  });
+  const assert_two_distinct_mentions = assert(() =>
+    (mentionSubject.mentions ?? []).length === 2
+  );
+  const action_unmention_first = action(() => {
+    mentionSubject.unmention?.send({ topic: mentionTargetA });
+  });
+  // Removal resolves against durable state rather than rewriting the array,
+  // so the survivor stays the reference it was.
+  const assert_only_the_retracted_one_left = assert(() =>
+    (mentionSubject.mentions ?? []).length === 1 &&
+    equals((mentionSubject.mentions ?? [])[0] as object, mentionTargetB)
+  );
+
+  const mentionOne = new Writable({ tag: "mention one" });
+  const mentionTwo = new Writable({ tag: "mention two" });
+  const uiMentioned = new Writable<unknown[] | Default<[]>>([]);
+  const action_ui_mentions_two = action(() => {
+    uiMentioned.push(mentionOne);
+    uiMentioned.push(mentionTwo);
+  });
+  const uiDropMention = dropMention({
+    mentioned: uiMentioned,
+    topic: mentionOne,
+  });
+  const action_drop_one_from_ui = action(() => {
+    uiDropMention.send();
+  });
+  const assert_ui_dropped_only_that_one = assert(() =>
+    uiMentioned.get().length === 1 &&
+    // The survivor is still the piece it was, not a flattened copy of it.
+    equals(uiMentioned.get()[0] as object, mentionTwo)
+  );
+
+  // A piece with no board wired in shows no inbound references rather than
+  // failing: `boardCrossrefs` is optional, as `mentionable` is.
+  const assert_boardless_topic_has_no_backlinks = assert(() =>
+    (directTopic.referencedBy ?? []).length === 0
+  );
+
+  // --- setTitle: the rename verb, direct interface only ---
+
+  const action_rename_direct_topic = action(() => {
+    directTopic.setTitle.send({
+      title: "  Direct topic, renamed  ",
+      agentName: " Sol ",
+    });
+  });
+  // Trimmed title, structured attribution, and the rename moves the activity
+  // clock — a renamed topic surfaces in the board's most-recent sort.
+  const assert_renamed_with_attribution = assert(() =>
+    directTopic.title === "Direct topic, renamed" &&
+    directTopic.titleUpdatedBy?.kind === "agent" &&
+    directTopic.titleUpdatedBy?.name === "Sol" &&
+    (directTopic.titleUpdatedAt ?? 0) > 0 &&
+    directTopic.lastActivityAt === directTopic.titleUpdatedAt
+  );
+
+  // What the HEADER RENDERS, not just what `editingTitle` holds. The two are
+  // different claims: a conditional that tested the cell object rather than
+  // its value would leave `editingTitle` correct and still render the edit
+  // form permanently, and no assertion on the output value can see that.
+  // The title input exists only in the edit branch, and the two link drafts
+  // are the only other `cf-input`s on the page, so the count discriminates:
+  // two while reading, three while renaming.
+  // These assert what RENDERS and nothing else; `editingTitle`'s own value is
+  // covered by the lifecycle assertions below. Keeping them apart matters
+  // here: a session cell's initial value is not observable through the result
+  // until something writes it, so an unwritten `editingTitle` reads back
+  // undefined while the header correctly renders its read branch.
+  const assert_header_reads = assert(() =>
+    findAllByTag(directTopic[UI], "cf-input").length === 2
+  );
+  const assert_header_edits = assert(() =>
+    findAllByTag(directTopic[UI], "cf-input").length === 3
+  );
+
+  // The rename editor's session lifecycle: Edit seeds the draft from the
+  // durable title, Cancel discards without touching it.
+  const action_start_rename_editor = action(() => {
+    directTopic.startEditTitle.send();
+  });
+  const assert_rename_editor_seeded = assert(() =>
+    directTopic.editingTitle === true &&
+    directTopic.titleDraft.get() === "Direct topic, renamed"
+  );
+  const action_cancel_rename_editor = action(() => {
+    directTopic.titleDraft.set("abandoned rename");
+    directTopic.cancelEditTitle.send();
+  });
+  const assert_rename_editor_closed = assert(() =>
+    directTopic.editingTitle === false &&
+    directTopic.title === "Direct topic, renamed"
+  );
+
+  // --- saveProfileTitle: the browser rename, deterministic Profile ---
+  //
+  // Bound to standalone cells like the other Profile handlers, so the
+  // mutation is testable without a wish. The property under test: a browser
+  // rename lands through the same core as the verb, so the title can never
+  // change while titleUpdatedBy keeps describing an earlier rename.
+  const renameTitle = new Writable<string | Default<"">>("Before rename");
+  const renameTitleDraft = new Writable("");
+  const renameEditingTitle = new Writable(false);
+  const renameUpdatedBy = new Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >({ kind: "person", name: "" });
+  const renameUpdatedAt = new Writable<number | Default<0>>(0);
+  const profileSaveTitle = saveProfileTitle({
+    title: renameTitle,
+    titleDraft: renameTitleDraft,
+    editingTitle: renameEditingTitle,
+    titleUpdatedBy: renameUpdatedBy,
+    titleUpdatedAt: renameUpdatedAt,
+    profileName: "Ada",
+    profileAvatar: "🦊",
+  });
+
+  const action_browser_rename = action(() => {
+    renameTitleDraft.set("  After rename  ");
+    renameEditingTitle.set(true);
+    profileSaveTitle.send();
+  });
+  const assert_browser_rename_attributed = assert(() =>
+    renameTitle.get() === "After rename" &&
+    renameUpdatedBy.get()?.kind === "person" &&
+    renameUpdatedBy.get()?.name === "Ada" &&
+    (renameUpdatedAt.get() ?? 0) > 0 &&
+    renameEditingTitle.get() === false
+  );
+
+  // A blank draft is a non-event: nothing lands and the editor stays open.
+  const action_browser_rename_blank = action(() => {
+    renameTitleDraft.set("   ");
+    renameEditingTitle.set(true);
+    profileSaveTitle.send();
+  });
+  const assert_blank_rename_declined = assert(() =>
+    renameTitle.get() === "After rename" &&
+    renameEditingTitle.get() === true
+  );
 
   return {
-    // UI demand (#4715) over the board: its card list — including the in-card
-    // crossref chip rows — renders through the real reconciler while the suite
-    // runs. The cards bind navigation to crossref-row pieces (wrapper-nested),
-    // which need real reconcile cycles to settle, so the passive [UI] export is
-    // backed by explicit `{ render: board[UI] }` steps below. Those cover the
-    // card path in both coverage lanes AND guard the wrapper-bind mechanism: a
-    // silent non-render regression (blank board, no error) would leave those
-    // lines uncovered and trip the coverage gate. A board list element is the
-    // shared-safe TopicPiece projection and exposes no [UI]; the topic detail
-    // page is driven through its own render step.
+    // UI demand (#4715) over the board: its card list renders through the real
+    // reconciler while the suite runs. The cards bind navigation to index-row
+    // pieces (wrapper-nested), which need real reconcile cycles to settle, so
+    // the passive [UI] export is backed by explicit `{ render: board[UI] }`
+    // steps below. Those cover the card path in both coverage lanes AND guard
+    // the wrapper-bind mechanism: a silent non-render regression (blank board,
+    // no error) would leave those lines uncovered and trip the coverage gate. A
+    // board list element is the shared-safe TopicPiece projection and exposes no
+    // [UI]; the topic detail page is driven through its own render step.
     [UI]: board[UI],
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial },
       { action: action_link_unsigned_mixed_version_sibling },
       { assertion: assert_explicit_undefined_author_projection },
       { action: action_submit_profile_topic },
       { assertion: assert_profile_topic_submitted },
+      { assertion: assert_profile_topic_named },
       { action: action_submit_profile_comment },
       { assertion: assert_profile_comment_submitted },
       { action: action_save_profile_body },
       { assertion: assert_profile_body_saved },
+      { assertion: assert_profile_references_published },
       { action: action_submit_profile_link },
       { assertion: assert_profile_link_submitted },
-      { action: action_set_legacy_name },
-      { assertion: assert_legacy_name_set },
-      { action: action_add_legacy_topic },
-      { assertion: assert_legacy_topic_created },
-      { action: action_comment_legacy_topic },
-      { assertion: assert_legacy_comment_landed },
-      { action: action_link_legacy_topic },
-      { assertion: assert_legacy_link_landed },
-      { action: action_update_legacy_topic_body },
-      { assertion: assert_legacy_body_landed },
       // Render the Profile-authored rows after their mutations land, then the
       // edit state whose Save control is disabled until #profile resolves.
       { render: profileTopic[UI] },
@@ -743,20 +1159,33 @@ export default pattern(() => {
       { assertion: assert_body_set },
       { action: action_link_valid_unlabeled },
       { assertion: assert_link_added },
+      { action: action_retraction_setup },
+      { action: action_edit_comment },
+      { assertion: assert_comment_edited },
+      { render: retractionSubject[UI] },
+      { assertion: assert_rendered_thread_carries_bodies },
+      { action: action_remove_comment },
+      { assertion: assert_comment_retracted },
+      { assertion: assert_retraction_moved_activity_forward },
+      { render: retractionSubject[UI] },
+      { assertion: assert_retracted_comment_leaves_the_render },
+      { action: action_remove_link_by_url },
+      { assertion: assert_link_retracted },
       { action: action_add_second_topic },
       { assertion: assert_second_topic },
       { render: board[UI] },
-      { assertion: assert_crossrefs_baseline },
-      { action: action_body_ref_first },
-      { assertion: assert_body_edge },
-      { render: board[UI] },
-      { assertion: assert_detail_edges },
-      { assertion: assert_lone_edgeless },
+      { assertion: assert_index_baseline },
+      { assertion: assert_index_bounded },
+      { assertion: assert_mention_index_baseline },
+      { assertion: assert_mention_index_bounded },
       { assertion: assert_cell_link_markup },
       { render: board[UI] },
       { action: action_comment_first_again },
       { action: action_add_third_topic },
       { assertion: assert_third_topic },
+      { render: board[UI] },
+      { assertion: assert_index_tracks_the_board },
+      { assertion: assert_mention_index_tracks_the_board },
       { action: action_submit_blank_comment_draft },
       { assertion: assert_blank_draft_rejected },
       { action: action_start_edit },
@@ -767,19 +1196,42 @@ export default pattern(() => {
       // Materialize the direct and legacy Topics without putting UI into the
       // board's shared TopicPiece projection.
       { render: directTopic[UI] },
-      { render: legacy[UI] },
-      { assertion: assert_legacy_fields_load },
       { assertion: assert_pure_helpers },
-      { action: action_comment_ref_encoded },
-      { assertion: assert_comment_edge },
-      { action: action_link_ref_second },
-      { assertion: assert_link_edge },
-      { action: action_self_and_unknown_ref },
-      { assertion: assert_self_unknown_ignored },
-      { action: action_remove_body_ref },
-      { assertion: assert_edge_removed },
-      { assertion: assert_crossref_helpers },
-      { assertion: assert_crossref_join },
+      { assertion: assert_mention_index_rows_pure },
+      { action: action_seed_row_universe },
+      { assertion: assert_row_universe_accepted },
+      { assertion: assert_self_mention_inert_through_a_twin },
+      { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
+      { action: action_mention_subject_gets_a_link },
+      { assertion: assert_plain_link_is_no_mention },
+      { action: action_mention_one },
+      { assertion: assert_mention_recorded },
+      { action: action_mention_same_again },
+      { assertion: assert_repeat_mention_is_one },
+      { action: action_mention_second },
+      { assertion: assert_two_distinct_mentions },
+      { action: action_unmention_first },
+      { assertion: assert_only_the_retracted_one_left },
+      { action: action_ui_mentions_two },
+      { action: action_drop_one_from_ui },
+      { assertion: assert_ui_dropped_only_that_one },
+      { assertion: assert_boardless_topic_has_no_backlinks },
+      { action: action_rename_direct_topic },
+      { assertion: assert_renamed_with_attribution },
+      { render: directTopic[UI] },
+      { assertion: assert_header_reads },
+      { action: action_start_rename_editor },
+      { assertion: assert_rename_editor_seeded },
+      { render: directTopic[UI] },
+      { assertion: assert_header_edits },
+      { action: action_cancel_rename_editor },
+      { assertion: assert_rename_editor_closed },
+      { render: directTopic[UI] },
+      { assertion: assert_header_reads },
+      { action: action_browser_rename },
+      { assertion: assert_browser_rename_attributed },
+      { action: action_browser_rename_blank },
+      { assertion: assert_blank_rename_declined },
     ],
   };
 });

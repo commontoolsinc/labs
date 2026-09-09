@@ -1,4 +1,6 @@
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import * as ed25519 from "@noble/ed25519";
+
 import {
   AuthorizationError,
   bytesToDid,
@@ -26,11 +28,25 @@ import {
 // | spki   |   X    |         |
 
 export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
-  #keypair: CryptoKeyPair;
+  /**
+   * The key pair, holding handles. A `CryptoKey` is opaque and carries no
+   * reachable material, and the pair around it is immutable, so the one
+   * instance serves both internal use and every reader.
+   */
+  #keyPair: FabricKeyPair;
+
   #did: ID;
   #verifier: Verifier<ID> | null = null;
-  constructor(keypair: CryptoKeyPair, did: ID) {
-    this.#keypair = keypair;
+
+  /**
+   * Constructs an instance. `keyPair` must hold handles, this being the
+   * implementation that signs with them.
+   */
+  constructor(keyPair: FabricKeyPair, did: ID) {
+    if (keyPair.hasMaterial) {
+      throw new Error("Not a native key pair: it holds material.");
+    }
+    this.#keyPair = keyPair;
     this.#did = did;
   }
 
@@ -41,15 +57,16 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   get verifier(): Verifier<ID> {
     if (!this.#verifier) {
       this.#verifier = new NativeEd25519Verifier<ID>(
-        this.#keypair.publicKey,
+        this.#keyPair.publicCryptoKey,
         this.#did,
       );
     }
     return this.#verifier;
   }
 
-  serialize(): CryptoKeyPair {
-    return this.#keypair;
+  /** @inheritDoc */
+  get keyPair(): FabricKeyPair {
+    return this.#keyPair;
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
@@ -57,7 +74,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       const signature = new Uint8Array(
         await globalThis.crypto.subtle.sign(
           ED25519_ALG,
-          this.#keypair.privateKey,
+          this.#keyPair.privateCryptoKey,
           payload as BufferSource,
         ),
       );
@@ -91,7 +108,10 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       ],
     );
     const did = bytesToDid(new Uint8Array(rawPublic));
-    return new NativeEd25519Signer({ publicKey, privateKey }, did as ID);
+    return new NativeEd25519Signer(
+      new FabricKeyPair({ publicKey, privateKey }),
+      did as ID,
+    );
   }
 
   static async generate<ID extends DIDKey>(): Promise<NativeEd25519Signer<ID>> {
@@ -106,12 +126,12 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       ],
     );
     const did = await didFromPublicKey(keypair.publicKey);
-    return new NativeEd25519Signer(keypair, did as ID);
+    return new NativeEd25519Signer(new FabricKeyPair(keypair), did as ID);
   }
 
-  static async deserialize<ID extends DIDKey>(keypair: CryptoKeyPair) {
-    const did = await didFromPublicKey(keypair.publicKey);
-    return new NativeEd25519Signer(keypair, did as ID);
+  static async fromKeyPair<ID extends DIDKey>(keyPair: FabricKeyPair) {
+    const did = await didFromPublicKey(keyPair.publicCryptoKey);
+    return new NativeEd25519Signer<ID>(keyPair, did as ID);
   }
 }
 

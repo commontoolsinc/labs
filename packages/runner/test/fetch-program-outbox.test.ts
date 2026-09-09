@@ -4,7 +4,7 @@ import {
   DataUnavailable,
   FabricError,
 } from "@commonfabric/data-model/fabric-instances";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";

@@ -1,0 +1,66 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "letters": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "selection": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "visible": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "letters",
+      "selection",
+      "visible"
+    ],
+    "type": "object"
+  },
+  "pattern": "plain-array-callback-locals/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "renameLast": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "selectC": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      }
+    },
+    "required": [
+      "selectC",
+      "renameLast",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

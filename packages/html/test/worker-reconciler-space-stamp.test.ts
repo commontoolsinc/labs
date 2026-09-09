@@ -1,10 +1,19 @@
-import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { VDomOp } from "../src/vdom-ops.ts";
-import { provideElementSpace } from "../src/main/space-context.ts";
+import { assertEquals, assertStrictEquals } from "@std/assert";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { CellHandle } from "@commonfabric/runtime-client";
+
+import {
+  clearPieceBoundary,
+  getPieceBoundary,
+  provideElementSpace,
+  providePieceBoundary,
+  subscribePieceBoundary,
+} from "../src/main/space-context.ts";
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
 
 // Space stamping (seefeldb's #4074 design): each create-element op
 // carries the space of the cell whose render produced it, elided when
@@ -120,7 +129,7 @@ Deno.test("worker reconciler - space stamping across transclusion", async (t) =>
   await storageManager.close();
 });
 
-Deno.test("provideElementSpace answers the context protocol for 'space'", () => {
+Deno.test("element render contexts share the standard context protocol", () => {
   const target = new EventTarget();
   provideElementSpace(target, "did:key:z6Mk-ctx");
   let received: string | undefined;
@@ -153,4 +162,20 @@ Deno.test("provideElementSpace answers the context protocol for 'space'", () => 
   });
   target.dispatchEvent(other);
   assertEquals(otherAnswered, false);
+
+  const cell = {} as CellHandle;
+  providePieceBoundary(target as unknown as Element, cell);
+  const piece = getPieceBoundary(target);
+  assertStrictEquals(piece?.cell, cell);
+  assertStrictEquals(piece?.element, target);
+
+  const deliveries: Array<CellHandle | undefined> = [];
+  const unsubscribe = subscribePieceBoundary(target, (value) => {
+    deliveries.push(value?.cell);
+  });
+  clearPieceBoundary(target as unknown as Element);
+  providePieceBoundary(target as unknown as Element, cell);
+  unsubscribe();
+  clearPieceBoundary(target as unknown as Element);
+  assertEquals(deliveries, [cell, undefined, cell]);
 });

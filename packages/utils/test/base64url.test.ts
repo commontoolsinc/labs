@@ -5,6 +5,7 @@ import {
   fromBase64url,
   toBase64Polyfill,
   toUnpaddedBase64url,
+  toUnpaddedBase64urlFromText,
 } from "@commonfabric/utils/base64url";
 
 const TEST_PAIRS: { arr: readonly number[]; b64: string }[] = [
@@ -34,36 +35,28 @@ function arrayString(arr: readonly number[]): string {
   return result.join("");
 }
 
-// ============================================================================
-// toUnpaddedBase64url and polyfill
-// ============================================================================
-
 for (const toBase64 of [toUnpaddedBase64url, toBase64Polyfill]) {
-  describe(`${toBase64.name}`, () => {
+  describe(`${toBase64.name}()`, () => {
     for (const { arr, b64 } of TEST_PAIRS) {
       const arrStr = arrayString(arr);
-      it(`encodes ${arrStr} to "${b64}"`, () => {
+      it(`encodes ${arrStr} to \`${b64}\``, () => {
         expect(toBase64(new Uint8Array(arr))).toBe(b64);
       });
     }
   });
 }
 
-// ============================================================================
-// fromBase64url and polyfill
-// ============================================================================
-
 for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
-  describe(`${fromBase64.name}`, () => {
+  describe(`${fromBase64.name}()`, () => {
     for (const { arr, b64 } of TEST_PAIRS) {
       const arrStr = arrayString(arr);
       const paddingCount = 2 - ((arr.length + 2) % 3);
       const paddedStr = `${b64}${"=".repeat(paddingCount)}`;
-      it(`decodes "${b64}" to ${arrStr}`, () => {
+      it(`decodes \`${b64}\` to ${arrStr}`, () => {
         expect(fromBase64(b64)).toEqual(new Uint8Array(arr));
       });
       if (paddedStr !== b64) {
-        it(`decodes "${paddedStr}" to ${arrStr}`, () => {
+        it(`decodes \`${paddedStr}\` to ${arrStr}`, () => {
           expect(fromBase64(paddedStr)).toEqual(new Uint8Array(arr));
         });
       }
@@ -71,9 +64,41 @@ for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
   });
 }
 
-// ============================================================================
-// Base64url round-trip
-// ============================================================================
+describe("toUnpaddedBase64urlFromText()", () => {
+  const textEncoder = new TextEncoder();
+
+  // The scratch buffer inside the function holds 4096 bytes, so these cases
+  // land on both sides of it: text that fits, text that is too long to fit,
+  // and text short enough to try but with characters too wide to fit.
+  const CASES: readonly (readonly [string, string])[] = [
+    ["empty text", ""],
+    ["one character", "x"],
+    ["encoded JSON text", `fvj1:{"value":42}`],
+    ["a length that is not a multiple of three", "abcd"],
+    ["two-byte characters", "Ñoño"],
+    ["three-byte characters", "你好世界"],
+    ["an astral-plane character", "🚀"],
+    ["an unpaired surrogate", "a\ud800b"],
+    ["text exactly filling the buffer", "x".repeat(4096)],
+    ["text one character too long for the buffer", "x".repeat(4097)],
+    ["text short enough but too wide for the buffer", "é".repeat(4096)],
+  ] as const;
+
+  for (const [label, text] of CASES) {
+    it(`gives the same answer as encoding to bytes first, for ${label}`, () => {
+      expect(toUnpaddedBase64urlFromText(text)).toBe(
+        toUnpaddedBase64url(textEncoder.encode(text)),
+      );
+    });
+  }
+
+  it("leaves no trace of one call in the next", () => {
+    const long = toUnpaddedBase64urlFromText("z".repeat(400));
+    const short = toUnpaddedBase64urlFromText("z");
+    expect(short).toBe(toUnpaddedBase64url(textEncoder.encode("z")));
+    expect(long).toBe(toUnpaddedBase64url(textEncoder.encode("z".repeat(400))));
+  });
+});
 
 describe("base64url round-trip", () => {
   it("round-trips various byte arrays", () => {

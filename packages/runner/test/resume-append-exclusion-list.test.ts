@@ -16,7 +16,8 @@ import {
 // `["element", ...]` link path the shared gate matches, so the window is held
 // deterministically (no timers). flatMap pushes the per-element result VALUE into
 // its aggregate, so a value lost to a reverted resume reconcile freezes the
-// appended element out — the defect the post-sync recovery in flatmap.ts fixes.
+// appended element out unless the element run is set up again. Marking a
+// reverted setup as owed is what makes the next reconcile issue it.
 //
 // map is deliberately not covered here. Its aggregate holds element-cell
 // REFERENCES that resolve through the projection rather than copied values —

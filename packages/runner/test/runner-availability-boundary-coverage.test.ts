@@ -64,8 +64,8 @@ describe("runner availability boundary coverage", () => {
       trustExecutable(runtime, pattern),
       options.argument as never,
     );
-    await result.pull();
-    return getDerivedInternalCell(result, { partialCause: "output" }).getRaw();
+    const output = getDerivedInternalCell(result, { partialCause: "output" });
+    return await output.pull();
   }
 
   it("requires policy metadata on availability modules", async () => {

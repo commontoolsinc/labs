@@ -83,6 +83,7 @@ export const viewImageToolDescriptor: HarnessToolDescriptor = {
             },
             bytes: { type: "integer", minimum: 1 },
             digest: { type: "string" },
+            snapshotPath: { type: "string" },
           },
           required: ["type", "hostPath", "mediaType", "bytes", "digest"],
           additionalProperties: false,
@@ -142,6 +143,7 @@ export const viewImageTool: HarnessToolDefinition<
         workspaceHostPath: hostRootPath,
         cwd: hostRootPath,
         path: hostPath,
+        snapshotDir: context.imageAttachmentSnapshotDir,
       });
       return {
         outputId: context.nextOutputId("view_image"),

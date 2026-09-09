@@ -4,6 +4,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
+import type { RawNodeCause } from "../module.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
   linkResolutionProbe,
@@ -15,6 +16,7 @@ import {
   getMetaLink,
   parseLink,
 } from "../link-utils.ts";
+import { rawMetaWriteAuthorization } from "../meta-seam.ts";
 
 export function resolvedCellScope(
   runtime: Runtime,
@@ -50,6 +52,27 @@ export function outputSpotFromBinding(
 ): { space: string; id: string; path: readonly unknown[] } | undefined {
   if (!binding) return undefined;
   return { space: binding.space, id: binding.id, path: [...binding.path] };
+}
+
+/**
+ * Returns an expression builtin's result-store cause from its operation,
+ * owning piece, and output coordinates. The cause stays equal across changes
+ * to the serialized inputs while the owning piece and output spot are
+ * unchanged.
+ *
+ * Throws if the node's output binding has no write redirect.
+ */
+export function ownedResultCause(
+  op: "ifElse" | "when" | "unless",
+  cause: RawNodeCause,
+  parentCell: Cell<any>,
+): Record<string, unknown> {
+  if (!cause.outputSpot) {
+    throw new Error(
+      `${op}: result store requires a write-redirect output binding`,
+    );
+  }
+  return { [op]: parentCell.entityId, outputSpot: cause.outputSpot };
 }
 
 export function cellIdentityKey(cell: Cell<any>): {
@@ -137,6 +160,7 @@ export function exposedResultCell<T>(
         base: exposed,
         includeSchema: true,
       }),
+      rawMetaWriteAuthorization,
     );
   }
   const value = initialCell.get();

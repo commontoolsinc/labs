@@ -1,7 +1,10 @@
-// ci trust: share of recent completed runs that passed on the first attempt (a
-// flakiness signal), with a history strip for every run in the fetched window.
-// One factory builds both the labs and loom instances against their own repo +
-// workflow.
+/**
+ * Reports the share of recent completed runs that passed on the first attempt,
+ * which is the wall's signal for flakiness, with a history strip carrying the
+ * newest runs in the trust window. One factory builds both the labs and loom
+ * instances against their own repository and workflow.
+ */
+
 import {
   runSource,
   type Run,
@@ -10,13 +13,13 @@ import {
   type TileView,
 } from "../types.ts";
 import { strip } from "../lib.ts";
-import { CI_RUNS_MAX, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_WARN } from "../config.ts";
+import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_GOOD, TRUST_RUNS_MAX, TRUST_WARN } from "../config.ts";
 
-type TrustOutcome = "green" | "red" | "run" | "grey";
+type TrustOutcome = "green" | "red" | "run" | "gray";
 
 function trustOutcome(run: Run): TrustOutcome {
   if (run.status === "in_progress") return "run";
-  if (run.status !== "completed" || !run.conclusion) return "grey";
+  if (run.status !== "completed" || !run.conclusion) return "gray";
   return run.conclusion === "success" && run.run_attempt === 1 ? "green" : "red";
 }
 
@@ -27,7 +30,7 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
     runSources: [runSource(opts.repo, opts.workflow)],
     async collect(ctx): Promise<TileView> {
       const runs = await ctx.runsFor(opts.repo, opts.workflow);
-      const scored = runs.slice(0, CI_RUNS_MAX).map((run) => ({
+      const scored = runs.slice(0, TRUST_RUNS_MAX).map((run) => ({
         run,
         outcome: trustOutcome(run),
       }));
@@ -44,12 +47,21 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
         outcome,
         href: run.html_url,
       }));
+      const times = scored.flatMap(({ run }) => {
+        const createdAt = Date.parse(run.created_at);
+        return Number.isFinite(createdAt) ? [createdAt] : [];
+      });
+      const spanMs = times.length === scored.length && times.length >= 2
+        ? Math.max(...times) - Math.min(...times)
+        : 0;
       return {
         label: opts.label,
         status: s,
         value: `${pct.toFixed(1)}%`,
         sub: `first-try green · ${runSummary}`,
-        extra: strip(cells, TRUST_COLS),
+        extra: strip(cells, spanMs > 0),
+        duration: spanMs,
+        alignChartBottom: true,
       };
     },
   };

@@ -8,28 +8,11 @@ for Common Fabric development.
 Dependency declarations, version rolls, and dependency troubleshooting are
 covered in [Dependencies](DEPENDENCIES.md).
 
-## Focused guides and design material
-
-- [Engineering priorities](ENGINEERING_PRIORITIES.md) defines how product
-  evidence selects work across correctness, speed, security, and other
-  dimensions.
-- [Performance program](PERFORMANCE_PROGRAM.md) turns the speed priority into
-  measurements and candidate projects.
-- [Committed-write backpressure](committed-write-backpressure.md) explains how
-  the scheduler surfaces or retries a committed write that the server rejects
-  under contention.
-- [Code coverage in CI](COVERAGE.md) explains the runtime and authored-pattern
-  coverage mechanisms. Its
-  [one-line guard note](deno-coverage-guard-line-artifact.md) explains a V8
-  branch-coverage reporting artifact.
-- [Invoking handlers from outside a pattern](handlers/invocation-outside-pattern.md)
-  covers programmatic handler-stream invocation through `RuntimeProcessor`.
-- [Bidirectional sync with an external canonical source](importers/bidirectional_sync.md)
-  covers identity, reconciliation, and write-back for importers.
-- [Ingest channels and the journal sink](proposals/ingest-channels-journal-sink.md)
-  proposes a durable append-only endpoint for external sources.
-- [Vouched ingest channel minting](proposals/vouched-ingest-channel-mint-design.md)
-  records the split-mint seam that the ingest-channel proposal builds on.
+The other development documents — testing, debugging, configuration,
+continuous integration, and the rest — are indexed in
+[the development README](README.md). Documents about a single feature, or
+about one aspect of the runtime, are indexed in
+[the features README](../features/README.md).
 
 ## Style & Conventions
 
@@ -43,25 +26,405 @@ covered in [Dependencies](DEPENDENCIES.md).
 
 ### Imports
 
-- Group imports by source: standard library, external, then internal.
+- Group imports by source: standard library, external, then internal, with a
+  blank line between the groups.
 - Prefer named exports over default exports.
-- Use package names for internal imports.
+- Use package names to import from another package.
+- Use relative paths to import from within your own package. A file that names
+  the package it belongs to reaches a file of that same package the long way
+  round, through the `exports` map and back, so one module ends up with two
+  spellings. Naming the bare package name is worse than that. The entry point
+  reaches every module the package exports, so naming it from inside completes
+  a cycle, and the order in which the package's modules initialize starts to
+  depend on the order the entry point lists its exports. The
+  `cf-package/no-self-import` lint rule (`tasks/lint-self-import.ts`,
+  registered in the root `deno.jsonc`) reports both forms, so a plain
+  `deno lint` catches them. It exempts a package's own tests, which name their
+  package on purpose: the surface a consumer sees is the thing they are there
+  to check.
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
+- Collate a package's imports. Every specifier naming the same top-level
+  package, or the same namespace-and-package pair, sits in one contiguous run:
+  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
+  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
+  places in the list reads as two dependencies, and the second appearance hides
+  from anyone scanning for what the file rests on.
+- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
+  scannable rather than merely grouped, and it answers by rule the question of
+  where a new import goes. Sort on the specifier, comparing without regard to
+  case, so that `codec-type-tags.ts` precedes `NullLiveEnvironment.ts`
+  the way a reader expects. Where sorting and the grouping above disagree, the
+  grouping wins: sort within the standard-library, external, and internal
+  blocks, not across them.
+- A bare `import "x";` is there for its side effect, so where it sits is part of
+  what it does. A polyfill, or a setup module that installs globals, running
+  after the code relying on it has already run is a different program, and
+  nothing type-checks that. So grouping, collation and sorting all yield to this
+  one: leave a bare import where it is, and move no other import across it. They
+  then apply to each run of imports between bare ones rather than to the file as
+  a whole — a file with a bare import in the middle has two groupings, two
+  collations and two sorts, and a checker that reads it as one will call correct
+  code wrong. A bare import of a module the file also imports by name is a
+  separate matter, and which way it goes turns on the kind of that named import.
+  Against a value import the bare one adds nothing, since the value import
+  evaluates the module, side effects included: drop it, and put what it was
+  there for in a comment on the surviving statement. Against nothing but an
+  `import type`, it stays — a type-only import is erased and evaluates nothing,
+  so the bare import is the only thing producing the effect.
+- Import a given module in exactly one or two statements. Two shapes are
+  allowed:
+  - One unified statement, marking any type-only names inline:
+    `import { type Foo, bar } from "x";`.
+  - One statement of each kind, kept adjacent:
+    `import type { Foo } from "x";` above `import { bar } from "x";`.
+
+  A file uses whichever reads better; neither is preferred. What neither shape
+  allows is a second statement of the same kind — two value imports from one
+  module, or two `import type`s from it. Those represent one dependency as
+  though it were two, and the second is easy to miss when the first is being
+  edited or removed, so merge their specifier lists. A bare `import "x";` counts
+  toward the total.
+- Within a package that defines the `@/` import alias, address the aliased tree
+  as `@/...` rather than by a `../` path that climbs out of the current
+  directory to reach it. The alias exists so that a module's address does not
+  depend on where the importing file sits, and a `../` path spends that. The
+  rule is about `../` and nothing else: a `./` path addresses the importing
+  file's own directory or something under it, and so never states how two
+  directories sit relative to each other. `./` and `@/` are both fine, and a
+  file may use each where it reads better. A `../` path whose target lies
+  outside the aliased tree has no `@/` form at all, and stays as it is — a
+  `bench/` or `test/` file reaching a fixture in its own tree, in a package
+  whose alias covers `src/`.
+- These rules govern the declaration list. What may not be written outside it
+  at all — a type spelled `import("./mod.ts").Thing`, and a module loaded by an
+  `import("./mod.ts")` expression under some function — is
+  [`imports.md`](imports.md), which two lint rules enforce.
+
+### Classes
+
+- Use JavaScript `#privateName` fields and methods rather than TypeScript's
+  `private` modifier. `protected` has no such counterpart, and stays a
+  TypeScript modifier.
+- A class exposes no enumerable properties, instance or static. Hold the
+  value in a `#privateName` field and expose a getter, and a setter when the
+  value is meant to be settable. This holds for a constructor parameter
+  property too, which is a field declaration in disguise. Depart from it only
+  for a strong and compelling reason. A module-internal class — one its module
+  does not export, whose instances therefore never reach a stranger — is
+  exempt: the confusion the rule prevents is between an instance and a plain
+  object, and there is no one there to be confused. Two things follow from
+  it:
+  - An instance stops looking like a plain object. Enumerating one, spreading
+    it, or serializing it yields nothing, so code that mistakes an instance
+    for data fails where it stands instead of quietly half-working. A `#`
+    field is not an own property at all, whereas a field declared `private` or
+    `protected` is: those modifiers are erased, and the property they describe
+    is as enumerable as any other.
+  - A whole class of bug becomes unreachable rather than merely discouraged. A
+    `readonly` field is only a compile-time promise, so a cast can strip it and
+    write through; a getter with no setter refuses the write at runtime.
+- The default order of items within a class is:
+  1. The exposed instance properties, which an exempt class is the only kind
+     to have, ordered from least to most protection: public, then protected.
+     A constructor parameter property is not one of these; it stays in the
+     constructor.
+  2. Private instance variables.
+  3. The constructor.
+  4. The abstract members, public and protected alike.
+  5. The remaining instance members, ordered from most to least access: public,
+     then protected, then private. Getters and setters come before methods.
+  6. The exposed static properties, ordered as the exposed instance properties
+     are.
+  7. Private static variables.
+  8. The remaining static members, ordered as the instance members are.
+- Three of those groups take a
+  [section marker](code-comment-style.md#section-markers), when the class has
+  meaningful sections to delineate or is large enough for one to earn its
+  keep: `Subclass contract` ahead of the abstract members, `Instance members`
+  ahead of the remaining instance members, and `Static members` ahead of the
+  exposed static properties.
+- Depart from that order when there is a compelling reason to, not by default.
+
+A class with every group filled, in order:
+
+```ts
+// Shown at module scope.
+
+/**
+ * Fryer of donuts. Being module-internal is what lets this one expose
+ * properties directly; an exported class holds them in `#` fields behind
+ * accessors.
+ */
+abstract class Fryer {
+  /** How many batches have been fried. */
+  batches = 0;
+
+  /** Oil temperature, which subclasses consult. */
+  protected temperature = 190;
+
+  #basket: string[];
+
+  /** Constructs an instance which fries the contents of `basket`. */
+  constructor(basket: string[]) {
+    this.#basket = basket;
+  }
+
+  //
+  // Subclass contract
+  //
+
+  /** Fries one item, however this fryer does it. */
+  abstract fry(item: string): string;
+
+  /** Drains the oil, however this fryer does it. */
+  protected abstract drain(): void;
+
+  //
+  // Instance members
+  //
+
+  /** What is waiting to be fried. */
+  get basket(): readonly string[] {
+    return this.#basket;
+  }
+
+  /** Fries everything waiting, and empties the basket. */
+  fryAll(): string[] {
+    const result = this.#basket.map((item) => this.fry(item));
+    this.#empty();
+    this.batches++;
+    return result;
+  }
+
+  /** Reports the oil temperature, for a subclass's diagnostics. */
+  protected report(): string {
+    return `${this.temperature}C`;
+  }
+
+  /** Helper for `fryAll()`, which drains the oil and clears the basket. */
+  #empty(): void {
+    this.drain();
+    this.#basket = [];
+  }
+
+  //
+  // Static members
+  //
+
+  /** Temperature a fryer runs at unless told otherwise. */
+  static defaultTemperature = 190;
+
+  static #built = 0;
+
+  /** How many fryers have been built. */
+  static get built(): number {
+    return Fryer.#built;
+  }
+}
+```
+
+#### Making a private member reachable from a test
+
+A test sometimes needs what a class keeps to itself: a threshold to straddle,
+a table to seed, a step to run on its own. Casting the instance to get at it —
+`as unknown as { ... }`, `as never as { ... }`, `as any` — is not the way, and
+the `#` convention takes it off the table: a `#` name is out of a cast's reach,
+and a member left TypeScript-`private` so that a cast can find it is, if a
+field, an own enumerable property, and either way a member the class promised
+to keep to itself, with a comment apologizing for it. The cast also types the
+member however the test finds convenient, so nothing checks that what the test
+reads is what the class holds, and a renamed member leaves the test reading
+`undefined` and passing.
+
+The way is a public getter named `accessForTestingOnly`, which hands over
+exactly what a test needs and nothing else. The name is the documentation:
+everything behind it is internals free to change, and a reader who sees it in
+a test knows the test is written against them. Its doc comment says what it
+exposes, and the name says the rest. The `cf-source/no-access-for-testing-only`
+lint rule (`tasks/lint-access-for-testing-only.ts`, registered in the root
+`deno.jsonc`) reports a read of the getter from anywhere but a test, a
+benchmark, or a file under a `test/`, `integration/`, or `bench/` directory, so
+a plain `deno lint` catches source that has come to depend on it.
+
+- Instance members go behind an instance getter; static members behind a
+  static one. A class may have both, and never more than one of each.
+- The getter's return type is written inline on the getter, and the body is an
+  object literal. No named type is declared for it, so the class's public
+  surface grows by one member and nothing else.
+- A field the class never reassigns — a `Map` it mutates in place — is handed
+  over as a plain property holding the reference. A field the class reassigns
+  is a getter, so that a read is live, and gains a setter only when a test
+  assigns it. A method is an arrow forwarding to the `#` method. An
+  object-literal getter cannot see the class's `this`, so an accessor with one
+  takes `const outerThis = this;` under `// deno-lint-ignore no-this-alias`;
+  an accessor of plain properties and arrows needs no alias.
+- An entry with no setter is `readonly` in the type. A getter without a
+  setter throws on assignment, and a plain property would take the write into
+  the literal and never reach the instance, so the type refuses the write
+  where a test would make it.
+- Each entry is typed as the class types the member. A stand-in the test
+  supplies then declares itself where it is passed in — an `as` on the
+  argument, or one small helper taking a `Partial<T>` — rather than on the
+  receiver, and a value the test reads back is what the class holds. A test
+  holding the value under an interface type narrows it to the class to reach
+  the getter, `tx as ExtendedStorageTransaction`: that is a cast to the real
+  type, which is what the accessor is typed by, and a different
+  implementation behind the interface would leave the read `undefined` and
+  the call throwing rather than passing.
+- It is a public getter, so it sits where the order above puts public getters,
+  and first among them.
+- Prose names the member `Class.#member`.
+
+```ts
+// Shown at module scope.
+
+/** A fryer that records the temperature each item was fried at. */
+export class Fryer {
+  #temperature = 190;
+  #log = new Map<string, number>();
+
+  /**
+   * The oil temperature, the batch log, and the drain step, which a test
+   * drives directly.
+   */
+  get accessForTestingOnly(): {
+    temperature: number;
+    readonly log: Map<string, number>;
+    drain(): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get temperature() {
+        return outerThis.#temperature;
+      },
+      set temperature(value) {
+        outerThis.#temperature = value;
+      },
+      log: this.#log,
+      drain: () => this.#drain(),
+    };
+  }
+
+  /** Fries one item at the current temperature. */
+  fry(item: string): void {
+    this.#log.set(item, this.#temperature);
+  }
+
+  #drain(): void {
+    this.#temperature = 20;
+  }
+}
+
+// In a test:
+const fryer = new Fryer();
+fryer.accessForTestingOnly.temperature = 200;
+fryer.fry("cruller");
+fryer.accessForTestingOnly.drain();
+```
+
+Three things a test reaches for that the getter does not cover, each wanting a
+different answer:
+
+- **A method the test replaces by assignment** — `obj.step = fake; ...;
+  obj.step = original`. A `#` method cannot be reassigned, and the getter only
+  forwards, so the test is asking for a seam the class does not offer. Offer
+  one — a collaborator passed to the constructor, a hook the class calls — or
+  rewrite the test against public behavior. Until then the member stays
+  TypeScript-`private`, with a comment naming the test that replaces it.
+- **A method called off the prototype against a stand-in receiver** —
+  `Class.prototype.step.call(fake, ...)`. A `#` method is not on the prototype
+  to be called, and a public method reached that way throws the moment it
+  touches a `#` member of a receiver that is not a real instance, so the test
+  wants rewriting to build one.
+- **A helper that uses no instance state.** Make it `static #` behind the
+  static getter, or a module-level function the test imports.
+
+### Comments
+
+- Comments explain **why**, not what, and describe the system as it stands.
+- Every export, every class and public member, and every non-trivial internal
+  function carries a JSDoc doc comment.
+- [`code-comment-style.md`](code-comment-style.md) is the guide to both kinds,
+  and to the Markdown markup that comments, error messages, and log messages
+  all use.
+
+### Word choice
+
+Prose written in this repository — comments, documents, error and log messages,
+test descriptions — standardizes on one spelling per word and one word per
+concept. Both halves buy the same thing: a search for a word finds all of it,
+and two files stating the same kind of fact read as though they do.
+
+The rule is forward-looking. New prose follows it, an edit conforms the prose it
+touches, and converting a whole file or package is its own change rather than a
+side effect of another one.
+
+#### Spelling
+
+American spellings: `behavior`, `color`, `center`, `serialize`, `analyze`,
+`gray`. This is standardization rather than a claim about which English is
+better, and it is the variety already in overwhelming use in these files.
+
+Two carve-outs. Material quoted from outside — a dependency's name, a message
+relayed from another system, a specification's wording, a data file's contents —
+keeps whatever spelling it arrived with. And an identifier vocabulary already
+established in the codebase, `cancelled` among them, is a rename rather than a
+spelling fix: match the surrounding code, and treat a change to it as the code
+change it is.
+
+#### One word per concept
+
+Where two words would do, this repository picks one. The list grows as the pairs
+come up.
+
+- **`returns`**, not `answers`, for what a call evaluates to. A call is not a
+  question put to the code, and the metaphor stands in for a word that is
+  already exact and already shorter.
+  [`unit-test-coding-style.md`](unit-test-coding-style.md#writing-the-description-strings)
+  states this for an `it()` description, which is where it comes up most often;
+  it holds everywhere else too.
+- **`represents`**, `denotes`, or `is written as` — not `spells` — for the
+  relation between a construct and what it means. A path fragment denotes a ref
+  that cannot resolve, and a non-positive bound means "don't wait". The verb
+  belongs to orthography, and borrowing it dresses a semantic relation in
+  orthographic clothes. Three uses survive: the noun names a surface form ("the
+  same spelling the root span uses"), the verb is exact when the claim is about
+  the form itself ("the string that spells the number"), and "spell out" is
+  ordinary English for writing something at length. `spell` is additionally an
+  identifier here — the retired name for a pattern, still read by the state
+  inspector — so prose that borrows the word costs a search as well.
+- **`visits`**, `reads`, `encounters`, `finds` — the list is open — not `meets`,
+  for coming across something during a walk or on a channel. It is the word that
+  is wrong here and not the sense, so pick what the site wants rather than one
+  substitute throughout: a walk visits every node it descends through, a decoder
+  reads what arrives, a format carrying no marker encounters data it never emits.
+  Often the cleanest sentence names where the thing arrived and wants no such
+  verb at all — "a cycle *here* arrived from a channel". What rules `meets` out
+  is that two other senses are already at work in these files, and both stay.
+  `meet` a requirement — `meet the condition`, `must meet the threshold` — is
+  ordinary and exact, with the caveat that the verb takes the requirement itself
+  as its object and not the artifact stating one: a value **satisfies** a schema,
+  or meets the schema's *requirements*, where "meets the schema" reaches past
+  what the verb selects for. And `meet` is the lattice operation the Contextual
+  Flow Control code is built on, a technical term with test files named after it,
+  where a stray prose use costs a search.
 
 ## Code Design & Principles
 
 ### Error Handling
 
-- Write descriptive error messages.
+- Write descriptive error messages, marked up as
+  [`code-comment-style.md`](code-comment-style.md#error-and-log-messages)
+  describes.
 - Propagate errors using async/await.
 - Document possible errors in JSDoc.
 
 ### TypeScript
 
 - Export types explicitly using `export type { ... }`.
-- Provide descriptive JSDoc comments on public interfaces.
 - Prefer strong typing with interfaces or types instead of `any`.
 - Update package-level README.md files.
 
@@ -163,12 +526,12 @@ validated types.
 
 ```ts
 class Data {
-  private inner: any;
+  #inner: any;
   constructor(inner: any) {
-    this.inner = inner;
+    this.#inner = inner;
   }
   process() {
-    // if (typeof this.inner === "object")
+    // if (typeof this.#inner === "object")
   }
 }
 
@@ -176,6 +539,86 @@ function processData(data: Data) {
   data.process();
 }
 ```
+
+### Walking or comparing a value
+
+A value the runtime holds may be a `FabricSpecialObject` — a byte sequence, a
+temporal value, a content hash, a regular expression, an error, a link, a map,
+a set. Each of those keeps its state in private fields and has no own
+properties at all, so a walk that decides "may I read this by property name?"
+with `isObjectOrArray()`, `isReadonlyObjectOrArray()`, `isObjectNotArray()`, or
+a bare `typeof value === "object"` gets the wrong result: it sees an empty
+record and then merges the value to `{}`, rebuilds it as `{}`, descends into it
+and finds nothing, or writes a property onto it. Two sites already carry a
+`TODO(danfuzz)` naming that defect against `isReadonlyObjectOrArray()` —
+`schema.ts`'s default merge and `cfc/schema-merge.ts` — and they are what these
+predicates are for.
+
+These functions from `@commonfabric/data-model` are what a walk needs, and
+using them is not optional in code that can reach a stored value:
+
+- `isKeyableObjectOrArray(value)` is the container question. Every
+  `FabricSpecialObject` returns `false`, `FabricPrimitive` and any further
+  subclass alike. For a `FabricPrimitive` that says the value has no keys to
+  reach, which is the whole story about one; for a `FabricInstance` it says
+  only that this walk cannot reach what it holds, which is incomplete rather
+  than wrong, and a walk taking that answer records what it under-reports.
+  Everything
+  outside the type is untouched: arrays and non-fabric class instances still
+  return `true`, so it is a drop-in for `isReadonlyObjectOrArray()`, which
+  narrows the same way. Against `isObjectOrArray()` the swap holds only where
+  the caller reads: that one narrows to a mutable `Record<string, unknown>`,
+  and a site that writes through the narrowed value fails to compile with
+  `TS2542`.
+- `isWalkableObjectOrArray(value)` is the same question with a `FabricInstance`
+  refused rather than reported as having no keys. The two differ on an instance
+  and nowhere else, and which one a walk wants turns on what a `false` would
+  cost it. An instance is a container a walk is meant to descend and cannot
+  yet, so a walk that rebuilds, merges, or carries a value forward takes
+  `false` as "carry this whole" and ships an empty record in place of the
+  value: that walk wants the refusal. A walk that only reports what a path
+  finds, or what a change triggers, reports an absence instead — incomplete,
+  not wrong — and takes `isKeyableObjectOrArray()` with a marker recording the
+  gap. So does a walk running where a throw cannot be delivered, under a
+  storage subscription that has to keep delivering.
+- A walk that can reach an instance and has a better answer than either tests
+  for one first — an error its own signature already carries, or a disposition
+  its caller can act on. Refusing is for a walk with nothing else to say.
+- `isKeyableObjectNotArray(value)` and `isWalkableObjectNotArray(value)` are
+  those two with arrays removed, for a walk to which an array is not merely a
+  different shape but something it must not treat as a record.
+- `isFabricPlainContainer(value)` asks the same container question of a value
+  the type system already says is a `FabricValue`, and is the one to reach for
+  where a caller holds one, with two differences to know. It rejects the values
+  a `FabricValue` cannot be — a `Cell`, a `Date`, a query-result proxy over
+  one — which the `isKeyable*` and `isWalkable*` pairs admit. And it returns
+  `false` for a `FabricInstance` rather than refusing one, so a walk that
+  would lose an instance gets no tripwire from it: reach for
+  `isWalkableObjectOrArray()` where that matters, even holding a
+  `FabricValue`.
+- `fabricAwareEqual(a, b)` is the comparison for operands that may hold a
+  `FabricValue` without being known to be one — a schema `const` against a
+  stored value, a schema default against a materialized one, a write against
+  the value it replaces, a request against the snapshot a policy was checked
+  over. It is a structural walk that decides every `FabricSpecialObject` it
+  reaches by content rather than by properties: two of one class go to
+  `valueEqual()`, and a pair whose classes differ, or with a special object on
+  one side only, is unequal without either one's contents being read. Neither half serves alone: `valueEqual()` throws
+  on a `Cell` or any other non-fabric instance, and `deepEqual()` compares by
+  enumerable own properties, of which a special object has none. Where both
+  operands are known to be `FabricValue`s, `valueEqual()` is the cheaper
+  call — it decides a container by a content hash cached on identity, where the
+  walk pays for every level each time — but it is not a drop-in even there. It
+  decides a container by hashing it whole, so it throws on a value holding a
+  cycle and on one holding a class whose codec is a stub, both of which this
+  walk returns for. `valueEqual({ v: aFabricMap }, { v: 5 })` throws where
+  `fabricAwareEqual()` returns `false`.
+
+A walk that must not silently pass a `FabricInstance` by — one whose contents
+are reachable only through its codec — refuses it outright rather than walking
+it. Those refusals are discovery instruments; see "Flag-gated tripwires" in
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md), which states the obligation
+each new one carries.
 
 ### Avoid representing invalid state
 
@@ -356,12 +799,12 @@ In both cases, we can maintain multiple caches, or instances of cache consumers.
 
 ```ts
 export class Cache {
-  private map: Map<string, string> = new Map();
+  #map: Map<string, string> = new Map();
   get(key: string): string | undefined {
-    return this.map.get(key);
+    return this.#map.get(key);
   }
   set(key: string, value: string) {
-    this.map.set(key, value);
+    this.#map.set(key, value);
   }
 }
 ```
@@ -406,11 +849,16 @@ suite will break.
    object with a `"test"` entry. The root test runner (`tasks/test.ts`) iterates
    all workspace members and runs `deno task test` in each package directory. If
    a package lacks a test task, Deno resolves the task name against the root
-   workspace instead, which re-runs the entire test suite recursively. This
-   causes exponential process spawning and will time out CI.
+   workspace instead, which would re-run the entire test suite recursively,
+   spawning processes exponentially. The runner reads every member's manifest
+   before it runs any of their test tasks, and refuses to start when one has no
+   `"test"` entry, naming the member; that check is what keeps a missing entry
+   to a message rather than a CI timeout.
 
    Use `"deno test"` for packages with tests, or `"echo 'No tests defined.'"` as
-   a stub for packages that don't have tests yet.
+   a stub for packages that don't have tests yet. A `"test"` task defined by its
+   `"dependencies"` alone counts too: what the check asks is whether the name
+   resolves in the package's own directory.
 
 3. **Minimal `deno.jsonc` example:**
 

@@ -9,9 +9,8 @@ import { join } from "@std/path";
 import { createSession, Identity } from "@commonfabric/identity";
 import { markRendererInputTx, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 
 const ROOT = join(import.meta.dirname!, "..");
 
@@ -28,15 +27,13 @@ describe("cell-flip shaping (plan B)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("http://localhost:8000/"),
       storageManager: StorageManager.emulate({ as: session.as }),
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
       }),
     });
-    const manager = new PieceManager(session, runtime);
-    await manager.synced();
-    cc = new PiecesController(manager);
+    cc = new PiecesController(session, runtime);
+    await cc.synced();
   });
 
   afterEach(async () => {
@@ -45,15 +42,16 @@ describe("cell-flip shaping (plan B)", () => {
   });
 
   it("shapes a renderer-input write's wake but not an internal write's", async () => {
-    const runtime = cc.manager().runtime;
-    const program = await runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        join(ROOT, "integration/fixtures/shape-input-echo.tsx"),
-        ROOT,
-      ),
+    const runtime = cc.runtime;
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      {
+        main: join(ROOT, "integration/fixtures/shape-input-echo.tsx"),
+        root: ROOT,
+      },
     );
     const piece = await cc.create(program, { start: true });
-    const result = cc.manager().getResult(piece.getCell());
+    const result = cc.getResult(piece.getCell());
     cancel = result.sink(() => {}); // materialize the computed
     await runtime.idle();
     const doubled = () => result.key("doubled").get();

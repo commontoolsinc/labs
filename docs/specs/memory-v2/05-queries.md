@@ -97,11 +97,13 @@ entity values, guided by a schema that constrains which paths to explore and
 which linked entities to include.
 
 The traversal code in `packages/runner/src/traverse.ts` is **shared between
-client and server**. The v1 server (`space-schema.ts`) imports
-`SchemaObjectTraverser` from `@commonfabric/runner/traverse`, and the client
-(`schema.ts`) uses the same code for validation and transformation. This ensures
-identical traversal behavior on both sides. The v2 implementation MUST preserve
-this shared-code property.
+client and server**. The client reaches `SchemaObjectTraverser` through
+`schema.ts` for validation and transformation; the server reaches the same
+traverser through `@commonfabric/runner/graph-query`, which drives it over
+documents the storage engine supplies. That gives identical traversal behavior
+on both sides, and the implementation MUST preserve this shared-code property.
+[Schema graph queries](../../features/schema-graph-queries.md) describes what
+the two packages exchange to do that.
 
 ### 5.3.1 Schema Query Structure
 
@@ -236,9 +238,11 @@ This mirrors the `followPointer` function from `traverse.ts`.
 #### Metadata / Provenance Resolution
 
 In addition to schema-directed references, traversal MUST load provenance and
-runtime metadata documents via top-level metadata links on an entity document.
+runtime metadata documents via top-level metadata links on the documents a
+query names and on the documents those links reach.
 
-When the server loads any document during query evaluation, it MUST inspect the
+When the server loads a document a query NAMES as a root, or one reached
+through such a document's metadata or manifest links, it MUST inspect the
 top-level document object for metadata links and manifest links such as:
 
 ```json
@@ -257,20 +261,62 @@ top-level document object for metadata links and manifest links such as:
 
 The `pattern`, `argument`, and `result` fields use the same sigil link form as
 ordinary cell references. The `internal` field is raw metadata, not a direct
-metadata link. It stores a manifest array, and traversal resolves each
-manifest-entry `link` as an internal cell owned by the result cell. The `cfc`
-metadata field is also special: it uses a compact metadata object, and traversal
-converts its `schemaHash` into a CID sigil link before loading the referenced
-document. If present, the server resolves each metadata link and each internal
-manifest link, loads that document, adds it to the query result and watch
-tracker, and then repeats the same metadata/manifest check on the loaded
-document. This continues until a document without metadata links or manifest
-links is reached or a cycle is detected.
+metadata link. It stores a manifest array, and each manifest-entry `link` names
+an internal cell owned by the result cell. The `cfc` metadata field is also
+special: it uses a compact metadata object, and traversal converts its
+`schemaHash` into a CID sigil link before loading the referenced document.
+
+How much of a document's metadata family the evaluation loads depends on the
+document's ROLE in the query:
+
+- A document the query NAMES as a root is owed its full family: the server
+  MUST resolve every metadata link and every internal manifest link, load
+  each target, add it to the query result and watch tracker, and repeat the
+  same check on each loaded document until a document without metadata or
+  manifest links is reached or a cycle is detected. This is what a caller
+  that intends to load and run what it named relies on, and the role is
+  persistent: a refresh that re-evaluates a named document — including an
+  absent root's first evaluation after it is created — owes it the same
+  full family, and so does one that re-evaluates a document delivered as a
+  member of that family, so a member whose metadata link moves delivers
+  the new target.
+
+- A document the evaluation merely reaches — loaded mid-walk through a link
+  crossing — is owed what the selector that reached it selects, and the
+  schema document its `cfc` metadata names: a reader of a labeled document
+  checks what it may read against that schema, so the server MUST resolve
+  and load it, and track it so an absent one arrives when it is written.
+  The server MUST NOT chase the document's other metadata links or its
+  internal manifest links: none of that family is loaded, delivered, or
+  tracked. A subscriber that wants a document's family names the document.
+  A refresh that re-evaluates a crossing-reached document applies the same
+  rule, so a subscription's delivered shape does not depend on the order in
+  which documents changed.
+
+A metadata family is a same-space structure: a metadata or manifest link
+that resolves to another space selects nothing — the evaluating space's
+engine cannot read it, and its refresh could never deliver it — and the
+server MUST ignore such an entry rather than chase it.
+
+A later query naming a document the evaluation had only reached does not
+count as covered by existing watch state until that document's full family
+has been chased: naming, not reachability, is what entitles a caller to the
+family.
 
 This behavior is not optional provenance decoration. It is part of the query
-result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts`, and is required
-for piece execution metadata to reconstruct the full lineage of a result
-document.
+result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts` and
+`graph-query.ts`, and it is what lets a subscriber reconstruct the full
+lineage of a result document it named without receiving the family of every
+document its walk merely passes through.
+
+Content-addressed schema documents ride the same mechanism
+(`docs/specs/content-addressed-schemas.md`): a link or selector schema
+holding an external `{ "$ref": "cid:…" }` reference makes traversal load the
+referenced schema document — and, transitively, the documents behind its own
+external refs — into the query result and watch tracker, registering each
+after hash verification (`loadExternalSchemaDocs()` in `traverse.ts`). A
+document whose content does not hash to its id is tracked but never
+registered, and refs to it stay unresolved.
 
 ### 5.3.3 Cycle Detection
 
@@ -333,29 +379,65 @@ type PointerCycleTracker = CompoundCycleTracker<
 
 ### 5.3.4 Schema Narrowing
 
-When following a reference from entity A to entity B, the schema applicable to B
-is the **intersection** of:
+When following a reference from entity A to entity B, the schema applicable to
+B is decided by precedence, not by intersection. The schema context from A's
+traversal (what A expects B to look like) governs whenever it says anything at
+all; the schema embedded in the reference itself (what the reference declares
+B to contain) fills in only where the traversal is agnostic.
 
-1. The schema context from A's traversal (what A expects B to look like).
-2. Any schema embedded in the reference itself (what the reference declares B to
-   contain).
+`combineSchemaForLink` implements the rule, gated by the
+`readerSchemaPrecedence` experimental flag (default on; off restores the
+strict pseudo-intersection at reference crossings — see
+`docs/development/EXPERIMENTAL_OPTIONS.md`).
+[`link-schema-precedence.md`](../link-schema-precedence.md) is the
+consolidated specification of the rule, the `default` exception, and the
+flow-control crossing seam. A reference routinely describes
+more of its target than the traversal asked for, and none of that description
+— extra properties, extra `required` entries, a different shape — reaches the
+combined schema:
 
-`combineSchema` computes a best-effort pseudo-intersection. False schemas and
+- A `false` traversal schema stays `false`: the traversal selected nothing,
+  and the reference cannot widen that.
+- A true or empty traversal schema (`true`, `{}`, or a flag-only wrapper such
+  as `{asCell: [...]}`) adopts the reference's schema, keeping its own
+  `asCell` wrapper. This is what types a schemaless read by the references it
+  crosses, and what lets a reference's `false` schema attenuate an open read
+  to nothing.
+- Any other traversal schema is used as it stands and the reference's schema
+  is ignored — a `false` reference schema blocks only traversals that brought
+  no shape of their own.
+
+`default` is the one keyword that crosses the precedence line: a value's
+default is inherited from the last crossed schema that declares one. Each
+hop's stored schema describes that hop's target, so the nearest declaration
+wins — a reference's top-level `default` overrides earlier references' and
+the traversal's own, and where no reference declares one the traversal's
+stands.
+
+A discarded reference schema's `ifc` does not ride onto the result: flow
+control never travels through combined schemas. A transaction is instead
+marked cfc-relevant at each crossing whose stored schema declares `ifc`,
+independently of which side won the combination, and enforcement reads
+stored cfc metadata and label views rather than combined schemas.
+[`link-schema-precedence.md`](../link-schema-precedence.md) specifies that
+crossing seam: the marking sites, the `cid:` closure registry warming, and
+the broken-declaration rule.
+
+The sibling `combineSchema` is the strict best-effort pseudo-intersection,
+used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`
+branches, where both parts were authored as one constraint. Object schemas
+combine shared properties recursively, retain properties allowed by only one
+side, and preserve every property required by either input. False schemas and
 disjoint types produce a false schema, while an unconstrained schema yields to
-the other input. Integer is treated as a subtype of number. For combinations
-that do not receive more specific handling, the parent schema takes precedence
-while retaining relevant flags from the link schema.
+the other input, and integer is treated as a subtype of number. Array schemas
+combine their `items` schemas recursively; their positional `prefixItems`
+extend to the longer input prefix, each position combining the two positional
+schemas and falling back to that input's `items` schema after its prefix ends,
+with `prefixItems` omitted when the merged prefix is empty.
 
-Object schemas combine shared properties recursively, retain properties allowed
-by only one side, and preserve every property required by either input. Array
-schemas combine their `items` schemas recursively. Their positional
-`prefixItems` extend to the longer input prefix: each position combines the two
-positional schemas, falling back to that input's `items` schema after its prefix
-ends. The result omits `prefixItems` when the merged prefix is empty.
-
-The operation is intentionally not a complete JSON Schema intersection and does
-not resolve `$ref` values. See `combineSchema` and `narrowSchema` in
-`packages/runner/src/traverse.ts` for the implementation.
+Neither operation is a complete JSON Schema intersection, and neither resolves
+`$ref` values. See `combineSchemaForLink`, `combineSchema`, and `narrowSchema`
+in `packages/runner/src/traverse.ts` for the implementation.
 
 ### 5.3.5 Schema Tracker
 
@@ -474,6 +556,11 @@ The server deduplicates at the session layer:
 - one entity appears once in the session cache even if multiple watches include
   it
 - `seenSeq` acts as the primary watermark
+- on a reconnect the client's declared `holdings` (04-protocol.md section
+  4.1.2) replace the server's per-session delivery memory as the diff base:
+  the server's memory of what it sent is a claim about the client the client
+  itself can contradict, and a held-at-seq statement from the replica is the
+  exact vocabulary the diff compares
 - optional `sentEntities` bookkeeping MAY still be used for watch-local
   optimizations like `excludeSent`
 
@@ -489,8 +576,11 @@ The required ordering invariant is:
 2. Recompute the affected watch unions against that latest state.
 3. Emit sync only after the recomputation is complete.
 
-If a transaction fails with `ConflictError` while such a refresh is pending, the
-server MUST flush the affected watch unions before returning the conflict.
+Transact verdicts return inline without waiting for such a refresh; the
+verdict's catch-up obligation guarantees the next frame to the committing
+session carries `caughtUpLocalSeq` covering it, and the CLIENT parks the
+verdict's state application until that marker (04-protocol.md section
+4.11.2, CT-1927).
 
 ### 5.4.6 Session Watch State
 

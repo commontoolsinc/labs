@@ -1,13 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { cfcLabelViewForCell } from "../src/cfc/mod.ts";
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import { cfcLabelViewForCell } from "../src/cfc/mod.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 
 const signer = await Identity.fromPassphrase(
   "profile-home-verified-identities",
@@ -131,6 +132,10 @@ describe("profile-home verified external identities", () => {
       result.withTx(revokeTx).key("revokeVerifiedIdentities").send({
         identities: [assertion.withTx(revokeTx)],
       });
+      // The send's resolution crosses the result doc's ifc-bearing link, which
+      // marks the transaction cfc-relevant, and a relevant transaction must be
+      // prepared before commit — same as the publish above.
+      runtime.prepareTxForCommit(revokeTx);
       expect((await revokeTx.commit()).error).toBeUndefined();
       await runtime.idle();
       await result.pull();

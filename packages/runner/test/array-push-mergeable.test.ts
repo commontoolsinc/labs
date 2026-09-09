@@ -4,46 +4,15 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-
-// A storage manager with its OWN per-space client replicas, loopback-connected
-// to a SHARED in-process memory server (mirrors cross-space-value-read.test.ts).
-// Two of these connected to one server model two real sessions: data written by
-// one session reaches the other only through an explicit per-space server
-// query/subscription.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionNativeCommit,
+} from "../src/storage/transaction-inspection.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 
 const signer = await Identity.fromPassphrase("array-push-mergeable");
 const space = signer.did();
@@ -53,6 +22,12 @@ const COUNTER_CAUSE = "mergeable-counter";
 const stringListSchema = {
   type: "array",
   items: { type: "string" },
+  // deno-lint-ignore no-explicit-any
+} as any;
+
+const nestedListSchema = {
+  type: "array",
+  items: { type: "array", items: { type: "string" } },
   // deno-lint-ignore no-explicit-any
 } as any;
 
@@ -73,7 +48,7 @@ const anySchema = {
 async function readDurable(
   server: MemoryV2Server.Server,
 ): Promise<string[]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -89,10 +64,31 @@ async function readDurable(
   }
 }
 
+// The same fresh-session read for a list whose elements are themselves lists.
+async function readDurableNested(
+  server: MemoryV2Server.Server,
+  cause: string,
+): Promise<string[][]> {
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+  const rt = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+  });
+  try {
+    const cell = rt.getCell<string[][]>(space, cause, nestedListSchema);
+    await cell.sync();
+    await cell.pull();
+    return (cell.get() ?? []) as string[][];
+  } finally {
+    await rt.dispose();
+    await storage.close();
+  }
+}
+
 async function readDurableNumber(
   server: MemoryV2Server.Server,
 ): Promise<number | undefined> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -110,13 +106,15 @@ async function readDurableNumber(
 
 describe("mergeable array appends", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
-  let storage2: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
+  let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
-    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await storage1?.close();
@@ -124,10 +122,12 @@ describe("mergeable array appends", () => {
     await server?.close();
   });
 
-  // Two sessions append to the same list against the SAME base, neither having
-  // observed the other's append before committing. Both appends represent real
-  // user intent on disjoint tail slots, so both must survive durably.
   it("two concurrent appends to the same list both survive", async () => {
+    // Two sessions append to the same list against the SAME base, neither
+    // having observed the other's append before committing. Both appends
+    // represent real user intent on disjoint tail slots, so both must survive
+    // durably.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -146,7 +146,7 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Both sessions load the seeded list. After this both replicas hold
@@ -159,14 +159,14 @@ describe("mergeable array appends", () => {
       // Session 1 appends "A".
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends "B" WITHOUT having observed session 1's "A": its
       // replica still holds ["seed"] at the pre-"A" basis.
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).push("B");
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -180,56 +180,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same merge must hold when the append goes through the query-result proxy
-  // (a handler's `arr.push(x)` on a reactive array) rather than Cell.push. The
-  // proxy marks its own base-array read as the op's incidental read; without that
-  // mark the read enters the conflict set, session 2's commit false-conflicts
-  // against session 1's "A", and "B" is dropped instead of merging.
-  it("a concurrent proxy push merges alongside another append", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
-      await rt1.storageManager.synced();
-
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
-
-      const txA = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
-      await rt1.storageManager.synced();
-
-      // Session 2 appends "B" through the proxy while still at the pre-"A" basis.
-      const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
-      proxy.push("B");
-      await txB.commit();
-      await rt2.storageManager.synced();
-
-      expect([...await readDurable(server)].sort()).toEqual(["A", "B", "seed"]);
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  });
-
-  // A CONDITIONAL push — the handler reads the list explicitly before pushing
-  // (the dedup-then-push shape) — must keep its read in the conflict set, so a
-  // concurrent append makes it conflict (and, in the live system, retry). This
-  // is the opposite of the unconditional case above, which merges. It proves the
-  // read drop is scoped to the op's own reads, not the handler's explicit read.
   it("a conditional push (explicit read before push) conflicts with a concurrent append", async () => {
+    // A CONDITIONAL push — the handler reads the list explicitly before pushing
+    // (the dedup-then-push shape) — must keep its read in the conflict set, so
+    // a concurrent append makes it conflict (and, in the live system, retry).
+    // This is the opposite of the unconditional case above, which merges. It
+    // proves the read drop is scoped to the op's own reads, not the handler's
+    // explicit read.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -241,7 +199,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -251,7 +209,7 @@ describe("mergeable array appends", () => {
       // Session 1 appends "A".
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-"A" basis, reads the list explicitly and
@@ -261,7 +219,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       cellB.get();
       cellB.push("B");
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -272,17 +230,18 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A push whose new element is derived from the array's LENGTH is a conditional
-  // push: its correctness depends on the count it read. The length read is
-  // recorded as the array's own `length` child path — the shape produced by a
-  // `for...of`/spread over the array, a shape-only `length` access, or
-  // `key("length")`. That read must stay in the conflict set: a mergeable append
-  // changes the length, so a concurrent append has to make this commit conflict
-  // (and retry against the new tail) instead of the push merging with a stale
-  // index. Before the length read was kept, session 2 read length 1, both
-  // sessions computed the same index, and the append silently merged with a
-  // duplicate index.
   it("a length-derived push conflicts with a concurrent append", async () => {
+    // A push whose new element is derived from the array's LENGTH is a
+    // conditional push: its correctness depends on the count it read. The
+    // length read is recorded as the array's own `length` child path — the
+    // shape produced by a `for...of`/spread over the array, a shape-only
+    // `length` access, or `key("length")`. That read must stay in the conflict
+    // set: a mergeable append changes the length, so a concurrent append has to
+    // make this commit conflict (and retry against the new tail) instead of the
+    // push merging with a stale index. Before the length read was kept, session
+    // 2 read length 1, both sessions computed the same index, and the append
+    // silently merged with a duplicate index.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -294,7 +253,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -304,7 +263,7 @@ describe("mergeable array appends", () => {
       // Session 1 appends "A", moving the durable length from 1 to 2.
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-"A" basis, reads the length (1) and pushes an
@@ -314,7 +273,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       const len = (cellB.key("length") as unknown as Cell<number>).get();
       cellB.push(`item-${len}`);
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -325,10 +284,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same protection through the query-result proxy's iterator: a handler that
-  // counts the array with `for...of` (or a spread) before pushing records the
-  // array's `length` read, so a concurrent append conflicts.
-  it("a for...of count before a proxy push conflicts with a concurrent append", async () => {
+  it("a for...of count before a push conflicts with a concurrent append", async () => {
+    // The same protection through the query-result proxy's iterator: a handler
+    // that counts the array with `for...of` (or a spread) before pushing
+    // records the array's `length` read, so a concurrent append conflicts.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -340,7 +300,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -349,16 +309,16 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
       let count = 0;
       for (const _ of proxy) count++;
-      proxy.push(`item-${count}`);
-      const result = await txB.commit();
+      cellB.push(`item-${count}`);
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -369,12 +329,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The length read stays precise: it conflicts with a change to the element
-  // COUNT (an append), not with an edit to an existing element. A concurrent
-  // edit to an element the length-reading session did not append leaves the
-  // length unchanged, so the append still merges — the length read must not
-  // over-conflict the way a whole-array `.get()` read would.
   it("a length-derived push merges past a concurrent edit to an existing element", async () => {
+    // The length read stays precise: it conflicts with a change to the element
+    // COUNT (an append), not with an edit to an existing element. A concurrent
+    // edit to an element the length-reading session did not append leaves the
+    // length unchanged, so the append still merges — the length read must not
+    // over-conflict the way a whole-array `.get()` read would.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -386,7 +347,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -397,7 +358,7 @@ describe("mergeable array appends", () => {
       const txA = rt1.edit();
       (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
         .key("0") as unknown as Cell<string>).set("edited");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 reads the length and pushes; the length did not change, so the
@@ -406,7 +367,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       const len = (cellB.key("length") as unknown as Cell<number>).get();
       cellB.push(`item-${len}`);
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(result.error).toBeUndefined();
@@ -418,15 +379,16 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Bare `.length` on the query-result proxy (the get trap) reads the whole
-  // array recursively at the op path, so it is already kept as the handler's
-  // explicit read and conflicts with a concurrent append even without the
-  // length-child carve-out. This pins that end-to-end guarantee for the most
-  // common form: a change that ever recorded bare `.length` as a shape-only read
-  // AT the op path (which `buildReads` drops as the proxy's incidental container
-  // read) would fail here, forcing the count dependency to stay in the conflict
-  // set.
   it("a bare proxy `.length` read before a push conflicts with a concurrent append", async () => {
+    // Bare `.length` on the query-result proxy (the get trap) reads the whole
+    // array recursively at the op path, so it is already kept as the handler's
+    // explicit read and conflicts with a concurrent append even without the
+    // length-child carve-out. This pins that end-to-end guarantee for the most
+    // common form: a change that ever recorded bare `.length` as a shape-only
+    // read AT the op path (which `buildReads` drops as the proxy's incidental
+    // container read) would fail here, forcing the count dependency to stay in
+    // the conflict set.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -438,7 +400,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -447,15 +409,15 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
       const len = proxy.length;
-      proxy.push(`item-${len}`);
-      const result = await txB.commit();
+      cellB.push(`item-${len}`);
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -466,13 +428,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Enumerating the array's keys (`Object.keys`/`values`/`entries`, or an object
-  // spread) observes the present-key set — the proxy's ownKeys trap records a
-  // recursive read of the array for that. So a push whose new element came from
-  // `Object.keys(arr).length` conflicts with a concurrent append (and, per the
-  // sparse test below, with a concurrent hole edit); an unconditional push, which
-  // never enumerates, still merges.
   it("an Object.keys(proxy).length-derived push conflicts with a concurrent append", async () => {
+    // Enumerating the array's keys (`Object.keys`/`values`/`entries`, or an
+    // object spread) observes the present-key set — the proxy's ownKeys trap
+    // records a recursive read of the array for that. So a push whose new
+    // element came from `Object.keys(arr).length` conflicts with a concurrent
+    // append (and, per the sparse test below, with a concurrent hole edit); an
+    // unconditional push, which never enumerates, still merges.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -484,7 +447,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -493,15 +456,15 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
       const len = Object.keys(proxy).length;
-      proxy.push(`item-${len}`);
-      const result = await txB.commit();
+      cellB.push(`item-${len}`);
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -512,12 +475,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The carve-out is not push-specific: it keeps the length read for every
-  // mergeable op. An addUnique whose added value or decision depended on the
-  // count must conflict with a concurrent count-changing op, even when the added
-  // element is a distinct key that would otherwise merge. A transaction that
-  // reads the length forfeits that transaction's distinct-element merge.
   it("a length-read addUnique conflicts with a concurrent addUnique", async () => {
+    // The carve-out is not push-specific: it keeps the length read for every
+    // mergeable op. An addUnique whose added value or decision depended on the
+    // count must conflict with a concurrent count-changing op, even when the
+    // added element is a distinct key that would otherwise merge. A transaction
+    // that reads the length forfeits that transaction's distinct-element merge.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -529,7 +493,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -538,14 +502,14 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("A");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       const len = (cellB.key("length") as unknown as Cell<number>).get();
       cellB.addUnique(`item-${len}`);
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -556,11 +520,12 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A single session appends to a list whose durable head it has not yet
-  // observed (the rehydration-race shape): it reads the list as shorter/empty
-  // than it durably is, then appends. The append must land at the durable tail,
-  // never clobbering elements it could not see.
   it("an append against a stale-short base does not clobber the durable tail", async () => {
+    // A single session appends to a list whose durable head it has not yet
+    // observed (the rehydration-race shape): it reads the list as shorter/empty
+    // than it durably is, then appends. The append must land at the durable
+    // tail, never clobbering elements it could not see.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -583,14 +548,14 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.set(["one", "two"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends "three" while its replica is still stale-short (it has
       // not pulled ["one","two"]).
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).push("three");
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -604,10 +569,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A single transaction that both edits an existing element and appends must
-  // keep the edit: the append op covers only the appended tail, not the edited
-  // prefix slot.
   it("an edit to an existing element survives alongside a push in the same tx", async () => {
+    // A single transaction that both edits an existing element and appends must
+    // keep the edit: the append op covers only the appended tail, not the
+    // edited prefix slot.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -621,14 +587,14 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.set(["one", "two"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.key(0).set("ONE");
       cell.push("three");
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -638,12 +604,13 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // Two different mergeable op kinds on the same array path in one transaction.
-  // The intent map holds one op per path, so the second would replace the first
-  // and the diff-suppression would then drop the first op's element from the
-  // commit. The path is poisoned instead and the whole-array diff carries both
-  // changes.
   it("addUnique then push in one tx commits both (no silent drop)", async () => {
+    // Two different mergeable op kinds on the same array path in one
+    // transaction. The intent map holds one op per path, so the second would
+    // replace the first and the diff-suppression would then drop the first op's
+    // element from the commit. The path is poisoned instead and the whole-array
+    // diff carries both changes.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -651,14 +618,14 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.addUnique("a");
       cell.push("b");
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["seed", "a", "b"]);
@@ -667,10 +634,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The "update my entry" idiom: remove the old value and add the new one in one
-  // handler. remove-by-value and add-unique are different op kinds, so the path
-  // is poisoned and the whole-array diff commits the correct result.
   it("removeByValue then addUnique in one tx commits both", async () => {
+    // The "update my entry" idiom: remove the old value and add the new one in
+    // one handler. remove-by-value and add-unique are different op kinds, so
+    // the path is poisoned and the whole-array diff commits the correct result.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -679,14 +647,14 @@ describe("mergeable array appends", () => {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
         .set(["seed", "old"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.removeByValue("old");
       cell.addUnique("new");
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["seed", "new"]);
@@ -695,72 +663,11 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A reshape (an in-place mutator that is not a mergeable push) after a push
-  // rewrites the array, so the recorded append tail no longer identifies the
-  // pushed element. The push intent is abandoned and the whole-array diff commits
-  // the reshaped result. `unshift` reads the array fresh, so the local value is
-  // exact.
-  it("push then unshift on a proxy commits the reshaped array", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
-      await rt1.storageManager.synced();
-
-      const tx1 = rt1.edit();
-      const proxy = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1)
-        .getAsQueryResult([], tx1, true) as unknown as string[];
-      proxy.push("b");
-      proxy.unshift("z");
-      await tx1.commit();
-      await rt1.storageManager.synced();
-
-      expect(await readDurable(server)).toEqual(["z", "seed", "b"]);
-    } finally {
-      await rt1.dispose();
-    }
-  });
-
-  // A reshape after a push commits the correctly reshaped array. The reshape
-  // reads the array fresh (so `sort` sees the pushed "b"), and the push intent is
-  // poisoned so the commit emits the reshaped whole-array diff rather than a stale
-  // tail op.
-  it("push then sort on a proxy commits the sorted array with the pushed element", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
-        "c",
-        "a",
-      ]);
-      await tx0.commit();
-      await rt1.storageManager.synced();
-
-      const tx1 = rt1.edit();
-      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
-      const proxy = cell.getAsQueryResult([], tx1, true) as unknown as string[];
-      proxy.push("b");
-      proxy.sort();
-      expect(cell.get()).toEqual(["a", "b", "c"]);
-      await tx1.commit();
-      await rt1.storageManager.synced();
-
-      expect(await readDurable(server)).toEqual(["a", "b", "c"]);
-    } finally {
-      await rt1.dispose();
-    }
-  });
-
-  // A whole-array Cell.set after a push reshapes the array; the append intent is
-  // poisoned so the commit emits the set's array, not a tail op sliced from it.
   it("push then a whole-array set commits the set array", async () => {
+    // A whole-array Cell.set after a push reshapes the array; the append intent
+    // is poisoned so the commit emits the set's array, not a tail op sliced
+    // from it.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -768,14 +675,14 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.push("b");
       cell.set(["x", "y", "z"]);
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["x", "y", "z"]);
@@ -784,287 +691,188 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A poisoned path forfeits merge-friendliness: because it commits as a
-  // whole-array diff whose reads are kept, a mixed-op transaction conflicts with
-  // a concurrent append instead of merging — the intended trade for never losing
-  // data on the mixed-op path.
-  it("a mixed-op (poisoned) transaction conflicts with a concurrent append", async () => {
+  it("a same-length whole-array set then a push commits the replaced list", async () => {
+    // A whole-array set that REPLACES every element without changing the length
+    // or the hole layout, then a push. This one is deliberately NOT abandoned,
+    // and pins that: a dense same-length replacement diffs into per-index
+    // candidates that all sit below the tail start, so they survive the op's
+    // suppression and commit alongside the append. (Characterization, not a
+    // regression guard — it holds on the unfixed code too. It is here so a
+    // future tightening of the guard to full prefix VALUE comparison has to
+    // justify losing this. Changing the hole layout is a different matter and
+    // is abandoned — see below.)
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
     });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
     try {
       const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
-        .set(["seed", "old"]);
-      await tx0.commit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
-
-      const txA = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["x", "y", "z"]);
+      cell.push("d");
+      expect(cell.get()).toEqual(["x", "y", "z", "d"]);
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      // Session 2, at the pre-"A" basis, does the mixed-op "update my entry"
-      // (remove old, add new) — a poisoned path, committed as a value diff.
-      const txB = rt2.edit();
-      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
-      cellB.removeByValue("old");
-      cellB.addUnique("new");
-      const result = await txB.commit();
-
-      expect(result.error).toBeDefined();
-      expect(await readDurable(server)).toEqual(["seed", "old", "A"]);
+      expect(await readDurable(server)).toEqual(["x", "y", "z", "d"]);
     } finally {
-      await rt2.dispose();
       await rt1.dispose();
     }
   });
 
-  // Probing whether a numeric index exists (`n in arr`) observes the element
-  // count, so an `n in arr`-derived push conflicts with a concurrent append.
-  it("an `n in arr`-derived push conflicts with a concurrent append", async () => {
+  it("a set that punches a hole then a push commits the hole", async () => {
+    // A same-length set that changes the array's HOLE LAYOUT, then a push.
+    // Length equality is satisfied, but the diff cannot express a presence
+    // change per index — it falls back to a whole-array replacement, which is
+    // the one candidate the op's suppression drops outright. Sparse arrays are
+    // preserved elsewhere in the runner, so the hole must survive the round
+    // trip.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
     });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
     try {
       const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
+      const punched: string[] = [];
+      punched[1] = "b";
+      punched[2] = "c";
 
-      const txA = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit();
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(punched);
+      cell.push("d");
+      expect(0 in (cell.get() as string[])).toBe(false);
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
-      proxy.push(1 in proxy ? "had-1" : "no-1");
-      const result = await txB.commit();
-
-      expect(result.error).toBeDefined();
-      expect(await readDurable(server)).toEqual(["seed", "A"]);
+      const durable = await readDurable(server);
+      expect(durable.length).toBe(4);
+      // The hole survived rather than the base's "a" being retained under it.
+      expect(0 in durable).toBe(false);
+      expect(durable[1]).toBe("b");
+      expect(durable[3]).toBe("d");
     } finally {
-      await rt2.dispose();
       await rt1.dispose();
     }
   });
 
-  // Arrays can be sparse (holes below `length`). Filling or punching a hole
-  // changes the present-key set without changing `length`, so an enumeration or
-  // `n in arr` probe that fed a push must conflict with a concurrent same-length
-  // hole edit. A `length`-only dependency would miss it; the ownKeys/has traps
-  // record a recursive read for arrays, which a hole edit invalidates.
-  it("an `n in arr`-derived push conflicts with a concurrent same-length hole fill", async () => {
+  it("an absent cell set to a sparse array then pushed commits the hole", async () => {
+    // No base at all: a previously absent cell set to a sparse array, then
+    // pushed. With no base the whole working array is the op's payload, so the
+    // hole is in the payload rather than in a prefix the diff would carry — the
+    // density check has to run whether or not there was a base. Without it the
+    // write does not merely flatten the hole, it fails to land at all.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
     });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
+    const SPARSE_CAUSE = "absent-sparse-append";
     try {
-      const tx0 = rt1.edit();
-      // ["a", <hole>, "c"] — length 3, index 1 absent.
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(
-        ["a", , "c"] as string[],
+      const sparse: string[] = [];
+      sparse[1] = "b";
+      sparse[2] = "c";
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(
+        space,
+        SPARSE_CAUSE,
+        stringListSchema,
+        tx1,
       );
-      await tx0.commit();
+      cell.set(sparse);
+      cell.push("d");
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
-
-      // Session 1 fills the hole at index 1: same length (3), present-key set
-      // changes. No `length` write.
-      const txA = rt1.edit();
-      (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
-        .key(1) as unknown as Cell<string>).set("b");
-      await txA.commit();
-      await rt1.storageManager.synced();
-
-      // Session 2, at the pre-fill basis, probes `1 in arr` (false) and pushes.
-      const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
-      proxy.push(1 in proxy ? "had-1" : "no-1");
-      const result = await txB.commit();
-
-      expect(result.error).toBeDefined();
-      expect(await readDurable(server)).toEqual(["a", "b", "c"]);
+      const storage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const readBack = rt2.getCell<string[]>(
+          space,
+          SPARSE_CAUSE,
+          stringListSchema,
+        );
+        await readBack.sync();
+        await readBack.pull();
+        const durable = readBack.get();
+        expect(durable).toBeDefined();
+        expect(durable!.length).toBe(4);
+        expect(0 in durable!).toBe(false);
+        expect(durable![1]).toBe("b");
+        expect(durable![3]).toBe("d");
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
     } finally {
-      await rt2.dispose();
       await rt1.dispose();
     }
   });
 
-  // Two sessions add distinct elements to the same set against the same base.
-  // Both are real intents on the set, so both must survive.
-  it("two concurrent add-uniques of distinct elements both survive", async () => {
+  it("a set that fills a hole then a push commits the filled value", async () => {
+    // The reverse: the base is sparse and the set FILLS the hole, same length.
+    // Without the layout check the fill is dropped and, because the whole-array
+    // candidate carried every element, so is the rest of the replacement.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
     });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
     try {
+      const seed: string[] = [];
+      seed[1] = "b";
+      seed[2] = "c";
       const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(seed);
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
-
-      const txA = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("A");
-      await txA.commit();
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["A", "b", "c"]);
+      cell.push("d");
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      // rt2 still holds ["seed"] (has not observed "A").
-      const txB = rt2.edit();
-      rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).addUnique("B");
-      await txB.commit();
-      await rt2.storageManager.synced();
-
-      const durable = await readDurable(server);
-      expect(durable.length).toBe(3);
-      expect(durable).toContain("seed");
-      expect(durable).toContain("A");
-      expect(durable).toContain("B");
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  });
-
-  // Two sessions add the SAME element against the same base. add-unique dedups
-  // against durable state on the server, so the element appears once.
-  it("concurrent add-unique of the same element is idempotent", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit();
-      await rt1.storageManager.synced();
-
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
-
-      const txA = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("X");
-      await txA.commit();
-      await rt1.storageManager.synced();
-
-      // rt2 adds "X" too, against its stale ["seed"] base — it never observed
-      // rt1's add.
-      const txB = rt2.edit();
-      rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).addUnique("X");
-      await txB.commit();
-      await rt2.storageManager.synced();
-
-      const durable = await readDurable(server);
-      expect(durable).toEqual(["seed", "X"]);
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  });
-
-  // Two sessions increment the same counter against the same base. Increments
-  // sum against durable state rather than clobber via last-write-wins.
-  it("two concurrent increments sum", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx0).set(0);
-      await tx0.commit();
-      await rt1.storageManager.synced();
-
-      const cell2 = rt2.getCell<number>(space, COUNTER_CAUSE, numberSchema);
-      await cell2.sync();
-      await cell2.pull();
-      expect(cell2.get()).toBe(0);
-
-      const txA = rt1.edit();
-      rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, txA).increment(1);
-      await txA.commit();
-      await rt1.storageManager.synced();
-
-      // rt2 still reads 0 (has not observed rt1's increment).
-      const txB = rt2.edit();
-      rt2.getCell<number>(space, COUNTER_CAUSE, numberSchema, txB).increment(1);
-      await txB.commit();
-      await rt2.storageManager.synced();
-
-      expect(await readDurableNumber(server)).toBe(2);
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  });
-
-  // Incrementing a counter that was never set treats the missing value as a
-  // zero default: the durable value becomes the increment amount.
-  it("increment on a missing value implies a zero default", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    try {
-      const tx = rt1.edit();
-      rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx).increment(5);
-      await tx.commit();
-      await rt1.storageManager.synced();
-
-      expect(await readDurableNumber(server)).toBe(5);
+      expect(await readDurable(server)).toEqual(["A", "b", "c", "d"]);
     } finally {
       await rt1.dispose();
     }
   });
 
-  // Two sessions remove distinct elements concurrently; both removals must land
-  // (they merge against durable state rather than clobber via a whole-array set).
-  it("two concurrent removeByValue of distinct elements both land", async () => {
+  it("a push then an element edit keeps the push mergeable and commits both", async () => {
+    // An element edit alongside a push is the composition the fallback must NOT
+    // swallow: the edit is a per-index candidate below the tail, it survives
+    // suppression, and the push stays mergeable. This is the case that stops
+    // the guard from being tightened into "the prefix must be untouched", and
+    // that pins the poison's direction — a write BENEATH an array must not
+    // reach the array's own intent.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1080,7 +888,574 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      // Push FIRST, so an intent exists when the edit's write fires the poison.
+      // The other order proves nothing: with no intent recorded yet there is
+      // nothing for a wrongly-widened poison to destroy.
+      cell.push("d");
+      cell.key(1).set("B");
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2 appends against the pre-edit basis. The edit-plus-push
+      // transaction stayed mergeable, so this merges rather than clobbering.
+      const tx2 = rt2.edit();
+      rt2.getCell<string[]>(space, CAUSE, stringListSchema, tx2).push("z");
+      await tx2.commit({ resolveAt: "verdict" });
+      await rt2.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["a", "B", "c", "d", "z"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("a shrinking whole-array set then a push commits the shrunk list", async () => {
+    // A whole-array set that SHRINKS the list, then a push. The set removed "b"
+    // and "c"; a tail op cannot express that removal, and its suppression
+    // covers the very diff candidates that would have carried it, so the
+    // removal must keep the path off the mergeable fast path.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["a"]);
+      cell.push("d");
+      expect(cell.get()).toEqual(["a", "d"]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["a", "d"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a whole-array set([]) then addUnique commits only the added members", async () => {
+    // The clear-and-reseed idiom: empty the list, then add the replacement
+    // members back with `addUnique`. The replacements are new values, so the
+    // server's add-unique dedup cannot mask the lost clear — the durable list
+    // must hold the reseeded members alone, not the cleared ones plus the
+    // additions.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set([]);
+      cell.addUnique("x", "y");
+      expect(cell.get()).toEqual(["x", "y"]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["x", "y"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a parent-object set that shrinks a nested list then a push commits the shrunk list", async () => {
+    // The same reshape reached from a PARENT path, landing BEFORE the op — so
+    // no intent exists yet for the ancestor write to poison, and the tail op's
+    // own prefix check is what has to catch it.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const holderSchema = {
+      type: "object",
+      properties: { rows: stringListSchema },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const HOLDER_CAUSE = "nested-shrink-holder";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
+        rows: ["a", "b", "c"],
+      });
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const holder = rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx1);
+      holder.set({ rows: ["a"] });
+      holder.key("rows").push("d");
+      expect(holder.get()).toEqual({ rows: ["a", "d"] });
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const storage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const cell = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
+        await cell.sync();
+        await cell.pull();
+        expect(cell.get()).toEqual({ rows: ["a", "d"] });
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a push into a just-appended nested list commits its element once", async () => {
+    // Nested tail ops where one op's PAYLOAD contains the other's target: push
+    // a new inner list onto the outer list, then push into that inner list. A
+    // tail op's payload is read from the working array at commit, so the outer
+    // append already carries the inner list complete with the element the inner
+    // append would add again — the store would apply it twice. Only the durable
+    // value shows it: the writer's own local value is correct throughout.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const NESTED_CAUSE = "nested-tail-inside-tail";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx0)
+        .set([["a"]]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const outer = rt1.getCell<string[][]>(
+        space,
+        NESTED_CAUSE,
+        nestedListSchema,
+        tx1,
+      );
+      outer.push(["x"]);
+      (outer.key(1) as unknown as Cell<string[]>).push("y");
+      expect(outer.get()).toEqual([["a"], ["x", "y"]]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurableNested(server, NESTED_CAUSE)).toEqual([
+        ["a"],
+        ["x", "y"],
+      ]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a push into a pre-existing nested list stays mergeable alongside an outer push", async () => {
+    // The same two pushes with the inner one landing BEFORE the outer tail:
+    // that element is not in the outer append's payload, so both ops are sent
+    // and the durable value has to come out of the two of them applied
+    // together. That combination is what this pins; that the inner op stays a
+    // live intent rather than falling back is pinned on the intents themselves
+    // ("nested tail ops abandon only the contained one", below) — a durable
+    // value cannot show it, since a concurrent append is add-wins and lands
+    // either way.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    const NESTED_CAUSE = "nested-tail-before-tail";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx0)
+        .set([["a"], ["b"]]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[][]>(
+        space,
+        NESTED_CAUSE,
+        nestedListSchema,
+      );
+      await cell2.sync();
+      await cell2.pull();
+
+      const tx1 = rt1.edit();
+      const outer = rt1.getCell<string[][]>(
+        space,
+        NESTED_CAUSE,
+        nestedListSchema,
+        tx1,
+      );
+      outer.push(["x"]);
+      (outer.key(0) as unknown as Cell<string[]>).push("y");
+      expect(outer.get()).toEqual([["a", "y"], ["b"], ["x"]]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2 appends against the pre-push basis. Both ops above stayed
+      // mergeable, so this merges rather than clobbering.
+      const tx2 = rt2.edit();
+      rt2.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx2)
+        .push(["z"]);
+      await tx2.commit({ resolveAt: "verdict" });
+      await rt2.storageManager.synced();
+
+      expect(await readDurableNested(server, NESTED_CAUSE)).toEqual([
+        ["a", "y"],
+        ["b"],
+        ["x"],
+        ["z"],
+      ]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("a mixed-op (poisoned) transaction conflicts with a concurrent append", async () => {
+    // A poisoned path forfeits merge-friendliness: because it commits as a
+    // whole-array diff whose reads are kept, a mixed-op transaction conflicts
+    // with a concurrent append instead of merging — the intended trade for
+    // never losing data on the mixed-op path.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
+        .set(["seed", "old"]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2, at the pre-"A" basis, does the mixed-op "update my entry"
+      // (remove old, add new) — a poisoned path, committed as a value diff.
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      cellB.removeByValue("old");
+      cellB.addUnique("new");
+      const result = await txB.commit({ resolveAt: "verdict" });
+
+      expect(result.error).toBeDefined();
+      expect(await readDurable(server)).toEqual(["seed", "old", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("an `n in arr`-derived push conflicts with a concurrent append", async () => {
+    // Probing whether a numeric index exists (`n in arr`) observes the element
+    // count, so an `n in arr`-derived push conflicts with a concurrent append.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
+      cellB.push(1 in proxy ? "had-1" : "no-1");
+      const result = await txB.commit({ resolveAt: "verdict" });
+
+      expect(result.error).toBeDefined();
+      expect(await readDurable(server)).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("an `n in arr`-derived push conflicts with a concurrent same-length hole fill", async () => {
+    // Arrays can be sparse (holes below `length`). Filling or punching a hole
+    // changes the present-key set without changing `length`, so an enumeration
+    // or `n in arr` probe that fed a push must conflict with a concurrent
+    // same-length hole edit. A `length`-only dependency would miss it; the
+    // ownKeys/has traps record a recursive read for arrays, which a hole edit
+    // invalidates.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      // ["a", <hole>, "c"] — length 3, index 1 absent.
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(
+        ["a", , "c"] as string[],
+      );
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      // Session 1 fills the hole at index 1: same length (3), present-key set
+      // changes. No `length` write.
+      const txA = rt1.edit();
+      (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
+        .key(1) as unknown as Cell<string>).set("b");
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2, at the pre-fill basis, probes `1 in arr` (false) and pushes.
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
+      cellB.push(1 in proxy ? "had-1" : "no-1");
+      const result = await txB.commit({ resolveAt: "verdict" });
+
+      expect(result.error).toBeDefined();
+      expect(await readDurable(server)).toEqual(["a", "b", "c"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("two concurrent add-uniques of distinct elements both survive", async () => {
+    // Two sessions add distinct elements to the same set against the same base.
+    // Both are real intents on the set, so both must survive.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("A");
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // rt2 still holds ["seed"] (has not observed "A").
+      const txB = rt2.edit();
+      rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).addUnique("B");
+      await txB.commit({ resolveAt: "verdict" });
+      await rt2.storageManager.synced();
+
+      const durable = await readDurable(server);
+      expect(durable.length).toBe(3);
+      expect(durable).toContain("seed");
+      expect(durable).toContain("A");
+      expect(durable).toContain("B");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("concurrent add-unique of the same element is idempotent", async () => {
+    // Two sessions add the SAME element against the same base. add-unique
+    // dedups against durable state on the server, so the element appears once.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("X");
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // rt2 adds "X" too, against its stale ["seed"] base — it never observed
+      // rt1's add.
+      const txB = rt2.edit();
+      rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).addUnique("X");
+      await txB.commit({ resolveAt: "verdict" });
+      await rt2.storageManager.synced();
+
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["seed", "X"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("two concurrent increments sum", async () => {
+    // Two sessions increment the same counter against the same base. Increments
+    // sum against durable state rather than clobber via last-write-wins.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx0).set(0);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<number>(space, COUNTER_CAUSE, numberSchema);
+      await cell2.sync();
+      await cell2.pull();
+      expect(cell2.get()).toBe(0);
+
+      const txA = rt1.edit();
+      rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, txA).increment(1);
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // rt2 still reads 0 (has not observed rt1's increment).
+      const txB = rt2.edit();
+      rt2.getCell<number>(space, COUNTER_CAUSE, numberSchema, txB).increment(1);
+      await txB.commit({ resolveAt: "verdict" });
+      await rt2.storageManager.synced();
+
+      expect(await readDurableNumber(server)).toBe(2);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("increment on a missing value implies a zero default", async () => {
+    // Incrementing a counter that was never set treats the missing value as a
+    // zero default: the durable value becomes the increment amount.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx = rt1.edit();
+      rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx).increment(5);
+      await tx.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurableNumber(server)).toBe(5);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("two concurrent removeByValue of distinct elements both land", async () => {
+    // Two sessions remove distinct elements concurrently; both removals must
+    // land (they merge against durable state rather than clobber via a
+    // whole-array set).
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1090,14 +1465,14 @@ describe("mergeable array appends", () => {
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
         .removeByValue("a");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2, still holding ["a","b","c"], removes a different element.
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
         .removeByValue("c");
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["b"]);
@@ -1107,8 +1482,297 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A zero increment is a programming no-op and is rejected.
+  it("an element edit before a removeByValue survives the removal", async () => {
+    // The ordinary "edit one row and delete another in the same handler" shape.
+    // A remove-by-value suppresses the array path AND everything under it, so
+    // the edit's per-index candidate has no surviving carrier: without the
+    // builder's own commit-time check the store applies the removal to the
+    // untouched base and the edit is gone, while the writing session's local
+    // value shows it. The edit writes BENEATH the array, so it deliberately
+    // does not poison the intent — the check at build is the only thing that
+    // can catch this.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.key(0).set("A");
+      cell.removeByValue("c");
+      expect(cell.get()).toEqual(["A", "b"]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["A", "b"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("an element edit after a removeByValue survives the removal", async () => {
+    // The same composition in the other order. Recording the op first does not
+    // help: the edit still lands beneath the array and leaves the intent alive,
+    // so the suppression discards it just the same.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.removeByValue("c");
+      cell.key(0).set("A");
+      expect(cell.get()).toEqual(["A", "b"]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["A", "b"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a whole-array set before a removeByValue commits the set array", async () => {
+    // A whole-array set BEFORE the removal: no intent exists yet for the set's
+    // write to poison, so the op is recorded against an array the transaction
+    // had already replaced. Its suppression then discards the set's entire diff
+    // and only the removals reach the store, leaving the durable list untouched
+    // apart from them.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["p", "q"]);
+      cell.removeByValue("p");
+      expect(cell.get()).toEqual(["q"]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["q"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a removeByValue on an array the transaction created commits the array", async () => {
+    // Creating the array and removing from it in one transaction: there is no
+    // base array for the op to describe at all. The removals alone say nothing
+    // about the elements the transaction created, and the subtree suppression
+    // discards the diff that carries them — so without the fallback the entity
+    // is never written and the durable value stays absent.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const CREATED_CAUSE = "created-then-removed-list";
+    try {
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(
+        space,
+        CREATED_CAUSE,
+        stringListSchema,
+        tx1,
+      );
+      cell.set(["p", "q"]);
+      cell.removeByValue("p");
+      expect(cell.get()).toEqual(["q"]);
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const storage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const readBack = rt2.getCell<string[]>(
+          space,
+          CREATED_CAUSE,
+          stringListSchema,
+        );
+        await readBack.sync();
+        await readBack.pull();
+        expect(readBack.get()).toEqual(["q"]);
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a parent-object set before a nested removeByValue commits the set list", async () => {
+    // The same reshape reached from a PARENT path — a `set` on the enclosing
+    // object, landing before the op, so neither the write-time poison (nothing
+    // recorded yet) nor a check scoped to the array's own path would see it.
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const holderSchema = {
+      type: "object",
+      properties: { rows: stringListSchema },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const HOLDER_CAUSE = "nested-remove-holder";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
+        rows: ["a", "b", "c"],
+      });
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const holder = rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx1);
+      holder.set({ rows: ["p", "q"] });
+      holder.key("rows").removeByValue("p");
+      expect(holder.get()).toEqual({ rows: ["q"] });
+      await tx1.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const storage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const cell = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
+        await cell.sync();
+        await cell.pull();
+        expect(cell.get()).toEqual({ rows: ["q"] });
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  it("a removeByValue stays mergeable when the other change is to a sibling field", async () => {
+    // The fallback is scoped: a removal that IS the transaction's only change
+    // to the array stays mergeable, so two sessions removing distinct elements
+    // against the same base still merge. Without this the fix would trade one
+    // silent loss for the clobbering the mergeable op exists to prevent. (The
+    // sibling test above removes concurrently from a shared base; this one pins
+    // that a same-transaction change to a DIFFERENT array leaves the removal
+    // mergeable.)
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    const holderSchema = {
+      type: "object",
+      properties: { rows: stringListSchema, title: { type: "string" } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const HOLDER_CAUSE = "sibling-remove-holder";
+    const readHolder = async () => {
+      const storage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const cell = rt.getCell(space, HOLDER_CAUSE, holderSchema);
+        await cell.sync();
+        await cell.pull();
+        return cell.get();
+      } finally {
+        await rt.dispose();
+        await storage.close();
+      }
+    };
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
+        rows: ["a", "b", "c"],
+        title: "before",
+      });
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      // Session 1 removes "a".
+      const txA = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, txA)
+        .key("rows").removeByValue("a");
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2, still at the pre-removal basis, removes a different element
+      // and edits an unrelated field. The sibling write does not touch the
+      // array, so the removal stays mergeable and both removals land.
+      const txB = rt2.edit();
+      const holderB = rt2.getCell(space, HOLDER_CAUSE, holderSchema, txB);
+      holderB.key("rows").removeByValue("c");
+      holderB.key("title").set("after");
+      const result = await txB.commit({ resolveAt: "verdict" });
+      await rt2.storageManager.synced();
+
+      expect(result.error).toBeUndefined();
+      expect(await readHolder()).toEqual({ rows: ["b"], title: "after" });
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
   it("increment(0) throws", async () => {
+    // A zero increment is a programming no-op and is rejected.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1117,16 +1781,116 @@ describe("mergeable array appends", () => {
       const tx = rt1.edit();
       const cell = rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx);
       expect(() => cell.increment(0)).toThrow();
-      await tx.commit();
+      await tx.commit({ resolveAt: "verdict" });
     } finally {
       await rt1.dispose();
     }
   });
 
-  // A non-finite amount is not a meaningful increment for a concurrent-sum
-  // counter (it would set the counter to an absorbing `NaN`/`±Infinity`), so it
-  // is rejected before any local write or mergeable-op record.
+  it("a stale framed addUnique does not clobber a concurrent element edit", async () => {
+    // A stale framed addUnique must not rewrite the array's existing prefix.
+    // Its base-array read is excluded from the commit's conflict set, which is
+    // only safe while the op writes nothing below the tail: anchoring (or
+    // otherwise rewriting) untouched inline prefix elements would let this
+    // stale commit apply positional replacements over a newer concurrent
+    // element edit without any conflict, silently losing that edit.
+
+    const OBJ_CAUSE = "mergeable-addunique-objects";
+    const objListSchema = {
+      type: "array",
+      items: { type: "object", additionalProperties: true },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    type Item = { v: number };
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      // Seed the durable array with INLINE object elements (a raw write, so
+      // no anchoring), and get it durable.
+      const tx0 = rt1.edit();
+      const seedCell = rt1.getCell<Item[]>(
+        space,
+        OBJ_CAUSE,
+        objListSchema,
+        tx0,
+      );
+      seedCell.setRaw([{ v: 1 }, { v: 2 }]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2 loads the seeded state; its replica now holds the same base.
+      const cell2 = rt2.getCell<Item[]>(space, OBJ_CAUSE, objListSchema);
+      await cell2.sync();
+      await cell2.pull();
+      expect(cell2.get()?.length).toBe(2);
+
+      // Session 1 edits an existing element and commits.
+      const txA = rt1.edit();
+      rt1.getCell<Item[]>(space, OBJ_CAUSE, objListSchema, txA).key(0).set(
+        { v: 9 },
+      );
+      await txA.commit({ resolveAt: "verdict" });
+      await rt1.storageManager.synced();
+
+      // Session 2, WITHOUT having observed that edit, performs a framed
+      // addUnique. The candidate is new, so it is accepted and anchored; the
+      // stale inline prefix must pass through untouched.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "stale addUnique",
+        reactives: new Set(),
+      });
+      try {
+        const txB = rt2.edit();
+        rt2.getCell<Item[]>(space, OBJ_CAUSE, objListSchema, txB).addUnique(
+          { v: 3 },
+        );
+        await txB.commit({ resolveAt: "verdict" });
+      } finally {
+        popFrame(frame);
+      }
+      await rt2.storageManager.synced();
+
+      // Durable truth from a fresh session: the concurrent edit AND the
+      // added value both survive.
+      const storage3 = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt3 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage3,
+      });
+      try {
+        const cell3 = rt3.getCell<Item[]>(space, OBJ_CAUSE, objListSchema);
+        await cell3.sync();
+        await cell3.pull();
+        const durable = (cell3.get() ?? []) as Item[];
+        expect(durable.length).toBe(3);
+        expect(durable[0]).toEqual({ v: 9 });
+        expect(durable[1]).toEqual({ v: 2 });
+        expect(durable[2]).toEqual({ v: 3 });
+      } finally {
+        await rt3.dispose();
+        await storage3.close();
+      }
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
   it("increment(non-finite) throws", async () => {
+    // A non-finite amount is not a meaningful increment for a concurrent-sum
+    // counter (it would set the counter to an absorbing `NaN`/`±Infinity`), so
+    // it is rejected before any local write or mergeable-op record.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1137,7 +1901,7 @@ describe("mergeable array appends", () => {
       expect(() => cell.increment(NaN)).toThrow();
       expect(() => cell.increment(Infinity)).toThrow();
       expect(() => cell.increment(-Infinity)).toThrow();
-      await tx.commit();
+      await tx.commit({ resolveAt: "verdict" });
     } finally {
       await rt1.dispose();
     }
@@ -1175,7 +1939,7 @@ const voteListSchema = {
 async function readDurableVotes(
   server: MemoryV2Server.Server,
 ): Promise<Vote[]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -1193,13 +1957,15 @@ async function readDurableVotes(
 
 describe("keyed collections via elementById", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
-  let storage2: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
+  let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
-    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await storage1?.close();
@@ -1207,9 +1973,11 @@ describe("keyed collections via elementById", () => {
     await server?.close();
   });
 
-  // The key resolves to the same entity in a session that never saw the write,
-  // so a second session can read and then remove the element purely by key.
   it("an element addressed by key is readable and removable from another session", async () => {
+    // The key resolves to the same entity in a session that never saw the
+    // write, so a second session can read and then remove the element purely by
+    // key.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1230,7 +1998,7 @@ describe("keyed collections via elementById", () => {
       const vote = votes0.elementById("alice|opt1");
       vote.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votes0.addUnique(vote);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, which never observed the write, addresses the same vote by
@@ -1252,7 +2020,7 @@ describe("keyed collections via elementById", () => {
           rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, txR)
             .elementById("alice|opt1"),
         );
-      await txR.commit();
+      await txR.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurableVotes(server)).toEqual([]);
@@ -1262,9 +2030,10 @@ describe("keyed collections via elementById", () => {
     }
   });
 
-  // Two sessions cast votes under different keys against the same base; both
-  // memberships merge instead of clobbering.
   it("two sessions add distinct keyed elements concurrently — both survive", async () => {
+    // Two sessions cast votes under different keys against the same base; both
+    // memberships merge instead of clobbering.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1276,7 +2045,7 @@ describe("keyed collections via elementById", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, tx0).set([]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const votes2 = rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema);
@@ -1293,7 +2062,7 @@ describe("keyed collections via elementById", () => {
       const a = votesA.elementById("alice|opt1");
       a.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votesA.addUnique(a);
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the empty base, adds a different key.
@@ -1307,7 +2076,7 @@ describe("keyed collections via elementById", () => {
       const b = votesB.elementById("bob|opt2");
       b.set({ voterName: "bob", optionId: "opt2", voteType: "no" });
       votesB.addUnique(b);
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableVotes(server);
@@ -1328,9 +2097,11 @@ describe("keyed collections via elementById", () => {
     }
   });
 
-  // Two sessions cast the same vote (same key) concurrently. The key derives to
-  // the same entity, so add-unique dedups by link to a single membership entry.
   it("two sessions add the same keyed element concurrently — dedups to one", async () => {
+    // Two sessions cast the same vote (same key) concurrently. The key derives
+    // to the same entity, so add-unique dedups by link to a single membership
+    // entry.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1342,7 +2113,7 @@ describe("keyed collections via elementById", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, tx0).set([]);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const votes2 = rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema);
@@ -1359,7 +2130,7 @@ describe("keyed collections via elementById", () => {
       const a = votesA.elementById("alice|opt1");
       a.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votesA.addUnique(a);
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -1372,7 +2143,7 @@ describe("keyed collections via elementById", () => {
       const b = votesB.elementById("alice|opt1");
       b.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votesB.addUnique(b);
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableVotes(server);
@@ -1388,9 +2159,11 @@ describe("keyed collections via elementById", () => {
     }
   });
 
-  // Editing a field of one keyed entity touches that entity's document, not the
-  // list, so a concurrent edit to a different field of the same entity merges.
   it("concurrent edits to different fields of one keyed element both land", async () => {
+    // Editing a field of one keyed entity touches that entity's document, not
+    // the list, so a concurrent edit to a different field of the same entity
+    // merges.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1411,7 +2184,7 @@ describe("keyed collections via elementById", () => {
       const vote = votes0.elementById("alice|opt1");
       vote.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votes0.addUnique(vote);
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const votes2 = rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema);
@@ -1422,14 +2195,14 @@ describe("keyed collections via elementById", () => {
       const txA = rt1.edit();
       rt1.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, txA)
         .elementById("alice|opt1").key("voteType").set("no");
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-edit basis, edits a different field.
       const txB = rt2.edit();
       rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, txB)
         .elementById("alice|opt1").key("voterName").set("alice2");
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableVotes(server);
@@ -1446,20 +2219,24 @@ describe("keyed collections via elementById", () => {
   });
 });
 
-// Single-session checks of the mergeable methods' guards and minority branches:
-// the transaction/shape preconditions, the absent-array initialization, the
-// cell-reference (keyed-entity) matching path used by addUnique/removeByValue,
-// the no-op early returns, the element-schema `$defs` carry-through, and the
-// in-transaction accumulation of repeated ops on one path. These do not need
-// concurrency, only the op machinery, so they run against a single runtime.
 describe("mergeable op guards and single-session branches", () => {
+  // Single-session checks of the mergeable methods' guards and minority
+  // branches: the transaction/shape preconditions, the absent-array
+  // initialization, the cell-reference (keyed-entity) matching path used by
+  // addUnique/removeByValue, the no-op early returns, the element-schema
+  // `$defs` carry-through, and the in-transaction accumulation of repeated ops
+  // on one path. These do not need concurrency, only the op machinery, so they
+  // run against a single runtime.
+
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
   let rt: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1517,12 +2294,12 @@ describe("mergeable op guards and single-session branches", () => {
   it("push with no items is a no-op", async () => {
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a"]);
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx).push();
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual(["a"]);
@@ -1563,12 +2340,12 @@ describe("mergeable op guards and single-session branches", () => {
   it("removeByValue with no matching element is a no-op", async () => {
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a", "b"]);
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx).removeByValue("z");
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual(["a", "b"]);
@@ -1615,7 +2392,7 @@ describe("mergeable op guards and single-session branches", () => {
     const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
     cell.addUnique("a");
     cell.addUnique("b");
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect([...await readDurable(server)].sort()).toEqual(["a", "b"]);
@@ -1624,14 +2401,14 @@ describe("mergeable op guards and single-session branches", () => {
   it("increment then decrement in one transaction nets no change", async () => {
     const tx0 = rt.edit();
     rt.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx0).set(5);
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     const cell = rt.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx);
     cell.increment(1);
     cell.increment(-1);
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurableNumber(server)).toBe(5);
@@ -1650,7 +2427,7 @@ describe("mergeable op guards and single-session branches", () => {
 
     const tx0 = rt.edit();
     rt.getCell(space, cause, docSchema, tx0).set({ tags: [], count: 0 });
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     // Two distinct mergeable ops on the SAME entity document but different
@@ -1660,10 +2437,10 @@ describe("mergeable op guards and single-session branches", () => {
     const doc = rt.getCell(space, cause, docSchema, tx);
     doc.key("tags").addUnique("x");
     doc.key("count").increment(2);
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
-    const readBack = SharedServerStorageManager.connectTo(server, {
+    const readBack = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt2 = new Runtime({
@@ -1681,10 +2458,12 @@ describe("mergeable op guards and single-session branches", () => {
     }
   });
 
-  // A cell whose transaction is a TransactionWrapper (the wrapper Cell.sample()
-  // and Cell.sink() install for child cells) routes its mergeable ops through
-  // the wrapper's record* delegations to the inner transaction.
   it("mergeable ops route through a TransactionWrapper", () => {
+    // A cell whose transaction is a TransactionWrapper (the wrapper
+    // Cell.sample() and Cell.sink() install for child cells) routes its
+    // mergeable ops through the wrapper's record* delegations to the inner
+    // transaction.
+
     const inner = rt.edit();
     const wrapper = new TransactionWrapper(inner, { childCellTx: inner });
 
@@ -1706,10 +2485,257 @@ describe("mergeable op guards and single-session branches", () => {
     expect(counter.get()).toBe(3);
   });
 
-  // An increment that sums to zero is a no-op the op builder drops. Pairing it
-  // with another change on the same entity forces the entity to commit, so the
-  // builder still visits (and drops) the zero increment.
+  it("an ancestor write poisons the tail intent beneath it", () => {
+    // A whole-value write reaches the intents BENEATH it, not just the one at
+    // the exact path it wrote. Asserted on the recorded intents rather than on
+    // a commit outcome, because the reshaping `set` also records reads of its
+    // own that conflict independently — a commit-level assertion would pass
+    // whether or not the intent survived.
+    //
+    // The sequence is the one length arithmetic alone cannot catch: push,
+    // reshape the enclosing object, push. The two pushes sum to a `count` that
+    // spans the reshape, so the recorded tail lands back on the base length
+    // while covering an element the reshape supplied rather than one an op
+    // appended.
+
+    const docSchema = {
+      type: "object",
+      properties: { rows: { type: "array", items: { type: "string" } } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const cause = "ancestor-poison";
+
+    const tx = rt.edit();
+    const doc = rt.getCell(space, cause, docSchema, tx);
+    doc.set({ rows: ["a", "b", "c"] });
+    const rows = doc.key("rows") as unknown as Cell<string[]>;
+
+    rows.push("p");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+
+    doc.set({ rows: ["m", "n", "o", "r"] });
+    rows.push("q");
+
+    // The ancestor write dropped the intent, and `recordMergeableOp` will not
+    // revive a poisoned path, so the second push records nothing either.
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+    expect(doc.get()).toEqual({ rows: ["m", "n", "o", "r", "q"] });
+  });
+
+  it("a build-time abandon removes the intent from the transaction", async () => {
+    // Abandoning at build time must remove the intent from the transaction, not
+    // just skip the wire op — a surviving intent keeps narrowing reads out of
+    // the conflict set for an op that is no longer being sent. Asserted
+    // directly on the intents after `getNativeCommit`, because the reshaping
+    // write happens to leave an unmarked read at the path anyway, so no commit
+    // outcome distinguishes the two.
+
+    // Asserting on the built commit rather than on the committed transaction
+    // matters: finishing a commit clears the intents anyway, so a post-commit
+    // assertion would pass whether or not the build dropped them.
+
+    const tx0 = rt.edit();
+    rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+      "a",
+      "b",
+      "c",
+    ]);
+    await tx0.commit({ resolveAt: "verdict" });
+    await rt.storageManager.synced();
+
+    const tx = rt.edit();
+    const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
+    cell.set(["a"]);
+    cell.push("d");
+
+    // Recorded while the handler ran: the shrink came first, so nothing was
+    // poisoned at the write.
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+
+    // Building the commit is what discovers the tail no longer describes the
+    // local value, and it drops the intent rather than just skipping the op.
+    getDirectTransactionNativeCommit(tx, space);
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+  });
+
+  it("a whole-document transaction emits a set and drops the push's intent", async () => {
+    // `markWholeDocumentWrites` replaces every op with a whole-document set —
+    // the client speculation overlay's seal, whose entries layer their ops over
+    // a confirmed value that moves under them. The append is not sent, so its
+    // intent must not survive to narrow the array read out of the commit's
+    // reads: that read is a real dependency of the value the set carries, and
+    // for a speculative seal it is what the entry's retirement floor is built
+    // from.
+    const tx0 = rt.edit();
+    rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a", "b"]);
+    await tx0.commit({ resolveAt: "verdict" });
+    await rt.storageManager.synced();
+
+    const tx = rt.edit();
+    const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
+    cell.push("c");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+
+    tx.tx.markWholeDocumentWrites!();
+    const native = getDirectTransactionNativeCommit(tx, space);
+    expect(native?.operations.map((op) => op.op)).toEqual(["set"]);
+    expect(
+      (native?.operations[0] as { value?: { value?: string[] } }).value?.value,
+    ).toEqual(["a", "b", "c"]);
+    // The array read the append would have narrowed away is in the sealed
+    // commit's reads, which is the claim the abandonment is FOR — the
+    // intent count alone cannot show it, and the whole-document write is
+    // the value the run computed from that read. Asserted before the
+    // intent count so a regression names the consequence, not the
+    // mechanism.
+    const replica = rt.storageManager.open(space).replica;
+    const sealed = replica.sealNative!(
+      native!,
+      tx.tx,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    const readIds = [
+      ...sealed.commit.reads.confirmed,
+      ...sealed.commit.reads.pending,
+    ].map((read) => read.id);
+    expect(readIds).toContain(cell.getAsNormalizedFullLink().id);
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+
+    // Poisoned as well as deleted: a later push on the same transaction
+    // records nothing, so the intent cannot come back after the commit
+    // was built without it.
+    cell.push("d");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+  });
+
+  it("nested tail ops abandon only the contained one", async () => {
+    // Two tail ops where one op's payload contains the other's target: exactly
+    // one intent — the CONTAINED one — is abandoned, and the containing op
+    // survives to carry the combined value. Which of the two is dropped only
+    // shows here: both choices commit the same durable value in the simple
+    // case, but abandoning the outer would forfeit the outer list's
+    // merge-friendliness instead of the inner one's.
+    //
+    // The same assertion pins the guard's lower edge: a nested push landing
+    // BEFORE the outer tail is in no payload, so both intents survive.
+
+    const nested = {
+      type: "array",
+      items: { type: "array", items: { type: "string" } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    // `["value"]` is the list itself within its document.
+    for (
+      const { name, seed, index, remains } of [
+        // Push a new inner list, then push into it: the outer payload already
+        // carries the "y" the inner op would add again, so only the outer op
+        // survives.
+        { name: "inside-tail", seed: [["a"]], index: 1, remains: [["value"]] },
+        // Push into an inner list that was already there: index 0 sits below the
+        // outer tail start, so nothing is sent twice and both ops survive.
+        {
+          name: "before-tail",
+          seed: [["a"], ["b"]],
+          index: 0,
+          remains: [["value"], ["value", "0"]],
+        },
+      ]
+    ) {
+      const cause = `nested-intents-${name}`;
+      const tx0 = rt.edit();
+      rt.getCell<string[][]>(space, cause, nested, tx0).set(seed);
+      await tx0.commit({ resolveAt: "verdict" });
+      await rt.storageManager.synced();
+
+      const tx = rt.edit();
+      const outer = rt.getCell<string[][]>(space, cause, nested, tx);
+      outer.push(["x"]);
+      (outer.key(index) as unknown as Cell<string[]>).push("y");
+      expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+        .toBe(2);
+
+      // Building the commit is where the containment is discovered — both ops
+      // were recorded on paths neither write reshaped.
+      getDirectTransactionNativeCommit(tx, space);
+      expect(
+        [...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]
+          .map(({ path }) => path),
+      ).toEqual(remains);
+    }
+  });
+
+  it("a write beneath an array leaves the array's intent intact", () => {
+    // The other direction, and the one that pins the predicate: a write BENEATH
+    // an array (an element edit) must leave that array's intent alone. Asserted
+    // on the intents, and with the push FIRST — the durable value cannot
+    // discriminate here, because a concurrent append is add-wins and lands
+    // either way, and the reverse order records no intent for a wrongly-widened
+    // poison to destroy.
+
+    const docSchema = {
+      type: "object",
+      properties: { rows: { type: "array", items: { type: "string" } } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const cause = "beneath-no-poison";
+
+    const tx = rt.edit();
+    const doc = rt.getCell(space, cause, docSchema, tx);
+    doc.set({ rows: ["a", "b"] });
+    const rows = doc.key("rows") as unknown as Cell<string[]>;
+
+    rows.push("p");
+    rows.key(0).set("A");
+
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+    expect(doc.get()).toEqual({ rows: ["A", "b", "p"] });
+  });
+
+  it("a sibling write leaves the tail intent intact", () => {
+    // A sibling write must NOT poison a tail intent: only paths at or beneath
+    // the write are covered, so an unrelated field keeps the push mergeable.
+
+    const docSchema = {
+      type: "object",
+      properties: {
+        rows: { type: "array", items: { type: "string" } },
+        title: { type: "string" },
+      },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const cause = "sibling-no-poison";
+
+    const tx = rt.edit();
+    const doc = rt.getCell(space, cause, docSchema, tx);
+    doc.set({ rows: ["a"], title: "before" });
+    const rows = doc.key("rows") as unknown as Cell<string[]>;
+
+    rows.push("p");
+    doc.key("title").set("after");
+
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+  });
+
   it("a net-zero increment alongside another change is dropped", async () => {
+    // An increment that sums to zero is a no-op the op builder drops. Pairing
+    // it with another change on the same entity forces the entity to commit, so
+    // the builder still visits (and drops) the zero increment.
+
     const docSchema = {
       type: "object",
       properties: {
@@ -1722,7 +2748,7 @@ describe("mergeable op guards and single-session branches", () => {
 
     const tx0 = rt.edit();
     rt.getCell(space, cause, docSchema, tx0).set({ tags: [], count: 5 });
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
@@ -1730,10 +2756,10 @@ describe("mergeable op guards and single-session branches", () => {
     doc.key("count").increment(1);
     doc.key("count").increment(-1);
     doc.key("tags").addUnique("x");
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
-    const readBack = SharedServerStorageManager.connectTo(server, {
+    const readBack = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt2 = new Runtime({
@@ -1751,10 +2777,11 @@ describe("mergeable op guards and single-session branches", () => {
     }
   });
 
-  // A recorded append whose path is overwritten by a whole-value set before
-  // commit is dropped: a non-array (or empty) value at the path produces no
-  // tail-relative op, and the whole-value write stands.
   it("an append superseded by a non-array set is dropped", async () => {
+    // A recorded append whose path is overwritten by a whole-value set before
+    // commit is dropped: a non-array (or empty) value at the path produces no
+    // tail-relative op, and the whole-value write stands.
+
     const cause = "append-then-scalar";
     const tx = rt.edit();
     // deno-lint-ignore no-explicit-any
@@ -1762,10 +2789,10 @@ describe("mergeable op guards and single-session branches", () => {
     cell.set([]);
     cell.push("x");
     cell.set(5);
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
-    const readBack = SharedServerStorageManager.connectTo(server, {
+    const readBack = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt2 = new Runtime({
@@ -1787,14 +2814,14 @@ describe("mergeable op guards and single-session branches", () => {
   it("an append superseded by an empty-array set yields no tail op", async () => {
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a"]);
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
     cell.push("x");
     cell.set([]);
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual([]);
@@ -1807,14 +2834,14 @@ describe("mergeable op guards and single-session branches", () => {
       "b",
       "c",
     ]);
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
     cell.removeByValue("a");
     cell.removeByValue("b");
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual(["c"]);
@@ -1845,7 +2872,7 @@ const namedListSchema = {
 async function readDurableNamed(
   server: MemoryV2Server.Server,
 ): Promise<NamedEntry[]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -1863,13 +2890,15 @@ async function readDurableNamed(
 
 describe("keyed object list (home spaces shape)", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
-  let storage2: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
+  let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
-    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await storage1?.close();
@@ -1877,9 +2906,10 @@ describe("keyed object list (home spaces shape)", () => {
     await server?.close();
   });
 
-  // Two sessions add spaces with distinct names against the same base; both
-  // memberships merge rather than the second clobbering the first.
   it("two sessions add distinct names concurrently — both survive", async () => {
+    // Two sessions add spaces with distinct names against the same base; both
+    // memberships merge rather than the second clobbering the first.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1893,7 +2923,7 @@ describe("keyed object list (home spaces shape)", () => {
       rt1.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema, tx0).set(
         [],
       );
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<NamedEntry[]>(
@@ -1914,7 +2944,7 @@ describe("keyed object list (home spaces shape)", () => {
       const a = spacesA.elementById("alpha");
       a.set({ name: "alpha" });
       spacesA.addUnique(a);
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2 still holds [] (has not observed "alpha").
@@ -1928,7 +2958,7 @@ describe("keyed object list (home spaces shape)", () => {
       const b = spacesB.elementById("beta");
       b.set({ name: "beta" });
       spacesB.addUnique(b);
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableNamed(server);
@@ -1939,9 +2969,10 @@ describe("keyed object list (home spaces shape)", () => {
     }
   });
 
-  // Two sessions add the SAME name against the same base; the key derives to the
-  // same entity, so add-unique dedups by link to one membership entry.
   it("two sessions add the same name concurrently — dedups to one", async () => {
+    // Two sessions add the SAME name against the same base; the key derives to
+    // the same entity, so add-unique dedups by link to one membership entry.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -1955,7 +2986,7 @@ describe("keyed object list (home spaces shape)", () => {
       rt1.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema, tx0).set(
         [],
       );
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<NamedEntry[]>(
@@ -1976,7 +3007,7 @@ describe("keyed object list (home spaces shape)", () => {
       const a = spacesA.elementById("dup");
       a.set({ name: "dup" });
       spacesA.addUnique(a);
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -1989,7 +3020,7 @@ describe("keyed object list (home spaces shape)", () => {
       const b = spacesB.elementById("dup");
       b.set({ name: "dup" });
       spacesB.addUnique(b);
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableNamed(server);
@@ -2000,9 +3031,10 @@ describe("keyed object list (home spaces shape)", () => {
     }
   });
 
-  // Two sessions remove different spaces by key concurrently; both removals land
-  // instead of clobbering through a whole-list rewrite.
   it("two sessions remove distinct names concurrently — both land", async () => {
+    // Two sessions remove different spaces by key concurrently; both removals
+    // land instead of clobbering through a whole-list rewrite.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2025,7 +3057,7 @@ describe("keyed object list (home spaces shape)", () => {
         e.set({ name });
         seed.addUnique(e);
       }
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<NamedEntry[]>(
@@ -2044,7 +3076,7 @@ describe("keyed object list (home spaces shape)", () => {
         txA,
       );
       spacesA.removeByValue(spacesA.elementById("b"));
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2, still holding all three, removes a different space.
@@ -2056,7 +3088,7 @@ describe("keyed object list (home spaces shape)", () => {
         txB,
       );
       spacesB.removeByValue(spacesB.elementById("c"));
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableNamed(server);
@@ -2111,12 +3143,14 @@ function favoriteKeyFor(piece: { getAsNormalizedFullLink(): unknown }): string {
 
 describe("keyed entity holding a cell reference (home favorites shape)", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
   let rt: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,

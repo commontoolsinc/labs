@@ -163,7 +163,10 @@ The scheduler manages the execution order of reactive updates:
 
 - Ensures updates happen in a predictable order
 - Batches related updates for efficiency
-- Prevents infinite update loops
+- Bounds the scheduling work a non-converging graph can demand, deferring the
+  offending actions rather than running them without limit. This bounds
+  scheduling, not computation: a loop inside a single computation body still
+  runs to completion or not at all
 - Provides hooks for synchronization points via `idle()`
 
 ## Core Components
@@ -826,7 +829,8 @@ The Runtime coordinates several core services:
 - **PatternManager**: Loads, compiles, and caches pattern definitions
 - **ModuleRegistry**: Manages module registration and retrieval for patterns
 - **Runner**: Executes patterns and manages their lifecycle
-- **Harness**: Provides the execution environment for pattern code
+- **Engine** (`runtime.harness`): Provides the execution environment for pattern
+  code
 
 All services receive the Runtime instance as a dependency, enabling proper
 isolation and testability without global state.

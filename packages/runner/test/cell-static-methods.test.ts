@@ -1,16 +1,23 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
+import type { FabricValue } from "@commonfabric/data-model";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createBuilder } from "../src/builder/factory.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -201,6 +208,86 @@ describe("Cell Static Methods", () => {
       });
     });
 
+    //
+    // The static-data walk over special objects
+    //
+    // The static-data validation walk descends anything `typeof === "object"`,
+    // which admits a `FabricSpecialObject`. A `FabricPrimitive` survives it
+    // because it has zero enumerable own properties: `Object.keys()` is empty,
+    // the descent ends there, and the walk only ever reads -- it never
+    // rebuilds. A `FabricInstance` is refused instead, its codec contents being
+    // able to hold a `Cell` the walk would never reach by property name.
+    // Nothing guards either, so these pin both.
+    //
+
+    it("should accept a `FabricBytes` in static data", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+        expect(Cell.of({ payload: bytes }).get().payload).toBeInstanceOf(
+          FabricBytes,
+        );
+      });
+    });
+
+    it("should reject a `FabricError` in static data", () => {
+      // An instance's codec contents can hold a `Cell`, which is exactly what
+      // this validation rejects, and those contents are not reachable by
+      // property name. Passing one through _smuggles_ a cell past the check --
+      // the validation failing open -- so it refuses instead.
+      withinHandlerContext(runtime, space, tx, () => {
+        const failure = FabricError.fromNativeError(new Error("boom"));
+
+        expect(() => Cell.of({ failure })).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) in " +
+            "`Cell.of()` static data.",
+        );
+      });
+    });
+
+    it("should reject a wrapped `Cell` on the wrapper, not by finding it", () => {
+      // Wrapping a `Cell` is not a way around the rejection -- but note WHERE
+      // the refusal comes from. `validateStaticData()` stops at the
+      // `FabricInstance` and never reads its codec contents, so the cell
+      // inside is never inspected: this passes with an empty extras bag just
+      // as well. What it pins is that the escape route is closed, and the
+      // asserted message names the wrapper so the reason cannot drift to
+      // something this test would not actually detect.
+      withinHandlerContext(runtime, space, tx, () => {
+        const held = Cell.of("hi");
+        expect(() => Cell.of({ c: held })).toThrow();
+
+        const wrapped = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { held: held as unknown as FabricValue },
+        });
+        expect(() => Cell.of({ w: wrapped })).toThrow(
+          "(a `FabricInstance`) in `Cell.of()` static data.",
+        );
+      });
+    });
+
+    it("should accept the same `FabricBytes` at two paths", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        // Every branch that ends a descent must still clear the ancestor it
+        // recorded. One that did not would leave the value an ancestor for the
+        // rest of the walk, and the second position holding it would be
+        // reported as a circular reference.
+        const shared = new FabricBytes(new Uint8Array([7]));
+
+        expect(() => Cell.of({ a: shared, b: shared })).not.toThrow();
+      });
+    });
+
+    //
+    // More `Cell.of()` cases
+    //
+    // The values it takes, and the cell it hands back.
+    //
+
     it("should create a cell with undefined value", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const cell = Cell.of(undefined);
@@ -266,6 +353,10 @@ describe("Cell Static Methods", () => {
         expect(cell.get()).toEqual(complex);
       });
     });
+
+    //
+    // The schema parameter
+    //
 
     it("should accept a schema as second parameter", () => {
       withinHandlerContext(runtime, space, tx, () => {
@@ -987,6 +1078,13 @@ describe("Cell Static Methods", () => {
       }
     };
 
+    //
+    // Date normalization on `set()`
+    //
+    // A native `Date` written through `set()` normalizes to a
+    // `FabricEpochNsec`, at the top level and nested inside an array.
+    //
+
     it("normalizes a top-level Date to FabricEpochNsec (set)", async () => {
       await inFreshRuntime((Cell) => {
         const cell = Cell.of<unknown>(0);
@@ -1003,13 +1101,9 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    // The `Cell.of(new Date(...))` cases (top-level and nested) are absent.
-    // Unlike `set()`, the `Cell.of` initial-value path
-    // doesn't normalize native values (see the TODO in `createWithDefault` in
-    // `cell.ts`), so the raw `Date` reaches encode and throws under the strict
-    // codec. `get()` *appears* to convert (read-side projection), but the
-    // committed form is still raw. Add `... (Cell.of)` cases once that path
-    // normalizes its initial value the way `set()` does.
+    //
+    // Mixed type arrays
+    //
 
     it("should handle creating cell with mixed type array", () => {
       withinHandlerContext(runtime, space, tx, () => {

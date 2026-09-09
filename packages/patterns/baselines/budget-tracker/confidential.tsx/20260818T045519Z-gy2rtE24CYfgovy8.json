@@ -1,0 +1,183 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "CategoryBudget": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "ConfidentialExpense": {
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "default": "Other",
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "description": {
+            "ifc": {
+              "confidentiality": [
+                "expense-note"
+              ]
+            },
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount",
+          "category",
+          "date"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "budgets": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/CategoryBudget"
+        },
+        "type": "array"
+      },
+      "expenses": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ConfidentialExpense"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "expenses",
+      "budgets"
+    ],
+    "type": "object"
+  },
+  "pattern": "budget-tracker/confidential.tsx",
+  "resultSchema": {
+    "$defs": {
+      "CategoryBudget": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "ConfidentialExpense": {
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "default": "Other",
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "description": {
+            "ifc": {
+              "confidentiality": [
+                "expense-note"
+              ]
+            },
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount",
+          "category",
+          "date"
+        ],
+        "type": "object"
+      },
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "properties": {},
+            "type": "object"
+          }
+        ]
+      },
+      "UIRenderable": {
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "ifc": {
+      "confidentiality": [
+        "expense-note"
+      ]
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "budgets": {
+        "items": {
+          "$ref": "#/$defs/CategoryBudget"
+        },
+        "type": "array"
+      },
+      "expenses": {
+        "items": {
+          "$ref": "#/$defs/ConfidentialExpense"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "expenses",
+      "budgets"
+    ],
+    "type": "object"
+  }
+}

@@ -160,7 +160,9 @@ export const styles = css`
     padding: 0;
   }
 
-  /* ── Solid variant ─────────────────────────────────────────────────── */
+  /*
+  ** Solid variant
+  */
 
   .button.solid {
     border-color: transparent;
@@ -208,7 +210,9 @@ export const styles = css`
     border-color: var(--cf-theme-color-danger-pressed);
   }
 
-  /* ── Outline variant ────────────────────────────────────────────────── */
+  /*
+  ** Outline variant
+  */
 
   .button.outline {
     background-color: transparent;
@@ -250,7 +254,9 @@ export const styles = css`
     background-color: var(--cf-theme-color-danger-subtle);
   }
 
-  /* ── Ghost variant ──────────────────────────────────────────────────── */
+  /*
+  ** Ghost variant
+  */
 
   .button.ghost {
     background-color: transparent;

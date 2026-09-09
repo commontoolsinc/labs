@@ -8,6 +8,7 @@ import {
   resolve,
 } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
+import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyTrace } from "./contracts/policy-trace.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
@@ -19,6 +20,11 @@ import type {
   HarnessSkillResourceReads,
   HarnessSkillScriptExecutions,
 } from "./contracts/skill.ts";
+import {
+  createHarnessTranscriptOmissions,
+  type HarnessTranscriptOmissions,
+  isHarnessTranscriptOmissions,
+} from "./contracts/transcript-omissions.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { HarnessCapabilitySnapshot } from "./diagnostics.ts";
@@ -79,6 +85,15 @@ const writeJsonFile = async (path: string, value: unknown): Promise<void> => {
 export interface HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
+
+  /**
+   * Host directory where image-attachment snapshots may be written, for
+   * stores backed by a writable filesystem. Stores without a writable
+   * location omit it; view_image attachments then stay locked to their
+   * source file's bytes instead of snapshotting.
+   */
+  readonly imageAttachmentSnapshotDir?: string;
+
   persistRunState(state: HarnessRunState): Promise<string>;
   persistTranscript(
     transcript: readonly HarnessTranscriptMessage[],
@@ -92,6 +107,16 @@ export interface HarnessArtifactStore {
   persistPolicyTrace?(
     trace: HarnessPolicyTrace,
   ): Promise<string>;
+
+  /**
+   * Records what the run's space holds for the cells the run touched. A
+   * store that cannot answer omits it, and the run keeps its labels in state
+   * without a file beside them.
+   */
+  persistCellLabels?(
+    labels: HarnessCellLabels,
+  ): Promise<string>;
+
   persistRunReport(
     report: HarnessRunReport,
   ): Promise<string>;
@@ -123,10 +148,12 @@ export interface FileSystemHarnessArtifactStoreOptions {
 export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
+  readonly imageAttachmentSnapshotDir: string;
 
   constructor(options: FileSystemHarnessArtifactStoreOptions) {
     this.artifactRoot = resolve(options.artifactRoot);
     this.runRoot = join(this.artifactRoot, assertValidRunId(options.runId));
+    this.imageAttachmentSnapshotDir = join(this.runRoot, "image-attachments");
   }
 
   async persistRunState(state: HarnessRunState): Promise<string> {
@@ -141,6 +168,30 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   ): Promise<string> {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "transcript.json");
+    const omissionsPath = join(this.runRoot, "transcript-omissions.json");
+    let previous: HarnessTranscriptOmissions | undefined;
+    try {
+      const parsed: unknown = JSON.parse(
+        await Deno.readTextFile(omissionsPath),
+      );
+      if (!isHarnessTranscriptOmissions(parsed)) {
+        throw new TypeError(
+          `unsupported transcript omission artifact: ${omissionsPath}`,
+        );
+      }
+      previous = parsed;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+    const omissions = createHarnessTranscriptOmissions(transcript, previous);
+    const hasToolResult = transcript.some((message) => message.role === "tool");
+    if (
+      previous !== undefined || omissions.results.length > 0 || !hasToolResult
+    ) {
+      await writeJsonFile(omissionsPath, omissions);
+    }
     await writeJsonFile(path, transcript);
     return path;
   }
@@ -169,6 +220,15 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "policy-trace.json");
     await writeJsonFile(path, trace);
+    return path;
+  }
+
+  async persistCellLabels(
+    labels: HarnessCellLabels,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "cell-labels.json");
+    await writeJsonFile(path, labels);
     return path;
   }
 

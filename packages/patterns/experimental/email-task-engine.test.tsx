@@ -4,6 +4,7 @@ import {
   handler,
   pattern,
   type Stream,
+  TESTS,
   Writable,
 } from "commonfabric";
 import Note from "../notes/note.tsx";
@@ -80,7 +81,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_engine_starts_without_tasks },
       { action: action_register_existing_note },
       { action: action_edit_note },

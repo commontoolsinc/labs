@@ -1,12 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
+import {
+  type NormalizedFullLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
 
 const alice = await Identity.fromPassphrase(
   "runner-profile-owner-cfc-alice",
@@ -88,8 +91,9 @@ const compileHomePattern = async (runtime: Runtime) => {
     "../../patterns/system/home.tsx",
     import.meta.url,
   ).pathname;
-  const program = await runtime.harness.resolve(
-    new FileSystemProgramResolver(sourcePath, repoRoot),
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    { main: sourcePath, root: repoRoot },
   );
   return await runtime.patternManager.compilePattern(program);
 };
@@ -103,8 +107,9 @@ const compileProfileHomePattern = async (runtime: Runtime) => {
     "../../patterns/system/profile-home.tsx",
     import.meta.url,
   ).pathname;
-  const program = await runtime.harness.resolve(
-    new FileSystemProgramResolver(sourcePath, repoRoot),
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    { main: sourcePath, root: repoRoot },
   );
   return await runtime.patternManager.compilePattern(program);
 };
@@ -133,7 +138,6 @@ const setTrustedProfileWriter = (
   tx: IExtendedStorageTransaction,
   actingPrincipal?: string,
 ) => {
-  tx.setCfcEnforcementMode("enforce-explicit");
   if (actingPrincipal !== undefined) {
     tx.setCfcTrustSnapshot({
       id: `profile-trust-${actingPrincipal}`,
@@ -407,7 +411,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot(undefined);
       tx.setCfcImplementationIdentity({
         kind: "builtin",
@@ -438,7 +441,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "profile-trust-untrusted",
         actingPrincipal: alice.did(),
@@ -471,7 +473,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "profile-trust-owner-without-integrity",
         actingPrincipal: alice.did(),
@@ -623,7 +624,6 @@ describe("profile owner CFC policy", () => {
     try {
       const profileHomePattern = await compileProfileHomePattern(runtime);
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "pattern-create",
         actingPrincipal: alice.did(),
@@ -703,7 +703,12 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const homePattern = await compileHomePattern(runtime);
-      // Seed a non-empty profiles list WITHOUT enforcement (no prepareCfc).
+      // The list starts non-empty, so that the write below is the shrink this
+      // case is named for. The container's `writeAuthorizedBy` names a
+      // verified handler in `profile-create.tsx`, which no transaction this
+      // test can author under, so the seed goes in through the raw document
+      // address: a write that names no schema records no write-policy input,
+      // and the gate under test does not decide it.
       const seed = runtime.edit();
       const profileA = runtime.getCell(
         alice.did(),
@@ -718,8 +723,11 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         seed,
       );
-      home.key("profiles").set([profileA]);
-      await seed.commit();
+      const storedProfiles = toMemorySpaceAddress(
+        home.key("profiles").getAsNormalizedFullLink(),
+      );
+      seed.writeOrThrow(storedProfiles, [profileA.getAsLink()]);
+      expect((await seed.commit()).error).toBeUndefined();
 
       // Untrusted truncation under enforcement → rejected by the container
       // writeAuthorizedBy (the array value changed [A] -> []).
@@ -730,10 +738,15 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         writeTx,
       );
+      // The stored list holds the seeded entry, so the write below empties it.
+      expect(writeTx.readOrThrow(storedProfiles)).toHaveLength(1);
       protectedHome.key("profiles").set([]);
       writeTx.prepareCfc();
       const result = await writeTx.commit();
-      expect(result.error?.message).toContain("trusted");
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity " +
+          "at /profiles",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -766,7 +779,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "setup-projection",
         actingPrincipal: alice.did(),
@@ -830,7 +842,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({ id: "no-marker", actingPrincipal: alice.did() });
       tx.setCfcImplementationIdentity({
         kind: "builtin",
@@ -873,7 +884,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({ id: "per-path", actingPrincipal: alice.did() });
       const cell = runtime.getCell(
         alice.did(),
@@ -914,7 +924,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "per-path-neg",
         actingPrincipal: alice.did(),

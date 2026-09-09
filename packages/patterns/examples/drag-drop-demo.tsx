@@ -7,6 +7,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import Counter from "../counter/counter.tsx";
@@ -22,6 +23,8 @@ interface DragDropDemoInput {
 }
 
 export interface DragDropDemoOutput {
+  [NAME]: string;
+  [UI]: VNode;
   availableItems: Item[];
   droppedItems: Item[];
 }

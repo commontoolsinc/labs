@@ -5,11 +5,19 @@
  * VDomOp operations from the worker thread to the actual DOM.
  */
 
-export { createDomApplicator, DomApplicator } from "./applicator.ts";
+export { DomApplicator } from "./applicator.ts";
 export type { DomApplicatorOptions } from "./applicator.ts";
 
-export { createVDomRenderer, renderVDom, VDomRenderer } from "./renderer.ts";
-export { provideElementSpace, SPACE_CONTEXT_KEY } from "./space-context.ts";
+export { VDomRenderer } from "./renderer.ts";
+export {
+  clearPieceBoundary,
+  getPieceBoundary,
+  type PieceBoundaryContext,
+  provideElementSpace,
+  providePieceBoundary,
+  SPACE_CONTEXT_KEY,
+  subscribePieceBoundary,
+} from "./space-context.ts";
 export type { VDomRendererOptions } from "./renderer.ts";
 
 export {

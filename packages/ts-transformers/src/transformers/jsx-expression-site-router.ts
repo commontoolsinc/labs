@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import { visitEachChildWithJsx } from "../ast/mod.ts";
+import { preserveSourceMapRange, visitEachChildWithJsx } from "../ast/mod.ts";
 import { classifyExpressionSiteHandling } from "./expression-site-policy.ts";
 import {
   rewriteExpressionSite,
@@ -63,9 +63,12 @@ function transform(context: TransformationContext): ts.SourceFile {
           visit,
         });
         if (rewritten) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            rewritten,
+          return preserveSourceMapRange(
+            context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              rewritten,
+            ),
+            node,
           );
         }
 
@@ -83,9 +86,12 @@ function transform(context: TransformationContext): ts.SourceFile {
           visit,
         });
         if (rewritten) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            rewritten,
+          return preserveSourceMapRange(
+            context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              rewritten,
+            ),
+            node,
           );
         }
 

@@ -10,6 +10,11 @@ import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
 import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
+import { isSafeIdentifierText } from "../utils/identifiers.ts";
+import {
   detectCallKind,
   isReactiveValueExpression,
   isReactiveValueSymbol,
@@ -100,27 +105,10 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   };
 };
 
-function unwrapStructuralDataFlowExpression(
-  expression: ts.Expression,
-): ts.Expression {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current) ||
-    ts.isPartiallyEmittedExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
-}
-
 function isStructuralOpaqueKeyDataFlow(
   expression: ts.Expression,
 ): boolean {
-  const target = unwrapStructuralDataFlowExpression(expression);
+  const target = unwrapExpression(expression);
   return ts.isCallExpression(target) &&
     classifyOpaquePathTerminalCall(target) === "key";
 }
@@ -147,8 +135,9 @@ export function createDataFlowAnalyzer(
   hooks: DataFlowAnalyzerHooks = {},
 ): (expression: ts.Expression) => DataFlowAnalysis {
   // Per-expression memoization for `analyze()`. Lives inside this closure;
-  // invalidated as a unit when `TransformationContext.invalidateReactiveAnalysisCaches`
-  // drops the analyzer instance (see core/mod.ts cache-invalidation contract).
+  // invalidated as a unit when
+  // `TransformationContext.#invalidateReactiveAnalysisCaches` drops the
+  // analyzer instance (see core/mod.ts cache-invalidation contract).
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
   const resolvingConstAliases = new Set<ts.Symbol>();
   const isArrayMethodElementBindingReference =
@@ -165,20 +154,24 @@ export function createDataFlowAnalyzer(
   const leftmostIdentifierIsArrayMethodElementBinding = (
     expression: ts.Expression,
   ): boolean => {
-    let current: ts.Expression = unwrapStructuralDataFlowExpression(expression);
+    let current: ts.Expression = unwrapExpression(expression);
     while (ts.isPropertyAccessExpression(current)) {
-      current = unwrapStructuralDataFlowExpression(current.expression);
+      current = unwrapExpression(current.expression);
     }
     return ts.isIdentifier(current) &&
       isArrayMethodElementBindingReference(current);
   };
 
-  // === Synthetic node helpers ===
-  // These enable unified handling of both synthetic (transformer-created) and
-  // non-synthetic (original source) nodes by gracefully handling cases where
-  // the TypeChecker can't resolve symbols or types.
+  // Synthetic node helpers: These enable unified handling of both synthetic
+  // (transformer-created) and non-synthetic (original source) nodes by
+  // gracefully handling cases where the TypeChecker can't resolve symbols or
+  // types.
 
   const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
+
+  type StaticBindingAccessSegment =
+    | { readonly kind: "property"; readonly text: string }
+    | { readonly kind: "index"; readonly text: string };
 
   const tryGetSymbol = (node: ts.Node): ts.Symbol | undefined => {
     try {
@@ -196,6 +189,146 @@ export function createDataFlowAnalyzer(
     }
   };
 
+  const isConstVariableDeclaration = (
+    declaration: ts.VariableDeclaration,
+  ): boolean => {
+    const declarationList = declaration.parent;
+    return !!(
+      declarationList &&
+      ts.isVariableDeclarationList(declarationList) &&
+      (declarationList.flags & ts.NodeFlags.Const) !== 0
+    );
+  };
+
+  const getEnclosingConstVariableDeclaration = (
+    node: ts.Node | undefined,
+  ): ts.VariableDeclaration | undefined => {
+    let current = node;
+    while (current) {
+      if (ts.isVariableDeclaration(current)) {
+        return isConstVariableDeclaration(current) ? current : undefined;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  };
+
+  const getObjectBindingAccessSegment = (
+    element: ts.BindingElement,
+  ): StaticBindingAccessSegment | undefined => {
+    if (!element.propertyName) {
+      if (ts.isIdentifier(element.name)) {
+        return { kind: "property", text: element.name.text };
+      }
+      return undefined;
+    }
+
+    if (ts.isIdentifier(element.propertyName)) {
+      return { kind: "property", text: element.propertyName.text };
+    }
+
+    const propertyNameText = getStaticPropertyNameText(element.propertyName);
+    if (propertyNameText !== undefined) {
+      return { kind: "property", text: propertyNameText };
+    }
+
+    return undefined;
+  };
+
+  const getStaticPropertyNameText = (
+    name: ts.PropertyName,
+  ): string | undefined => {
+    if (ts.isIdentifier(name)) {
+      return name.text;
+    }
+
+    if (
+      ts.isStringLiteral(name) ||
+      ts.isNumericLiteral(name) ||
+      ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+      return name.text;
+    }
+
+    return undefined;
+  };
+
+  const getBindingElementStaticAccessPath = (
+    element: ts.BindingElement,
+  ): readonly StaticBindingAccessSegment[] | undefined => {
+    const path: StaticBindingAccessSegment[] = [];
+    let current: ts.BindingElement | undefined = element;
+
+    while (current) {
+      if (current.dotDotDotToken || current.initializer) {
+        return undefined;
+      }
+
+      const parentPattern: ts.Node = current.parent;
+      if (ts.isObjectBindingPattern(parentPattern)) {
+        const segment = getObjectBindingAccessSegment(current);
+        if (!segment) {
+          return undefined;
+        }
+        path.unshift(segment);
+      } else if (ts.isArrayBindingPattern(parentPattern)) {
+        const index = parentPattern.elements.indexOf(current);
+        if (index < 0) {
+          return undefined;
+        }
+        path.unshift({ kind: "index", text: String(index) });
+      } else {
+        return undefined;
+      }
+
+      const owner: ts.Node = parentPattern.parent;
+      if (ts.isVariableDeclaration(owner)) {
+        return path;
+      }
+      if (ts.isBindingElement(owner)) {
+        current = owner;
+        continue;
+      }
+      return undefined;
+    }
+
+    return undefined;
+  };
+
+  const createStaticBindingAccessExpression = (
+    root: ts.Expression,
+    path: readonly StaticBindingAccessSegment[],
+  ): ts.Expression => {
+    let current = unwrapExpression(root);
+
+    for (const segment of path) {
+      if (segment.kind === "index") {
+        current = ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createNumericLiteral(segment.text),
+        );
+        continue;
+      }
+
+      current = isSafeIdentifierText(segment.text)
+        ? ts.factory.createPropertyAccessExpression(
+          current,
+          ts.factory.createIdentifier(segment.text),
+        )
+        : /^\d+$/.test(segment.text)
+        ? ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createNumericLiteral(segment.text),
+        )
+        : ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createStringLiteral(segment.text),
+        );
+    }
+
+    return current;
+  };
+
   const getStableConstAliasInitializer = (
     symbol: ts.Symbol | undefined,
   ): ts.Expression | undefined => {
@@ -205,7 +338,7 @@ export function createDataFlowAnalyzer(
     return resolveStableConstAliasInitializer(
       symbol,
       ts.factory,
-      unwrapStructuralDataFlowExpression,
+      unwrapExpression,
     );
   };
 
@@ -217,7 +350,7 @@ export function createDataFlowAnalyzer(
       return undefined;
     }
 
-    const target = unwrapStructuralDataFlowExpression(initializer);
+    const target = unwrapExpression(initializer);
     if (
       ts.isObjectLiteralExpression(target) ||
       ts.isArrayLiteralExpression(target)
@@ -282,7 +415,7 @@ export function createDataFlowAnalyzer(
   const shouldPreserveConstAliasIdentity = (
     initializer: ts.Expression,
   ): boolean => {
-    const target = unwrapStructuralDataFlowExpression(initializer);
+    const target = unwrapExpression(initializer);
 
     return !(
       ts.isObjectLiteralExpression(target) ||
@@ -436,7 +569,7 @@ export function createDataFlowAnalyzer(
     expression: ts.Expression,
     seenSymbols = new Set<ts.Symbol>(),
   ): boolean => {
-    const target = unwrapStructuralDataFlowExpression(expression);
+    const target = unwrapExpression(expression);
 
     if (ts.isCallExpression(target)) {
       return classifyOpaquePathTerminalCall(target) === "key";
@@ -487,7 +620,7 @@ export function createDataFlowAnalyzer(
       setParentPointers(expression);
     }
 
-    // === Helper functions (available for both synthetic and non-synthetic paths) ===
+    // Helper functions (available for both synthetic and non-synthetic paths)
 
     const recordDataFlow = (
       expr: ts.Expression,
@@ -522,13 +655,9 @@ export function createDataFlowAnalyzer(
           current = current.expression;
           continue;
         }
-        if (
-          ts.isParenthesizedExpression(current) ||
-          ts.isAsExpression(current) ||
-          ts.isTypeAssertionExpression(current) ||
-          ts.isNonNullExpression(current)
-        ) {
-          current = current.expression;
+        const unwrapped = unwrapTransparentWrapperOnce(current);
+        if (unwrapped) {
+          current = unwrapped;
           continue;
         }
         if (ts.isCallExpression(current)) {
@@ -567,7 +696,7 @@ export function createDataFlowAnalyzer(
       return false;
     };
 
-    // === Expression type handlers ===
+    // Expression type handlers
 
     if (ts.isIdentifier(expression)) {
       // Skip property names in property access expressions - they're not data flows.
@@ -923,20 +1052,13 @@ export function createDataFlowAnalyzer(
       };
     }
 
-    if (ts.isParenthesizedExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isAsExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isTypeAssertionExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isNonNullExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
+    // A transparent wrapper is analyzed as the expression it wraps. This has to
+    // name the whole set: an unlisted spelling falls to the generic child walk
+    // below, which reaches the same operands but merges them through
+    // `mergeAnalyses` and so drops the inner `rewriteHint`.
+    const unwrappedTarget = unwrapTransparentWrapperOnce(expression);
+    if (unwrappedTarget) {
+      return analyzeExpression(unwrappedTarget, scope, context);
     }
 
     if (ts.isConditionalExpression(expression)) {
@@ -1107,11 +1229,10 @@ export function createDataFlowAnalyzer(
       return mergeAnalyses(...analyses);
     }
 
-    // === JSX Expression Handling ===
-    // The analyzer provides complete data flow analysis for JSX elements,
-    // including both attributes (like `value={expr}`) and children.
-    // This makes the analyzer self-contained - callers get correct results
-    // regardless of how they traverse the AST.
+    // JSX Expression Handling: The analyzer provides complete data flow
+    // analysis for JSX elements, including both attributes (like
+    // `value={expr}`) and children. This makes the analyzer self-contained -
+    // callers get correct results regardless of how they traverse the AST.
 
     // Helper: analyze JSX attributes (JsxAttribute and JsxSpreadAttribute)
     const analyzeJsxAttributes = (

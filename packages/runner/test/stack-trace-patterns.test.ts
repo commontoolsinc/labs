@@ -7,10 +7,12 @@
 // → source maps → eval → error → parseStack → original line numbers.
 
 import { assertEquals, assertMatch } from "@std/assert";
-import { Runtime } from "../src/runtime.ts";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -51,8 +53,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((err: Error) => {
+  runtime.scheduler.onError((err: Error) => {
     capturedError = err;
   });
 
@@ -129,8 +130,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((err: Error) => {
+  runtime.scheduler.onError((err: Error) => {
     capturedError = err;
   });
 
@@ -209,8 +209,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((err: Error) => {
+  runtime.scheduler.onError((err: Error) => {
     capturedError = err;
   });
 

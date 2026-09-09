@@ -554,6 +554,10 @@ Deno.test("pattern factory .inSpace() resolves named spaces during action postRu
     await runtime.idle();
     await runtime.storageManager.synced();
     await result.pull();
+    // The name-resolution retry re-runs the action on delivery turns kicked
+    // by the pull above; drain them and re-pull to see the re-linked child.
+    await clock.settle();
+    await result.pull();
 
     const actionLink = parseLink(result.key("child").getRaw(), result);
     const actionResult = runtime.getCellFromLink(actionLink!);
@@ -906,6 +910,10 @@ Deno.test("pattern factory .inSpace() without a space creates a fresh DID space 
     await tx.commit();
     await runtime.idle();
     await runtime.storageManager.synced();
+    await result.pull();
+    // The name-resolution retry re-runs the action on delivery turns kicked
+    // by the pull above; drain them and re-pull to see the re-linked child.
+    await clock.settle();
     await result.pull();
 
     const actionLink = parseLink(result.key("child").getRaw(), result);

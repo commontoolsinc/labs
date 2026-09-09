@@ -1,7 +1,11 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 
@@ -15,20 +19,21 @@ type StoredEntry = {
   observes?: string;
 };
 
-// A document-creating write lands at the RAW document root: writeOrThrow's
-// missing-doc retry constructs the envelope `{value: ...}` and writes it at
-// storage path []. `valueWriteTargets` canonicalizes the write PATH but used
-// to keep the RAW envelope as the written value, so the pure-link container
-// walk descended through the `value` wrapper key and emitted raw-projected
-// container paths — the membership stamp (origin:"structure",
-// observes:"enumerate") then persisted anchored at ["value"] instead of the
-// canonical container path []. Consumption compares stored anchors against
-// canonical read paths, so nothing at the canonical path consumed the
-// membership label until the next write's carry-forward re-anchored it; the
-// window was only masked by the co-minted frozen existence entry carrying
-// the same creating join. These tests pin the canonical anchoring at
-// creation itself.
 describe("CFC: creation anchors membership at the canonical container path", () => {
+  // A document-creating write lands at the RAW document root: writeOrThrow's
+  // missing-doc retry constructs the envelope `{value: ...}` and writes it at
+  // storage path []. `valueWriteTargets` canonicalizes the write PATH but used
+  // to keep the RAW envelope as the written value, so the pure-link container
+  // walk descended through the `value` wrapper key and emitted raw-projected
+  // container paths — the membership stamp (origin:"structure",
+  // observes:"enumerate") then persisted anchored at ["value"] instead of the
+  // canonical container path []. Consumption compares stored anchors against
+  // canonical read paths, so nothing at the canonical path consumed the
+  // membership label until the next write's carry-forward re-anchored it; the
+  // window was only masked by the co-minted frozen existence entry carrying
+  // the same creating join. These tests pin the canonical anchoring at
+  // creation itself.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -48,6 +53,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({
       space,
       scope: "space",
@@ -57,13 +63,14 @@ describe("CFC: creation anchors membership at the canonical container path", () 
       value,
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{ path: [], label: { confidentiality: [atom] } }],
         },
       },
     });
+    rt.prepareTxForCommit(seed);
     expect((await seed.commit()).ok).toBeDefined();
     return id;
   };
@@ -82,7 +89,8 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // `entriesOf` reads the label map the replica stores, and flow labels
+      // reach storage at "persist".
       cfcFlowLabels: "persist",
     });
 
@@ -102,6 +110,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     el0.get();
     const listCell = runtime.getCell(space, "anchor-list", listSchema, setup);
     listCell.set([el0, el1]);
+    runtime.prepareTxForCommit(setup);
     expect((await setup.commit()).ok).toBeDefined();
     return listCell.getAsNormalizedFullLink().id;
   };
@@ -132,6 +141,15 @@ describe("CFC: creation anchors membership at the canonical container path", () 
   it("a shape read at the canonical container path consumes the creating join", async () => {
     const listId = await createList();
 
+    // The reader's output document declares the confidentiality it is about
+    // to receive, so the stamped write fits the ceiling its label map states.
+    await seedLabeledDoc(
+      runtime!,
+      "anchor-out",
+      { copied: false },
+      "alice-secret",
+    );
+
     // A nonRecursive (shape) read at the container observes membership and
     // existence: the creating join must arrive in the reader's flow join
     // and stamp its output. (During the mis-anchored window this held only
@@ -147,6 +165,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     }, { nonRecursive: true });
     const out = runtime!.getCell(space, "anchor-out", undefined, readTx);
     out.set({ copied: true });
+    runtime!.prepareTxForCommit(readTx);
     expect((await readTx.commit()).ok).toBeDefined();
 
     const outDerived = entriesOf(out.getAsNormalizedFullLink().id).find((e) =>

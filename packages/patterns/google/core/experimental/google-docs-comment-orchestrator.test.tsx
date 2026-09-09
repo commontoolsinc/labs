@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/google-docs-comment-orchestrator.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import { hasText } from "../../../test/vnode-helpers.ts";
 import GoogleDocsCommentOrchestrator from "./google-docs-comment-orchestrator.tsx";
 
@@ -52,7 +52,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_fetch_waits_for_auth },
       { assertion: assert_auth_ui_explains_required_scopes },
       { assertion: assert_no_comments_initially },

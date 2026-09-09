@@ -25,6 +25,7 @@ describe("CFC runtime options", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // The assertion below reads this value back off the runtime.
       cfcEnforcementMode: "disabled",
     });
 

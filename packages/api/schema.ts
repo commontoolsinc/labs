@@ -18,6 +18,12 @@ import type {
   AsCellType,
   Cell,
   ComparableCell,
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
   FactoryInput,
   HandlerFactory,
   JSONSchema,
@@ -31,7 +37,9 @@ import type {
   WriteonlyCell,
 } from "commonfabric";
 
-// ===== Helper Types =====
+//
+// Helper Types
+//
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
@@ -45,7 +53,9 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 
-// ===== JSON Pointer Path Resolution Utilities =====
+//
+// JSON Pointer Path Resolution Utilities
+//
 
 /**
  * Split a JSON Pointer reference into path segments.
@@ -181,6 +191,12 @@ type SchemaCore<
   : T extends { type: "number" | "integer" } ? number
   : T extends { type: "boolean" } ? boolean
   : T extends { type: "null" } ? null
+  : T extends { type: "FabricBytes" } ? FabricBytes
+  : T extends { type: "FabricEpochDay" } ? FabricEpochDay
+  : T extends { type: "FabricEpochNsec" } ? FabricEpochNsec
+  : T extends { type: "FabricHash" } ? FabricHash
+  : T extends { type: "FabricKeyPair" } ? FabricKeyPair
+  : T extends { type: "FabricRegExp" } ? FabricRegExp
   : T extends { type: "array" }
     ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
     : unknown[]
@@ -269,6 +285,10 @@ type SchemaInner<
  * - $ref resolution (both "#" and "#/path/to/def")
  * - anyOf unions
  * - Primitive types (string, number, boolean, null)
+ * - `FabricPrimitive` types ("FabricBytes", "FabricEpochDay",
+ *   "FabricEpochNsec", "FabricHash", "FabricKeyPair", "FabricRegExp"), each
+ *   inferring the
+ *   corresponding `FabricPrimitive` interface from this package
  * - Arrays with typed items
  * - Objects with typed properties (required and optional)
  * - Cell and Stream wrapping via asCell/asStream
@@ -369,7 +389,9 @@ export type SchemaWithoutCell<
   Depth extends DepthLevel = 9,
 > = SchemaInner<T, Root, Depth, false>;
 
-// ===== Module Augmentation for Schema-based Overloads =====
+//
+// Module Augmentation for Schema-based Overloads
+//
 
 declare module "commonfabric" {
   // Augment PatternFunction with schema-based overloads
@@ -422,7 +444,7 @@ declare module "commonfabric" {
       eventSchema: E,
       stateSchema: T,
       handler: (event: Schema<E>, props: Schema<T>) => any,
-    ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+    ): HandlerFactory<SchemaWithoutCell<E>, SchemaWithoutCell<T>>;
   }
 
   // Augment WishFunction with schema-based overloads
@@ -430,7 +452,7 @@ declare module "commonfabric" {
     <S extends JSONSchema = JSONSchema>(
       target: FactoryInput<WishParams>,
       schema: S,
-    ): Reactive<WishState<Schema<S>> & UIRenderable>;
+    ): Reactive<WishState<Schema<S>>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload

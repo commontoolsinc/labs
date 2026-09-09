@@ -202,7 +202,7 @@ describe("CFC trust closure (B3)", () => {
           { from: LOCATION_ROUNDING, to: AGE_ROUNDING },
         ],
       }));
-      // Terminates and answers correctly despite the cycle.
+      // Terminates and is correct despite the cycle.
       expect(
         cycleResolver.conceptSatisfied(
           LOCATION_ROUNDING,

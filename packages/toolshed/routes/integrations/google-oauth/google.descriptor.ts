@@ -5,13 +5,15 @@
  * compatibility with existing consuming patterns. The custom tokenMapper
  * and emptyAuthData handle this.
  */
-import env from "@/env.ts";
+
 import { AuthSchema } from "@commonfabric/runner";
 import type { JSONSchema } from "@commonfabric/runner";
+
+import env from "@/env.ts";
 import type {
   OAuth2Tokens,
   ProviderDescriptor,
-} from "../oauth2-common/oauth2-common.types.ts";
+} from "@/routes/integrations/oauth2-common/oauth2-common.types.ts";
 
 function tokenToAuthData(
   token: OAuth2Tokens,

@@ -15,7 +15,7 @@ import {
 } from "commonfabric";
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
-import { listMentionable, listRecent } from "./common-fabric.tsx";
+import { listMentionable } from "./common-fabric.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
@@ -125,8 +125,6 @@ export default pattern<QuickCaptureInput, QuickCaptureOutput>(
       query: "#mentionable",
     });
     const mentionable = resultOf(mentionableWish.result);
-    const recentWish = wish<MentionablePiece[]>({ query: "#recent" });
-    const recentPieces = resultOf(recentWish.result);
     const summaryWish = wish<{ entries: SummaryIndexEntry[] }>({
       query: "#summaryIndex",
     });
@@ -181,7 +179,6 @@ ${profileSection}`;
         entries: summaryEntries,
       }),
       listMentionable: patternTool(listMentionable, { mentionable }),
-      listRecent: patternTool(listRecent, { recentPieces }),
       createNote: {
         handler: createNoteHandler({ pieceRegistry }),
         description:

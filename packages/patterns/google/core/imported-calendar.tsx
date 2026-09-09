@@ -20,6 +20,7 @@ import {
   pattern,
   resultOf,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -60,6 +61,8 @@ interface Input {
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   title: string;
   eventCount: number;
   localEvents: LocalEvent[];
@@ -365,16 +368,15 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   );
   const { events: importedEvents } = resultOf(calendarWish.result);
 
-  // Current date sourced from the reactive #now cell instead of reading the
-  // clock directly at pattern-body level. The derived date stays unavailable
-  // until the wish resolves.
+  // Current date sourced from the reactive #now cell (one-shot, coarsened to
+  // 1s) instead of reading the clock directly at pattern-body level. The wish
+  // fills its result in later, so every value derived from it is reactive and
+  // reads as empty until it arrives.
   const nowCell = wish<number>({ query: "#now" });
   const nowCellValue = resultOf(nowCell.result);
   const todayDate = computed(() => getTodayDate(nowCellValue));
 
-  // Store navigation as a static offset and derive calendar dates from #now.
-  // This keeps date rendering and interactions unavailable until the clock is
-  // usable without mutating Writable cells from inside a computed derivation.
+  // Store navigation as an offset and derive calendar dates from #now.
   const navigationOffset = new Writable(0);
   const visibleDays = new Writable(7);
 

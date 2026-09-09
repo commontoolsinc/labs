@@ -3,6 +3,10 @@ import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_LABEL_READ_FAILED_ATOM } from "@commonfabric/runner/cfc";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { RenderPolicy } from "../src/worker/types.ts";
 
@@ -14,15 +18,9 @@ import type { RenderPolicy } from "../src/worker/types.ts";
 // fallthrough, all-atoms-admitted loop exit) cover nondeterministically across
 // runs. Calling the admission methods directly pins them to a fixed path.
 
-// Private admission methods on WorkerReconciler, reached through a typed cast
-// rather than `any` so the call sites still type-check.
-type ReconcilerAdmission = {
-  canRenderCellUnderPolicy(cell: unknown, policy: RenderPolicy): boolean;
-  atomRenderableUnderPolicy(atom: unknown, policy: RenderPolicy): boolean;
-};
-
-function admissionSeam(reconciler: WorkerReconciler): ReconcilerAdmission {
-  return reconciler as unknown as ReconcilerAdmission;
+// The admission checks, reached through the reconciler's accessor.
+function admissionSeam(reconciler: WorkerReconciler) {
+  return reconciler.accessForTestingOnly;
 }
 
 Deno.test("worker reconciler CFC atom admission", async (t) => {
@@ -52,6 +50,7 @@ Deno.test("worker reconciler CFC atom admission", async (t) => {
       tx,
     );
     const secretLink = secret.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: secretLink.id!,
@@ -61,7 +60,7 @@ Deno.test("worker reconciler CFC atom admission", async (t) => {
       value: "Sensitive diagnosis: migraine",
       cfc: {
         version: 1,
-        schemaHash: "test-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

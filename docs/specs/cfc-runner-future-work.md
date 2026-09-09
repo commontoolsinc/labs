@@ -44,10 +44,11 @@ defaults `cfcEnforcementMode` to `enforce-explicit`
 `createRuntimeClientOptions` — the types-level
 `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`
 ([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
-bare-transaction fallback. What *is* dormant: flow-labels default `off`
-([`types.ts:331`](../../packages/runner/src/cfc/types.ts)) everywhere, the render
-confidentiality ceiling is plumbed end-to-end but no host populates it, and
-`enforce-strict` has no distinct behavior. So the flow-taint and display
+bare-transaction fallback. What *is* dormant: flow-labels are `persist` in the
+shell and `off` in every other host, the render confidentiality ceiling is wired
+end-to-end but the shell builds one only behind a flag that defaults off, and no
+host runs at `enforce-strict`, leaving the one reject that rung adds — the
+writer-fit misfit — unexercised in deployment. So the flow-taint and display
 protections below are *built but dormant* until a host turns them on — see Epic H.
 
 ---
@@ -122,7 +123,7 @@ Decomposes into (dependency order — 1/2/3 can parallelize once A lands):
 - **B3 — Trust closure over the acting principal.** The `I ≥_actingUser Concept(C)`
   resolver under a `trustContext` (§4.4.5, §4.8.9) — feeds concept-valued integrity
   matches; mints per-user `HasRole` facts. Delivers invariant 11.
-- **B4 — Guarded rewrite + fuelled fixpoint.** `applyExchangeRule` (add-alternative
+- **B4 — Guarded rewrite + fueled fixpoint.** `applyExchangeRule` (add-alternative
   + empty-postcondition drop) + `evaluateExchangeRules` fixpoint with bounded fuel
   and **hard fail-closed on exhaustion** (§4.4.5); then post-rewrite `canAccess`.
 - **B5 — Boundary hook.** Wire the evaluator into `prepareBoundaryCommit`
@@ -242,25 +243,60 @@ collaborative-doc model as a downgraded/future area. Ref: §14.4.8, §3.1.6.
 
 ## Epic H — Enforcement & flow activation (smaller than the engines, high leverage)
 
-**Size: medium. Partly just flipping defaults + finishing the ladder — do early.**
+**Size: medium. Mostly flipping defaults onto conforming states — do early.**
 
 Not new machinery so much as turning the system on:
 
-- **Flow-labels default `off` → inv-9 dormant.** The router-attack flow-taint
-  (§10's own worked example) is not stamped by default. Move deployments to
-  propagation `persist`; note trigger-read confidentiality (SC-3) currently never
-  reaches the enforcement side or the egress ceiling even when the dial is on.
-- **`enforce-strict` undifferentiated.** The effective deployment default is
-  already `enforce-explicit` (Runtime + lib-shell; the types-level `disabled` is
-  the bare-transaction fallback), but the strict rung is rankable with no
-  additional reject behavior in the commit gate (SC-13). Finish the ladder and
-  pick conforming default deployment states.
-- **Display-ceiling "shell flip."** The render ceiling is built and fail-closed but
-  **no host populates it**, and it admits atoms by raw structural equality rather
-  than §15.2 acting-user shapes (`User`/`PersonalSpace`/`Space`-via-`HasRole`).
-  Atom-shaping needs Epic B's exchange resolution; activation does not. (SC-16;
-  §8.10.6.) Render-boundary *composition + text integrity* itself is owned by
-  `packages/html` (see Out of scope).
+- **Flow-labels `off` outside the shell → inv-9 partial.** The router-attack
+  flow-taint (§10's own worked example) is stamped where the shell runs
+  ([`lib-shell/src/runtime.ts`](../../packages/lib-shell/src/runtime.ts) defaults
+  `cfcFlowLabels` to `persist`) and nowhere else: the `Runtime` default is `off`,
+  and toolshed and background-piece-service pass no CFC options at all, so they
+  inherit it. Move them through `observe` to `persist`. `cfcTriggerReadGating` is
+  `false` in every host on the same footing — turning it on joins the §8.9.2
+  trigger reads to both enforcement gates, the sink-request ceiling and the
+  `requiredIntegrity` input gate
+  ([`prepare.ts`](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`),
+  which closes the direct trigger channel; multi-hop closure follows once flow
+  persists (SC-3).
+- **`enforce-strict` default deployment states.** The effective deployment
+  default is `enforce-explicit` (Runtime + lib-shell; the types-level `disabled`
+  is the bare-transaction fallback). The strict rung carries one differentiated
+  reject: the SC-18b writer-fit misfit. The per-transaction flow join landing on
+  a written document must fit that document's declared store policy; under
+  strict a misfit rejects the commit, and under every mode below it persists the
+  measurement and flags a diagnostic. One seam answers a misfit by declaring
+  rather than rejecting: a document the runtime is setting a piece up in
+  takes the §8.12.5 route-2 upgrade, declaring a policy that covers the join
+  in the same transaction that writes it. Implemented in
+  `prepareBoundaryCommit`
+  ([`prepare.ts`](../../packages/runner/src/cfc/prepare.ts)), contract in
+  [`cfc-enforcement-matrix.md`](./cfc-enforcement-matrix.md) §4, asserted under
+  both modes in
+  [`cfc-writer-fit.test.ts`](../../packages/runner/test/cfc-writer-fit.test.ts).
+  What remains is picking the conforming default deployment states from that
+  matrix's §3 progression and moving the shipped hosts onto them. A piece's
+  RUNNING graph is not on that seam: a lift or handler writing in a later
+  transaction records no setup marker, so its target — commonly a `computed:`
+  document — measures against its own ceiling, and strict refuses those
+  writes until they have a route of their own. Strict
+  presupposes `cfcFlowLabels: persist`: §18.6.3's conformance matrix marks
+  `enforce-strict` without `persist` non-conforming, and the writer-fit
+  measurement exists only where the flow join is stamped. §18.6.3 also puts the
+  standard-profile display ceiling (§8.10.6) on the strict rung, where the
+  runner has it as a host-passed option the enforcement ladder does not reach —
+  so a deployment that moves to strict does not thereby get it.
+- **Display-ceiling "shell flip."** The render ceiling is built, fail-closed and
+  §15.2-shaped: `User` and `PersonalSpace` fit the acting user by exact match,
+  and a `Space(...)` clause resolves through a verified `HasRole` reader fact
+  under the standard display exchange rule
+  ([`render-ceiling.ts`](../../packages/runner/src/cfc/render-ceiling.ts)), which
+  the worker backend threads into the reconciler whenever a ceiling is in force
+  ([`runtime-processor.ts`](../../packages/runtime-client/backends/runtime-processor.ts)).
+  What remains is the flip: the shell builds that ceiling only behind its
+  `cfcRenderCeiling` flag, which defaults off, so nothing renders under a ceiling
+  today. (SC-16; §8.10.6.) Render-boundary *composition + text integrity* itself
+  is owned by `packages/html` (see Out of scope).
 
 ---
 
@@ -333,9 +369,11 @@ spec test failing.
 - **Post-commit sink-release re-verification** — the runner re-checks the frozen
   request snapshot after commit; §8.10 defines only pre-commit verification. Define
   the contract (what it re-verifies, whether it re-runs the ceiling). (audit 3.11.)
-- **`ExternalIngest` vouched-ingest provenance mark** — split-mint, module-private
-  trigger, bypasses `gateRuntimeMintedIntegrity`, audience recorded-not-enforced —
-  defined only in a proposal doc.
+- **`ExternalIngest` provenance mark** — split-mint, module-private trigger,
+  and bypasses `gateRuntimeMintedIntegrity`. Its vouched-channel variant
+  records an audience without enforcing it; its weaker fetch variant records
+  only a pinned source and makes no audience claim. Defined only in feature
+  documents.
 - **Atom registry parity (`ExternalIngest` / `UserSurfaceInput`).** Both are
   *already* registered in the runtime — `CFC_ATOM_TYPE`
   ([`packages/api/cfc.ts:35`,`:49`](../../packages/api/cfc.ts)) and the propagation
@@ -369,20 +407,19 @@ policy (store labels + write-authority claims), not these mechanisms.
 ```
 Epic A (CNF clauses)  ──┬──►  Epic B (exchange-rule evaluator)  ──►  B6 retire prompt special-case
                         │
-                        ├──►  Epic E (row-set / sqlite 3.b)   [3.c is a separate server-side track]
-                        │
-                        └──►  Epic H display-ceiling atom-shaping
+                        └──►  Epic E (row-set / sqlite 3.b)   [3.c is a separate server-side track]
 
 Epic C (observation classes)   — independent, start any time
 Epic D (write/agent integrity) — independent (D1 wants B's matcher); highest security urgency
-Epic H activation (flip defaults, finish ladder) — do early, cheap, high leverage
+Epic H activation (flip defaults onto conforming states) — cheap, high leverage
 Epic F (range-scoped integrity) — last of the big epics; most speculative
 ```
 
-Rule of thumb: **A unlocks the most** (B, most of E, H's ceiling shaping, and 3–4
-Tier-2 items). **D is the most urgent for security** (live soundness holes) and is
-largely independent. **H is the cheapest leverage** (the system doesn't enforce much
-by default today). Everything in Tier 3 is spec-writing, not runner code.
+Rule of thumb: **A unlocks the most** (B, most of E, and 3–4 Tier-2 items).
+**D is the most urgent for security** (live soundness holes) and is largely
+independent. **H is the cheapest leverage** — it depends on nothing above it,
+and the hosts below the shell enforce little by default today. Everything in
+Tier 3 is spec-writing, not runner code.
 
 ## Provenance
 

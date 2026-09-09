@@ -1,8 +1,11 @@
-// Pins TS enum-member handling (mapping spec §4/§16.2). Enum members are scalar
-// literal types, not reusable named definitions: keeping them inline prevents
-// their short member names from colliding with members of another enum or with
-// an unrelated named type in $defs. Whole enum declarations remain hoisted and
-// are covered separately by enum-schema-rows.test.ts.
+/**
+ * Pins TS enum-member handling (mapping spec §4/§16.2). Enum members are scalar
+ * literal types, not reusable named definitions: keeping them inline prevents
+ * their short member names from colliding with members of another enum or with
+ * an unrelated named type in $defs. Whole enum declarations remain hoisted and
+ * are covered separately by enum-schema-rows.test.ts.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../src/schema-generator.ts";

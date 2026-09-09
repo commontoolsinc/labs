@@ -1,21 +1,30 @@
 // Cell commit callback tests: verifying that onCommit callbacks fire correctly
 // after cell writes reach a final commit result.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isCell } from "../src/cell.ts";
-import { JSONSchema } from "../src/builder/types.ts";
+
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { JSONSchema } from "../src/builder/types.ts";
+import { isCell } from "../src/cell.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IStorageTransaction,
+} from "../src/storage/interface.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -125,7 +134,7 @@ describe("Cell commit callbacks", () => {
     expect(callOrder).toEqual([1, 2]);
   });
 
-  it("should not call callback if transaction fails", () => {
+  it("should call callback when the transaction is aborted", () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-fail-test",
@@ -133,36 +142,25 @@ describe("Cell commit callbacks", () => {
       tx,
     );
 
-    let callbackCalled = false;
+    const statuses: string[] = [];
 
-    cell.set(42, () => {
-      callbackCalled = true;
+    cell.set(42, (settledTx) => {
+      statuses.push(settledTx.status().status);
     });
 
-    // Abort the transaction instead of committing
+    // An abort discards the staged writes exactly as a rejected commit does,
+    // and the callback exists to compensate for writes that did not become
+    // durable. It reports the same errored transaction either way.
     tx.abort("test abort");
 
-    expect(callbackCalled).toBe(false);
+    expect(statuses).toEqual(["error"]);
   });
 
   it("should call callback when commit returns an error", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-    tx = runtime.edit();
-
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-error-test",
-      { type: "number", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+      undefined,
       tx,
     );
 
@@ -170,9 +168,10 @@ describe("Cell commit callbacks", () => {
     cell.set(42, (committedTx) => {
       statuses.push(committedTx.status().status);
     });
+    refuseAtCommitBoundary(tx, "the callback reports a rejected commit");
 
     const result = await tx.commit();
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
     expect(statuses).toEqual(["error"]);
   });
 
@@ -252,6 +251,54 @@ describe("Cell commit callbacks", () => {
     await tx.commit();
 
     expect(callbackStatuses).toEqual(["error"]);
+  });
+
+  it("runs generic commit callbacks when the storage promise rejects", async () => {
+    const rejection = new Error("storage promise rejected");
+    const inner = {
+      journal: {},
+      clearReadOnly() {},
+      status: () => ({ status: "ready", journal: {} }),
+      commit: () => Promise.reject(rejection),
+    } as unknown as IStorageTransaction;
+    const extended = new ExtendedStorageTransaction(inner);
+    const callbackErrors: unknown[] = [];
+    const callbackStatuses: string[] = [];
+    extended.enqueuePostCommitEffect({
+      id: "rejected-commit-effect",
+      kind: "test",
+      flush() {
+        throw new Error("a rejected commit must not flush its outbox");
+      },
+    });
+    extended.addCommitCallback((committedTx, result) => {
+      callbackStatuses.push(committedTx.status().status);
+      callbackErrors.push(result.error);
+    });
+    extended.setReadOnly("commit callback rejection test");
+
+    let thrown: unknown;
+    try {
+      await extended.commit();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(rejection);
+    expect(callbackStatuses).toEqual(["error"]);
+    expect(callbackErrors).toHaveLength(1);
+    expect(callbackErrors[0]).toMatchObject({
+      name: "StorageTransactionAborted",
+      reason: rejection,
+    });
+    expect(extended.status()).toMatchObject({
+      status: "error",
+      error: {
+        name: "StorageTransactionAborted",
+        reason: rejection,
+      },
+    });
+    expect(extended.hasPendingPostCommitEffects()).toBe(false);
   });
 
   describe("set operations with arrays", () => {

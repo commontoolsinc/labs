@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../src/plugin.ts";
+import { SchemaGenerator } from "../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "./utils.ts";
 
 // The DEFAULT_MARKER brand payload carries V (the default VALUE's type) — see
@@ -17,7 +17,7 @@ const DEFAULT_PRELUDE = `
 `;
 
 describe("brand-payload default recovery (expanded Default<T, V>)", () => {
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
 
   it("recovers string literal defaults from the payload", async () => {
     const code = `${DEFAULT_PRELUDE}
@@ -128,7 +128,7 @@ const FAITHFUL_PRELUDE = `
 `;
 
 describe("brand-payload recovery on the expanded path (no typeNode)", () => {
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
 
   async function schemaOfPropertyType(
     body: string,
@@ -193,18 +193,19 @@ describe("brand-payload recovery on the expanded path (no typeNode)", () => {
   });
 });
 
-// The payloads above are all literal TYPES, which the checker hands over
-// directly. A `typeof SOME_CONST` payload naming an object or array cannot be
-// carried that way — the values are recovered by reading the const's
-// INITIALIZER off the AST.
-//
-// That reader's handling of numbers in their non-literal spellings is pinned by
-// the `default-typeof-const-numbers` fixture, whose golden can hold `-0`, `NaN`
-// and the infinities directly. What stays here is the one case a golden cannot
-// state: that a shadowed global is NOT folded, which is an assertion about what
-// does not happen.
 describe("defaults recovered from a `typeof CONST` initializer", () => {
-  const transformer = createSchemaTransformerV2();
+  // The payloads above are all literal TYPES, which the checker hands over
+  // directly. A `typeof SOME_CONST` payload naming an object or array cannot be
+  // carried that way — the values are recovered by reading the const's
+  // INITIALIZER off the AST.
+  //
+  // That reader's handling of numbers in their non-literal spellings is pinned
+  // by the `default-typeof-const-numbers` fixture, whose golden can hold `-0`,
+  // `NaN` and the infinities directly. What stays here is the one case a golden
+  // cannot state: that a shadowed global is NOT folded, which is an assertion
+  // about what does not happen.
+
+  const transformer = new SchemaGenerator();
 
   async function defaultOfX(declarations: string): Promise<unknown> {
     const { type, checker } = await getTypeFromCode(

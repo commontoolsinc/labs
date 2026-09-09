@@ -19,15 +19,11 @@
  * - Events are posted to the aggregator in real-time
  */
 import {
-  computed,
   type Default,
-  hasError,
-  hasSchemaMismatch,
-  isPending,
-  isSyncing,
   NAME,
   pattern,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -38,15 +34,20 @@ import { FolksonomyTags } from "./folksonomy-tags.tsx";
 interface Input {
   /** Tags for item A (scope: demo-shared) */
   itemATags: string[] | Default<[]>;
+
   /** Tags for item B (scope: demo-shared - same as A) */
   itemBTags: string[] | Default<[]>;
+
   /** Tags for item C (scope: demo-isolated - different scope) */
   itemCTags: string[] | Default<[]>;
+
   /** Custom scope name */
   customScope: string | Default<"demo-shared">;
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   itemATags: string[];
   itemBTags: string[];
   itemCTags: string[];

@@ -1,4 +1,9 @@
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+
 import { ContextualFlowControl } from "../runner/src/cfc.ts";
 
 const encoder = new TextEncoder();
@@ -9,22 +14,19 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function isSchemaRecord(schema: JSONSchema | undefined): schema is Record<
-  string,
-  unknown
-> {
-  return typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema);
+function isSchemaRecord(
+  schema: JSONSchema | undefined,
+): schema is ReadonlyRecord {
+  return isObjectNotArray(schema);
 }
 
 function isPatternSchemaValue(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return false;
   }
 
-  const pattern = value as Record<string, unknown>;
-  return "argumentSchema" in pattern || "resultSchema" in pattern ||
-    "nodes" in pattern;
+  return "argumentSchema" in value || "resultSchema" in value ||
+    "nodes" in value;
 }
 
 function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {

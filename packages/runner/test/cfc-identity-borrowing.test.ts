@@ -7,21 +7,21 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-identity-borrowing");
 
-// Regression guard for the write-policy identity fallback (audit S13).
-//
-// writeAuthorizedBy is verified against the implementation identity captured
-// when the write-policy input was recorded. The pre-fix code fell back to the
-// transaction's *current* identity (state.implementationIdentity) for inputs
-// recorded before any identity was set, so an unattributed write into a
-// protected field could borrow a trusted identity set later in the same
-// transaction and pass verification. Unattributed writes must fail closed.
 describe("CFC write-policy identity borrowing", () => {
+  // Regression guard for the write-policy identity fallback (audit S13).
+  //
+  // writeAuthorizedBy is verified against the implementation identity captured
+  // when the write-policy input was recorded. The pre-fix code fell back to the
+  // transaction's *current* identity (state.implementationIdentity) for inputs
+  // recorded before any identity was set, so an unattributed write into a
+  // protected field could borrow a trusted identity set later in the same
+  // transaction and pass verification. Unattributed writes must fail closed.
+
   it("does not attribute an unattributed write to a later-set identity", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-identity-borrowing",
         actingPrincipal: signer.did(),

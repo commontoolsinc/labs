@@ -1,13 +1,17 @@
-import { describe, it } from "@std/testing/bdd";
-import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import {
+  type CfcConfClause,
+  clausesEqual,
+  normalizeClause,
+} from "../src/cfc/clause.ts";
 import {
   CFC_LABEL_READ_FAILED_ATOM,
   cfcObservationFitsCeiling,
   type CfcObservationMaxConfidentiality,
   meetCfcObservationCeilings,
 } from "../src/cfc/observation.ts";
-import { clausesEqual, normalizeClause } from "../src/cfc/clause.ts";
 
 // Decision 6 of docs/history/plans/cfc-future-work-implementation.md (corrected
 // 2026-07-02, #4482): the general clause meet is the pairwise
@@ -19,6 +23,17 @@ import { clausesEqual, normalizeClause } from "../src/cfc/clause.ts";
 const A = { type: "https://commonfabric.org/cfc/atom/User", subject: "A" };
 const B = { type: "https://commonfabric.org/cfc/atom/User", subject: "B" };
 const C = { type: "https://commonfabric.org/cfc/atom/User", subject: "C" };
+
+// A personal space and its owner, which the fit kernel relates on the label
+// side (the owner is one of the space's readers). The property below has to
+// hold across them: a ceiling naming the owner and one naming something else
+// meet to a ceiling admitting exactly what both admit.
+const DID = "did:key:zD";
+const D = { type: "https://commonfabric.org/cfc/atom/User", subject: DID };
+const DPersonalSpace = {
+  type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+  owner: DID,
+};
 
 const clauseSetsEqual = (
   left: readonly unknown[],
@@ -126,6 +141,31 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
     });
   });
 
+  describe("the personal-space containment across a meet", () => {
+    // The property test below cannot see this rule: both its sides call the
+    // same `clauseSubsumes`, so the equivalence holds whether or not the
+    // containment is wired in. These pin the containment directly, at the
+    // seam where a meet puts the two spellings in one clause.
+
+    it("a meet of the two spellings still admits the personal-space label", () => {
+      // The meet unions the alternatives (no collapse — `clausesEqual` tells
+      // the atoms apart), so every ceiling alternative must answer the label.
+      // `PersonalSpace(P)` answers itself, and `User(P)` answers it only
+      // through the containment.
+      const met = meetCfcObservationCeilings([D], [DPersonalSpace]);
+      expect(met).toHaveLength(1);
+      expect(cfcObservationFitsCeiling([DPersonalSpace], met)).toBe(true);
+    });
+
+    it("that meet does not admit the owner label — the one-sidedness", () => {
+      // `PersonalSpace(P)` sitting in the ceiling gets no reading, so the
+      // meet refuses a `User(P)` label even though one parent admits it.
+      const met = meetCfcObservationCeilings([D], [DPersonalSpace]);
+      expect(cfcObservationFitsCeiling([D], [D])).toBe(true);
+      expect(cfcObservationFitsCeiling([D], met)).toBe(false);
+    });
+  });
+
   describe("both-direction property: fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧ fits(L,C2)", () => {
     // Exhaustive enumeration over a small clause universe, including flat
     // atoms, OR-clauses (with an order-differing spelling), the malformed
@@ -141,6 +181,8 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
       { anyOf: [A, B, C] },
       { anyOf: [] },
       CFC_LABEL_READ_FAILED_ATOM,
+      D,
+      DPersonalSpace,
     ];
     const labelClausePool: readonly CfcConfClause[] = [
       A,
@@ -152,6 +194,9 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
       { anyOf: [] },
       CFC_LABEL_READ_FAILED_ATOM,
       { anyOf: [CFC_LABEL_READ_FAILED_ATOM, A] },
+      D,
+      DPersonalSpace,
+      { anyOf: [DPersonalSpace, C] },
     ];
 
     const subsetsUpToSize2 = (

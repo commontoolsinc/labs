@@ -184,8 +184,8 @@ Following `parking-coordinator`'s discipline (it uses all three scopes):
 | `knownVehicles: KnownVehicle[]`                                   | **`PerSpace`**   | shared guest + offender registries                  |
 | `spots` (input)                                                   | **`PerSpace`**   | shared with `parking-coordinator`                   |
 | `people` (input)                                                  | **`PerSpace`**   | read employee `vehicles` (the "ours" set)           |
-| `adminRegistry`                                                   | **`PerSpace`**   | shared CFC admin registry (who can edit watchlists) |
-| `adminManagerCredential`                                          | **`PerUser`**    | per-user manager credential (CFC pattern)           |
+| `adminRegistry`                                                   | **`PerSpace`**   | Lot Watch's own CFC registry (who edits watchlists) |
+| `adminManagerMode`                                                | **`PerUser`**    | reveals the admin controls; gates roster changes    |
 | capture draft fields (`draftSpot`, in-flight image, `draftNotes`) | **`PerSession`** | transient UI state per device/tab                   |
 | `selectedTab` / report filters / confirm-dialog targets           | **`PerSession`** | ephemeral UI state                                  |
 | `reporterName` (current actor)                                    | **`PerUser`**    | who's doing the documenting                         |
@@ -196,28 +196,50 @@ These map directly onto the constructors already in use:
 
 ## 6. Authorization (CFC Admin)
 
-We reuse `packages/patterns/cfc/admin/mod.ts` exactly as `parking-coordinator`
-does. The integrity-tagged role model:
+We reuse `packages/patterns/cfc/admin/mod.ts`, and follow the first four of the
+five rules for flooring an admin registry in `packages/patterns/cfc/README.md`.
+The integrity-tagged role model:
 
-- `adminManagerCredentialIsActive(credential)` — gates who may _assign_ admins.
 - `adminRegistryEntries<Role>(registry)` — read the admin list.
-- `AddIntegrity<...>` / `RequiresIntegrity<...>` — brand the role/list types so
-  they can only be produced through the credentialed path.
+- `AddIntegrity<...>` / `RequiresIntegrity<...>` — endorse the roles and the
+  roster with one atom, and floor the roster on that same atom, so a roster
+  write carries the endorsement its own floor asks for and the roster read that
+  write consumes carries the witness the floor's read-side gate asks for.
+- `WriteAuthorizedBy<...>` — name `commitLotWatchAdminChange` as the one handler
+  that may write the roster, so a write from another action here or from another
+  pattern holding the registry cell under this schema is refused. That binding
+  is what decides where a roster write may come from. Pattern setup and seed
+  materialization install a value at the roster without passing through it, and
+  a holder that declares the same cell under a schema of its own carries no
+  contract for the runtime to check.
 
 ```ts
 export const LOT_WATCH_ADMIN_INTEGRITY = "lot-watch-admin" as const;
-export const LOT_WATCH_ADMIN_MANAGER_INTEGRITY =
-  "lot-watch-admin-manager" as const;
 ```
+
+The per-user switch that reveals the admin controls is a plain boolean with no
+integrity. Any viewer turns it on for themselves, so a value claiming an atom
+would endorse every protected write that consulted it. That switch is also the
+only check `commitLotWatchAdminChange` makes on the acting user, which is where
+this design departs from the remaining rules: authority does not come from the
+role registry, and a role is granted to whatever `reporterName` the viewer typed
+rather than to a subject drawn from `people`. So any viewer can grant themselves
+the role. That is the demo identity model described above, and it wants a stable
+user identity before this gate means anything; the roster never gates its own
+editing, so no grant can lock the pattern out of repairing it.
 
 **What admin gates:** editing the **guest** and **offender** registries,
 deleting sightings, and bulk-merging duplicates. **Any employee can capture a
 sighting** — documentation must be frictionless; only curation is privileged.
 
-**Decided:** Lot Watch **reuses parking-coordinator's `adminRegistry`** (shared
-`PerSpace` input) but tags its role with a distinct `lot-watch-admin` integrity,
-so the one registry carries both role types — the admin module is already
-generic over `Role`. One admin list to manage operationally.
+**Decided:** Lot Watch keeps **its own `adminRegistry` cell**, tagging its role
+with a distinct `lot-watch-admin` integrity. The two patterns cannot share one
+registry cell. Each declares a `requiredIntegrity` floor at `/admins`, and the
+two floors name different atoms, so a roster written to satisfy one is refused
+by the other. Each also names its own commit handler in the list's
+`writeAuthorizedBy` contract, which refuses a write from any other code — the
+other pattern's included. Sharing would mean agreeing on one atom and one
+writer, which is a larger decision than sharing a cell.
 
 ## 7. Capture Flow (mobile-first)
 
@@ -485,8 +507,9 @@ Mirror `parking-coordinator/main.test.tsx` (pattern test harness): drive
 
 ## 16. Resolved Decisions
 
-- **Admin role** — reuse parking-coordinator's `adminRegistry` with a distinct
-  `lot-watch-admin` integrity tag. (§6)
+- **Admin role** — a separate `adminRegistry` cell with a distinct
+  `lot-watch-admin` integrity tag; the two registries' floors and write bindings
+  disagree, so one cell cannot serve both. (§6)
 - **Employee plate source** — extend coordinator's `Person` with
   `vehicles?:
   Vehicle[]`; Lot Watch reads it read-only as "ours". (§3b)

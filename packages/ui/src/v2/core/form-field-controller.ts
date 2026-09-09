@@ -37,6 +37,7 @@
  * }
  * ```
  */
+
 import { ReactiveController, ReactiveControllerHost } from "lit";
 import { ContextConsumer } from "@lit/context";
 import {
@@ -52,17 +53,15 @@ import {
 export interface CellControllerLike<T> {
   getValue(): T;
   setValue(value: T): void;
+
   /**
    * Optional: run any pending (debounced) write immediately, so a following
    * read or commit sees the latest value.
    */
   flush?(): void;
-  /**
-   * Optional method to get the underlying CellHandle for direct async operations.
-   * Used by FormFieldController to await cell.set() during flush.
-   * Returns null if no Cell is bound, or the CellHandle with async set().
-   */
-  getCell?(): { set(value: T): Promise<void> } | null;
+
+  /** Returns the bound cell, or `null` for a plain value. */
+  getCell?(): { setStrict(value: T): Promise<void> } | null;
 }
 
 /**
@@ -95,20 +94,28 @@ export class FormFieldController<T> implements ReactiveController {
   private _cellController: CellControllerLike<T>;
   private _validate: () => ValidationResult;
 
-  // Form context consumer - automatically subscribes to context
+  /** Form context consumer, which automatically subscribes to the context. */
   private _formContextConsumer: ContextConsumer<
     typeof formContext,
     ReactiveControllerHost & HTMLElement
   >;
 
-  // Buffer state (only used when in form context)
+  /** The buffered value, only used when in a form context. */
   private _buffer: T | undefined;
-  // Flag to track if buffer has been set (allows undefined as a valid buffered value)
+
+  /**
+   * Whether the buffer has been set, which allows `undefined` as a valid
+   * buffered value.
+   */
   private _hasBuffer = false;
-  // Original value captured when form field is registered - used for reset
+
+  /**
+   * Original value, captured when the form field is registered and used for
+   * reset.
+   */
   private _originalValue: T | undefined;
 
-  // Form registration cleanup function
+  /** Cleanup function for the form registration. */
   private _formUnregister?: () => void;
 
   constructor(
@@ -168,14 +175,13 @@ export class FormFieldController<T> implements ReactiveController {
   }
 
   /**
-   * Flush the field's current value to the bound cell and await the set()
-   * round-trip. This is for standalone fields: it drains any pending
+   * Flush the field's current value to the bound cell and await its confirmed
+   * write. This is for standalone fields: it drains any pending
    * debounced/throttled write, then writes the current value (buffered value if
    * present, otherwise the cell controller's value) to the bound cell, and
    * rebaselines dirty/reset tracking to the committed value. Resolves once the
-   * local apply and the set() round-trip complete; it does not surface a
-   * remote-commit rejection (the underlying set() logs and swallows that). When
-   * no Cell is bound, it falls back to the cell controller's setValue.
+   * runtime confirms the commit and rejects when the write fails. When no Cell
+   * is bound, it falls back to the cell controller's setValue.
    *
    * In a form context the form owns durable writes: each field buffers its edit
    * and the form flushes them together on submit. So when this field is in a
@@ -194,7 +200,7 @@ export class FormFieldController<T> implements ReactiveController {
       : this._cellController.getValue();
     const cell = this._cellController.getCell?.();
     if (cell) {
-      await cell.set(valueToFlush);
+      await cell.setStrict(valueToFlush);
     } else {
       this._cellController.setValue(valueToFlush);
     }
@@ -247,13 +253,10 @@ export class FormFieldController<T> implements ReactiveController {
         const valueToFlush = this._hasBuffer
           ? this._buffer as T
           : this._cellController.getValue();
-        // If the cell controller can provide the underlying CellHandle,
-        // call set() directly and await it to ensure the update is committed
         const cell = this._cellController.getCell?.();
         if (cell) {
-          await cell.set(valueToFlush);
+          await cell.setStrict(valueToFlush);
         } else {
-          // Fallback to synchronous setValue (for non-Cell values)
           this._cellController.setValue(valueToFlush);
         }
         // Update original value after successful flush

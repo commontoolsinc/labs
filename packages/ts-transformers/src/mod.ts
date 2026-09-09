@@ -1,4 +1,5 @@
 export type {
+  BuilderSourceSiteOptions,
   DiagnosticSeverity,
   PatternCoverageKind,
   PatternCoverageOptions,
@@ -6,20 +7,21 @@ export type {
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
-  TransformMode,
 } from "./core/mod.ts";
 export {
   CrossStageState,
   injectCfHelpers,
   isLegacyInjectedEnvelope,
   PATTERN_COVERAGE_GLOBAL,
-  Pipeline,
-  sourceDisablesCfTransform,
-  sourceHasIgnoredDisableDirective,
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";
-export type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
+export type {
+  BuilderSourceSite,
+  BuilderSourceSitesV1,
+  CfcPolicyCompilerManifestV1,
+} from "./core/runtime-contract.ts";
+export { isBuilderSourceSitesV1 } from "./core/runtime-contract.ts";
 export {
   CFC_CANONICAL_ALIAS_NAMES,
   type CfcCanonicalAliasName,
@@ -35,9 +37,4 @@ export {
 } from "./transformers/mod.ts";
 export { ClosureTransformer } from "./closures/transformer.ts";
 export { CommonFabricTransformerPipeline } from "./cf-pipeline.ts";
-export {
-  CompositeDiagnosticTransformer,
-  type DiagnosticMessageTransformer,
-  ReactiveErrorTransformer,
-  type ReactiveErrorTransformerOptions,
-} from "./diagnostics/mod.ts";
+export { createReactiveErrorTransformer } from "./diagnostics/mod.ts";

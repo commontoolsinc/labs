@@ -1,6 +1,1 @@
-export {
-  CompositeDiagnosticTransformer,
-  type DiagnosticMessageTransformer,
-  ReactiveErrorTransformer,
-  type ReactiveErrorTransformerOptions,
-} from "./error-message-transformer.ts";
+export { createReactiveErrorTransformer } from "./error-message-transformer.ts";

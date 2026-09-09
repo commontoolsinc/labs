@@ -15,6 +15,31 @@ export interface HarnessBashToolInputSummary {
   commandDigest?: string;
 }
 
+/**
+ * The action, its inert selectors, and digests where free text rides: a URL
+ * or a fill value is what a run would disclose to the web, so the summary
+ * carries its size and digest rather than the text itself.
+ */
+export interface HarnessBrowserToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "browser";
+  action?: string;
+  kind?: string;
+  ref?: string;
+
+  /** A bound handle, carried whole: it names an address, not a value. */
+  valueHandle?: string;
+
+  /** A bound handle, carried whole: it names an address, not a value. */
+  urlHandle?: string;
+
+  timeoutMs?: number;
+  urlBytes?: number;
+  urlDigest?: string;
+  valueBytes?: number;
+  valueDigest?: string;
+}
+
 export interface HarnessReadFileToolInputSummary {
   type: "cf-harness.tool-input-summary";
   toolId: "read_file";
@@ -84,8 +109,23 @@ export interface HarnessDelegateTaskToolInputSummary {
   maxModelTurns?: number;
 }
 
+export interface HarnessRunPatternToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "run_pattern";
+  sourceTextBytes?: number;
+  sourceTextDigest?: string;
+
+  /** The indexed pattern run, when the call named one instead of source. */
+  patternId?: string;
+
+  inputCount?: number;
+  resultSchemaBytes?: number;
+  resultSchemaDigest?: string;
+}
+
 export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
+  | HarnessBrowserToolInputSummary
   | HarnessReadFileToolInputSummary
   | HarnessReadSkillResourceToolInputSummary
   | HarnessRunSkillScriptToolInputSummary
@@ -93,6 +133,7 @@ export type HarnessToolInputSummary =
   | HarnessEditFileToolInputSummary
   | HarnessWriteFileToolInputSummary
   | HarnessDelegateTaskToolInputSummary
+  | HarnessRunPatternToolInputSummary
   | {
     type: "cf-harness.tool-input-summary";
     toolId: BuiltinToolId;

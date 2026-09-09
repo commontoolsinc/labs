@@ -1,21 +1,16 @@
-import ts from "typescript";
-import { isRecord } from "@commonfabric/utils/types";
-import {
-  type CellWrapperKind,
-  getCellBrand,
-  getCellWrapperInfo,
-  isCellBrand,
-  wrapperKindToBrand,
-} from "../typescript/cell-brand.ts";
-import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
-import { numberFromExpression } from "../typescript/numeric-expression.ts";
-import { dedupeByValueEqual } from "../value-equality.ts";
 import type {
   AsCellEntry,
   MutableJSONSchema,
   MutableJSONSchemaObj,
   SchemaScope,
 } from "@commonfabric/api";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CANONICAL_ALIAS_NAMES,
+} from "@commonfabric/api/cfc";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -27,9 +22,19 @@ import {
   type TypeWithInternals,
 } from "../type-utils.ts";
 import {
-  CFC_ATOM_TYPE,
-  CFC_CANONICAL_ALIAS_NAMES,
-} from "@commonfabric/api/cfc";
+  extractLiteralValueOfSymbol,
+  resolveAliasedSymbol,
+} from "../typescript/literal-value.ts";
+import {
+  type CellWrapperKind,
+  getCellBrand,
+  getCellWrapperInfo,
+  isCellBrand,
+  wrapperKindToBrand,
+} from "../typescript/cell-brand.ts";
+import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
+import { dedupeByValueEqual } from "../value-equality.ts";
+import { scopeInsideUnionError } from "../scope-placement.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -178,7 +183,7 @@ const applyScopeToAsCellEntry = (
   if (typeof entry === "string") {
     return { kind: entry, scope };
   }
-  if (isRecord(entry)) {
+  if (isObjectOrArray(entry)) {
     return { ...entry, scope };
   }
   return entry;
@@ -191,7 +196,10 @@ const applyScopeToAsCellEntry = (
  * manually traverse alias chains.
  */
 export class CommonFabricFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: SchemaGenerator) {
+  #schemaGenerator: SchemaGenerator;
+
+  constructor(schemaGenerator: SchemaGenerator) {
+    this.#schemaGenerator = schemaGenerator;
     if (!schemaGenerator) {
       throw new Error(
         "CommonFabricFormatter requires a SchemaGenerator instance",
@@ -221,7 +229,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       return true;
     }
 
-    if (this.resolveCfcAliasInstantiation(type as TypeWithInternals, context)) {
+    if (
+      this.#resolveCfcAliasInstantiation(type as TypeWithInternals, context)
+    ) {
       return true;
     }
 
@@ -242,14 +252,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Check if this is FactoryInput<T>.
-    if (this.getFactoryInputBase(type)) {
+    if (this.#getFactoryInputBase(type)) {
       return true;
     }
 
     // Check if union contains wrapper types via node inspection
     // This must come before the blanket union rejection to handle
     // cases like Reactive<T> | undefined without expanding conditionals
-    if (this.isWrapperUnion(type, context)) {
+    if (this.#isWrapperUnion(type, context)) {
       return true; // Take ownership of wrapper unions
     }
 
@@ -287,7 +297,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     const n = context.typeNode;
     const resolvedScopeWrapper = resolveScopeWrapperNode(n);
     if (resolvedScopeWrapper) {
-      return this.formatScopeWrapperTypeFromNode(
+      return this.#formatScopeWrapperTypeFromNode(
         resolvedScopeWrapper.node,
         context,
         resolvedScopeWrapper.scope,
@@ -303,20 +313,20 @@ export class CommonFabricFormatter implements TypeFormatter {
           `${aliasType.aliasSymbol?.name}<T> requires type argument`,
         );
       }
-      const innerSchema = this.schemaGenerator.formatChildType(
+      const innerSchema = this.#schemaGenerator.formatChildType(
         innerType,
         context,
         undefined,
       );
-      return this.applyScopeWrapperSemantics(innerSchema, aliasScope);
+      return this.#applyScopeWrapperSemantics(innerSchema, aliasScope);
     }
 
-    const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
+    const resolvedCfcAlias = this.#resolveCfcAliasInstantiation(
       aliasType,
       context,
     );
     if (resolvedCfcAlias) {
-      return this.formatResolvedCfcAlias(resolvedCfcAlias, context);
+      return this.#formatResolvedCfcAlias(resolvedCfcAlias, context);
     }
 
     // Handle wrapper unions first (before FactoryInput<T> union check)
@@ -324,22 +334,22 @@ export class CommonFabricFormatter implements TypeFormatter {
     // via node inspection to avoid conditional type expansion
     if (
       (type.flags & ts.TypeFlags.Union) !== 0 &&
-      this.isWrapperUnion(type, context)
+      this.#isWrapperUnion(type, context)
     ) {
-      return this.formatWrapperUnion(type as ts.UnionType, context);
+      return this.#formatWrapperUnion(type as ts.UnionType, context);
     }
 
     // Check if this is FactoryInput<T> and handle it first
     // This prevents the UnionFormatter from creating an anyOf
-    const factoryInputBase = this.getFactoryInputBase(type);
+    const factoryInputBase = this.#getFactoryInputBase(type);
     if (factoryInputBase) {
-      const innerSchema = this.schemaGenerator.formatChildType(
+      const innerSchema = this.#schemaGenerator.formatChildType(
         factoryInputBase,
         context,
         undefined, // Don't pass typeNode since we're working with the unwrapped type
       );
 
-      return this.applyWrapperSemantics(innerSchema, "OpaqueCell");
+      return this.#applyWrapperSemantics(innerSchema, "OpaqueCell");
     }
 
     // Check via typeNode for all wrapper types (handles both direct usage and aliases)
@@ -357,7 +367,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         : resolvedWrapper.node; // Direct reference or fallback
 
       if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
-        return this.formatDefaultType(nodeForDefault, context, type);
+        return this.#formatDefaultType(nodeForDefault, context, type);
       }
     }
 
@@ -372,7 +382,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       typeWithAlias.aliasTypeArguments.length >= 1
     ) {
       const innerType = typeWithAlias.aliasTypeArguments[0]!;
-      const valueSchema = this.schemaGenerator.formatChildType(
+      const valueSchema = this.#schemaGenerator.formatChildType(
         innerType,
         context,
         undefined,
@@ -380,7 +390,20 @@ export class CommonFabricFormatter implements TypeFormatter {
 
       if (typeWithAlias.aliasTypeArguments.length >= 2) {
         const defaultType = typeWithAlias.aliasTypeArguments[1]!;
-        const defaultValue = this.extractDefaultValue(defaultType, context);
+        const defaultValue = this.#extractDefaultValue(defaultType, context);
+        // TODO(danfuzz): A default for a fabric-backed native disagrees with
+        // the value its type actually stores. `Date`, `RegExp`, and
+        // `Uint8Array` map to `{ type: "object" }` because they are stored as
+        // `FabricEpochNsec` / `FabricRegExp` / `FabricBytes`, but the default
+        // captured here is the authored TS literal. So
+        // `Default<Date, "2020-01-01T00:00:00.000Z">` emits
+        // `{ type: "object", default: "2020-01-01T00:00:00.000Z" }` -- a string
+        // standing in for an object, and not the form a read of that slot would
+        // ever produce. Decide how a default for these types is expressed
+        // (converted to the fabric form here, converted where the default is
+        // applied, or refused outright) instead of leaving the two disagreeing.
+        // The node-based path below attaches defaults the same way and needs
+        // the same answer.
         if (defaultValue !== undefined) {
           if (typeof valueSchema === "boolean") {
             return (valueSchema === false
@@ -400,9 +423,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       resolvedWrapper.kind !== "Default" &&
       wrapperInfo &&
       wrapperInfo.kind !== resolvedWrapper.kind &&
-      this.isSyntheticWrapperNode(resolvedWrapper.node)
+      this.#isSyntheticWrapperNode(resolvedWrapper.node)
     ) {
-      return this.formatWrapperTypeFromNode(
+      return this.#formatWrapperTypeFromNode(
         resolvedWrapper.node,
         context,
         resolvedWrapper.kind,
@@ -418,12 +441,12 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     if (wrapperInfo && !(type.flags & ts.TypeFlags.Union)) {
-      const nodeToPass = this.selectWrapperTypeNode(
+      const nodeToPass = this.#selectWrapperTypeNode(
         n,
         resolvedWrapper,
         wrapperInfo.kind,
       );
-      return this.formatWrapperType(
+      return this.#formatWrapperType(
         wrapperInfo.typeRef,
         nodeToPass,
         context,
@@ -439,7 +462,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       resolvedWrapper.kind !== "Default" &&
       !wrapperInfo
     ) {
-      return this.formatWrapperTypeFromNode(
+      return this.#formatWrapperTypeFromNode(
         resolvedWrapper.node,
         context,
         resolvedWrapper.kind,
@@ -459,18 +482,18 @@ export class CommonFabricFormatter implements TypeFormatter {
       "ComparableCell",
     ];
     for (const kind of wrapperKinds) {
-      const unwrappedType = this.recursivelyUnwrapOpaqueCell(
+      const unwrappedType = this.#recursivelyUnwrapOpaqueCell(
         type,
         kind,
         context.typeChecker,
       );
       if (unwrappedType) {
-        const nodeToPass = this.selectWrapperTypeNode(
+        const nodeToPass = this.#selectWrapperTypeNode(
           n,
           resolvedWrapper,
           unwrappedType.kind,
         );
-        return this.formatWrapperType(
+        return this.#formatWrapperType(
           unwrappedType.typeRef,
           nodeToPass,
           context,
@@ -479,13 +502,13 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const nodeName = this.getTypeRefIdentifierName(n);
+    const nodeName = this.#getTypeRefIdentifierName(n);
     throw new Error(
       `Unexpected Common Fabric type: ${nodeName}`,
     );
   }
 
-  private formatWrapperTypeFromNode(
+  #formatWrapperTypeFromNode(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     wrapperKind: WrapperKind,
@@ -525,11 +548,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     // synthetic position, so the node-driven result must win there (e.g. a
     // `string | undefined` inner whose `| undefined` lives only on the node).
     if (
-      this.isUnusableInnerType(innerType) && fallbackInnerTypeRef &&
+      this.#isUnusableInnerType(innerType) && fallbackInnerTypeRef &&
       ts.isTypeReferenceNode(innerTypeNode)
     ) {
       const fallbackInner = fallbackInnerTypeRef.typeArguments?.[0];
-      if (fallbackInner && !this.isUnusableInnerType(fallbackInner)) {
+      if (fallbackInner && !this.#isUnusableInnerType(fallbackInner)) {
         innerType = fallbackInner;
       }
     }
@@ -539,7 +562,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
-        const itemsOverride = this.createArrayItemsOverride(
+        const itemsOverride = this.#createArrayItemsOverride(
           innerType,
           innerTypeNode,
           context,
@@ -548,7 +571,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    const innerSchema = this.#schemaGenerator.formatChildType(
       innerType,
       childContext,
       innerTypeNode,
@@ -556,9 +579,9 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     if (wrapperKind === "Stream") {
       if (typeof innerSchema === "boolean") {
-        return this.applyWrapperSemantics(innerSchema, "Stream");
+        return this.#applyWrapperSemantics(innerSchema, "Stream");
       }
-      return this.applyWrapperSemantics(
+      return this.#applyWrapperSemantics(
         innerSchema as MutableJSONSchemaObj,
         "Stream",
       );
@@ -570,7 +593,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         context.typeChecker,
       );
       if (
-        this.isStreamType(innerType, context.typeChecker) ||
+        this.#isStreamType(innerType, context.typeChecker) ||
         innerWrapper?.kind === "Stream"
       ) {
         throw new Error(
@@ -579,10 +602,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    return this.applyWrapperSemantics(innerSchema, wrapperKind);
+    return this.#applyWrapperSemantics(innerSchema, wrapperKind);
   }
 
-  private formatScopeWrapperTypeFromNode(
+  #formatScopeWrapperTypeFromNode(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     scope: SchemaScope,
@@ -600,16 +623,16 @@ export class CommonFabricFormatter implements TypeFormatter {
       innerType = context.typeChecker.getAnyType();
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    const innerSchema = this.#schemaGenerator.formatChildType(
       innerType,
       context,
       innerTypeNode,
     );
 
-    return this.applyScopeWrapperSemantics(innerSchema, scope);
+    return this.#applyScopeWrapperSemantics(innerSchema, scope);
   }
 
-  private applyScopeWrapperSemantics(
+  #applyScopeWrapperSemantics(
     schema: MutableJSONSchema,
     scope: SchemaScope,
   ): MutableJSONSchema {
@@ -634,7 +657,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return { ...schema, scope };
   }
 
-  private formatWrapperType(
+  #formatWrapperType(
     typeRef: ts.TypeReference,
     typeRefNode: ts.TypeNode | undefined,
     context: GenerationContext,
@@ -669,13 +692,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     // when wrapper references degrade to unknown/any/type-parameter.
     let innerType: ts.Type | undefined = innerTypeFromType;
     if (
-      (!innerType || this.isUnusableInnerType(innerType)) &&
+      (!innerType || this.#isUnusableInnerType(innerType)) &&
       innerTypeNode
     ) {
       try {
         const fromNode = context.typeRegistry?.get(innerTypeNode) ??
           context.typeChecker.getTypeFromTypeNode(innerTypeNode);
-        if (fromNode && !this.isUnusableInnerType(fromNode)) {
+        if (fromNode && !this.#isUnusableInnerType(fromNode)) {
           innerType = fromNode;
         }
       } catch {
@@ -701,7 +724,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       innerTypeNode.end === -1;
 
     const syntheticNodeNeedsHelp = !!innerTypeNode && !!isSyntheticNode &&
-      this.innerTypeNeedsNodeAssistance(innerType, context.typeChecker);
+      this.#innerTypeNeedsNodeAssistance(innerType, context.typeChecker);
 
     // Prefer real source nodes, but allow synthetic nodes when the resolved type
     // is widened/unusable and the node still carries useful structure.
@@ -721,7 +744,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         // element's `comparable` capability lives ONLY on the synthetic node
         // (the resolved union type can't express it), so the node is required to
         // recover it. (CT-1639 Gap B)
-        const itemsOverride = this.createArrayItemsOverride(
+        const itemsOverride = this.#createArrayItemsOverride(
           innerType,
           innerTypeNode,
           context,
@@ -730,7 +753,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    const innerSchema = this.#schemaGenerator.formatChildType(
       innerType,
       childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
@@ -739,9 +762,9 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {
       if (typeof innerSchema === "boolean") {
-        return this.applyWrapperSemantics(innerSchema, "Stream");
+        return this.#applyWrapperSemantics(innerSchema, "Stream");
       }
-      return this.applyWrapperSemantics(
+      return this.#applyWrapperSemantics(
         innerSchema as MutableJSONSchemaObj,
         "Stream",
       );
@@ -750,7 +773,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
     if (
       wrapperKind === "Cell" &&
-      this.isStreamType(innerType, context.typeChecker)
+      this.#isStreamType(innerType, context.typeChecker)
     ) {
       throw new Error(
         "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
@@ -758,10 +781,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Apply wrapper semantics (asCell/asOpaque) to the inner schema
-    return this.applyWrapperSemantics(innerSchema, wrapperKind);
+    return this.#applyWrapperSemantics(innerSchema, wrapperKind);
   }
 
-  private createArrayItemsOverride(
+  #createArrayItemsOverride(
     arrayType: ts.Type,
     arrayTypeNode: ts.TypeNode | undefined,
     context: GenerationContext,
@@ -785,7 +808,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       // The real array member's element capability (e.g. `comparable`) lives on
       // the synthetic NODE, not the resolved union type, so recover it from the
       // node by descending to the real array member's element. (CT-1639 Gap B)
-      resolvedElementWrapperKind = this.elementWrapperFromUnionNode(
+      resolvedElementWrapperKind = this.#elementWrapperFromUnionNode(
         arrayTypeNode,
         context.typeChecker,
       );
@@ -795,7 +818,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       ? undefined
       : resolvedElementWrapperKind;
     return elementWrapperKind
-      ? this.applyWrapperSemantics(base, elementWrapperKind)
+      ? this.#applyWrapperSemantics(base, elementWrapperKind)
       : base;
   }
 
@@ -806,14 +829,14 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Empty-array / `Default<...>` members are skipped. Returns undefined when the
    * node is not a union, has no real array member, or the element is unwrapped.
    */
-  private elementWrapperFromUnionNode(
+  #elementWrapperFromUnionNode(
     node: ts.TypeNode | undefined,
     checker: ts.TypeChecker,
   ): "Default" | WrapperKind | undefined {
     if (!node || !ts.isUnionTypeNode(node)) return undefined;
     let elementNode: ts.TypeNode | undefined;
     for (const member of node.types) {
-      const arrayElement = this.arrayElementNode(member);
+      const arrayElement = this.#arrayElementNode(member);
       if (!arrayElement) continue; // non-array member (e.g. Default<[]>) — skip
       // Skip degenerate empty-array members (`never[]`) — they're the unbranded
       // arm of an expanded `Default<[]>` and carry no real element. (The branded
@@ -828,7 +851,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   /** The element TypeNode of `T[]` or `Array<T>`/`ReadonlyArray<T>`, else undefined. */
-  private arrayElementNode(node: ts.TypeNode): ts.TypeNode | undefined {
+  #arrayElementNode(node: ts.TypeNode): ts.TypeNode | undefined {
     if (ts.isArrayTypeNode(node)) return node.elementType;
     if (
       ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
@@ -841,25 +864,25 @@ export class CommonFabricFormatter implements TypeFormatter {
     return undefined;
   }
 
-  private isUnusableInnerType(type: ts.Type): boolean {
+  #isUnusableInnerType(type: ts.Type): boolean {
     return (type.flags &
       (ts.TypeFlags.Any | ts.TypeFlags.Unknown |
         ts.TypeFlags.TypeParameter)) !==
       0;
   }
 
-  private innerTypeNeedsNodeAssistance(
+  #innerTypeNeedsNodeAssistance(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): boolean {
-    if (this.isUnusableInnerType(type)) {
+    if (this.#isUnusableInnerType(type)) {
       return true;
     }
     const numericIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
     if (!numericIndex) {
       return false;
     }
-    return this.isUnusableInnerType(numericIndex);
+    return this.#isUnusableInnerType(numericIndex);
   }
 
   /**
@@ -869,7 +892,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * opaque-branded layers due to the recursive definition of the FactoryInput
    * type.
    */
-  private recursivelyUnwrapOpaqueCell(
+  #recursivelyUnwrapOpaqueCell(
     type: ts.Type,
     targetWrapperKind: WrapperKind,
     checker: ts.TypeChecker,
@@ -895,7 +918,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       const unionType = type as ts.UnionType;
       for (const member of unionType.types) {
         // Try to unwrap this member
-        const result = this.recursivelyUnwrapOpaqueCell(
+        const result = this.#recursivelyUnwrapOpaqueCell(
           member,
           targetWrapperKind,
           checker,
@@ -906,10 +929,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // If this is an opaque-branded cell, extract its type argument and recurse
-    if (this.isOpaqueCellType(type, checker)) {
-      const innerType = this.extractOpaqueCellTypeArgument(type, checker);
+    if (this.#isOpaqueCellType(type, checker)) {
+      const innerType = this.#extractOpaqueCellTypeArgument(type, checker);
       if (innerType) {
-        return this.recursivelyUnwrapOpaqueCell(
+        return this.#recursivelyUnwrapOpaqueCell(
           innerType,
           targetWrapperKind,
           checker,
@@ -924,25 +947,27 @@ export class CommonFabricFormatter implements TypeFormatter {
   /**
    * Extract the base type from FactoryInput<T>.
    */
-  private getFactoryInputBase(type: ts.Type): ts.Type | undefined {
+  #getFactoryInputBase(type: ts.Type): ts.Type | undefined {
     const aliasType = type as TypeWithInternals;
     return aliasType.aliasSymbol?.name === "FactoryInput"
       ? aliasType.aliasTypeArguments?.[0]
       : undefined;
   }
 
-  // Detects the "opaque" cell brand, carried by OpaqueCell<T>. Named for the
-  // brand it matches, not the `Reactive` annotation spelling: that is an
-  // identity alias for T (no runtime wrapper, no brand), so it cannot be
-  // detected structurally here — only OpaqueCell can.
-  private isOpaqueCellType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  /**
+   * Detects the opaque cell brand, carried by `OpaqueCell<T>`. Named for the
+   * brand it matches, not the `Reactive` annotation spelling: that is an
+   * identity alias for `T` (no runtime wrapper, no brand), so it cannot be
+   * detected structurally here — only `OpaqueCell` can.
+   */
+  #isOpaqueCellType(type: ts.Type, checker: ts.TypeChecker): boolean {
     return isCellBrand(type, checker, "opaque");
   }
 
   /**
    * Extract the type argument T from an opaque-branded cell (OpaqueCell<T>).
    */
-  private extractOpaqueCellTypeArgument(
+  #extractOpaqueCellTypeArgument(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): ts.Type | undefined {
@@ -959,7 +984,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return typeArgs && typeArgs.length > 0 ? typeArgs[0] : undefined;
   }
 
-  private selectWrapperTypeNode(
+  #selectWrapperTypeNode(
     originalNode: ts.TypeNode | undefined,
     resolvedWrapper:
       | {
@@ -982,11 +1007,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     return undefined;
   }
 
-  private isSyntheticWrapperNode(node: ts.Node): boolean {
+  #isSyntheticWrapperNode(node: ts.Node): boolean {
     return node.pos < 0 || node.end < 0;
   }
 
-  private getTypeRefIdentifierName(
+  #getTypeRefIdentifierName(
     node?: ts.TypeNode,
   ): string | undefined {
     if (!node || !ts.isTypeReferenceNode(node)) return undefined;
@@ -994,11 +1019,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     return ts.isIdentifier(tn) ? tn.text : undefined;
   }
 
-  private isStreamType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  #isStreamType(type: ts.Type, checker: ts.TypeChecker): boolean {
     return getCellBrand(type, checker) === "stream";
   }
 
-  private formatDefaultType(
+  #formatDefaultType(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     pairedType?: ts.Type,
@@ -1017,21 +1042,21 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Get the value type from the type nodes
     const valueType = context.typeRegistry?.get(valueTypeNode) ??
       context.typeChecker.getTypeFromTypeNode(valueTypeNode);
-    if (typeArgs.length === 1 && this.isUndefinedType(valueType)) {
+    if (typeArgs.length === 1 && this.#isUndefinedType(valueType)) {
       throw new Error(
         "Default<undefined> is unsupported; use an optional field or a JSON value default.",
       );
     }
 
     // Generate schema for the value type
-    const valueSchema = this.schemaGenerator.formatChildType(
+    const valueSchema = this.#schemaGenerator.formatChildType(
       valueType,
       context,
       valueTypeNode,
     );
 
     // Extract default value from the default type node (this can handle complex literals)
-    let defaultValue = this.extractDefaultValueFromNode(
+    let defaultValue = this.#extractDefaultValueFromNode(
       defaultTypeNode,
       context,
     );
@@ -1049,6 +1074,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     if (defaultValue !== undefined) {
+      // TODO(danfuzz): This attaches a default without checking it against the
+      // shape its type stores -- see the marker on the type-based path above,
+      // which describes the fabric-backed-native mismatch and needs one answer
+      // covering both paths.
+      //
       // JSON Schema Draft 2020-12 allows default as a sibling of $ref
       // Simply add the default property directly to the schema
       if (typeof valueSchema === "boolean") {
@@ -1065,7 +1095,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return valueSchema;
   }
 
-  private formatCfcAlias(
+  #formatCfcAlias(
     typeWithAlias: TypeWithInternals,
     context: GenerationContext,
     aliasName: string,
@@ -1076,14 +1106,14 @@ export class CommonFabricFormatter implements TypeFormatter {
       throw new Error(`${aliasName}<T> requires type argument`);
     }
 
-    const baseTypeNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
-    const baseSchema = this.schemaGenerator.formatChildType(
+    const baseTypeNode = this.#getAliasTypeArgumentNode(context.typeNode, 0);
+    const baseSchema = this.#schemaGenerator.formatChildType(
       baseType,
       context,
       baseTypeNode,
     );
 
-    const ifc = this.buildIfcMetadataForAlias(
+    const ifc = this.#buildIfcMetadataForAlias(
       aliasName,
       aliasArgs,
       context,
@@ -1092,10 +1122,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       return baseSchema;
     }
 
-    return this.mergeIfcMetadata(baseSchema, ifc);
+    return this.#mergeIfcMetadata(baseSchema, ifc);
   }
 
-  private formatResolvedCfcAlias(
+  #formatResolvedCfcAlias(
     resolved: ResolvedCfcAlias,
     context: GenerationContext,
   ): MutableJSONSchema {
@@ -1106,11 +1136,11 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     const baseTypeNode = resolved.aliasArgNodes?.[0];
     const baseSchema = baseTypeNode
-      ? this.formatCfcAliasTypeNode(baseTypeNode, context) ??
-        this.schemaGenerator.formatChildType(baseType, context, baseTypeNode)
-      : this.schemaGenerator.formatChildType(baseType, context, undefined);
+      ? this.#formatCfcAliasTypeNode(baseTypeNode, context) ??
+        this.#schemaGenerator.formatChildType(baseType, context, baseTypeNode)
+      : this.#schemaGenerator.formatChildType(baseType, context, undefined);
 
-    const ifc = this.buildIfcMetadataForAlias(
+    const ifc = this.#buildIfcMetadataForAlias(
       resolved.aliasName,
       resolved.aliasArgs,
       context,
@@ -1120,17 +1150,17 @@ export class CommonFabricFormatter implements TypeFormatter {
       return baseSchema;
     }
 
-    return this.mergeIfcMetadata(baseSchema, ifc);
+    return this.#mergeIfcMetadata(baseSchema, ifc);
   }
 
-  private formatCfcAliasTypeNode(
+  #formatCfcAliasTypeNode(
     typeNode: ts.TypeNode,
     context: GenerationContext,
   ): MutableJSONSchema | undefined {
     if (
       ts.isParenthesizedTypeNode(typeNode) || ts.isTypeOperatorNode(typeNode)
     ) {
-      return this.formatCfcAliasTypeNode(typeNode.type, context);
+      return this.#formatCfcAliasTypeNode(typeNode.type, context);
     }
     if (
       !ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)
@@ -1138,7 +1168,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return undefined;
     }
 
-    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+    const aliasDeclaration = this.#getTypeAliasDeclarationForSymbol(
       context.typeChecker.getSymbolAtLocation(typeNode.typeName),
       context,
     );
@@ -1150,9 +1180,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       ? [...typeNode.typeArguments]
       : undefined;
     const aliasArgs = (aliasArgNodes ?? []).map((argNode) =>
-      this.resolveTypeNodeToType(argNode, context, new Map())
+      this.#resolveTypeNodeToType(argNode, context, new Map())
     );
-    const resolved = this.resolveCfcAliasFromDeclaration(
+    const resolved = this.#resolveCfcAliasFromDeclaration(
       aliasDeclaration,
       aliasArgs,
       aliasArgNodes,
@@ -1160,11 +1190,11 @@ export class CommonFabricFormatter implements TypeFormatter {
       new Set([aliasDeclaration.name.text]),
     );
     return resolved
-      ? this.formatResolvedCfcAlias(resolved, context)
+      ? this.#formatResolvedCfcAlias(resolved, context)
       : undefined;
   }
 
-  private resolveCfcAliasInstantiation(
+  #resolveCfcAliasInstantiation(
     typeWithAlias: TypeWithInternals,
     context: GenerationContext,
   ): ResolvedCfcAlias | undefined {
@@ -1178,7 +1208,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     const aliasSymbol = typeWithAlias.aliasSymbol;
-    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+    const aliasDeclaration = this.#getTypeAliasDeclarationForSymbol(
       aliasSymbol,
       context,
     );
@@ -1186,16 +1216,16 @@ export class CommonFabricFormatter implements TypeFormatter {
       return undefined;
     }
 
-    return this.resolveCfcAliasFromDeclaration(
+    return this.#resolveCfcAliasFromDeclaration(
       aliasDeclaration,
       aliasArgs,
-      this.getAliasTypeArgumentNodes(context.typeNode),
+      this.#getAliasTypeArgumentNodes(context.typeNode),
       context,
       new Set([aliasName]),
     );
   }
 
-  private resolveCfcAliasFromDeclaration(
+  #resolveCfcAliasFromDeclaration(
     aliasDeclaration: ts.TypeAliasDeclaration,
     aliasArgs: readonly ts.Type[],
     aliasArgNodes: readonly ts.TypeNode[] | undefined,
@@ -1223,7 +1253,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return undefined;
     }
 
-    const targetDeclaration = this.getTypeAliasDeclarationForSymbol(
+    const targetDeclaration = this.#getTypeAliasDeclarationForSymbol(
       context.typeChecker.getSymbolAtLocation(aliased.typeName),
       context,
     );
@@ -1248,15 +1278,15 @@ export class CommonFabricFormatter implements TypeFormatter {
     const resolvedArgs: ts.Type[] = [];
     const resolvedArgNodes: ts.TypeNode[] = [];
     for (const argNode of aliased.typeArguments ?? []) {
-      const resolvedArgNode = this.substituteTypeNode(argNode, paramNodeMap);
+      const resolvedArgNode = this.#substituteTypeNode(argNode, paramNodeMap);
       resolvedArgs.push(
-        this.resolveTypeNodeToType(resolvedArgNode, context, new Map()),
+        this.#resolveTypeNodeToType(resolvedArgNode, context, new Map()),
       );
       resolvedArgNodes.push(resolvedArgNode);
     }
 
     visited.add(aliasName);
-    return this.resolveCfcAliasFromDeclaration(
+    return this.#resolveCfcAliasFromDeclaration(
       targetDeclaration,
       resolvedArgs,
       resolvedArgNodes,
@@ -1265,7 +1295,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     );
   }
 
-  private resolveTypeNodeToType(
+  #resolveTypeNodeToType(
     typeNode: ts.TypeNode,
     context: GenerationContext,
     paramMap: ReadonlyMap<string, ts.Type>,
@@ -1291,26 +1321,19 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
   }
 
-  private getTypeAliasDeclarationForSymbol(
+  #getTypeAliasDeclarationForSymbol(
     symbol: ts.Symbol | undefined,
     context: GenerationContext,
   ): ts.TypeAliasDeclaration | undefined {
-    let resolved = symbol;
-    if (resolved && (resolved.flags & ts.SymbolFlags.Alias) !== 0) {
-      try {
-        resolved = context.typeChecker.getAliasedSymbol(resolved);
-      } catch {
-        // Fall back to the original symbol; some synthetic test symbols do not
-        // round-trip cleanly through getAliasedSymbol.
-      }
-    }
+    const resolved = symbol &&
+      resolveAliasedSymbol(symbol, context.typeChecker);
     return resolved?.declarations?.find(
       (decl): decl is ts.TypeAliasDeclaration =>
         ts.isTypeAliasDeclaration(decl),
     );
   }
 
-  private substituteTypeNode(
+  #substituteTypeNode(
     typeNode: ts.TypeNode,
     paramMap: ReadonlyMap<string, ts.TypeNode>,
   ): ts.TypeNode {
@@ -1331,7 +1354,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           typeNode.typeName,
           ts.factory.createNodeArray(
             typeNode.typeArguments.map((arg) =>
-              this.substituteTypeNode(arg, paramMap)
+              this.#substituteTypeNode(arg, paramMap)
             ),
           ),
         );
@@ -1350,7 +1373,7 @@ export class CommonFabricFormatter implements TypeFormatter {
                 member.modifiers,
                 member.name,
                 member.questionToken,
-                this.substituteTypeNode(member.type, paramMap),
+                this.#substituteTypeNode(member.type, paramMap),
               );
             }
             return member;
@@ -1363,7 +1386,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return ts.factory.updateTupleTypeNode(
         typeNode,
         typeNode.elements.map((element) =>
-          this.substituteTypeNode(element, paramMap) as ts.TypeNode
+          this.#substituteTypeNode(element, paramMap) as ts.TypeNode
         ),
       );
     }
@@ -1371,38 +1394,38 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (ts.isArrayTypeNode(typeNode)) {
       return ts.factory.updateArrayTypeNode(
         typeNode,
-        this.substituteTypeNode(typeNode.elementType, paramMap),
+        this.#substituteTypeNode(typeNode.elementType, paramMap),
       );
     }
 
     if (ts.isTypeOperatorNode(typeNode)) {
       return ts.factory.updateTypeOperatorNode(
         typeNode,
-        this.substituteTypeNode(typeNode.type, paramMap),
+        this.#substituteTypeNode(typeNode.type, paramMap),
       );
     }
 
     if (ts.isParenthesizedTypeNode(typeNode)) {
       return ts.factory.updateParenthesizedType(
         typeNode,
-        this.substituteTypeNode(typeNode.type, paramMap),
+        this.#substituteTypeNode(typeNode.type, paramMap),
       );
     }
 
     return typeNode;
   }
 
-  private buildIfcMetadataForAlias(
+  #buildIfcMetadataForAlias(
     aliasName: string,
     aliasArgs: readonly ts.Type[],
     context: GenerationContext,
     aliasArgNodes?: readonly ts.TypeNode[],
   ): Record<string, unknown> | undefined {
     const readValue = (index: number): unknown => {
-      return this.extractLiteralLikeValue(
+      return this.#extractLiteralLikeValue(
         aliasArgs[index],
         aliasArgNodes?.[index] ??
-          this.getAliasTypeArgumentNode(context.typeNode, index),
+          this.#getAliasTypeArgumentNode(context.typeNode, index),
         context,
       );
     };
@@ -1410,7 +1433,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     switch (aliasName) {
       case "Cfc": {
         const payload = readValue(1);
-        return isRecord(payload) ? { ...payload } : undefined;
+        return isObjectOrArray(payload) ? { ...payload } : undefined;
       }
       case "Confidential":
         return { confidentiality: readValue(1) };
@@ -1439,9 +1462,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       case "ExactCopy":
         return { exactCopyOf: readValue(1) };
       case "WriteAuthorizedBy":
-        return this.buildWriteAuthorizedByMetadata(context, aliasArgNodes);
+        return this.#buildWriteAuthorizedByMetadata(context, aliasArgNodes);
       case "TrustedActionWriteWithIntegrity":
-        return this.buildTrustedActionWriteMetadata({
+        return this.#buildTrustedActionWriteMetadata({
           context,
           aliasArgNodes,
           action: readValue(2),
@@ -1450,7 +1473,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         });
       case "TrustedActionWrite": {
         const trustedPattern = readValue(3);
-        return this.buildTrustedActionWriteMetadata({
+        return this.#buildTrustedActionWriteMetadata({
           context,
           aliasArgNodes,
           action: readValue(2),
@@ -1472,19 +1495,19 @@ export class CommonFabricFormatter implements TypeFormatter {
         };
       }
       case "ProjectionPath":
-        return this.buildProjectionMetadata(aliasArgs, context, {
+        return this.#buildProjectionMetadata(aliasArgs, context, {
           fromIndex: 1,
           pathIndex: 2,
           defaultFrom: undefined,
         });
       case "ProjectionOf":
-        return this.buildProjectionMetadata(aliasArgs, context, {
+        return this.#buildProjectionMetadata(aliasArgs, context, {
           fromIndex: 1,
           pathIndex: 1,
           defaultFrom: "/",
         });
       case "Projection":
-        return this.buildProjectionMetadata(aliasArgs, context, {
+        return this.#buildProjectionMetadata(aliasArgs, context, {
           fromIndex: 1,
           pathIndex: 1,
           defaultFrom: "/",
@@ -1494,7 +1517,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
   }
 
-  private buildProjectionMetadata(
+  #buildProjectionMetadata(
     aliasArgs: readonly ts.Type[],
     context: GenerationContext,
     options: {
@@ -1504,15 +1527,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     },
   ): Record<string, unknown> | undefined {
     const readValue = (index: number): unknown => {
-      return this.extractLiteralLikeValue(
+      return this.#extractLiteralLikeValue(
         aliasArgs[index],
-        this.getAliasTypeArgumentNode(context.typeNode, index),
+        this.#getAliasTypeArgumentNode(context.typeNode, index),
         context,
       );
     };
 
     const from = options.defaultFrom ?? readValue(options.fromIndex);
-    const directPath = this.encodeJsonPointerPath(readValue(options.pathIndex));
+    const directPath = this.#encodeJsonPointerPath(
+      readValue(options.pathIndex),
+    );
     if (directPath !== undefined) {
       return {
         projection: {
@@ -1523,14 +1548,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     const sourceRefType = aliasArgs[0] as TypeWithInternals | undefined;
-    const sourceRefNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const sourceRefNode = this.#getAliasTypeArgumentNode(context.typeNode, 0);
     const nestedPathType = sourceRefType?.aliasTypeArguments?.[1];
     const nestedPathNode =
       sourceRefNode && ts.isTypeReferenceNode(sourceRefNode)
         ? sourceRefNode.typeArguments?.[1]
         : undefined;
-    const nestedPath = this.encodeJsonPointerPath(
-      this.extractLiteralLikeValue(nestedPathType, nestedPathNode, context),
+    const nestedPath = this.#encodeJsonPointerPath(
+      this.#extractLiteralLikeValue(nestedPathType, nestedPathNode, context),
     );
     if (nestedPath === undefined) {
       return undefined;
@@ -1544,18 +1569,18 @@ export class CommonFabricFormatter implements TypeFormatter {
     };
   }
 
-  private buildWriteAuthorizedByMetadata(
+  #buildWriteAuthorizedByMetadata(
     context: GenerationContext,
     aliasArgNodes?: readonly ts.TypeNode[],
   ): Record<string, unknown> | undefined {
-    return this.buildWriteAuthorizedByMetadataForArg(
+    return this.#buildWriteAuthorizedByMetadataForArg(
       context,
       aliasArgNodes,
       1,
     );
   }
 
-  private buildTrustedActionWriteMetadata(
+  #buildTrustedActionWriteMetadata(
     options: {
       context: GenerationContext;
       aliasArgNodes: readonly ts.TypeNode[] | undefined;
@@ -1564,7 +1589,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       requiredEventIntegrity: unknown;
     },
   ): Record<string, unknown> | undefined {
-    const writeMetadata = this.buildWriteAuthorizedByMetadataForArg(
+    const writeMetadata = this.#buildWriteAuthorizedByMetadataForArg(
       options.context,
       options.aliasArgNodes,
       1,
@@ -1580,13 +1605,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     };
   }
 
-  private buildWriteAuthorizedByMetadataForArg(
+  #buildWriteAuthorizedByMetadataForArg(
     context: GenerationContext,
     aliasArgNodes: readonly ts.TypeNode[] | undefined,
     bindingIndex: number,
   ): Record<string, unknown> | undefined {
     const bindingNode = aliasArgNodes?.[bindingIndex] ??
-      this.getAliasTypeArgumentNode(context.typeNode, bindingIndex);
+      this.#getAliasTypeArgumentNode(context.typeNode, bindingIndex);
     if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
       return undefined;
     }
@@ -1596,7 +1621,7 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     return {
       writeAuthorizedBy: {
-        __ctWriterIdentityOf: this.writeAuthorizedByIdentityForBinding(
+        __ctWriterIdentityOf: this.#writeAuthorizedByIdentityForBinding(
           context,
           bindingNode.exprName,
         ),
@@ -1604,11 +1629,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     };
   }
 
-  private writeAuthorizedByIdentityForBinding(
+  #writeAuthorizedByIdentityForBinding(
     context: GenerationContext,
     bindingName: ts.Identifier,
     normalizeFile = true,
   ): { file: string; path: string[]; moduleIdentity?: string } {
+    // Resolved here rather than through `resolveAliasedSymbol`: the file this
+    // lands on becomes the writer's module identity, and a hop that fell back
+    // to the importing file would attribute authority to the wrong module.
     const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
     const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
       ? context.typeChecker.getAliasedSymbol(symbol)
@@ -1642,7 +1670,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     };
   }
 
-  private getAliasTypeArgumentNode(
+  #getAliasTypeArgumentNode(
     typeNode: ts.TypeNode | undefined,
     index: number,
   ): ts.TypeNode | undefined {
@@ -1652,7 +1680,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return typeNode.typeArguments?.[index];
   }
 
-  private getAliasTypeArgumentNodes(
+  #getAliasTypeArgumentNodes(
     typeNode: ts.TypeNode | undefined,
   ): readonly ts.TypeNode[] | undefined {
     if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
@@ -1661,7 +1689,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return typeNode.typeArguments ? [...typeNode.typeArguments] : undefined;
   }
 
-  private mergeIfcMetadata(
+  #mergeIfcMetadata(
     schema: MutableJSONSchema,
     ifc: Record<string, unknown>,
   ): MutableJSONSchema {
@@ -1669,7 +1697,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return schema === false ? { not: true, ifc } : { ifc };
     }
 
-    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    const existingIfc = isObjectOrArray(schema.ifc) ? schema.ifc : {};
     return {
       ...schema,
       ifc: {
@@ -1679,7 +1707,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     };
   }
 
-  private encodeJsonPointerPath(value: unknown): string | undefined {
+  #encodeJsonPointerPath(value: unknown): string | undefined {
     if (typeof value === "string") {
       return value;
     }
@@ -1699,7 +1727,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return undefined;
   }
 
-  private extractLiteralLikeValue(
+  #extractLiteralLikeValue(
     type: ts.Type | undefined,
     typeNode: ts.TypeNode | undefined,
     context: GenerationContext,
@@ -1710,13 +1738,13 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     if (typeNode) {
       if (ts.isParenthesizedTypeNode(typeNode)) {
-        return this.extractLiteralLikeValue(type, typeNode.type, context);
+        return this.#extractLiteralLikeValue(type, typeNode.type, context);
       }
       if (ts.isTypeOperatorNode(typeNode)) {
-        return this.extractLiteralLikeValue(type, typeNode.type, context);
+        return this.#extractLiteralLikeValue(type, typeNode.type, context);
       }
       if (ts.isTypeQueryNode(typeNode)) {
-        return this.extractValueFromTypeQuery(typeNode, context);
+        return this.#extractValueFromTypeQuery(typeNode, context);
       }
       if (ts.isLiteralTypeNode(typeNode)) {
         const literal = typeNode.literal;
@@ -1728,19 +1756,19 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
       if (ts.isTupleTypeNode(typeNode)) {
         return typeNode.elements.map((element) =>
-          this.extractLiteralLikeValue(undefined, element, context)
+          this.#extractLiteralLikeValue(undefined, element, context)
         );
       }
       if (
         ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
       ) {
-        const referencedName = this.resolveTypeReferenceName(
+        const referencedName = this.#resolveTypeReferenceName(
           typeNode.typeName,
           context,
         );
         if (referencedName === "AnyOf") {
           const alternativesNode = typeNode.typeArguments?.[0];
-          const alternatives = this.extractLiteralLikeValue(
+          const alternatives = this.#extractLiteralLikeValue(
             undefined,
             alternativesNode,
             context,
@@ -1758,7 +1786,7 @@ export class CommonFabricFormatter implements TypeFormatter {
             return {
               type: CFC_ATOM_TYPE.Policy,
               policyRefKind: "module",
-              __ctPolicyIdentityOf: this.writeAuthorizedByIdentityForBinding(
+              __ctPolicyIdentityOf: this.#writeAuthorizedByIdentityForBinding(
                 context,
                 bindingNode.exprName,
                 false,
@@ -1768,7 +1796,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           }
           return undefined;
         }
-        const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+        const aliasDeclaration = this.#getTypeAliasDeclarationForSymbol(
           context.typeChecker.getSymbolAtLocation(typeNode.typeName),
           context,
         );
@@ -1785,9 +1813,9 @@ export class CommonFabricFormatter implements TypeFormatter {
               paramMap.set(paramName, actualArgNode);
             }
           }
-          return this.extractLiteralLikeValue(
+          return this.#extractLiteralLikeValue(
             undefined,
-            this.substituteTypeNode(aliasDeclaration.type, paramMap),
+            this.#substituteTypeNode(aliasDeclaration.type, paramMap),
             context,
           );
         }
@@ -1798,7 +1826,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           if (ts.isPropertySignature(member) && member.name && member.type) {
             const propName = getPropertyNameText(member.name);
             if (!propName) continue;
-            obj[propName] = this.extractLiteralLikeValue(
+            obj[propName] = this.#extractLiteralLikeValue(
               undefined,
               member.type,
               context,
@@ -1847,7 +1875,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       const elements = context.typeChecker.getTypeArguments(tupleType);
       if (elements.length > 0) {
         return elements.map((element) =>
-          this.extractLiteralLikeValue(element, undefined, context)
+          this.#extractLiteralLikeValue(element, undefined, context)
         );
       }
     }
@@ -1860,7 +1888,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       const elements = context.typeChecker.getTypeArguments(tupleType);
       if (elements.length > 0) {
         return elements.map((element) =>
-          this.extractLiteralLikeValue(element, undefined, context)
+          this.#extractLiteralLikeValue(element, undefined, context)
         );
       }
     }
@@ -1875,7 +1903,7 @@ export class CommonFabricFormatter implements TypeFormatter {
             property.valueDeclaration ?? property.declarations?.[0] ??
               context.typeNode ?? ({} as ts.Node),
           );
-          obj[property.getName()] = this.extractLiteralLikeValue(
+          obj[property.getName()] = this.#extractLiteralLikeValue(
             propType,
             undefined,
             context,
@@ -1888,7 +1916,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     return undefined;
   }
 
-  private resolveTypeReferenceName(
+  #resolveTypeReferenceName(
     typeName: ts.Identifier,
     context: GenerationContext,
   ): string {
@@ -1899,14 +1927,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     return resolved?.name ?? typeName.text;
   }
 
-  private extractDefaultValueFromNode(
+  #extractDefaultValueFromNode(
     typeNode: ts.TypeNode,
     context: GenerationContext,
   ): unknown {
     // Handle typeof expressions (TypeQuery nodes)
     // These reference a variable's value, like: typeof defaultRoutes
     if (ts.isTypeQueryNode(typeNode)) {
-      return this.extractValueFromTypeQuery(typeNode, context);
+      return this.#extractValueFromTypeQuery(typeNode, context);
     }
 
     // Handle type references that represent empty objects
@@ -1939,7 +1967,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Handle array literals (tuples) like [1, 2] or ["item1", "item2"]
     if (ts.isTupleTypeNode(typeNode)) {
       return typeNode.elements.map((element) =>
-        this.extractDefaultValueFromNode(element, context)
+        this.#extractDefaultValueFromNode(element, context)
       );
     }
 
@@ -1955,7 +1983,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           if (!propName) {
             continue;
           }
-          obj[propName] = this.extractDefaultValueFromNode(
+          obj[propName] = this.#extractDefaultValueFromNode(
             member.type,
             context,
           );
@@ -1971,10 +1999,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Fallback: try to get the type and extract from it
     const type = context.typeRegistry?.get(typeNode) ??
       context.typeChecker.getTypeFromTypeNode(typeNode);
-    return this.extractDefaultValue(type, context);
+    return this.#extractDefaultValue(type, context);
   }
 
-  private extractDefaultValue(
+  #extractDefaultValue(
     type: ts.Type,
     context: GenerationContext,
   ): unknown {
@@ -1999,13 +2027,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     // This is a simplified approach that works for many cases
     const symbol = type.getSymbol();
     if (symbol && symbol.valueDeclaration) {
-      return this.extractComplexDefaultFromTypeSymbol(type, symbol, context);
+      return this.#extractComplexDefaultFromTypeSymbol(type, symbol, context);
     }
 
     return undefined;
   }
 
-  private extractValueFromTypeQuery(
+  #extractValueFromTypeQuery(
     typeQueryNode: ts.TypeQueryNode,
     context: GenerationContext,
   ): unknown {
@@ -2013,126 +2041,32 @@ export class CommonFabricFormatter implements TypeFormatter {
     const exprName = typeQueryNode.exprName;
 
     // Get the symbol for the referenced entity
-    let symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
     if (!symbol) {
       return undefined;
     }
-    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
-      try {
-        symbol = context.typeChecker.getAliasedSymbol(symbol);
-      } catch {
-        // Fall back to the import alias; local test programs can produce
-        // synthetic symbols that do not round-trip through getAliasedSymbol.
-      }
-    }
 
-    return this.extractValueFromSymbol(symbol, context);
+    return this.#extractValueFromSymbol(symbol, context);
   }
 
   /**
    * Extract a runtime value from a symbol's value declaration.
    * Works for variables with initializers like: const foo = [1, 2, 3]
    */
-  private extractValueFromSymbol(
+  #extractValueFromSymbol(
     symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
-    const valueDeclaration = symbol.valueDeclaration;
-    if (!valueDeclaration) {
-      return undefined;
-    }
-
-    // Check if it's a variable declaration with an initializer
-    if (
-      ts.isVariableDeclaration(valueDeclaration) &&
-      valueDeclaration.initializer
-    ) {
-      return this.extractValueFromExpression(
-        valueDeclaration.initializer,
-        context,
-      );
-    }
-
-    return undefined;
+    return extractLiteralValueOfSymbol(symbol, context.typeChecker)?.value;
   }
 
-  private extractValueFromExpression(
-    expr: ts.Expression,
-    context: GenerationContext,
-  ): unknown {
-    if (
-      ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) ||
-      ts.isSatisfiesExpression(expr) || ts.isParenthesizedExpression(expr)
-    ) {
-      return this.extractValueFromExpression(expr.expression, context);
-    }
-
-    // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
-    if (ts.isArrayLiteralExpression(expr)) {
-      return expr.elements.map((element) =>
-        this.extractValueFromExpression(element, context)
-      );
-    }
-
-    // Handle object literals like { id: "a", name: "test" }
-    if (ts.isObjectLiteralExpression(expr)) {
-      const obj: Record<string, unknown> = {};
-      for (const property of expr.properties) {
-        if (
-          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
-        ) {
-          const propName = property.name.text;
-          obj[propName] = this.extractValueFromExpression(
-            property.initializer,
-            context,
-          );
-        } else if (ts.isShorthandPropertyAssignment(property)) {
-          // Handle shorthand like { id } where id is a variable
-          const propName = property.name.text;
-          obj[propName] = this.extractValueFromExpression(
-            property.name,
-            context,
-          );
-        }
-      }
-      return obj;
-    }
-
-    // Handle string literals
-    if (ts.isStringLiteral(expr)) {
-      return expr.text;
-    }
-
-    // Handle numeric literals, including signed and non-finite ones
-    const numeric = numberFromExpression(expr, context.typeChecker);
-    if (numeric !== undefined) {
-      return numeric;
-    }
-
-    // Handle boolean literals
-    if (expr.kind === ts.SyntaxKind.TrueKeyword) {
-      return true;
-    }
-    if (expr.kind === ts.SyntaxKind.FalseKeyword) {
-      return false;
-    }
-
-    // Handle null
-    if (expr.kind === ts.SyntaxKind.NullKeyword) {
-      return null;
-    }
-
-    // For more complex expressions, return undefined
-    return undefined;
-  }
-
-  private extractComplexDefaultFromTypeSymbol(
+  #extractComplexDefaultFromTypeSymbol(
     type: ts.Type,
     symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
     // Try to extract from the symbol's value declaration initializer (AST-based)
-    const extracted = this.extractValueFromSymbol(symbol, context);
+    const extracted = this.#extractValueFromSymbol(symbol, context);
     if (extracted !== undefined) {
       return extracted;
     }
@@ -2153,7 +2087,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Check if a type is the undefined type.
    * Extracted for clarity and consistency with UnionFormatter.
    */
-  private isUndefinedType(type: ts.Type): boolean {
+  #isUndefinedType(type: ts.Type): boolean {
     return (type.flags & ts.TypeFlags.Undefined) !== 0;
   }
 
@@ -2161,7 +2095,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Apply wrapper semantics to a schema, handling boolean schemas correctly.
    * Boolean schemas (true/false) can't have properties spread into them.
    */
-  private applyWrapperSemantics(
+  #applyWrapperSemantics(
     schema: MutableJSONSchema,
     wrapperKind: WrapperKind,
   ): MutableJSONSchema {
@@ -2187,7 +2121,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Handles empty array by returning true (any value is valid).
    * Deduplicates identical schemas before wrapping.
    */
-  private maybeWrapInAnyOf(
+  #maybeWrapInAnyOf(
     schemas: MutableJSONSchema[],
   ): MutableJSONSchema {
     if (schemas.length === 0) {
@@ -2212,7 +2146,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Handles cases like: Reactive<T> | undefined, Cell<T> | null, etc.
    * Uses nodes when available to preserve named type hoisting.
    */
-  private formatWrapperUnion(
+  #formatWrapperUnion(
     unionType: ts.UnionType,
     context: GenerationContext,
   ): MutableJSONSchema {
@@ -2231,8 +2165,20 @@ export class CommonFabricFormatter implements TypeFormatter {
       const memberType = members[i]!;
       const memberNode = unionNode?.types[i];
 
+      // A scope wrapper around a cell formats as the cell alone, dropping the
+      // scope before it reaches the schema — so the structural check on the
+      // finished schema would have nothing left to reject. Catch it here,
+      // where the wrapper is still visible.
+      const memberScope = resolveScopeWrapperNode(memberNode)?.scope ??
+        scopeForWrapperName(
+          (memberType as TypeWithInternals).aliasSymbol?.name,
+        );
+      if (memberScope !== undefined) {
+        throw scopeInsideUnionError(memberScope);
+      }
+
       // Include undefined as an explicit type in the schema
-      if (this.isUndefinedType(memberType)) {
+      if (this.#isUndefinedType(memberType)) {
         schemas.push({ type: "undefined" });
         continue;
       }
@@ -2264,7 +2210,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           ? resolveWrapperNode(memberNode, context.typeChecker)
           : undefined;
 
-        const schema = this.formatWrapperType(
+        const schema = this.#formatWrapperType(
           wrapperInfo.typeRef,
           wrapperNodeInfo?.node, // Pass node if available for proper name hoisting
           context,
@@ -2274,7 +2220,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       } else {
         // Not a wrapper - use standard formatting
         // Pass the member node if available to preserve named type hoisting
-        const schema = this.schemaGenerator.formatChildType(
+        const schema = this.#schemaGenerator.formatChildType(
           memberType,
           context,
           memberNode, // Pass node to preserve named type information
@@ -2283,7 +2229,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    return this.maybeWrapInAnyOf(schemas);
+    return this.#maybeWrapInAnyOf(schemas);
   }
 
   /**
@@ -2294,7 +2240,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Examples that return true: Reactive<T> | undefined, Cell<T> | null, Stream<T> | null | undefined
    * Examples that return false: string | Cell | null (mixed union, should use UnionFormatter)
    */
-  private isWrapperUnion(type: ts.Type, context: GenerationContext): boolean {
+  #isWrapperUnion(type: ts.Type, context: GenerationContext): boolean {
     // Must be a union type
     if ((type.flags & ts.TypeFlags.Union) === 0) {
       return false;
@@ -2310,7 +2256,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     for (const memberType of unionType.types) {
       // Skip undefined and null - they're modifiers, not members
       if (
-        this.isUndefinedType(memberType) ||
+        this.#isUndefinedType(memberType) ||
         (memberType.flags & ts.TypeFlags.Null) !== 0
       ) {
         continue;

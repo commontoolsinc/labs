@@ -1,30 +1,34 @@
+import {
+  type SchemaGenerationOptions,
+  SchemaGenerator,
+} from "@commonfabric/schema-generator";
+import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
 import ts from "typescript";
+
+import {
+  getNodeText,
+  getTypeFromTypeNodeWithFallback,
+  visitEachChildWithJsx,
+} from "../ast/mod.ts";
 import {
   CF_HELPERS_IDENTIFIER,
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
 import {
-  createSchemaTransformerV2,
-  type SchemaGenerationOptions,
-} from "@commonfabric/schema-generator";
-import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
-import {
-  getNodeText,
-  getTypeFromTypeNodeWithFallback,
-  visitEachChildWithJsx,
-} from "../ast/mod.ts";
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
+import { reportOpaqueReservedResultKeys } from "./reserved-result-keys.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
-    const schemaTransformer = createSchemaTransformerV2();
+    const schemaGenerator = new SchemaGenerator();
     const { sourceFile, tsContext: transformation, checker } = context;
-    const { logger, state } = context.options;
-    const typeRegistry = state?.typeRegistry;
-    const schemaHints = state?.schemaHints;
+    const { typeRegistry, schemaHints } = context.state;
     const writerIdentityForSourceFile = (fileName: string) => {
       const moduleIdentities = context.options.moduleIdentities;
       const moduleIdentity = moduleIdentities?.get(fileName);
@@ -77,7 +81,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         // below and inside the schema-generator package. The uses don't collide
         // because they key on different node-kinds; no split needed.
         let type: ts.Type;
-        if (typeRegistry && typeRegistry.has(node)) {
+        if (typeRegistry.has(node)) {
           type = typeRegistry.get(node)!;
         } else {
           // Use fallback to handle synthetic TypeNodes that may be in the registry
@@ -88,12 +92,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        if (logger) {
-          const typeText = getNodeText(schemaTypeArg);
-          logger(`[SchemaTransformer] Found toSchema<${typeText}>() call`);
-        }
-
-        const arg0 = node.arguments[0];
+        const arg0 = node.arguments[0] && unwrapExpression(node.arguments[0]);
         let optionsObj: Record<string, unknown> = {};
         let widenLiterals: boolean | undefined;
         if (arg0 && ts.isObjectLiteralExpression(arg0)) {
@@ -126,7 +125,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             containsAnyOrUnknownTypeNode(typeArg))
         ) {
           // Synthetic TypeNode path - use new method that shares context properly
-          schema = schemaTransformer.generateSchemaFromSyntheticTypeNode(
+          schema = schemaGenerator.generateSchemaFromSyntheticTypeNode(
             schemaTypeArg,
             checker,
             typeRegistry,
@@ -136,7 +135,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         } else {
           // Normal Type path
-          schema = schemaTransformer.generateSchema(
+          schema = schemaGenerator.generateSchema(
             type,
             checker,
             schemaTypeArg,
@@ -150,14 +149,12 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         let finalSchema: unknown = typeof schema === "boolean"
           ? schema
           : { ...(schema as Record<string, unknown>), ...optionsObj };
-        if (schemaHints) {
-          finalSchema = attachUiContractFromSchemaHints(
-            finalSchema,
-            node,
-            schemaTypeArg,
-            schemaHints,
-          );
-        }
+        finalSchema = attachUiContractFromSchemaHints(
+          finalSchema,
+          node,
+          schemaTypeArg,
+          schemaHints,
+        );
         if (writeAuthorizedByIdentity && typeof finalSchema !== "boolean") {
           finalSchema = attachWriteAuthorizedByMarker(
             finalSchema as Record<string, unknown>,
@@ -168,6 +165,19 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         const emittedSchema = typeof finalSchema === "boolean"
           ? finalSchema
           : { ...(finalSchema as Record<string, unknown>), ...optionsObj };
+        // This is the one place a pattern's declared result exists as the
+        // schema it generated, whatever type the author named and whichever
+        // inference path SchemaInjection took to reach it. SchemaInjection
+        // recorded which calls describe a result, and the node to point at.
+        const patternResultAnchor = context.state
+          .lookupPatternResultSchemaAnchor(node);
+        if (patternResultAnchor) {
+          reportOpaqueReservedResultKeys(
+            context,
+            emittedSchema,
+            patternResultAnchor,
+          );
+        }
         const schemaAst = createSchemaAst(emittedSchema, context.factory);
 
         // Wrap in `as const satisfies JSONSchema` so that schema-inference
@@ -241,7 +251,7 @@ function resolvePolicyOfMarkers(
         : undefined);
     let manifests = sourceEntry === undefined
       ? undefined
-      : context.options.state?.getPolicyManifests().get(sourceEntry[0]);
+      : context.state.getPolicyManifests().get(sourceEntry[0]);
     if (sourceEntry !== undefined && manifests === undefined) {
       const definingSource = context.program.getSourceFile(sourceEntry[0]);
       if (definingSource !== undefined) {
@@ -250,7 +260,7 @@ function resolvePolicyOfMarkers(
             definingSource,
             sourceEntry[1],
           );
-          context.options.state?.recordPolicyManifests(
+          context.state.recordPolicyManifests(
             sourceEntry[0],
             manifests,
           );
@@ -596,13 +606,11 @@ function evaluateExpression(
 ): unknown {
   // Wrappers that do not change the value: parentheses, and the type-only
   // assertion forms. Without this every parenthesized option is dropped, of
-  // whatever type -- `("text")` as surely as `(-1)`. The schema-generator side
-  // of this pair has always unwrapped them.
-  if (
-    ts.isParenthesizedExpression(node) || ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
-  ) {
-    return evaluateExpression(node.expression, checker);
+  // whatever type -- `("text")` as surely as `(-1)`. Reading the shared set
+  // keeps that list the same one the rest of the pipeline looks through.
+  const unwrapped = unwrapTransparentWrapperOnce(node);
+  if (unwrapped) {
+    return evaluateExpression(unwrapped, checker);
   }
 
   if (ts.isStringLiteral(node)) return node.text;

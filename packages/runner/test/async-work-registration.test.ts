@@ -1,4 +1,5 @@
 /// <reference path="./clock.d.ts" />
+
 /**
  * Async builtin work must reach `runtime.trackAsyncWork()`, and it must reach
  * it under the run that started it.
@@ -58,19 +59,12 @@ enableMockMode();
  * Builtin source files that enqueue a post-commit side effect and deliberately
  * do not hand a promise to `trackAsyncWork`, with the reason. Anything absent
  * from this list has to register, and the source scan names it when it does not.
+ *
+ * Empty: every builtin that enqueues one registers work of its own. Two of them
+ * register the settle for an abandoned request rather than the flush, and say
+ * at the flush itself why that one is not registered.
  */
-const POST_COMMIT_WITHOUT_TRACKED_WORK: Record<string, string> = {
-  // The query RPC and its writeback are awaited inside the flush, so the
-  // transaction's own commit promise spans them, and the scheduler registers
-  // that promise for every commit carrying post-commit effects.
-  "sqlite-builtins.ts":
-    "the flush awaits the query and its writeback, so the commit promise spans it",
-  // A subscription rather than a request: the read loop lives until the stream
-  // ends or is aborted, so registering it would mean `settled()` never returns
-  // while a stream is connected.
-  "stream-data.ts":
-    "an open-ended stream subscription, with no completion for a barrier to wait for",
-};
+const POST_COMMIT_WITHOUT_TRACKED_WORK: Record<string, string> = {};
 
 const OK_SCHEMA = {
   type: "object",

@@ -1,12 +1,15 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import { CommonFabricTransformerPipeline } from "../src/mod.ts";
-import { batchTypeCheckFixtures } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { batchTypeCheckFixtures } from "./utils.ts";
 
 /**
  * CT-1868 lineage regression — the hermetic, tracked form of the transform-time
- * lineage probe documented in `APRIME-LINEAGE-HANDOFF.md` §3/§11.
+ * lineage probe recorded in
+ * `docs/history/packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md` §3/§11.
  *
  * The transformer pipeline must arrive at BuilderCallHoisting with every
  * hoisted / authored builder call — its inner call AND its callback — still
@@ -154,10 +157,12 @@ function findCallbackArgument(
 
 interface BuilderSite {
   readonly tag: string;
+
   /** The builder call whose authored position must be recoverable. For a
    * hoisted `const __cfLift_N = __cfHelpers.lift(...)` this is the INNER
    * call; for a top-level authored builder it is the call itself. */
   readonly call: ts.CallExpression;
+
   readonly callback: ts.ArrowFunction | ts.FunctionExpression | undefined;
 }
 
@@ -252,6 +257,7 @@ function collectRewrittenSites(
 
 async function transformFixtureToAst(): Promise<{
   transformed: ts.SourceFile;
+
   /** The pre-transform source file, whose text the recovered positions index
    * into (it carries the `transformCfDirective` helper-import prelude). */
   original: ts.SourceFile;
@@ -266,7 +272,7 @@ async function transformFixtureToAst(): Promise<{
   const original = program.getSourceFile(fileName);
   assert(original, "fixture source file present in program");
 
-  const pipeline = new CommonFabricTransformerPipeline({ mode: "transform" });
+  const pipeline = new CommonFabricTransformerPipeline();
   const result = ts.transform(original, pipeline.toFactories(program));
   const transformed = result.transformed[0];
   assert(transformed, "pipeline returned a transformed source file");

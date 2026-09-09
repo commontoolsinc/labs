@@ -13,6 +13,7 @@ import {
   handler,
   NAME,
   pattern,
+  type Stream,
   UI,
   type VNode,
   Writable,
@@ -87,35 +88,28 @@ const updateDietaryRestrictions = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({
-    ...current,
-    dietaryRestrictions: detail?.tags ?? [],
-  });
+  member.update({ dietaryRestrictions: detail?.tags ?? [] });
 });
 
 const updateTags = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({ ...current, tags: detail?.tags ?? [] });
+  member.update({ tags: detail?.tags ?? [] });
 });
 
 const updateAllergies = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({ ...current, allergies: detail?.tags ?? [] });
+  member.update({ allergies: detail?.tags ?? [] });
 });
 
 const updateGiftIdeas = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({ ...current, giftIdeas: detail?.tags ?? [] });
+  member.update({ giftIdeas: detail?.tags ?? [] });
 });
 
 // sameAs handlers
@@ -125,15 +119,13 @@ const selectSameAs = handler<
 >(({ detail }, { member, showPicker }) => {
   const linked = detail?.data;
   if (!linked) return;
-  const current = member.get();
-  member.set({ ...current, sameAs: linked });
+  member.update({ sameAs: linked });
   showPicker.set(false);
 });
 
 const clearSameAs = handler<unknown, { member: Writable<FamilyMember> }>(
   (_event, { member }) => {
-    const current = member.get();
-    member.set({ ...current, sameAs: undefined });
+    member.update({ sameAs: undefined });
   },
 );
 
@@ -143,7 +135,7 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
   },
 );
 
-const toggle = handler<unknown, { section: Writable<boolean> }>(
+const toggle = handler<Record<string, never>, { section: Writable<boolean> }>(
   (_event, { section }) => {
     section.set(!section.get());
   },
@@ -164,7 +156,10 @@ function buildSectionHeaderLabel(
   return `${arrow} ${label}${suffix}`;
 }
 
-function header(labelContent: any, onClick: any) {
+function header(
+  labelContent: string,
+  onClick: Stream<Record<string, never>>,
+) {
   return (
     <cf-hstack
       style={{
@@ -249,6 +244,15 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
     buildSectionHeaderLabel("Notes", showNotes.get())
   );
 
+  // Each section's toggle is bound here rather than inside the rendered tree.
+  // A handler bound inside a JSX expression that also calls a helper is
+  // compiled as part of that expression, and the binding is not available
+  // there.
+  const toggleFamilyInfo = toggle({ section: showFamilyInfo });
+  const toggleHealth = toggle({ section: showHealth });
+  const toggleGifts = toggle({ section: showGifts });
+  const toggleNotes = toggle({ section: showNotes });
+
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
     if (!sameAs) return [];
@@ -326,7 +330,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
            */
           }
           <div>
-            {header(familyHeader, toggle({ section: showFamilyInfo }))}
+            {header(familyHeader, toggleFamilyInfo)}
             {computed(() => {
               if (!showFamilyInfo.get()) return null;
               return (
@@ -353,7 +357,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Health & Diet Section */}
           <div>
-            {header(healthHeader, toggle({ section: showHealth }))}
+            {header(healthHeader, toggleHealth)}
             {computed(() => {
               if (!showHealth.get()) return null;
               return (
@@ -383,7 +387,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Gift Ideas Section */}
           <div>
-            {header(giftIdeasHeader, toggle({ section: showGifts }))}
+            {header(giftIdeasHeader, toggleGifts)}
             {computed(() => {
               if (!showGifts.get()) return null;
               return (
@@ -399,7 +403,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {header(notesHeader, toggle({ section: showNotes }))}
+            {header(notesHeader, toggleNotes)}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (

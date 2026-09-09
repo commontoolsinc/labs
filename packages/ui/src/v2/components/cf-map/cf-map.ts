@@ -5,13 +5,14 @@
  * Uses OpenStreetMap tiles (no API key required).
  */
 
-import { html, PropertyValues } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
-import { styles } from "./styles.ts";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 // @ts-types="@types/leaflet"
 import * as L from "leaflet";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { html, PropertyValues } from "lit";
+
+import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
+import { styles } from "./styles.ts";
 import type {
   Bounds,
   CfBoundsChangeDetail,
@@ -25,6 +26,7 @@ import type {
   MapPolyline,
   MapValue,
 } from "./types.ts";
+
 import "../cf-render/index.ts";
 
 // Default map configuration
@@ -172,7 +174,7 @@ export class CFMap extends BaseElement {
   declare fitToBounds: boolean;
   declare interactive: boolean;
 
-  // Leaflet map instance
+  /** The Leaflet map instance. */
   private _map: L.Map | null = null;
 
   // Layer groups for organized management
@@ -180,28 +182,31 @@ export class CFMap extends BaseElement {
   private _circleLayer: L.LayerGroup | null = null;
   private _polylineLayer: L.LayerGroup | null = null;
 
-  // Track markers for drag events
+  /** The markers, tracked for drag events. */
   private _leafletMarkers: L.Marker[] = [];
 
-  // Track circles for click events
+  /** The circles, tracked for click events. */
   private _leafletCircles: L.Circle[] = [];
 
-  // Track polylines for cleanup
+  /** The polylines, tracked for cleanup. */
   private _leafletPolylines: L.Polyline[] = [];
 
-  // RAF ID for map initialization (prevent race condition on disconnect)
+  /**
+   * `requestAnimationFrame` id for map initialization, which prevents a race
+   * condition on disconnect.
+   */
   private _rafId: number | null = null;
 
-  // ResizeObserver for automatic map resize when container changes
+  /** `ResizeObserver` for automatic map resize when the container changes. */
   private _resizeObserver: ResizeObserver | null = null;
 
-  // Timeout ID for debounced resize handling
+  /** Timeout id for debounced resize handling. */
   private _resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  // Flag to prevent echo loops during programmatic updates
+  /** Whether a programmatic update is in progress; this prevents echo loops. */
   private _isUpdatingFromCell = false;
 
-  // Flag to track pending click events deferred during animations
+  /** A pending click event deferred during an animation, if any. */
   private _pendingClickEvent: L.LeafletMouseEvent | null = null;
 
   // Pending updates deferred during animations
@@ -249,7 +254,7 @@ export class CFMap extends BaseElement {
     },
   });
 
-  // Bound event handler for cleanup
+  /** Bound keydown handler, held so it can be removed on cleanup. */
   private _boundHandleKeydown = this._handleKeydown.bind(this);
 
   constructor() {
@@ -352,7 +357,9 @@ export class CFMap extends BaseElement {
     `;
   }
 
-  // === Keyboard Navigation ===
+  //
+  // Keyboard Navigation
+  //
 
   private _handleKeydown(event: KeyboardEvent): void {
     // Only handle when interactive and map exists and is stable
@@ -395,7 +402,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Map State Helpers ===
+  //
+  // Map State Helpers
+  //
 
   /**
    * Check if the map is in a stable state for operations.
@@ -423,7 +432,9 @@ export class CFMap extends BaseElement {
     return true;
   }
 
-  // === Map Initialization ===
+  //
+  // Map Initialization
+  //
 
   private _initializeMap(): void {
     const container = this.shadowRoot?.querySelector(
@@ -579,7 +590,9 @@ export class CFMap extends BaseElement {
     this.emit("cf-click", detail);
   }
 
-  // === Value Getters (using CellControllers) ===
+  //
+  // Value Getters (using CellControllers)
+  //
 
   private _getValue(): MapValue {
     return this._valueController.getValue() || {};
@@ -599,7 +612,9 @@ export class CFMap extends BaseElement {
     return this._boundsController.getValue() || null;
   }
 
-  // === Cell Updates (bidirectional, using CellControllers) ===
+  //
+  // Cell Updates (bidirectional, using CellControllers)
+  //
 
   private _updateCenterCell(center: LatLng): void {
     if (!this._centerController.hasCell()) return;
@@ -634,7 +649,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Map Updates ===
+  //
+  // Map Updates
+  //
 
   private _updateMapCenter(): void {
     if (!this._map) return;
@@ -769,7 +786,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Feature Rendering ===
+  //
+  // Feature Rendering
+  //
 
   private _clearLayers(): void {
     // Remove event listeners from tracked markers before clearing to prevent memory leaks
@@ -1107,7 +1126,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Popup Rendering ===
+  //
+  // Popup Rendering
+  //
 
   private _createPopupContent(
     feature: MapMarker | MapCircle,
@@ -1151,7 +1172,9 @@ export class CFMap extends BaseElement {
     return container;
   }
 
-  // === Fit to Bounds ===
+  //
+  // Fit to Bounds
+  //
 
   private _fitMapToBounds(): void {
     if (!this._map) return;
@@ -1260,7 +1283,9 @@ export class CFMap extends BaseElement {
     }
   }
 
-  // === Utilities ===
+  //
+  // Utilities
+  //
 
   private _isEmoji(str: string): boolean {
     // Simple emoji detection - checks for emoji unicode ranges
@@ -1268,7 +1293,9 @@ export class CFMap extends BaseElement {
     return EMOJI_REGEX.test(str);
   }
 
-  // === Coordinate Validation ===
+  //
+  // Coordinate Validation
+  //
 
   /**
    * Clamp zoom level to valid range, handling NaN/Infinity
@@ -1355,7 +1382,9 @@ export class CFMap extends BaseElement {
     return bounds;
   }
 
-  // === Cleanup ===
+  //
+  // Cleanup
+  //
 
   private _cleanup(): void {
     // Cancel pending RAF to prevent race condition if component disconnects before it fires
@@ -1401,7 +1430,9 @@ export class CFMap extends BaseElement {
     // the host element disconnects.
   }
 
-  // === Public API ===
+  //
+  // Public API
+  //
 
   /**
    * Get the underlying Leaflet map instance for advanced usage

@@ -1,9 +1,10 @@
+import { decode, encode } from "@commonfabric/utils/encoding";
+import * as ed25519 from "@noble/ed25519";
+import { varint } from "multiformats";
 import { base58btc } from "multiformats/bases/base58";
 import { base64pad } from "multiformats/bases/base64";
-import { varint } from "multiformats";
+
 import { DIDKey } from "../interface.ts";
-import * as ed25519 from "@noble/ed25519";
-import { decode, encode } from "@commonfabric/utils/encoding";
 
 export const ED25519_ALG = "Ed25519";
 const ED25519_CODE = 0xed;
@@ -139,10 +140,13 @@ export class AuthorizationError extends Error {
 //   https://caniuse.com/mdn-api_subtlecrypto_generatekey_ed25519
 // * [2] Firefox supports ed25519 keys, though cannot be serialized (stored in IndexedDB)
 //   until v136 https://bugzilla.mozilla.org/show_bug.cgi?id=1939993.
-// * [3] While Deno serializes `CryptoKey`s without throwing, they cannot be rehydrated
-//   after cloning. We do not test that here, as we prefer the WebCrypto implementation
-//   in Deno, but in scenarios where a clone is necessary, a fallback implementation
-//   can be requested.
+// * [3] Deno carries a `CryptoKey` across one worker boundary whole: the clone
+//   is a `CryptoKey` with its extractability and algorithm intact, and it
+//   signs. A key that itself arrived that way does not survive a further
+//   crossing -- it degrades to a plain object -- so a relay through two workers
+//   loses what a single hop keeps. Cloning within a realm has no such limit,
+//   which is the cloning this function checks, and that check is about Firefox
+//   per [2].
 //   https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
 // * [4] Safari/Webkit generates randomized signatures as per `draft-irtf-cfrg-det-sigs-with-noise`
 //   https://datatracker.ietf.org/doc/draft-irtf-cfrg-det-sigs-with-noise/

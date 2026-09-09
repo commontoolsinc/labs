@@ -1,5 +1,5 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { getTopFrame } from "../builder/pattern.ts";
 import { type Frame } from "../builder/types.ts";
 import {
@@ -67,6 +67,24 @@ export function getSchedulerActionId(
   return generatedId;
 }
 
+/**
+ * Just the readable name of an action, without the rest of its telemetry.
+ *
+ * `getSchedulerActionTelemetryInfo` formats every annotated read and write on
+ * the way to producing these two names, which is the bulk of its work and none
+ * of what a caller wanting a label uses. Both names are plain properties, so
+ * this is two reads and no allocation.
+ */
+export function getSchedulerActionName(
+  action: Action | EventHandler,
+): string | undefined {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  // `||`, so an empty name falls through rather than winning: a name a reader
+  // cannot use is not a name.
+  return getOptionalName(annotated.module) ||
+    getOptionalName(annotated.pattern);
+}
+
 export function getSchedulerActionTelemetryInfo(
   action: Action | EventHandler,
 ): SchedulerActionInfo | undefined {
@@ -99,7 +117,7 @@ function formatTelemetryLink(link: NormalizedFullLink): string {
 }
 
 function getOptionalName(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   const debugName = value.debugName;
   if (typeof debugName === "string") return debugName;
   const name = value.name;
@@ -161,7 +179,7 @@ export function summarizeTriggerTraceValue(
   if (Array.isArray(value)) {
     return { kind: "array", size: value.length };
   }
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     return { kind: "object", size: Object.keys(value).length };
   }
   return { kind: "other", preview: Object.prototype.toString.call(value) };
@@ -191,15 +209,15 @@ export function getPieceMetadataFromFrame(frame?: Frame): {
   // cycle) and fall back to the in-hand pattern's entry ref when the cell has no
   // stored pointer (a keyless run()).
   const storedIdentity = resultCell.getMetaRaw("patternIdentity");
-  result.patternId =
-    (isRecord(storedIdentity) && typeof storedIdentity.identity === "string"
-      ? storedIdentity.identity
-      : undefined) ??
-      (frame?.unsafe_binding?.pattern
-        ? frame.runtime?.patternManager.getArtifactEntryRef(
-          frame.unsafe_binding.pattern,
-        )?.identity
-        : undefined);
+  result.patternId = (isObjectOrArray(storedIdentity) &&
+      typeof storedIdentity.identity === "string"
+    ? storedIdentity.identity
+    : undefined) ??
+    (frame?.unsafe_binding?.pattern
+      ? frame.runtime?.patternManager.getArtifactEntryRef(
+        frame.unsafe_binding.pattern,
+      )?.identity
+      : undefined);
   result.space = resultCell.space;
   // The FULL sourceURI, scheme included. All consumers are display (error
   // strings, console-log prefixes), and keeping the scheme means ids copied

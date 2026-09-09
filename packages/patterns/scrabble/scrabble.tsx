@@ -12,6 +12,7 @@
 import {
   type Cell,
   computed,
+  dataFile,
   Default,
   handler,
   hasError,
@@ -46,8 +47,10 @@ export type ScrabbleProfileCell = Cell<{ name?: string; avatar?: string }>;
 
 export interface Player {
   name: string;
+
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
+
   /**
    * Live profile cell — present for profile-joined players (the scoreboard
    * renders it via `<cf-profile-badge>`), absent for headless name-only joins
@@ -285,49 +288,9 @@ const BONUS_LABELS: Record<BonusType, string> = {
   star: "*",
 };
 
-const EXAMPLE_WORDS = new Set([
-  "AD",
-  "AM",
-  "AN",
-  "AS",
-  "AT",
-  "AX",
-  "BE",
-  "BY",
-  "DO",
-  "GO",
-  "HE",
-  "HI",
-  "IF",
-  "IN",
-  "IS",
-  "IT",
-  "ME",
-  "MY",
-  "NO",
-  "OF",
-  "ON",
-  "OR",
-  "OX",
-  "SO",
-  "TO",
-  "UP",
-  "US",
-  "WE",
-  "WORD",
-  "WORDS",
-  "TILE",
-  "TILES",
-  "GAME",
-  "GAMES",
-  "PLAY",
-  "PLAYS",
-  "SCORE",
-  "SCORES",
-  "STAR",
-  "RACK",
-  "BOARD",
-]);
+const VALID_WORDS = new Set(
+  dataFile("words.txt").split("\n").filter((word) => word.length > 0),
+);
 
 type BoardCell = Writable<PlacedTile[] | Default<[]>>;
 type BagCell = Writable<Letter[] | Default<[]>>;
@@ -582,7 +545,7 @@ function findAllWordsWithPositions(
 }
 
 function isValidWord(word: string): boolean {
-  return word.length >= 2 && EXAMPLE_WORDS.has(word.toUpperCase());
+  return word.length >= 2 && VALID_WORDS.has(word.toUpperCase());
 }
 
 function calculateWordScore(wordData: WordWithPositions): WordScore {

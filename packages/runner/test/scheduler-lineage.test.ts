@@ -69,12 +69,15 @@ function createOriginTx(
   return origin as TestOriginTx;
 }
 
+let nextEnqueueSeq = 1;
+
 function queuedEvent(
   id: string,
   originTx?: IExtendedStorageTransaction,
 ): QueuedEvent {
   return {
     id,
+    enqueueSeq: nextEnqueueSeq++,
     originTx,
     eventLink,
     action: () => {},

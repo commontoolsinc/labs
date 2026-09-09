@@ -3,20 +3,27 @@ import type {
   JSONSchema,
   JSONSchemaObj,
 } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { getPatternEnvironment } from "../builder/env.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
-import type { CellScope } from "../builder/types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { CellScope, Schema } from "../builder/types.ts";
+import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
 import { mapSubschemas } from "../schema-walk.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
   isToolshedApiOrigin,
@@ -33,13 +40,11 @@ import {
   tryWriteResult,
   writeUnavailableFetchResult,
 } from "./fetch-utils.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 import {
-  DataUnavailable,
-  isDataUnavailable,
-} from "@commonfabric/data-model/fabric-instances";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
 
 type FetchRequestOptions = {
   body?: any;
@@ -47,6 +52,7 @@ type FetchRequestOptions = {
   headers?: Record<string, string>;
   cache?: RequestCache;
   redirect?: RequestRedirect;
+
   /**
    * How long (ms) a claimed request mutex stays valid before another tab may
    * take it over. Not part of the request itself: stripped before the request
@@ -58,8 +64,10 @@ type FetchRequestOptions = {
 /** The shape of the fetch builtins' input cells (union across all kinds). */
 type FetchInputs = {
   url?: string;
+
   /** fetchJson only. */
   schema?: JSONSchema;
+
   options?: FetchRequestOptions;
 };
 
@@ -169,7 +177,11 @@ class FetchResponseSchemaMismatch extends Error {
 async function processBinaryResponse(
   response: Response,
 ): Promise<FetchBinaryResult> {
-  const bytes = new FabricBytes(new Uint8Array(await response.arrayBuffer()));
+  // The `true` below cedes the buffer to the `FabricBytes` rather than having
+  // it copied. `arrayBuffer()` yields a buffer nobody else holds, so there is
+  // nothing left to protect. A response body is unbounded, which is what makes
+  // the copy worth avoiding.
+  const bytes = new FabricBytes(await response.arrayBuffer(), true);
   const contentType = response.headers.get("content-type");
   const mediaType = contentType?.split(";")[0].trim().toLowerCase() ||
     "application/octet-stream";
@@ -189,7 +201,7 @@ const asTypeArray = (type: unknown): string[] =>
  * Exported for unit testing only — not part of the fetch builtin surface.
  */
 export function schemaWithOpenObjects(schema: JSONSchema): JSONSchema {
-  if (!isRecord(schema)) return schema;
+  if (!isObjectOrArray(schema)) return schema;
   // Default-tier walk plus `$defs`. The never-emitted keywords (`contains`,
   // `if`/`then`/`else`, ...) are deliberately NOT rewritten — opening objects
   // under them would make those paths look supported; if one becomes emitted,
@@ -258,6 +270,11 @@ function snapshotInputsFor(
     const { mutexTimeoutMs: _mutexTimeoutMs, ...rawOptions } =
       snapshot.options ?? {};
     const body = rawOptions.body;
+    // TODO(danfuzz): the `body` schema is open (`{}`), and `JSON.stringify`
+    // renders a `FabricSpecialObject` body — a `FabricBytes`, say, the very
+    // type this file mints for binary responses — as `"{}"`, both on the
+    // wire and in the request hash, so two distinct bodies collapse to one
+    // request identity.
     const options = snapshot.options && Object.keys(rawOptions).length > 0
       ? {
         ...rawOptions,
@@ -315,6 +332,15 @@ function fetchBuiltin(kind: FetchKind) {
     let internal: Cell<Schema<typeof internalSchema>>;
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
+
+    /**
+     * The request this node staged on its most recent run, if that run staged
+     * one. A token rather than the request's hash: two stagings of the same
+     * inputs are still two requests, and the ending of the first must not be
+     * read as the ending of the second.
+     */
+    let currentStaging: symbol | undefined = undefined;
+
     let abortController: AbortController | undefined = undefined;
 
     // This is called when the pattern containing this node is being stopped.
@@ -328,6 +354,18 @@ function fetchBuiltin(kind: FetchKind) {
       const tx = runtime.edit();
 
       try {
+        // Teardown tx on piece stop — no scheduler run stamps it;
+        // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+        // serving runtime releases the claim instead of refusing the
+        // unstamped seal. No-op off the serving posture. INSIDE the
+        // try (r3756175831's shape, applied to the sibling site): a
+        // throwing stamper routes through the abort below instead of
+        // leaking the manually-opened tx.
+        runtime.stampServerRun(tx, {
+          actionId: `${kind.name}/teardown/${parentCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
+
         // If the pending request is ours, set pending to false and clear the
         // requestId. A claim another replica has taken over carries its id,
         // not ours, and releasing it would strand the request it is running.
@@ -349,6 +387,11 @@ function fetchBuiltin(kind: FetchKind) {
 
     return (tx: IExtendedStorageTransaction) => {
       tx.resetNarrowestReadScope();
+      // Cleared for the whole run and set again only by the arm that stages a
+      // request, so every way this run can end without staging one — an empty
+      // url, a result already stored, a request already in flight — leaves the
+      // ending of an earlier request with nothing of this node's to write to.
+      currentStaging = undefined;
       const unavailableInput = selectUnavailableFetchInput(
         inputsCell.withTx(tx).getRaw(),
         { runtime, tx, base: inputsCell },
@@ -362,41 +405,45 @@ function fetchBuiltin(kind: FetchKind) {
       const outputScope = tx.getNarrowestReadScope();
 
       if (!cellsInitialized || cellScope !== outputScope) {
-        const basePending = runtime.getCell<boolean>(
-          parentCell.space,
+        pending = ownedCell<boolean>(
+          runtime,
+          tx,
+          parentCell,
           { [kind.name]: { pending: cause } },
           undefined,
-          tx,
+          outputScope,
         );
-        pending = scopedCell(runtime, tx, basePending, outputScope);
 
-        const baseResult = runtime.getCell<any | undefined>(
-          parentCell.space,
+        result = ownedCell<any | undefined>(
+          runtime,
+          tx,
+          parentCell,
           {
             [kind.name]: { result: cause },
           },
           undefined,
-          tx,
+          outputScope,
         );
-        result = scopedCell(runtime, tx, baseResult, outputScope);
 
-        const baseError = runtime.getCell<any | undefined>(
-          parentCell.space,
+        error = ownedCell<any | undefined>(
+          runtime,
+          tx,
+          parentCell,
           {
             [kind.name]: { error: cause },
           },
           undefined,
-          tx,
+          outputScope,
         );
-        error = scopedCell(runtime, tx, baseError, outputScope);
 
-        const baseInternal = runtime.getCell(
-          parentCell.space,
+        internal = ownedCell(
+          runtime,
+          tx,
+          parentCell,
           { [kind.name]: { internal: cause } },
           internalSchema,
-          tx,
+          outputScope,
         );
-        internal = scopedCell(runtime, tx, baseInternal, outputScope);
 
         // Link the new result cells to the parent result cell
         setResultCell(pending, parentCell);
@@ -525,6 +572,16 @@ function fetchBuiltin(kind: FetchKind) {
         !(isDataUnavailable(currentResult) &&
           currentResult.reason === "pending");
       const hasError = inputsMatch && currentError !== undefined;
+      if (hasValidResult || hasError) {
+        // The §4 memo hit (server-execution v2): the stored request hash
+        // matches, so the committed result (or error-shaped result) IS
+        // the node's value — no effect fires, which is what makes
+        // restart-recovery safe (serving-loop.md §4, §6 step 3).
+        runtime.effectMemoObserver?.({
+          kind: "hit",
+          id: `${kind.name}:${inputHash}`,
+        });
+      }
 
       // If we're already fetching these inputs, wait
       const alreadyFetching = inputsMatch && currentPending &&
@@ -534,10 +591,30 @@ function fetchBuiltin(kind: FetchKind) {
       if (!hasValidResult && !hasError && !alreadyFetching) {
         // The claim id names this replica, so teardown can tell a claim it
         // still holds from one another replica has taken over. `runtime.id` is
-        // unique per storage manager and so per replica. The outbox id stays
-        // the input hash, which is what makes it an idempotency key for the
-        // same request from anywhere.
+        // unique per storage manager and so per replica. The outbox/dedupe
+        // key is the input hash WIDENED BY THIS NODE's result-cell identity
+        // (effectTargetKey): dedupe collapses re-issues of the SAME node's
+        // request from anywhere, while a DISTINCT node with identical
+        // inputs keeps its own effect — its closure writes its own cells,
+        // which a shared key would have dropped (round-2 headline).
         const newRequestId = `${runtime.id}:${inputHash}`;
+        const staging = Symbol(inputHash);
+        currentStaging = staging;
+        // These cells as this request found them. Whether anything has been
+        // committed to them since is one question about all four together, not
+        // four questions: a request that answers writes its result without
+        // moving the claim id, and one that takes over moves the claim id
+        // without writing a result.
+        const cellsBeforeStage = {
+          pending: currentPending,
+          result: currentResult,
+          error: currentError,
+          internal: currentInternal,
+        };
+        const effectKey = effectTargetKey(
+          `${kind.name}:${inputHash}`,
+          result,
+        );
         enqueueSinkRequestPostCommitEffect(
           tx,
           kind.name,
@@ -565,6 +642,7 @@ function fetchBuiltin(kind: FetchKind) {
               snapshotInputs,
               inputHash,
               mutexTimeoutMs,
+              effectKey,
             ).then(
               async ({ claimed }) => {
                 if (!claimed) {
@@ -610,6 +688,7 @@ function fetchBuiltin(kind: FetchKind) {
                   // Release the lock and clear state
                   myRequestId = undefined;
                   runtime.editWithRetry((tx) => {
+                    markEffectCompletion(tx, effectKey);
                     pending.withTx(tx).set(false);
                     result.withTx(tx).setRaw(
                       DataUnavailable.schemaMismatch(),
@@ -639,10 +718,82 @@ function fetchBuiltin(kind: FetchKind) {
                   error,
                   internal,
                   controller.signal,
+                  effectKey,
                 );
               },
             );
             runtime.trackAsyncWork(work, parentCell);
+          },
+          {
+            idempotencyKey: effectKey,
+            onRejected: (rejection) => {
+              runtime.trackAsyncWork(
+                settleAbandonedRequest(
+                  runtime,
+                  kind.name,
+                  effectKey,
+                  (settleTx) => {
+                    // The announcement rode the abandoned transaction, so it
+                    // is made again whoever owns the answer now.
+                    sendResult(settleTx, { pending, result, error });
+                    // Decided here rather than when this callback ran.
+                    // Another request holds these cells in either of two ways,
+                    // and the ending steps around both. One is in flight: the
+                    // pending flag is up under a claim id that is not this
+                    // request's. Or one has claimed here since this request was
+                    // staged, whatever state it left — a later request that
+                    // already answered leaves its own claim id with the flag
+                    // down, and that answer is its own to keep.
+                    //
+                    // What was left over from before this request was staged is
+                    // neither. A request that finished leaves its claim id
+                    // standing with the flag down, so every request after the
+                    // first one finds an id here that belongs to nobody, and
+                    // reading that as a takeover would leave the pattern
+                    // holding the finished request's answer under inputs it no
+                    // longer describes.
+                    // This node has moved on if its latest run staged
+                    // something else, or staged nothing at all. The store can
+                    // say nothing about that: a run whose inputs return to ones
+                    // already answered keeps that answer and writes nothing, so
+                    // the two durable tests below both see exactly what this
+                    // request left behind.
+                    if (currentStaging !== staging) return;
+                    const cellsNow = {
+                      pending: pending.withTx(settleTx).get(),
+                      result: result.withTx(settleTx).get(),
+                      error: error.withTx(settleTx).get(),
+                      internal: internal.withTx(settleTx).get(),
+                    };
+                    const claim = cellsNow.internal?.requestId;
+                    const inFlight = cellsNow.pending === true &&
+                      claim !== undefined && claim !== "" &&
+                      claim !== newRequestId;
+                    // `valueEqual` rather than a structural walk: a fetched
+                    // body is a `FabricValue`, and `fetchBinary` answers with
+                    // `FabricBytes`, whose contents live in private fields that
+                    // a structural walk cannot see — every distinct instance of
+                    // one compares equal to every other.
+                    const writtenSinceStaged = !valueEqual(
+                      cellsBeforeStage as FabricValue,
+                      cellsNow as FabricValue,
+                    );
+                    if (inFlight || writtenSinceStaged) {
+                      return;
+                    }
+                    writeUnavailableFetchResult(
+                      settleTx,
+                      pending,
+                      result,
+                      error,
+                      DataUnavailable.error(rejection),
+                      rejection.message,
+                    );
+                  },
+                ),
+                parentCell,
+              );
+            },
           },
         );
       }
@@ -695,6 +846,7 @@ async function startFetch(
   error: Cell<any | undefined>,
   internal: Cell<Schema<typeof internalSchema>>,
   abortSignal: AbortSignal,
+  effectKey: string,
 ) {
   const { url, options } = inputsSnapshot;
 
@@ -733,7 +885,7 @@ async function startFetch(
     if (abortSignal.aborted) return;
 
     // Try to write result - any tab can write if inputs match
-    await tryWriteResult(
+    const written = await tryWriteResult(
       runtime,
       internal,
       inputsCell,
@@ -744,7 +896,23 @@ async function startFetch(
         error.withTx(tx).set(undefined);
       },
       snapshotInputs,
+      effectKey,
     );
+    // A writeback SUPERSEDED by changed inputs is done (the new inputs'
+    // own request owns the cells now). A writeback whose COMMIT failed
+    // is not: the claim (pending=true) is durable and this response is
+    // the only completion it will ever get — swallowing the failure
+    // retires the effect as "completed" while the claim wedges forever
+    // under serving (nothing re-runs the action without input change).
+    // Throw instead: the catch below converts it into an error-shaped
+    // result (retryable, input-driven — §4's failure posture), and if
+    // even that cannot commit, the rethrow makes the tracked work
+    // reject so the outbox counts outbox.failed and logs it loudly.
+    if (written.commitError !== undefined) {
+      throw new Error(
+        `${kind.name} completion write failed: ${written.commitError.message}`,
+      );
+    }
   } catch (err) {
     // Don't write errors if request was aborted
     if (abortSignal.aborted) return;
@@ -757,10 +925,8 @@ async function startFetch(
         err instanceof Error ? err : new Error(String(err)),
       );
 
-    // A takeover can leave two requests for the same inputs in flight. A
-    // failure must not replace a usable result the other request already
-    // recorded, but it may publish while the direct result is still pending.
-    await runtime.editWithRetry((tx) => {
+    // Write error - but only update inputHash if inputs haven't changed
+    const errorWritten = await runtime.editWithRetry((tx) => {
       const unavailableInput = selectUnavailableFetchInput(
         inputsCell.withTx(tx).getRaw(),
         { runtime, tx, base: inputsCell },
@@ -780,6 +946,7 @@ async function startFetch(
         return;
       }
 
+      markEffectCompletion(tx, effectKey);
       writeUnavailableFetchResult(
         tx,
         pending,
@@ -790,6 +957,18 @@ async function startFetch(
       );
       internal.withTx(tx).update({ inputHash });
     });
+    if (errorWritten.error !== undefined) {
+      // Neither the result nor an error-shaped result could commit: the
+      // claim stays wedged durably. Propagate so the effect's tracked
+      // work REJECTS — outbox.failed counts it and the failure is loud
+      // (recovery is §6's re-miss on the next activation, or an input
+      // change; a silent return here would count "completed").
+      throw new Error(
+        `${kind.name} error writeback failed to commit: ` +
+          `${errorWritten.error.message}`,
+        { cause: err },
+      );
+    }
   }
 }
 

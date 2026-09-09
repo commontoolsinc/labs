@@ -21,8 +21,10 @@ export type DiffLineKind =
 
 export interface DiffLine {
   readonly kind: DiffLineKind;
+
   /** 0-based line number in the NEW file, for ctx/add lines. */
   readonly newLine?: number;
+
   /** 0-based line number in the OLD file, for ctx/del lines. */
   readonly oldLine?: number;
 }
@@ -30,14 +32,20 @@ export interface DiffLine {
 export interface DiffHunk {
   /** 0-based diff-text line index of the `@@` header. */
   readonly headerLine: number;
+
   /** 0-based diff-text line index of the last body line. */
   readonly endLine: number;
+
   /** 1-based start line in the old file (from the `@@` header). */
   readonly oldStart: number;
+
   readonly oldCount: number;
+
   /** 1-based start line in the new file (from the `@@` header). */
   readonly newStart: number;
+
   readonly newCount: number;
+
   /** Trailing context from the header (the enclosing function), if any. */
   readonly context: string;
 }
@@ -45,19 +53,25 @@ export interface DiffHunk {
 export interface DiffFile {
   /** Path on the old side (`a/…` stripped), absent for a created file. */
   readonly oldPath?: string;
+
   /** Path on the new side (`b/…` stripped), absent for a deleted file. */
   readonly newPath?: string;
+
   /** Old blob named by a Git `index old..new` header, when present. */
   readonly oldObject?: string;
+
   /** 0-based diff-text line index where this file's headers begin. */
   readonly headerLine: number;
+
   /** 0-based diff-text line index of the file's last line. */
   readonly endLine: number;
+
   readonly hunks: readonly DiffHunk[];
 }
 
 export interface DiffModel {
   readonly files: readonly DiffFile[];
+
   /** Classification of every diff-text line, indexed by line number. */
   readonly lines: readonly DiffLine[];
 }
@@ -146,6 +160,7 @@ export function parseDiff(text: string): DiffModel | null {
     headerLine: number;
     hunks: DiffHunk[];
     endLine: number;
+
     /** A `diff --cc`/`--combined` merge section: consumed but never emitted —
      * its `@@@` hunks use a three-way format this parser does not model. */
     combined?: boolean;

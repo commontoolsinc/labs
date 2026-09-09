@@ -1,25 +1,48 @@
-import type { Cell } from "../cell.ts";
-import type { Runtime } from "../runtime.ts";
 import type { Logger } from "@commonfabric/utils/logger";
-import type { JSONSchema } from "../builder/types.ts";
-import { cellIdentityKey } from "./scope-policy.ts";
-import {
-  linkResolutionProbe,
-  machineryRead,
-} from "../storage/reactivity-log.ts";
 import {
   type DataUnavailableVariant,
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
+
+import type { JSONSchema } from "../builder/types.ts";
+import type { Cell } from "../cell.ts";
+import type { Runtime } from "../runtime.ts";
 import {
   preferDataUnavailable,
   readAvailabilityAwareCell,
 } from "../data-unavailability.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
+import type { ElementRun } from "./list-element-rollback.ts";
+import { cellIdentityKey } from "./scope-policy.ts";
 
-type ElementRuns = Map<
-  string,
-  { resultCell: Cell<any>; lastIndex: number }
->;
+type ElementRuns = Map<string, ElementRun>;
+
+/**
+ * The run-context kind for a list builtin's out-of-band resume-SETTLE
+ * write (map/filter/flatMap's `awaitInputThenSettle`), shared so the
+ * three builtins cannot drift (review thread r3756175819):
+ *
+ * - SERVING posture: `bookkeeping` — the sanctioned internal kind
+ *   (serving-loop.md §3d, RULED 2026-08-05), so the wave admits the
+ *   recovery write instead of refusing an unstamped seal.
+ * - Everything else (flag-ON clients included): `derivation` — the
+ *   settle writes DERIVED content (result := f(input)), and on a
+ *   client that must divert to the speculation overlay like any other
+ *   derivation. Stamped `bookkeeping` it committed authored-class — a
+ *   by-construction violation of the client derivation-commit removal.
+ *   (On the OFF arm the stamp is a no-op either way.)
+ *
+ * The resume-SEED stays `bookkeeping` on both postures: materializing
+ * the empty result container is setup/instantiation-class work under
+ * the scheduler tell (protocol.md §1), not derived content.
+ */
+export const resumeSettleRunKind = (
+  runtime: Runtime,
+): "bookkeeping" | "derivation" =>
+  runtime.servingPosture ? "bookkeeping" : "derivation";
 
 /**
  * Decide what one element contributes to the rebuilt aggregate. `value` is the
@@ -37,6 +60,15 @@ export type ElementContribution = (
 
 export interface ResumeRepublisher {
   /**
+   * Whether this coordinator is still waiting for the given element result
+   * document. A reconcile does not write an element's setup while its result
+   * is in that state: the document has not caught up, so the transaction
+   * carrying the setup is rejected as stale, and the retry that follows reads
+   * the same document and is rejected the same way.
+   */
+  awaitingResult(cell: Cell<any>): boolean;
+
+  /**
    * Hold the durable aggregate while the given still-pending element result
    * cells confirm their docs, then rebuild and write it. The entry point; the
    * republish it schedules re-defers any straggler and calls back in.
@@ -47,20 +79,41 @@ export interface ResumeRepublisher {
 export interface ResumeRepublisherOptions {
   runtime: Runtime;
   logger: Logger;
+
+  /**
+   * False once the coordinator is torn down. A republish outstanding at that
+   * moment has a container nothing owns any more, so it is dropped rather than
+   * written.
+   */
+  isActive: () => boolean;
+
   /**
    * The result container is bound after the builtin's setup, so it is read
    * lazily on each republish rather than captured once.
    */
   getResult: () => Cell<any[]> | undefined;
+
   inputsCell: Cell<any>;
   inputSchema: JSONSchema;
   resultSchema: JSONSchema;
   elementRuns: ElementRuns;
   contribute: ElementContribution;
+
   /** The aggregate's noun for logs, e.g. "filtered list" / "flatMap result". */
   aggregateNoun: string;
+
   /** The per-element noun for logs, e.g. "predicate" / "result". */
   elementNoun: string;
+
+  /**
+   * Re-arm the coordinator's reconcile. Only a reconcile can issue an owed
+   * element setup (`needsSetup`), and it declines to while that element's
+   * result is being awaited. A republish chain that ends by confirming the
+   * document ABSENT writes nothing the reconcile journals — this callback is
+   * the only remaining trigger, so without it the owed setup would never be
+   * issued and the element would stay out of the aggregate.
+   */
+  rearmReconcile: () => void;
 }
 
 /**
@@ -88,6 +141,7 @@ export function createResumeRepublisher(
   const {
     runtime,
     logger,
+    isActive,
     getResult,
     inputsCell,
     inputSchema,
@@ -96,12 +150,43 @@ export function createResumeRepublisher(
     contribute,
     aggregateNoun,
     elementNoun,
+    rearmReconcile,
   } = opts;
+
+  // The element results this coordinator is waiting on, by document id. An
+  // entry lasts exactly as long as the sync it holds.
+  const waiting = new Map<string, Promise<unknown>>();
+
+  // Wait for one element result document, sharing a wait already in progress
+  // for it. Re-syncing a document the coordinator is already waiting on would
+  // leave two entries racing to clear one id.
+  const waitFor = (cell: Cell<any>): Promise<unknown> => {
+    const id = cell.getAsNormalizedFullLink().id;
+    const inFlight = waiting.get(id);
+    if (inFlight) return inFlight;
+    const sync = cell.sync().finally(() => {
+      if (waiting.get(id) === sync) waiting.delete(id);
+    });
+    waiting.set(id, sync);
+    return sync;
+  };
+
+  const awaitingResult = (cell: Cell<any>): boolean =>
+    waiting.has(cell.getAsNormalizedFullLink().id);
 
   const republishFromConfirmed = (awaited: Set<string>): Promise<void> =>
     runtime.editWithRetry((tx): Cell<any>[] => {
-      const result = getResult();
+      const result = isActive() ? getResult() : undefined;
       if (!result) return [];
+      // Out-of-band recovery write (serving-loop.md §3d, RULED
+      // 2026-08-05): the republish runs from a raw promise chain under
+      // trackUntilSettled — no scheduler run stamps it, and a SERVING
+      // runtime's wave refuses unstamped seals. Same bookkeeping stamp
+      // as the list builtins' resume-seed/settle writes.
+      runtime.stampServerRun(tx, {
+        actionId: `list-republish/${result.sourceURI}`,
+        kind: "bookkeeping",
+      });
       const inputs = inputsCell.asSchema(inputSchema).withTx(tx).get() as {
         list?: unknown;
       };
@@ -154,7 +239,25 @@ export function createResumeRepublisher(
         );
         return;
       }
-      if (ok && ok.length > 0) awaitPendingThenRepublish(ok, awaited);
+      if (ok && ok.length > 0) {
+        awaitPendingThenRepublish(ok, awaited);
+        return;
+      }
+      // The chain has settled, but an element may still owe its setup: a
+      // reconcile declines to issue one while that element's result is being
+      // awaited, and this chain's confirmations may have written nothing the
+      // reconcile journals (a document confirmed absent republishes an
+      // unchanged aggregate). The waits are over now, so a reconcile CAN
+      // issue it — re-arm one, or the element stays out of the aggregate
+      // with no trigger left.
+      if (isActive()) {
+        for (const entry of elementRuns.values()) {
+          if (entry.needsSetup) {
+            rearmReconcile();
+            break;
+          }
+        }
+      }
     });
 
   // Hold the durable aggregate while the still-pending elements confirm their
@@ -168,9 +271,10 @@ export function createResumeRepublisher(
     cells: Cell<any>[],
     awaited: Set<string> = new Set<string>(),
   ): void => {
+    if (!isActive()) return;
     for (const c of cells) awaited.add(c.getAsNormalizedFullLink().id);
     runtime.storageManager.trackUntilSettled(
-      Promise.all(cells.map((c) => c.sync()))
+      Promise.all(cells.map(waitFor))
         .then(() => republishFromConfirmed(awaited))
         .catch((error) =>
           logger.warn(
@@ -182,5 +286,5 @@ export function createResumeRepublisher(
     );
   };
 
-  return { awaitPendingThenRepublish };
+  return { awaitingResult, awaitPendingThenRepublish };
 }

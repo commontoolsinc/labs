@@ -30,9 +30,6 @@ export function collectPullIterationSeeds(
   state: PullSchedulingState,
   workSet: Set<Action>,
 ): void {
-  // Rehydration barrier: hold every pull seed until all in-flight resumes
-  // resolve (see PullSchedulingState.hasPendingInitialRehydrations).
-  if (state.hasPendingInitialRehydrations()) return;
   const initialSize = workSet.size;
   collectPrimaryPullIterationSeeds(state, workSet);
 
@@ -100,6 +97,7 @@ type PullSettleIteration = { settled: true } | {
 
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
+  readonly scopeKeyIdentity: SchedulerSettleLoopState["scopeKeyIdentity"];
   readonly nodes: SchedulerSettleLoopState["nodes"];
   readonly dependencies: SchedulerSettleLoopState["dependencies"];
   readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
@@ -157,6 +155,7 @@ function buildPullIterationWorkSet(state: {
 
 function addDeclaredReadWriterClosure(
   state: {
+    readonly scopeKeyIdentity: SchedulerSettleLoopState["scopeKeyIdentity"];
     readonly nodes: SchedulerSettleLoopState["nodes"];
     readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
     readonly writersByEntity: SchedulerSettleLoopState["writersByEntity"];
@@ -194,6 +193,7 @@ function addDeclaredReadWriterClosure(
       // O(workSet x allNodes) full-registry fixpoint scan).
       forEachOverlappingWriter(
         {
+          scopeKeyIdentity: state.scopeKeyIdentity,
           writersByEntity: state.writersByEntity,
           getSchedulingWrites: state.getSchedulingWrites,
         },
@@ -457,6 +457,7 @@ function buildAndLogPullIterationWorkSet(
   const buildPullWorkSetStart = performance.now();
   const result = buildPullIterationWorkSet({
     initialSeeds,
+    scopeKeyIdentity: state.scopeKeyIdentity,
     nodes: state.nodes,
     dependencies: state.dependencies,
     materializerIndex: state.materializerIndex,
@@ -518,6 +519,16 @@ async function runPullSettleOrder(
 ): Promise<number> {
   let actionsRun = 0;
   for (const fn of order) {
+    // The serving posture's cooperative macrotask yield (server-execution
+    // v2 stage C tuning T3, cooperative-yield.ts): between runs, once the
+    // slice is spent, let the wave's flush-deadline timer, the lease
+    // renew, and the push flush fire. `yieldBetweenRuns` is installed
+    // only on a serving runtime; everywhere else this is one undefined
+    // check and the loop keeps its exact microtask shape (no `await`).
+    if (state.yieldBetweenRuns !== undefined) {
+      const turn = state.yieldBetweenRuns();
+      if (turn !== undefined) await turn;
+    }
     actionsRun += await runPullSettleAction(
       state,
       fn,

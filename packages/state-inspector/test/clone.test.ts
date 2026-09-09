@@ -4,12 +4,13 @@
 // can tell a clean migration from data loss.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
+
 import {
   resolveMemoryEngineStoreRootUrl,
   resolveSpaceStoreUrl,
 } from "@commonfabric/memory/v2/storage-path";
+import { Database } from "@db/sqlite";
 
 import {
   clonePaths,
@@ -24,7 +25,26 @@ const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
 const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
 const NOW = () => new Date("2026-07-27T12:00:00.000Z");
 
+/** A per-user scope_key, %-encoded as the runtime stores one. */
+const USER_SCOPE = "user:did%3Akey%3AzAlice";
+
 const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+/**
+ * The piece as a pattern update rewrites it: `of:orphan` — a cell no earlier
+ * manifest listed — adopted into a generated slot.
+ */
+const PIECE_ADOPTING_ORPHAN = {
+  value: { $NAME: "Board" },
+  argument: link("of:input"),
+  internal: [
+    { partialCause: "entries", link: link("of:named") },
+    { partialCause: { $generated: 0 }, link: link("of:generated") },
+    { partialCause: { $generated: 1 }, link: link("of:orphan") },
+  ],
+  patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+  schema: { type: "object", properties: {}, $defs: {} },
+};
 
 /** A source store shaped like a real one: a piece with one named and one
  *  generated internal cell, plus its input. */
@@ -62,8 +82,18 @@ CREATE TABLE revision (
   db.close();
 }
 
-/** Append documents to an existing store, continuing its seq sequence. */
-function writeDocs(db: Database, docs: [string, unknown][]): void {
+/**
+ * Append documents to an existing store, continuing its seq sequence.
+ *
+ * `scope` is the stored `scope_key`: `space` for shared state, and
+ * `user:<DID>` / `session:<DID>:<uuid>` for the per-identity rows that can
+ * carry the SAME id as a shared one.
+ */
+function writeDocs(
+  db: Database,
+  docs: [string, unknown][],
+  scope = "space",
+): void {
   const next = db.prepare(`SELECT coalesce(max(seq), 0) s FROM "commit"`)
     .get<{ s: number }>()!.s;
   const commit = db.prepare(
@@ -72,19 +102,36 @@ function writeDocs(db: Database, docs: [string, unknown][]): void {
   );
   const rev = db.prepare(
     `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
-     VALUES (?, 'space', ?, 0, 'set', ?, ?)`,
+     VALUES (?, ?, ?, 0, 'set', ?, ?)`,
   );
   docs.forEach(([id, doc], i) => {
     const seq = next + i + 1;
     commit.run(seq, SESSION, seq);
-    rev.run(id, seq, JSON.stringify(doc), seq);
+    rev.run(id, scope, seq, JSON.stringify(doc), seq);
   });
 }
 
 /** Apply writes to a store on disk (what a rehearsal's migration would do). */
-function mutate(path: string, docs: [string, unknown][]): void {
+function mutate(
+  path: string,
+  docs: [string, unknown][],
+  scope?: string,
+): void {
   const db = new Database(path);
-  writeDocs(db, docs);
+  writeDocs(db, docs, scope);
+  db.close();
+}
+
+/**
+ * Destroy an entity's rows in one scope — content loss at rest, which is what
+ * `removed` names. A `delete` op would not do: a listing keeps tombstones, so
+ * the entity still enumerates and the fingerprint records it with a null hash,
+ * which the diff reads as a change.
+ */
+function dropEntity(path: string, id: string, scope: string): void {
+  const db = new Database(path);
+  db.prepare(`DELETE FROM revision WHERE id = ? AND scope_key = ?`)
+    .run(id, scope);
   db.close();
 }
 
@@ -167,6 +214,130 @@ Deno.test("a clean migration keeps the fingerprint even as commits climb", async
   });
 });
 
+Deno.test("verify reports WHAT moved, not merely that something did", async () => {
+  // The headline hash cannot distinguish a successful migration from data
+  // loss: a schema update rewrites every piece result, so it always differs.
+  // `removed` is the unambiguous alarm, and the per-kind tally is what lets an
+  // operator judge the rest.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    mutate(paths.workingPath, [
+      ["of:named", { value: "named-v2", result: link("of:piece") }],
+      ["of:newcomer", { value: "hello" }],
+    ]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0, "nothing was destroyed");
+    assertEquals(v.diff.changed, 1);
+    assertEquals(v.diff.added, 1);
+    assertEquals(v.diff.changedByKind["owned-cell"], 1);
+    assertEquals(v.diff.removedByKind, {});
+  });
+});
+
+Deno.test("a migration-shaped change is a PASS, not a failure", async () => {
+  // The verdict and the message have to agree. An earlier version reported
+  // "this is the EXPECTED result of a migration" while returning ok=false, so
+  // the CLI exited nonzero — meaning a rehearsal script written from the
+  // documented procedure would treat every successful migration as a failure
+  // and refuse to proceed. Content CHANGING is information; content
+  // DISAPPEARING is the alarm.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    // What a migration does: rewrite derived values, add new cells, drop nothing.
+    mutate(paths.workingPath, [
+      ["of:named", {
+        value: "rewritten-by-migration",
+        result: link("of:piece"),
+      }],
+      ["of:brand-new-derived-cell", { value: 1, result: link("of:piece") }],
+    ]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0);
+    assert(!v.fingerprint.match, "the hash necessarily moves");
+    assert(!v.ok, "strict stays strict — something DID change");
+    assert(
+      v.okAfterMigration,
+      "but the migration verdict passes: nothing lost",
+    );
+  });
+});
+
+Deno.test("a cell a migration adopts as generated is not a removal", async () => {
+  // Measured on a 5 GB clone of the real Topics store: `verify` reported 114
+  // owned cells REMOVED — "durable content was destroyed", the loudest verdict
+  // it has — while every one of them was present at head in BOTH stores. The
+  // two sides derive their exclusions from their own pieces: the baseline
+  // hashed cells no pristine manifest listed, and after the migration the
+  // pieces call those same cells generated, so they drop out of the second
+  // list. An operator following the runbook aborts a healthy migration on it.
+  await withDirs(async ({ source, clone }) => {
+    // A cell no piece's manifest lists: the baseline hashes it.
+    mutate(source, [["of:orphan", {
+      value: "orphan-v1",
+      result: link("of:piece"),
+    }]]);
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    // What the migration does: the new pattern adopts it into a generated slot.
+    mutate(paths.workingPath, [["of:piece", PIECE_ADOPTING_ORPHAN]]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0, "it is in both stores; nothing was lost");
+    assertEquals(
+      v.diff.reclassifiedGenerated,
+      1,
+      "and the reclassification is reported rather than dropped",
+    );
+    assert(v.okAfterMigration, "so the migration verdict passes");
+  });
+});
+
+Deno.test("an adoption in one scope does not excuse a removal in another", async () => {
+  // The reclassification has to key by (id, scope) for the same reason the
+  // diff does. A manifest link carries an id and no scope, so adopting a cell
+  // excludes EVERY scope holding that id from the working fingerprint —
+  // subtracting by id alone therefore clears the alarm for a scope whose rows
+  // are gone, and reports destroyed per-user state as a filter disagreement.
+  // That inverts the whole point: the reclassification exists to preserve
+  // `removed` as "durable content was destroyed", not to suppress it.
+  await withDirs(async ({ source, clone }) => {
+    // One id in two scopes, listed by no manifest: the baseline hashes both.
+    mutate(source, [["of:orphan", {
+      value: "orphan-v1",
+      result: link("of:piece"),
+    }]]);
+    mutate(source, [["of:orphan", {
+      value: "orphan-per-user",
+      result: link("of:piece"),
+    }]], USER_SCOPE);
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+
+    // The migration adopts the id into a generated slot — and the per-user
+    // rows are destroyed, which no reclassification can account for.
+    mutate(paths.workingPath, [["of:piece", PIECE_ADOPTING_ORPHAN]]);
+    dropEntity(paths.workingPath, "of:orphan", USER_SCOPE);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 1, "the destroyed per-user row is a removal");
+    assertEquals(
+      v.diff.removedByKind,
+      { "owned-cell": 1 },
+      "classified from the removed entity's own baseline (id, scope)",
+    );
+    assertEquals(
+      v.diff.reclassifiedGenerated,
+      1,
+      "only the space-scope row is present in both stores",
+    );
+    assert(!v.okAfterMigration, "so the alarm still sounds");
+  });
+});
+
 Deno.test("verify catches a real content change", async () => {
   await withDirs(async ({ source, clone }) => {
     await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
@@ -177,9 +348,16 @@ Deno.test("verify catches a real content change", async () => {
     }]]);
 
     const v = await verifyClone(clone);
-    assert(!v.ok, "authored content moved");
-    assert(!v.fingerprint.match);
+    assert(!v.ok, "the strict verdict catches an accidental clobber");
+    assert(!v.fingerprint.match, "authored content moved");
+    assertEquals(v.diff.changed, 1);
     assert(v.baselineIntact, "the baseline itself is still fine");
+    // Honest limit: a clobber is a CHANGE, so the migration verdict cannot see
+    // it. That is why authored content must be checked separately after a run.
+    assert(
+      v.okAfterMigration,
+      "documented blind spot, asserted so it stays known",
+    );
   });
 });
 
@@ -195,7 +373,10 @@ Deno.test("reset discards the attempt, including WAL companions", async () => {
     mutate(paths.workingPath, [["of:input", {
       value: { title: "CLOBBERED" },
     }]]);
-    assert(!(await verifyClone(clone)).ok, "the attempt landed");
+    assert(
+      !(await verifyClone(clone)).ok,
+      "the attempt landed",
+    );
 
     await resetClone(clone);
 
@@ -209,7 +390,87 @@ Deno.test("reset discards the attempt, including WAL companions", async () => {
     }
     const v = await verifyClone(clone);
     assert(v.ok, "back to baseline");
+    assert(v.fingerprint.match, "and byte-for-byte identical again");
     assertEquals(v.counts.working.commits, v.counts.manifest.commits);
+  });
+});
+
+Deno.test("reset refuses while a server still holds the working copy", async () => {
+  // The defect this pins: unlinking a file does not reach a process that
+  // already has it open. A toolshed keeps reading and writing the unlinked
+  // inode while every NEW reader — including the verify that `cf space reset`
+  // runs immediately afterwards — sees the restored one, so the reset reports
+  // success while pass two runs against pass one's state. Every other reset
+  // test in this file closes its connection first, which is exactly the case
+  // that cannot catch this.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+
+    // Stand in for the served store: WAL, and still open.
+    const server = new Database(paths.workingPath);
+    server.exec("PRAGMA journal_mode = WAL");
+    server.prepare(`SELECT count(*) FROM "commit"`).get();
+    try {
+      const error = await assertRejects(
+        () => resetClone(clone),
+        Error,
+        "still has it open",
+      );
+      assert(
+        /stop the server/i.test(error.message),
+        `the message must say what to do, got: ${error.message}`,
+      );
+    } finally {
+      server.close();
+    }
+
+    // And the refusal is not a permanent lockout: once the holder is gone the
+    // same reset succeeds. A guard that could not be cleared would push
+    // operators straight back to `rm -rf`.
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "reset works once the server stops");
+  });
+});
+
+Deno.test("reset restores a working copy that was deleted outright", async () => {
+  // Nothing to hold open, and nothing to unlink. The probe must not treat an
+  // absent file as a reason to fail — and must not create one just to ask.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.remove(clonePaths(clone, SPACE).workingPath);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
+Deno.test("reset works when the working path cannot be opened at all", async () => {
+  // The probe fails at open rather than at lock — a different branch from a
+  // file that opens and turns out not to be a database, and the same verdict:
+  // whatever is in the way, restoring from pristine is the remedy.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    await Deno.remove(paths.workingPath);
+    await Deno.mkdir(paths.workingPath);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
+Deno.test("reset still works on a working copy that is not a database", async () => {
+  // The mirror image of the guard above: a probe that refuses whenever it
+  // cannot take the lock would refuse hardest on a corrupt working copy, which
+  // is precisely when a reset is the remedy rather than the risk.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    await Deno.writeTextFile(paths.workingPath, "not a database at all");
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
   });
 });
 
@@ -326,6 +587,125 @@ Deno.test("refuses a non-empty target rather than merging into it", async () => 
       () => createClone({ source, space: SPACE, targetDir: clone, now: NOW }),
       Error,
       "is not empty",
+    );
+  });
+});
+
+Deno.test("the per-kind tally respects scope, not just id", async () => {
+  // One id can hold a shared space value AND per-user overrides that are
+  // genuinely different entities; `diffFingerprints` keys by id AND scope.
+  // Keying the kind lookup by id alone let the last scope win and misclassify
+  // the tally — the precision ("74 pieces vs 73 cells") the diff exists for.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const working = clonePaths(clone, SPACE).workingPath;
+    // Same id as an existing space-scope cell, in a per-user scope.
+    mutate(working, [["of:named", { value: "per-user override" }]], USER_SCOPE);
+
+    // Also CHANGE the space-scope row of the same id, so the tally has to
+    // classify a real entry rather than an empty map. Without this the
+    // assertions below pass no matter how the kind lookup behaves.
+    mutate(working, [[
+      "of:named",
+      { value: "named-v2", result: link("of:piece") },
+    ]]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0);
+    assertEquals(v.diff.added, 1, "the per-user entity is new, not a rewrite");
+    assertEquals(v.diff.changed, 1, "the space-scope row of the same id moved");
+    // The point of the test: `of:named` exists at two scopes, and the changed
+    // one must be classified from ITS OWN row. A by-id lookup would let
+    // whichever scope enumerated last supply the kind for both.
+    assertEquals(
+      v.diff.changedByKind,
+      { "owned-cell": 1 },
+      "classified from the changed entity's own (id, scope), not by id alone",
+    );
+    assertEquals(v.diff.removedByKind, {});
+  });
+});
+
+Deno.test("a clone taken before the baseline sidecar still verifies", async () => {
+  // Backward compatibility: clones made before per-entity baselines were
+  // recorded have no sidecar, and must still produce a real diff by
+  // recomputing from the pristine snapshot rather than silently comparing
+  // against nothing — which would report every entity as "added" and pass.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.remove(clonePaths(clone, SPACE).baselinePath);
+
+    const clean = await verifyClone(clone);
+    assertEquals(clean.diff.added, 0, "not 'everything is new'");
+    assertEquals(clean.diff.changed, 0);
+    assert(clean.ok);
+
+    // And it still detects a real change without the sidecar.
+    mutate(clonePaths(clone, SPACE).workingPath, [
+      ["of:input", { value: { title: "CLOBBERED" } }],
+    ]);
+    const dirty = await verifyClone(clone);
+    assertEquals(dirty.diff.changed, 1);
+    assert(!dirty.ok);
+  });
+});
+
+Deno.test("a corrupted-but-PARSEABLE sidecar is caught by its hash", async () => {
+  // The dangerous case is not unparseable JSON — it is valid JSON with wrong
+  // contents. The sidecar feeds `diff` and therefore `okAfterMigration`, the
+  // verdict a rehearsal gates on, so a silently wrong baseline would produce a
+  // confident wrong answer while `baselineIntact` still reported true.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const path = clonePaths(clone, SPACE).baselinePath;
+    const rows = JSON.parse(await Deno.readTextFile(path)) as {
+      id: string;
+      hash: string | null;
+    }[];
+    // Still valid JSON, still the right shape — one hash quietly altered.
+    rows[0].hash = "fid1:tamperedtamperedtamperedtamperedtamperedta";
+    await Deno.writeTextFile(path, JSON.stringify(rows));
+
+    const error = await assertRejects(() => verifyClone(clone), Error);
+    assert(
+      error.message.includes("does not match the hash recorded"),
+      `expected an integrity failure, got: ${error.message}`,
+    );
+  });
+});
+
+Deno.test("a corrupt baseline sidecar fails loudly rather than recomputing", async () => {
+  // Absent is ordinary — an older clone simply has no sidecar. UNREADABLE is
+  // not: silently falling back to recomputation would produce a correct-looking
+  // verdict while hiding that the clone directory is damaged, and verify's job
+  // is to report damage, not paper over it.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.writeTextFile(
+      clonePaths(clone, SPACE).baselinePath,
+      "{ this is not json",
+    );
+    await assertRejects(() => verifyClone(clone), Error);
+  });
+});
+
+Deno.test("an IO error while clearing the working set is surfaced", async () => {
+  // reset probes for `-wal`/`-shm` companions; only "absent" is an ordinary
+  // answer. A component that is not a directory yields NotADirectory, which
+  // must propagate rather than be read as "nothing there" — treating it as
+  // absent would skip a file it failed to delete and call the clone pristine.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const working = clonePaths(clone, SPACE).workingPath;
+    // Replace the directory holding the working copy with a regular file.
+    const dir = working.replace(/\/[^/]*$/, "");
+    await Deno.remove(dir, { recursive: true });
+    await Deno.writeTextFile(dir, "not a directory");
+
+    const error = await assertRejects(() => resetClone(clone), Error);
+    assert(
+      error instanceof Deno.errors.NotADirectory,
+      `expected the real IO error, got ${error.constructor.name}`,
     );
   });
 });

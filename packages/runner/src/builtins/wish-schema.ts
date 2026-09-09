@@ -4,7 +4,7 @@ import {
   deepFrozenCloneAndInternSchema,
   hashSchema,
   internSchema,
-} from "@commonfabric/data-model/schema-hash";
+} from "@commonfabric/data-model-schema";
 import { LRUCache } from "@commonfabric/utils/cache";
 
 // asCell-wrapped schemas keyed by content hash. `hashSchema()` is one

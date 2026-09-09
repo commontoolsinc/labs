@@ -2,11 +2,11 @@
 // disable lint for this type
 // deno-lint-ignore-file ban-types
 import type {
+  AnyStream,
   CELL_LIKE,
   CellLike,
   JSXElement,
   RenderNode,
-  Stream,
 } from "commonfabric";
 
 /**
@@ -1453,7 +1453,6 @@ declare namespace CFDOM {
      * presented if they are made.
      */
     "aria-autocomplete"?: "none" | "inline" | "list" | "both" | undefined;
-    /** Indicates an element is being modified and that assistive technologies MAY want to wait until the modifications are complete before exposing them to the user. */
     /**
      * Defines a string value that labels the current element, which is intended to be converted into Braille.
      * @see aria-label.
@@ -1464,6 +1463,7 @@ declare namespace CFDOM {
      * @see aria-roledescription.
      */
     "aria-brailleroledescription"?: string | undefined;
+    /** Indicates an element is being modified and that assistive technologies MAY want to wait until the modifications are complete before exposing them to the user. */
     "aria-busy"?: Booleanish | undefined;
     /**
      * Indicates the current "checked" state of checkboxes, radio buttons, and other widgets.
@@ -2873,12 +2873,22 @@ type CFEvent<T> = {
   };
 };
 
+// A stream of ANY arity is bindable, including one that declares a result.
+// Deliberate, not incidental: the point of the verb contract is that one verb
+// serves both the UI and an agent calling it through `cf piece call`, so a
+// verb must not become UI-unbindable by declaring what it returns. The result
+// is simply unobserved here — the DOM has nowhere to put it, and the caller
+// that wants it reads the invocation receipt.
+//
+// Spelled `AnyStream` rather than `Stream<T> | Stream<void>` because that pair
+// pins the arity: it means `Stream<T, void> | Stream<void, void>`, which a
+// returning verb does not satisfy, making `onClick={addTopic}` a hard error
+// for exactly the verbs the contract exists to enable.
 type EventHandler<T> =
   | CellLike<CFEvent<T> | T>
   | ((event: CFEvent<T>) => void)
   | (() => void)
-  | Stream<T>
-  | Stream<void>;
+  | AnyStream;
 
 // `Piece` is not a pattern type.
 type Piece = any;
@@ -2914,7 +2924,6 @@ interface CFIFrameElement extends CFHTMLElement {}
 interface CFHStackElement extends CFHTMLElement {}
 interface CFFabElement extends CFHTMLElement {}
 interface CFModalElement extends CFHTMLElement {}
-interface CFModalProviderElement extends CFHTMLElement {}
 interface CFChevronButtonElement extends CFHTMLElement {}
 interface CFCardElement extends CFHTMLElement {}
 interface CFListItemElement extends CFHTMLElement {}
@@ -3579,7 +3588,15 @@ interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "src": string;
-  "$context": CellLike<any>;
+  "bridge"?: {
+    readonly resources: Readonly<Record<string, object>>;
+  };
+  "context"?: object;
+  "$context"?: CellLike<any>;
+  "resourceKinds"?: Record<
+    string,
+    "cell" | "readonly" | "stream" | "sqlite"
+  >;
 }
 
 interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
@@ -3684,8 +3701,6 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-modal-opened"?: EventHandler<void>;
   "oncf-modal-closed"?: EventHandler<void>;
 }
-
-interface CFModalProviderAttributes<T> extends CFHTMLAttributes<T> {}
 
 interface CFChevronButtonAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
@@ -4012,11 +4027,19 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
     | "text/markdown";
   "disabled"?: boolean;
   "readonly"?: boolean;
+  "collaborative"?: boolean;
+  "presenceRoom"?: string;
+  "participantName"?: string;
+  "presenceUrl"?: string;
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
   "$mentionable"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
   "$mentioned"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
+  "$references"?: CellLike<
+    Record<string, { destination: unknown; modifiedTitle: boolean }>
+  >;
+  "fabricHosts"?: string[];
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;
@@ -4033,8 +4056,11 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-blur"?: any;
   "oncf-file-paste"?: any;
   "oncf-error"?: any;
+  "oncf-collaboration-reconcile"?: any;
+  "oncf-presence-error"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
+  "onmention-ref-label-changed"?: any;
 }
 
 interface CFAutostartAttributes<T> extends CFHTMLAttributes<T> {
@@ -5050,10 +5076,6 @@ declare global {
       "cf-modal": CFDOM.DetailedHTMLProps<
         CFModalAttributes<CFModalElement>,
         CFModalElement
-      >;
-      "cf-modal-provider": CFDOM.DetailedHTMLProps<
-        CFModalProviderAttributes<CFModalProviderElement>,
-        CFModalProviderElement
       >;
       "cf-file-download": CFDOM.DetailedHTMLProps<
         CFFileDownloadAttributes<CFFileDownloadElement>,

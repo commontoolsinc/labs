@@ -297,7 +297,7 @@ Deno.test("wish output schema preserves local defs through result paths", () => 
   const stateSchema = pruneCfcSchemaDefinitions(
     wishStateSchemaForResult(pieceSchema)!,
   );
-  const allPiecesSchema = new ContextualFlowControl().schemaAtPath(
+  const allPiecesSchema = ContextualFlowControl.schemaAtPath(
     stateSchema,
     ["result", "allPieces"],
   );

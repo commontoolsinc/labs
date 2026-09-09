@@ -12,6 +12,15 @@ import {
   selectPrimaryHarnessFailure,
 } from "../src/diagnostics.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
+import {
+  DockerRunscSandboxRuntime,
+  resolveDockerRunscSandboxConfig,
+} from "../src/sandbox/docker-runsc.ts";
+import type {
+  ProcessRunner,
+  ProcessRunRequest,
+  ProcessRunResult,
+} from "../src/sandbox/process-runner.ts";
 import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
 import type {
   SandboxCommandRequest,
@@ -22,7 +31,13 @@ import type {
 } from "../src/sandbox/types.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
 
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return path.startsWith("/") ? path : `${cwd}/${path}`;
@@ -30,6 +45,10 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -61,8 +80,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
 }
 
 class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
-  constructor(private readonly fabricStatusJson?: string) {
+  readonly #fabricStatusJson?: string;
+
+  constructor(fabricStatusJson?: string) {
     super();
+    this.#fabricStatusJson = fabricStatusJson;
   }
 
   override runShell(
@@ -70,10 +92,10 @@ class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
   ): Promise<SandboxCommandResult> {
     if (request.command.includes(FABRIC_STATUS_PROBE_SENTINEL)) {
       return Promise.resolve(
-        this.fabricStatusJson === undefined
+        this.#fabricStatusJson === undefined
           ? { stdout: "missing\t\n", stderr: "", exitCode: 0 }
           : {
-            stdout: `present\t${this.fabricStatusJson}\n`,
+            stdout: `present\t${this.#fabricStatusJson}\n`,
             stderr: "",
             exitCode: 0,
           },
@@ -82,7 +104,7 @@ class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
     return super.runShell(request);
   }
 
-  describe(): SandboxRuntimeDescription {
+  override describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
@@ -111,7 +133,7 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
     at: "2026-04-22T23:00:00.000Z",
     cfc: {
       enforcementMode: "enforce-explicit",
-      absenceBehavior: "permissive-if-absent",
+      absenceBehavior: "fail-closed-if-absent",
       substrateStatus: "not-attested",
       runManifest: { present: false },
       sandbox: {
@@ -208,7 +230,7 @@ Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", a
 });
 
 class FakeHostBindSandboxRuntime extends FakeSandboxRuntime {
-  describe(): SandboxRuntimeDescription {
+  override describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
@@ -398,45 +420,15 @@ Deno.test("classifyBashToolFailure prefers the missing subcommand from shell out
   });
 });
 
-Deno.test("classifyBuiltinToolFailure records host shell failures without sandbox capability claims", () => {
+Deno.test("classifyBuiltinToolFailure records invalid browser actions as not allowed", () => {
   const failure = classifyBuiltinToolFailure(
-    "bash-no-sandbox",
-    { command: "agent-browser --help" },
+    "browser",
+    { action: "eval" },
     {
-      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-      stdout: "",
-      stderr: "bash: agent-browser: command not found",
-      exitCode: 127,
-      cwd: "/workspace",
-    },
-    "2026-04-23T18:25:00.000Z",
-  );
-
-  assertEquals(failure, {
-    type: "cf-harness.failure-record",
-    kind: "missing_binary",
-    source: "tool_output",
-    detail: "agent-browser was not found while executing a shell command.",
-    at: "2026-04-23T18:25:00.000Z",
-    toolId: "bash-no-sandbox",
-    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-    command: "agent-browser --help",
-    commandName: "agent-browser",
-    exitCode: 127,
-  });
-});
-
-Deno.test("classifyBuiltinToolFailure records denied browser host commands", () => {
-  const failure = classifyBuiltinToolFailure(
-    "bash-no-sandbox",
-    { command: "git status" },
-    {
-      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-      stdout: "",
-      stderr:
-        "bash-no-sandbox command denied: git is not allowed in the browser host profile",
-      exitCode: 126,
-      cwd: "/workspace",
+      outputId: createToolOutputId("run-host", "browser", 1),
+      status: "error",
+      code: "invalid_input",
+      message: "action must be one of: open, snapshot",
     },
     "2026-04-23T18:26:00.000Z",
   );
@@ -445,14 +437,52 @@ Deno.test("classifyBuiltinToolFailure records denied browser host commands", () 
     type: "cf-harness.failure-record",
     kind: "tool_not_allowed",
     source: "tool_output",
-    detail:
-      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    detail: "action must be one of: open, snapshot",
     at: "2026-04-23T18:26:00.000Z",
-    toolId: "bash-no-sandbox",
-    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-    command: "git status",
-    exitCode: 126,
+    toolId: "browser",
+    outputId: createToolOutputId("run-host", "browser", 1),
   });
+});
+
+Deno.test("classifyBuiltinToolFailure records a browser run without its lease as a harness error", () => {
+  const failure = classifyBuiltinToolFailure(
+    "browser",
+    { action: "snapshot" },
+    {
+      outputId: createToolOutputId("run-host", "browser", 1),
+      status: "error",
+      code: "lease_unavailable",
+      message: "Browser Access lease has expired",
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "harness_error",
+    source: "tool_output",
+    detail: "Browser Access lease has expired",
+    at: "2026-04-23T18:26:00.000Z",
+    toolId: "browser",
+    outputId: createToolOutputId("run-host", "browser", 1),
+  });
+});
+
+Deno.test("classifyBuiltinToolFailure leaves browser page-level failures to the model", () => {
+  const failure = classifyBuiltinToolFailure(
+    "browser",
+    { action: "click", ref: "@e5" },
+    {
+      outputId: createToolOutputId("run-host", "browser", 1),
+      status: "error",
+      code: "command_failed",
+      message: "error: ref @e5 not found",
+      exitCode: 1,
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, undefined);
 });
 
 Deno.test("classifyBuiltinToolFailure records blocked web_fetch URLs", () => {
@@ -643,4 +673,78 @@ Deno.test("selectPrimaryHarnessFailure prefers the highest-signal failure kind",
   ]);
 
   assertEquals(primary?.kind, "tool_not_allowed");
+});
+
+//
+// The capability snapshot is persisted into the CFC policy snapshot, so a
+// transport reading taken after it is captured cannot repair the claim it
+// already made.
+//
+
+const CAPABILITY_PROBE_STDOUT = [
+  "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+  "sh\tpresent\t/bin/sh\tBusyBox v1.36.1",
+  "node\tmissing\t\t",
+  "deno\tpresent\t/usr/local/bin/deno\tdeno 2.2.0",
+  "python\tmissing\t\t",
+  "python3\tpresent\t/usr/bin/python3\tPython 3.11.9",
+  "git\tpresent\t/usr/bin/git\tgit version 2.45.1",
+].join("\n");
+
+Deno.test("collectHarnessCapabilitySnapshot reads the CFC transport before capturing the sandbox description", async () => {
+  const requests: ProcessRunRequest[] = [];
+  const results: ProcessRunResult[] = [
+    {
+      // A runtime registered with CFC enabled and neither sidecar directory.
+      stdout: JSON.stringify({ "runsc-cfc": { runtimeArgs: ["--cfc"] } }),
+      stderr: "",
+      exitCode: 0,
+    },
+    { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    { stdout: CAPABILITY_PROBE_STDOUT, stderr: "", exitCode: 0 },
+    { stdout: "0\n", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ];
+  const runner: ProcessRunner = {
+    run(request) {
+      requests.push(request);
+      const result = results.shift();
+      if (result === undefined) {
+        throw new Error(`unexpected process request: ${request.args[0]}`);
+      }
+      return Promise.resolve(result);
+    },
+  };
+  const sandbox = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+    runner,
+  );
+
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    sandbox,
+    "/workspace",
+    "2026-04-30T00:00:00.000Z",
+  );
+
+  // What this test pins: the reading is taken BEFORE the description is
+  // captured, so the persisted snapshot carries it instead of the
+  // `unverified` it would hold if nothing had probed.
+  assertEquals(requests[0]?.args[0], "info");
+  assertEquals(
+    snapshot.cfc.sandbox.cfc?.invocationContextTransportReadiness,
+    "unregistered",
+  );
+
+  // What it deliberately does NOT pin: that the capability container is
+  // allowed to start on that reading. It does start — this probe calls
+  // `runShell` without a `cfcInvocationContext`, so it bypasses the
+  // per-invocation refusal, and `engine.ts` claims the readiness check
+  // precedes any sandbox execution under enforcement while it does not.
+  // Asserting the full `info,create,start,wait,rm` order here would make a
+  // test out of that defect and turn it into expected behavior. Whether an
+  // enforcing run should abort at this point is the run-start fail-closed
+  // decision tracked on CT-2122.
 });

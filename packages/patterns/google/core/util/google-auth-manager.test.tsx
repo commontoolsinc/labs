@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/util/google-auth-manager.test.tsx --verbose
  */
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 import {
   GoogleAuthManager,
   type GoogleAuthManagerOutput,
@@ -19,7 +19,7 @@ import {
 import { hasText } from "../../../test/vnode-helpers.ts";
 
 export interface TestOutput {
-  tests: unknown[];
+  [TESTS]: unknown[];
   authDefault: GoogleAuthManagerOutput;
   authWithScopes: GoogleAuthManagerOutput;
   authDebug: GoogleAuthManagerOutput;
@@ -109,7 +109,7 @@ export default pattern<Record<string, never>, TestOutput>(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state checks ===
       { assertion: assert_default_not_ready },
       { assertion: assert_default_state_initial },

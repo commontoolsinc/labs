@@ -1,7 +1,7 @@
 import ts from "typescript";
-import { StaticCacheFS } from "@commonfabric/static";
-import { isRecord } from "@commonfabric/utils/types";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { StaticCache } from "@commonfabric/static";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import { FabricPrimitive } from "@commonfabric/data-model";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
 // Cache for TypeScript library definitions
@@ -18,11 +18,21 @@ declare interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {}
 declare type Reactive<T> = T;
 declare interface Cell<T> extends BrandedCell<T, "cell"> {}
 declare type Writable<T> = Cell<T>; // Alias for Cell with clearer write-access semantics
-declare interface Stream<T> extends BrandedCell<T, "stream"> {}
+declare const CELL_RESULT_TYPE: unique symbol;
+// Mirrors the real \`Stream<E, R = void>\`: a verb's declared result rides a
+// second type parameter, pinned by a property so it discriminates. The stub
+// carried one parameter long after the real type grew two, which made every
+// test here pass regardless of what the api declared.
+declare interface Stream<E, R = void> extends BrandedCell<E, "stream"> {
+  readonly [CELL_RESULT_TYPE]: R;
+}
 declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
 declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
 declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
-declare type SqliteDatabase = { readonly __sqliteDb: true };
+// Mirrors the real handle type: a nominal brand keyed by an exported unique
+// symbol, which is what the emitted descriptor is recognized by.
+declare const SQLITE_DB_BRAND: unique symbol;
+declare type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 declare interface SqliteDb<T = SqliteDatabase>
   extends BrandedCell<T, "sqlite"> {}
 
@@ -44,7 +54,7 @@ async function getTypeScriptEnvironmentTypes(): Promise<
     return typeLibsCache;
   }
 
-  const cache = new StaticCacheFS();
+  const cache = StaticCache.fromFileSystem();
   const es2023 = await cache.getText("types/es2023.d.ts");
   const jsx = await cache.getText("types/jsx.d.ts");
   const dom = await cache.getText("types/dom.d.ts");
@@ -453,7 +463,7 @@ function normalizeAnyOf(node: any): any {
   if (node.anyOf.length === 2) {
     const a = node.anyOf[0];
     const b = node.anyOf[1];
-    const isNull = (x: any) => isRecord(x) && x.type === "null";
+    const isNull = (x: any) => isObjectOrArray(x) && x.type === "null";
     if (isNull(b) && !isNull(a)) {
       node.anyOf = [b, a];
     }
@@ -484,7 +494,7 @@ function deepCanonicalize(node: unknown): unknown {
   // descend into. There is no faithful way to do that through `Object.entries`
   // either, so a `FabricInstance` still flattens to `{}` here. Handling it is
   // left for when the golden path needs to carry one.
-  if (!isRecord(node) || node instanceof FabricPrimitive) return node;
+  if (!isObjectOrArray(node) || node instanceof FabricPrimitive) return node;
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node)) {

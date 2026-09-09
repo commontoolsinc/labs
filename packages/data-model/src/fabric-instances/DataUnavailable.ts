@@ -1,15 +1,16 @@
-import type { DataUnavailable as ApiDataUnavailable } from "@commonfabric/api";
+import type { DataUnavailable as ApiDataUnavailable } from "@/api.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   CODEC,
-  type FabricCodec,
-  type ReconstructionContext,
-} from "@/codec-common/interface.ts";
+  type LiveEnvironment,
+  type NonterminalCodec,
+} from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import type { FabricValue } from "@/interface.ts";
+import type { FabricPlainObject, FabricValue } from "@/interface.ts";
 import { fabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import {
@@ -18,13 +19,12 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import {
   getCanonicalDataUnavailableClass,
   installCanonicalDataUnavailableClass,
 } from "./data-unavailable-brand.ts";
 import { FabricError } from "./FabricError.ts";
-import { ProblematicValue } from "./ProblematicValue.ts";
 
 /** Reasons why a value is not currently usable by a computation. */
 export type DataUnavailableReason =
@@ -35,10 +35,13 @@ export type DataUnavailableReason =
 
 /** Canonical encoded state for a {@link DataUnavailable} value. */
 export type DataUnavailableState =
-  | { readonly reason: "pending" }
-  | { readonly reason: "error"; readonly error: FabricError }
-  | { readonly reason: "syncing" }
-  | { readonly reason: "schema-mismatch" };
+  & FabricPlainObject
+  & (
+    | { readonly reason: "pending" }
+    | { readonly reason: "error"; readonly error: FabricError }
+    | { readonly reason: "syncing" }
+    | { readonly reason: "schema-mismatch" }
+  );
 
 /** A pending unavailable value. */
 export type IsPending = DataUnavailable & {
@@ -242,21 +245,30 @@ export class DataUnavailable extends BaseFabricInstance
   }
 
   static #codec = Object.freeze(
-    new (class DataUnavailableCodec extends BaseFabricCodec {
+    new (class DataUnavailableCodec
+      extends BaseNonterminalCodec<FabricPlainObject> {
       constructor() {
         super(CODEC_TYPE_TAGS.DataUnavailable, DataUnavailable);
       }
 
       /** @inheritDoc */
-      encode(value: DataUnavailable): FabricValue {
-        return value.#state as FabricValue;
+      encode(
+        value: DataUnavailable,
+        _env: LiveEnvironment,
+      ): FabricPlainObject {
+        return value.#state;
+      }
+
+      /** @inheritDoc */
+      canDecode(state: FabricValue): state is FabricPlainObject {
+        return isPlainObject(state);
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
-        context: ReconstructionContext,
+        state: FabricPlainObject,
+        env: LiveEnvironment,
       ): FabricValue {
         const validated = validateState(state);
         if (validated instanceof ProblematicValue) {
@@ -276,7 +288,7 @@ export class DataUnavailable extends BaseFabricInstance
             return DataUnavailable.schemaMismatch();
           case "error": {
             const result = new DataUnavailable(validated);
-            return context.shouldDeepFreeze ? deepFreeze(result) : result;
+            return env.shouldDeepFreeze ? deepFreeze(result) : result;
           }
         }
       }
@@ -284,7 +296,7 @@ export class DataUnavailable extends BaseFabricInstance
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     const canonical = getCanonicalDataUnavailableClass<
       typeof DataUnavailable
     >();

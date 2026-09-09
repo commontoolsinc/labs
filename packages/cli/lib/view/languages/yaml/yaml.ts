@@ -4,6 +4,7 @@
  * aliases, quoted strings, and block scalars. It accepts incomplete input so
  * files remain highlighted while they are being edited.
  */
+
 import type { Document, Line, Span, TokenClass } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import type { Highlighter } from "../language.ts";
@@ -35,6 +36,7 @@ interface ExplicitKeyState {
 interface HighlightState {
   /** Logical indentation of each open flow collection. */
   readonly flow: number[];
+
   readonly explicitKeys: ExplicitKeyState[];
   documentPrefix: boolean;
   quote?: QuoteState;
@@ -47,7 +49,7 @@ interface HighlightState {
   pendingNodeIndent?: number;
 }
 
-/** Colour YAML text into rendered lines. */
+/** Color YAML text into rendered lines. */
 export function yamlHighlightLines(text: string): Line[] {
   const rawLines = text.split("\n");
   const state: HighlightState = {
@@ -60,7 +62,7 @@ export function yamlHighlightLines(text: string): Line[] {
   );
 }
 
-/** A full YAML document. YAML currently contributes syntax colour only. */
+/** A full YAML document. YAML currently contributes syntax color only. */
 export function yamlDocument(text: string): Document {
   return {
     text,

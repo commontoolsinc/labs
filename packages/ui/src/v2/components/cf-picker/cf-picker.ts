@@ -1,11 +1,13 @@
+import { numberSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { css, html, PropertyValues } from "lit";
+
 import { BaseElement } from "../../core/base-element.ts";
 import {
   createArrayCellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { numberSchema } from "@commonfabric/runner/schemas";
+
 import "../cf-render/index.ts";
 
 /**
@@ -228,7 +230,10 @@ export class CFPicker extends BaseElement {
     },
   });
 
-  // Cell controller for items - handles subscription to load cell values
+  /**
+   * Cell controller for the items, which handles the subscription that loads
+   * cell values.
+   */
   private _itemsCellController = createArrayCellController<any>(this, {
     timing: { strategy: "immediate" },
   });
@@ -376,7 +381,9 @@ export class CFPicker extends BaseElement {
     `;
   }
 
-  // --- Selection methods ---
+  //
+  // Selection methods
+  //
 
   private _selectPrevious = (): void => {
     const items = this._getItems();
@@ -406,7 +413,9 @@ export class CFPicker extends BaseElement {
     this.requestUpdate();
   }
 
-  // --- Keyboard navigation ---
+  //
+  // Keyboard navigation
+  //
 
   private _handleKeyDown = (event: KeyboardEvent): void => {
     const items = this._getItems();
@@ -441,7 +450,9 @@ export class CFPicker extends BaseElement {
     }
   };
 
-  // --- Touch/swipe handling ---
+  //
+  // Touch/swipe handling
+  //
 
   private _handleTouchStart = (event: TouchEvent): void => {
     if (this.disabled) return;
@@ -462,7 +473,9 @@ export class CFPicker extends BaseElement {
     this._isTouching = false;
   };
 
-  // --- Focus handling ---
+  //
+  // Focus handling
+  //
 
   private _handleFocus = (): void => {
     this.emit("cf-focus");
@@ -472,7 +485,9 @@ export class CFPicker extends BaseElement {
     this.emit("cf-blur");
   };
 
-  // --- ARIA ---
+  //
+  // ARIA
+  //
 
   private _updateAriaAttributes(): void {
     this.setAttribute(
@@ -482,13 +497,17 @@ export class CFPicker extends BaseElement {
     this.setAttribute("aria-disabled", String(this.disabled));
   }
 
-  // --- Styling helpers ---
+  //
+  // Styling helpers
+  //
 
   private _updateMinHeight(): void {
     this.style.setProperty("--cf-picker-min-height", this.minHeight);
   }
 
-  // --- Public API ---
+  //
+  // Public API
+  //
 
   getSelectedIndex(): number {
     return this._currentIndex;

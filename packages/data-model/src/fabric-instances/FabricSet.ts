@@ -3,14 +3,14 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
-  type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+  type LiveEnvironment,
+  type NonterminalCodec,
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -20,19 +20,28 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
-  constructor(readonly set: Set<FabricValue>) {
+  #set: Set<FabricValue>;
+
+  /** Constructs an instance wrapping `set`. */
+  constructor(set: Set<FabricValue>) {
     super();
+    this.#set = set;
+  }
+
+  /** The wrapped set. */
+  get set(): Set<FabricValue> {
+    return this.#set;
   }
 
   /**
-   * Stub -- throws until `Set` support is fully implemented. `FabricSet` is
-   * not yet used and is being reworked separately; the protocol methods are
-   * deliberately left as throwing stubs (per Dan's PR #3612 review).
+   * Stub -- throws until `Set` support is fully implemented. The protocol
+   * methods throw rather than approximate, so that no caller can come to depend
+   * on an answer that would have to be taken back.
    */
   [DEEP_FREEZE](
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    throw new Error("FabricSet: not yet implemented");
+    throw new Error("`FabricSet`: not yet implemented");
   }
 
   /**
@@ -42,31 +51,32 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   [IS_DEEP_FROZEN](
     _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    throw new Error("FabricSet: not yet implemented");
-  }
-
-  /** @inheritDoc */
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
-    return new FabricSet(this.set);
+    throw new Error("`FabricSet`: not yet implemented");
   }
 
   /** @inheritDoc */
   protected get wrappedValue(): Set<FabricValue> {
-    return this.set;
+    return this.#set;
+  }
+
+  /** @inheritDoc */
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
+    return new FabricSet(this.#set);
   }
 
   /** @inheritDoc */
   protected toNativeFrozen(): FrozenSet<FabricValue> {
-    return new FrozenSet(this.set);
+    return new FrozenSet(this.#set);
   }
 
   /** @inheritDoc */
   protected toNativeThawed(): Set<FabricValue> {
-    return new Set(this.set);
+    return new Set(this.#set);
   }
 
   static #codec = Object.freeze(
-    new (class FabricSetCodec extends BaseFabricCodec {
+    new (class FabricSetCodec extends BaseNonterminalCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Set, FabricSet);
       }
@@ -76,8 +86,20 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
        *
        * Stub -- throws until `Set` support is implemented.
        */
-      encode(_value: FabricSet): FabricValue {
-        throw new Error("FabricSet: not yet implemented");
+      encode(_value: FabricSet, _env: LiveEnvironment): FabricValue {
+        throw new Error("`FabricSet`: not yet implemented");
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Stub -- accepts anything until `Set` support is implemented.
+       */
+      canDecode(_state: FabricValue): _state is FabricValue {
+        // The refusal is `decode()`'s, where "not yet implemented" is the
+        // honest answer. Refusing here would name the payload as the thing at
+        // fault.
+        return true;
       }
 
       /**
@@ -88,15 +110,15 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       decode(
         _typeTag: string,
         _state: FabricValue,
-        _context: ReconstructionContext,
+        _env: LiveEnvironment,
       ): FabricValue {
-        throw new Error("FabricSet: not yet implemented");
+        throw new Error("`FabricSet`: not yet implemented");
       }
     })(),
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

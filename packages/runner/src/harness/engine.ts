@@ -1,76 +1,44 @@
-import { Console } from "./console.ts";
-import {
-  type CacheableModule,
-  type CompiledModuleArtifact,
-  type EvaluateResult,
-  type Exports,
-  type Harness,
-  type HarnessedFunction,
-  type ResolvedFabricPin,
-  type RuntimeProgram,
-  type TypeScriptHarnessProcessOptions,
-} from "./types.ts";
+import { hashOf } from "@commonfabric/data-model";
 import type {
-  MappedPosition,
   Program,
   ProgramResolver,
   Source,
+  SourceMap,
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "@commonfabric/js-compiler";
 import { InMemoryProgram } from "@commonfabric/js-compiler/program";
-import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
-import {
-  findFirstContentLineIndex,
-  PATTERN_COVERAGE_GLOBAL,
-  sourceDisablesCfTransform,
-} from "@commonfabric/ts-transformers/runtime-contract";
-import {
-  compilerStack,
-  ensureCompilerStack,
-} from "./deferred-compiler-stack.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  COMPILE_INTERLEAVES_EVENT_LOOP,
-  interleaveCompileYield,
-} from "./compile-interleave.ts";
-import { type MemorySpace, Runtime } from "../runtime.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { StaticCache } from "@commonfabric/static";
-import {
-  pretransformProgramForModules,
-  transformInjectHelperModule,
-} from "./pretransform.ts";
-import {
-  type ModuleImportEdges,
-  resolveModuleImports,
-} from "./module-identity.ts";
-import {
-  buildRecordsFromCompiled,
-  type CachedCompiledModule,
-  cachedModuleSourceNames,
-  type CompiledModuleGraph,
-  compileSourcesToRecords,
-  computeFabricModuleIdentities,
-  FABRIC_MOUNT_ROOT,
-  type FabricMount,
-} from "../sandbox/module-record-compiler.ts";
 import {
   composeBundleSourceMap,
   identitySourceMap,
 } from "@commonfabric/js-compiler/source-map";
-import type { SourceMap } from "@commonfabric/js-compiler";
+import type { StaticCache } from "@commonfabric/static";
+import type {
+  BuilderSourceSiteOptions,
+  BuilderSourceSitesV1,
+  PatternCoverageOptions,
+} from "@commonfabric/ts-transformers";
+import {
+  findFirstContentLineIndex,
+  PATTERN_COVERAGE_GLOBAL,
+} from "@commonfabric/ts-transformers/runtime-contract";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
+import { popFrame, pushFrame } from "../builder/pattern.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import type { PatternCoverageCollector } from "../pattern-coverage.ts";
+import { type MemorySpace, Runtime } from "../runtime.ts";
+import {
+  createModuleCompartmentGlobals,
+  createSafeConsoleGlobal,
+} from "../sandbox/compartment-globals.ts";
 import {
   loadModuleGraph,
   runtimeModuleRecords,
   type VirtualModuleRecord,
 } from "../sandbox/esm-module-loader.ts";
-import {
-  verifyCompiledModuleBody,
-  verifyModuleGraph,
-} from "../sandbox/module-record-verifier.ts";
-import { popFrame, pushFrame } from "../builder/pattern.ts";
-import type { PatternCoverageCollector } from "../pattern-coverage.ts";
+import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
 import {
   ensureSESLockdown,
   getRuntimeModuleExports,
@@ -80,53 +48,113 @@ import {
   SESRuntime,
 } from "../sandbox/mod.ts";
 import {
-  createModuleCompartmentGlobals,
-  createSafeConsoleGlobal,
-} from "../sandbox/compartment-globals.ts";
+  buildRecordsFromCompiled,
+  type CachedCompiledModule,
+  type CompiledModuleGraph,
+  compileSourcesToRecords,
+  computeFabricModuleIdentities,
+  dataFileSpecifier,
+  FABRIC_MOUNT_ROOT,
+  type FabricMount,
+  sourceRootSpecifier,
+} from "../sandbox/module-record-compiler.ts";
+import {
+  verifyCompiledModuleBody,
+  verifyModuleGraph,
+} from "../sandbox/module-record-verifier.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
+import {
+  deterministicCompileError,
+  markDeterministicCompileFailure,
+} from "./compile-failure.ts";
+import {
+  COMPILE_INTERLEAVES_EVENT_LOOP,
+  interleaveCompileYield,
+} from "./compile-interleave.ts";
+import { recordAuthoredDebugSource } from "./authored-debug-source.ts";
+import { Console } from "./console.ts";
+import {
+  compilerStack,
+  ensureCompilerStack,
+} from "./deferred-compiler-stack.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
-import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
+import { FabricAwareResolver } from "./fabric-resolver.ts";
+import {
+  type ModuleImportEdges,
+  resolveModuleImports,
+} from "./module-identity.ts";
+import {
+  pretransformProgramForModules,
+  transformInjectHelperModule,
+} from "./pretransform.ts";
+import {
+  type CacheableModule,
+  type CompiledModuleArtifact,
+  type EvaluateResult,
+  type Exports,
+  type HarnessedFunction,
+  type ResolvedFabricPin,
+  type RuntimeProgram,
+  type TypeScriptHarnessProcessOptions,
+} from "./types.ts";
+import { attachDeclaredDataFiles } from "./declared-data-files.ts";
 import {
   getDefiningModule,
   readBindingIdentity,
   recordVerifiedProvenance,
 } from "./verified-provenance.ts";
-import { FabricAwareResolver } from "./fabric-resolver.ts";
-import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
-import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("engine");
 
+/**
+ * Run one pure compile step, classifying only its synchronous failures.
+ *
+ * Every call site sits after an `await`, so caller stack depth is drained.
+ * Within a runtime session the engine stack limit is fixed, so an overflow
+ * will recur for the same compile inputs and is safe to classify as
+ * deterministic. Keep new call sites behind an `await`.
+ */
+function deterministicCompileStep<T>(step: () => T): T {
+  try {
+    return step();
+  } catch (error) {
+    throw markDeterministicCompileFailure(error);
+  }
+}
+
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
-  private runtimeModuleTypes: Record<string, string> | undefined;
-  private cache: StaticCache;
+  #runtimeModuleTypes: Record<string, string> | undefined;
+  #cache: StaticCache;
   constructor(program: Program, cache: StaticCache) {
     const modules = program.files.reduce((mod, file) => {
       mod[file.name] = file.contents;
       return mod;
     }, {} as Record<string, string>);
     super(program.main, modules);
-    this.cache = cache;
+    this.#cache = cache;
   }
 
-  // Add `.d.ts` files for known supported 3P modules.
+  /**
+   * Resolves a source, adding `.d.ts` files for known supported third-party
+   * modules.
+   */
   override async resolveSource(
     identifier: string,
   ): Promise<Source | undefined> {
-    if (!this.runtimeModuleTypes) {
-      this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
-        this.cache,
+    if (!this.#runtimeModuleTypes) {
+      this.#runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
+        this.#cache,
       );
     }
     if (
       !isRuntimeModuleIdentifier(identifier) &&
-      identifier in this.runtimeModuleTypes &&
-      this.runtimeModuleTypes[identifier]
+      identifier in this.#runtimeModuleTypes &&
+      this.#runtimeModuleTypes[identifier]
     ) {
       return {
         name: identifier,
-        contents: this.runtimeModuleTypes[identifier],
+        contents: this.#runtimeModuleTypes[identifier],
       };
     }
     if (identifier.endsWith(".d.ts")) {
@@ -135,18 +163,140 @@ export class EngineProgramResolver extends InMemoryProgram {
         isRuntimeModuleIdentifier(origSource)
       ) {
         if (
-          origSource in this.runtimeModuleTypes &&
-          this.runtimeModuleTypes[origSource]
+          origSource in this.#runtimeModuleTypes &&
+          this.#runtimeModuleTypes[origSource]
         ) {
           return {
             name: identifier,
-            contents: this.runtimeModuleTypes[origSource],
+            contents: this.#runtimeModuleTypes[origSource],
           };
         }
       }
     }
     return super.resolveSource(identifier);
   }
+}
+
+class RootedProgramResolver implements ProgramResolver {
+  readonly #inner: ProgramResolver;
+  readonly #root: string;
+
+  constructor(
+    inner: ProgramResolver,
+    root: string,
+  ) {
+    this.#inner = inner;
+    this.#root = root;
+  }
+
+  async main(): Promise<Source> {
+    const source = await this.#inner.resolveSource(this.#root);
+    if (source === undefined) {
+      throw new Error(`Source root "${this.#root}" could not be resolved.`);
+    }
+    return source;
+  }
+
+  resolveDataFile(name: string): Promise<Source | undefined> {
+    return this.#inner.resolveDataFile
+      ? this.#inner.resolveDataFile(name)
+      : this.#inner.resolveSource(name);
+  }
+
+  resolveSource(identifier: string): Promise<Source | undefined> {
+    return this.#inner.resolveSource(identifier);
+  }
+}
+
+function reachableModuleSpecifiers(
+  records: ReadonlyMap<string, VirtualModuleRecord>,
+  mainSpecifier: string,
+): Set<string> {
+  const reachable = new Set<string>();
+  const pending = [mainSpecifier];
+  while (pending.length > 0) {
+    const specifier = pending.pop()!;
+    if (reachable.has(specifier)) continue;
+    reachable.add(specifier);
+    const record = records.get(specifier);
+    if (record === undefined) continue;
+    for (const importSpecifier of record.imports) {
+      const resolutions = record.resolutions;
+      pending.push(
+        resolutions !== undefined &&
+          Object.hasOwn(resolutions, importSpecifier)
+          ? resolutions[importSpecifier]
+          : importSpecifier,
+      );
+    }
+  }
+  return reachable;
+}
+
+function canonicalSourceRoots(
+  main: string,
+  roots: readonly string[] | undefined,
+): string[] {
+  return [...new Set(roots ?? [])]
+    .filter((root) => root !== main)
+    .sort();
+}
+
+function canonicalDataFiles(
+  main: string,
+  dataFiles: readonly string[] | undefined,
+): string[] {
+  const paths = [...new Set(dataFiles ?? [])].sort();
+  // Unlike a source root, which the entry trivially is, an entry named as data
+  // is a contradiction: it is the module the program executes. Dropping it
+  // would silently compile a file the caller asked to store uninterpreted.
+  if (paths.includes(main)) {
+    throw new Error(`The program entry '${main}' cannot be a data file.`);
+  }
+  return paths;
+}
+
+/**
+ * Split a program's files into the code the compiler sees and the data files it
+ * must not. A data file named by the program but absent from its files is a
+ * caller error, and stops the compile rather than deploying a package whose
+ * identity claims data that is not there. `idPrefix` names the per-load path
+ * prefix to drop when reporting such a file, so the report spells the path the
+ * caller wrote.
+ */
+function partitionDataFiles(
+  program: RuntimeProgram,
+  idPrefix?: string,
+): { dataPaths: string[]; codeFiles: Source[]; dataSources: Source[] } {
+  const dataPaths = canonicalDataFiles(program.main, program.dataFiles);
+  if (dataPaths.length === 0) {
+    return { dataPaths, codeFiles: [...program.files], dataSources: [] };
+  }
+  const wanted = new Set(dataPaths);
+  const codeFiles: Source[] = [];
+  const dataSources: Source[] = [];
+  for (const file of program.files) {
+    (wanted.has(file.name) ? dataSources : codeFiles).push(file);
+  }
+  if (dataSources.length !== wanted.size) {
+    const present = new Set(dataSources.map((file) => file.name));
+    const absent = dataPaths
+      .filter((path) => !present.has(path))
+      .map((path) =>
+        idPrefix !== undefined && path.startsWith(`${idPrefix}/`)
+          ? path.slice(idPrefix.length)
+          : path
+      )
+      .join(", ");
+    throw new Error(`Program names data files it does not carry: ${absent}`);
+  }
+  return { dataPaths, codeFiles, dataSources };
+}
+
+function persistableSourceFiles(files: readonly Source[]): Source[] {
+  return files.filter((file) =>
+    !file.name.endsWith(".d.ts") || file.name.startsWith("/")
+  );
 }
 
 interface RuntimeInternals {
@@ -166,38 +316,54 @@ export interface EngineOptions {
   hideInternalStackFrames?: boolean;
 }
 
-export class Engine extends EventTarget implements Harness {
-  private runtimeInternals: RuntimeInternals | undefined;
-  private compilerInternals: CompilerInternals | undefined;
-  private ctRuntime: Runtime;
-  private sesRuntime: SESRuntime | undefined;
-  private nextEvalId = 0;
-  // Content-addressed module hash per prefixed source path (`/<id>/file.tsx`),
-  // populated at evaluate() time. Used to translate an action's bundle-relative
-  // source location into a stable implementation identity.
-  private moduleHashByPrefixedSource = new Map<string, string>();
-  // Canonical content-addressed source per prefixed source path, i.e.
-  // `/<programHash>/<authoredPath>` -> `cf:module/<moduleHash>/<authoredPath>`.
-  // Used to rewrite a function's `src` into a reload-stable identity that does
-  // not depend on which bundle/entry-point compiled the module.
-  private canonicalSourceByPrefixed = new Map<string, string>();
-  private readonly executableRegistry = new ExecutableRegistry();
-  private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
-  private readonly patternCoverageByGraph = new WeakMap<
+export class Engine extends EventTarget {
+  #runtimeInternals: RuntimeInternals | undefined;
+  #compilerInternals: CompilerInternals | undefined;
+  #ctRuntime: Runtime;
+
+  #sesRuntime: SESRuntime | undefined;
+
+  #nextEvalId = 0;
+
+  readonly #executableRegistry = new ExecutableRegistry();
+
+  readonly #consoleShim = createSafeConsoleGlobal(new Console(this));
+  readonly #patternCoverageByGraph = new WeakMap<
     CompiledModuleGraph,
     PatternCoverageCollector
   >();
 
+  readonly #options: EngineOptions;
+
   constructor(
     ctRuntime: Runtime,
-    private readonly options: EngineOptions = {},
+    options: EngineOptions = {},
   ) {
     super();
-    this.ctRuntime = ctRuntime;
+    this.#options = options;
+    this.#ctRuntime = ctRuntime;
+  }
+
+  /**
+   * The SES runtime, once one has been made, and the implementation index,
+   * which a test reads directly.
+   */
+  get accessForTestingOnly(): {
+    readonly executableRegistry: ExecutableRegistry;
+    readonly sesRuntime: SESRuntime | undefined;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      executableRegistry: this.#executableRegistry,
+      get sesRuntime() {
+        return outerThis.#sesRuntime;
+      },
+    };
   }
 
   async initializeRuntime(): Promise<RuntimeInternals> {
-    const runtime = this.getSESRuntime();
+    const runtime = this.#getSESRuntime();
     const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();
     return { runtime, runtimeExports, exportsCallback };
   }
@@ -207,7 +373,7 @@ export class Engine extends EventTarget implements Harness {
     // (typescript + transformers), kept off the worker-boot path.
     const { TypeScriptCompiler } = await ensureCompilerStack();
     const environmentTypes = await Engine.getEnvironmentTypes(
-      this.ctRuntime.staticCache,
+      this.#ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
     return { compiler };
@@ -215,15 +381,33 @@ export class Engine extends EventTarget implements Harness {
 
   async initialize(): Promise<RuntimeInternals & CompilerInternals> {
     const [runtimeInternals, compilerInternals] = await Promise.all([
-      this.getRuntimeInternals(),
-      this.getCompilerInternals(),
+      this.#getRuntimeInternals(),
+      this.#getCompilerInternals(),
     ]);
     return { ...runtimeInternals, ...compilerInternals };
   }
 
-  // Resolve a `ProgramResolver` into a `Program`.
+  /**
+   * Resolve a `ProgramResolver` into a program: the entry, the closure its
+   * imports reach, and the data files its source declares by reading them.
+   *
+   * This is how a program is assembled from a source of truth — a directory, a
+   * web address, the fabric — so it is where a declaration in the source is
+   * acted on. Re-resolving a program the engine already holds goes through
+   * `#resolveModules()`, which follows imports and nothing else.
+   */
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
-    const { compiler } = await this.getCompilerInternals();
+    return await attachDeclaredDataFiles(
+      await this.#resolveModules(program),
+      program,
+    );
+  }
+
+  /** Resolve the module closure an entry's imports reach. */
+  async #resolveModules(
+    program: ProgramResolver,
+  ): Promise<RuntimeProgram> {
+    const { compiler } = await this.#getCompilerInternals();
     logger.timeStart("resolve");
     try {
       return await compiler.resolveProgram(program, {
@@ -232,6 +416,34 @@ export class Engine extends EventTarget implements Harness {
     } finally {
       logger.timeEnd("resolve");
     }
+  }
+
+  async #resolveWithSourceRoots(
+    resolver: ProgramResolver,
+    sourceRoots: readonly string[],
+  ): Promise<RuntimeProgram> {
+    const programs = [await this.#resolveModules(resolver)];
+    for (const root of new Set(sourceRoots)) {
+      if (root === programs[0].main) continue;
+      programs.push(
+        await this.#resolveModules(new RootedProgramResolver(resolver, root)),
+      );
+    }
+
+    const files = new Map<string, Source>();
+    for (const program of programs) {
+      for (const file of program.files) {
+        const existing = files.get(file.name);
+        if (existing !== undefined && existing.contents !== file.contents) {
+          throw new Error(
+            `Resolved source roots produced conflicting files named ` +
+              `"${file.name}".`,
+          );
+        }
+        files.set(file.name, file);
+      }
+    }
+    return { main: programs[0].main, files: [...files.values()] };
   }
 
   /**
@@ -262,20 +474,35 @@ export class Engine extends EventTarget implements Harness {
       const id = options.identifier ?? computeId(program);
       assertNoReservedFabricPaths(program.files);
       const mappedProgram = pretransformProgramForModules(program, id);
-      assertFabricImportsHaveSpace(mappedProgram.files, options);
-      const engineResolver = new EngineProgramResolver(
+      const sourceRoots = canonicalSourceRoots(
+        mappedProgram.main,
+        mappedProgram.sourceRoots,
+      );
+      // Data files leave the program before anything that reads TypeScript
+      // touches it: they are neither scanned for imports nor offered to the
+      // resolver, so an import can never land on one. They rejoin the pristine
+      // set below, which is what identity and the source store are built from.
+      const { dataPaths, codeFiles, dataSources } = partitionDataFiles(
         mappedProgram,
-        this.ctRuntime.staticCache,
+        `/${id}`,
+      );
+      assertFabricImportsHaveSpace(codeFiles, options);
+      const engineResolver = new EngineProgramResolver(
+        { ...mappedProgram, files: codeFiles },
+        this.#ctRuntime.staticCache,
       );
       const fabricResolver = options.fabricImports
         ? new FabricAwareResolver(engineResolver, {
-          runtime: this.ctRuntime,
+          runtime: this.#ctRuntime,
           space: options.fabricImports.space,
           allowUnpinned: options.fabricImports.allowUnpinned,
         })
         : undefined;
       const resolver = fabricResolver ?? engineResolver;
-      const resolvedProgram = await this.resolve(resolver);
+      const resolvedProgram = await this.#resolveWithSourceRoots(
+        resolver,
+        sourceRoots,
+      );
       const mounts = fabricResolver?.mounts() ?? [];
       const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
       const resolvedPins = fabricResolver?.resolvedPins() ?? [];
@@ -301,33 +528,52 @@ export class Engine extends EventTarget implements Harness {
       const authoredByStoredName = new Map(
         program.files.map((f) => [f.name, f.contents]),
       );
+      const authoredDataFiles = new Set(program.dataFiles ?? []);
+      const authoredCompileSources = [
+        ...program.files.filter((file) => !authoredDataFiles.has(file.name)),
+        ...resolvedFiles.filter((file) =>
+          file.name.startsWith(FABRIC_MOUNT_ROOT)
+        ),
+      ];
       const patternCoverage = patternCoverageOptionsForCompile(
         options.patternCoverage,
         {
           id,
           mounts,
-          sourceFiles: [
-            ...program.files,
-            ...resolvedFiles.filter((file) =>
-              file.name.startsWith(FABRIC_MOUNT_ROOT)
-            ),
-          ],
+          sourceFiles: authoredCompileSources,
         },
       );
-      const pristineModuleFiles = pristineModuleSources(
-        moduleFiles,
-        authoredByStoredName,
-        (name) => storedFilenameFor(name, id, mounts),
-      );
+      const builderSourceSites = builderSourceSiteOptionsForCompile({
+        id,
+        mounts,
+        sourceFiles: authoredCompileSources,
+      });
+      const pristineSourceFiles = [
+        ...pristineModuleSources(
+          persistableSourceFiles(resolvedFiles),
+          authoredByStoredName,
+          (name) => storedFilenameFor(name, id, mounts),
+        ),
+        ...dataSources,
+      ];
 
       // Prefix-free content identity per resolved module path. Computed here
       // (cheap, no TS compile) so the cache-hit check and the write-back
       // descriptors agree with the graph's `cf:module/<hash>` specifiers.
       const identityByPath = computeFabricModuleIdentities(
-        pristineModuleFiles,
+        pristineSourceFiles,
         mounts,
         {
           idPrefix: `/${id}`,
+          ...(sourceRoots.length || dataPaths.length
+            ? {
+              sourcePackage: {
+                entryPath: mappedProgram.main,
+                rootPaths: sourceRoots,
+                dataPaths,
+              },
+            }
+            : {}),
         },
       );
       const entryIdentity = identityByPath.get(mappedProgram.main)!;
@@ -342,7 +588,11 @@ export class Engine extends EventTarget implements Harness {
         (options.precompiledModulesFor
           ? await options.precompiledModulesFor({
             entryIdentity,
-            identities: [...new Set(identityByPath.values())],
+            identities: [
+              ...new Set(
+                moduleFiles.map((file) => identityByPath.get(file.name)!),
+              ),
+            ],
           })
           : undefined);
       const cached = patternCoverage !== undefined &&
@@ -355,8 +605,12 @@ export class Engine extends EventTarget implements Harness {
 
       const precompiledBodies = new Map<string, string>();
       // Carry per-module source maps so the ESM loader can compose a per-load
-      // bundle map (CFC verified-source / fn.src coordinate resolution).
+      // bundle map for authored error-stack coordinates.
       const precompiledSourceMaps = new Map<string, SourceMap>();
+      const precompiledBuilderSourceSites = new Map<
+        string,
+        BuilderSourceSitesV1
+      >();
       const precompiledPolicyManifests = new Map<string, readonly unknown[]>();
 
       if (fullHit) {
@@ -368,6 +622,12 @@ export class Engine extends EventTarget implements Harness {
             precompiledSourceMaps.set(
               file.name,
               artifact.sourceMap as SourceMap,
+            );
+          }
+          if (artifact.builderSourceSites !== undefined) {
+            precompiledBuilderSourceSites.set(
+              file.name,
+              artifact.builderSourceSites,
             );
           }
           if (artifact.policyManifests !== undefined) {
@@ -383,7 +643,7 @@ export class Engine extends EventTarget implements Harness {
           }
         }
       } else {
-        const { compiler } = await this.getCompilerInternals();
+        const { compiler } = await this.#getCompilerInternals();
         // A cold compile is a seconds-long CPU-bound pipeline. In the browser
         // runtime worker a synchronous run wedges the event loop and stalls
         // every queued IPC delivery until it finishes (measured as
@@ -400,14 +660,13 @@ export class Engine extends EventTarget implements Harness {
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
-          diagnosticMessageTransformer: new (compilerStack()
-            .ReactiveErrorTransformer)({
-            verbose: options.verboseErrors,
-          }),
+          diagnosticMessageTransformer: compilerStack()
+            .createReactiveErrorTransformer(options.verboseErrors),
           beforeTransformers: (program) => {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({
               patternCoverage,
+              builderSourceSites,
               moduleIdentities: identityByPath,
               // Writer identities record authored paths: unmap the engine's
               // per-load `/<id>` prefix (and mount paths) before spelling.
@@ -417,6 +676,7 @@ export class Engine extends EventTarget implements Harness {
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
+              getBuilderSourceSites: () => pipeline.getBuilderSourceSites(),
               getPolicyManifests: () => pipeline.getPolicyManifests(),
             };
           },
@@ -440,12 +700,15 @@ export class Engine extends EventTarget implements Harness {
         for (const [name, out] of modules) {
           precompiledBodies.set(name, out.js);
           if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+          if (out.builderSourceSites) {
+            precompiledBuilderSourceSites.set(name, out.builderSourceSites);
+          }
           if (out.policyManifests) {
             precompiledPolicyManifests.set(name, out.policyManifests);
           }
         }
       }
-      const { runtimeExports } = await this.getRuntimeInternals();
+      const { runtimeExports } = await this.#getRuntimeInternals();
       const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
         runtimeExports?.[name]
       );
@@ -458,8 +721,14 @@ export class Engine extends EventTarget implements Harness {
       const graph = compileSourcesToRecords(moduleFiles, {
         precompiledBodies,
         precompiledSourceMaps,
+        precompiledBuilderSourceSites,
         runtimeModules: runtimeModulesOption,
         specifierAliases,
+        // Carried onto the graph under their stored (prefix-free) names, the
+        // same spelling the warm path recovers from the compiled set.
+        dataFiles: dataSources.map((file) =>
+          [storedFilenameFor(file.name, id, mounts), file.contents] as const
+        ),
         // Strip the whole-program `/<id>` prefix from per-module identities so
         // `cf:module/<hash>` is entry-point independent and dedupes across
         // programs (the content-addressed cache keys off these identities).
@@ -467,9 +736,12 @@ export class Engine extends EventTarget implements Harness {
         // Reuse the identities already computed above (cache-hit check); avoids
         // a second hashing/import-resolution pass over the module set.
         identityByPath,
+        // A `dataFile()` path resolves against the reading module's stored
+        // name, so a read lands in the same space `dataFiles` is keyed by.
+        storedNameFor: (name) => storedFilenameFor(name, id, mounts),
       });
       if (options.patternCoverage) {
-        this.patternCoverageByGraph.set(graph, options.patternCoverage);
+        this.#patternCoverageByGraph.set(graph, options.patternCoverage);
       }
 
       // Register runtime-module records so cf:runtime/* imports resolve.
@@ -480,9 +752,7 @@ export class Engine extends EventTarget implements Harness {
           unknown
         >;
       }
-      for (
-        const [spec, record] of runtimeModuleRecords(runtimeRecordExports)
-      ) {
+      for (const [spec, record] of runtimeModuleRecords(runtimeRecordExports)) {
         graph.records.set(spec, record as VirtualModuleRecord);
       }
 
@@ -546,14 +816,17 @@ export class Engine extends EventTarget implements Harness {
       // and the internal import edges as specifier → dependency-identity links.
       // On a cache hit these mirror the artifacts just loaded. Built over the
       // pristine module set so `source` and the edges are over authored bytes.
+      const dataFileSet = new Set(dataPaths);
       const importEdges = resolveModuleImports({
         main: "",
-        files: pristineModuleFiles,
-      });
-      const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
+        files: pristineSourceFiles,
+      }, { dataFiles: dataFileSet });
+      const modules: CacheableModule[] = pristineSourceFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
-        const patternCoverageSpans = patternCoverage === undefined
+        const emittedBody = precompiledBodies.get(file.name);
+        const patternCoverageSpans = patternCoverage === undefined ||
+            emittedBody === undefined
           ? undefined
           : options.patternCoverage?.spansForFile(
             coverageFilenameFor(file.name, id, mounts),
@@ -564,16 +837,56 @@ export class Engine extends EventTarget implements Harness {
           identityByPath,
           specifierAliases,
         );
-        const policyManifests = validatePolicyManifestsForModule(
-          identity,
-          precompiledPolicyManifests.get(file.name),
-        );
+        if (file.name === mappedProgram.main) {
+          for (const rootPath of sourceRoots) {
+            const rootIdentity = identityByPath.get(rootPath);
+            if (rootIdentity === undefined) {
+              throw new Error(
+                `Source root '${rootPath}' has no module identity.`,
+              );
+            }
+            imports.push({
+              specifier: sourceRootSpecifier(
+                storedFilenameFor(rootPath, id, mounts),
+              ),
+              targetIdentity: rootIdentity,
+            });
+          }
+          for (const dataPath of dataPaths) {
+            // Every data path is in the pristine set the identities were
+            // computed over, the same guarantee the module lookup above relies
+            // on.
+            imports.push({
+              specifier: dataFileSpecifier(
+                storedFilenameFor(dataPath, id, mounts),
+              ),
+              targetIdentity: identityByPath.get(dataPath)!,
+            });
+          }
+        }
+        const policyManifests = emittedBody === undefined
+          ? undefined
+          : validatePolicyManifestsForModule(
+            identity,
+            precompiledPolicyManifests.get(file.name),
+          );
+        // A data entry's compiled form is its own bytes: the compiled set is
+        // what a warm load reads, and it must carry everything the runtime
+        // needs to run the pattern.
+        const isData = dataFileSet.has(file.name);
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
           source: file.contents,
-          js: precompiledBodies.get(file.name)!,
+          js: isData ? file.contents : (emittedBody ?? ""),
+          ...(isData ? { isData: true } : {}),
           ...(sourceMap === undefined ? {} : { sourceMap }),
+          ...(emittedBody === undefined ||
+              precompiledBuilderSourceSites.get(file.name) === undefined
+            ? {}
+            : {
+              builderSourceSites: precompiledBuilderSourceSites.get(file.name),
+            }),
           ...(patternCoverageSpans === undefined
             ? {}
             : { patternCoverageSpans }),
@@ -582,7 +895,7 @@ export class Engine extends EventTarget implements Harness {
         };
       });
       for (const module of modules) {
-        this.ctRuntime.registerCfcPolicyManifests(
+        this.#ctRuntime.registerCfcPolicyManifests(
           undefined,
           module.policyManifests ?? [],
         );
@@ -641,10 +954,13 @@ export class Engine extends EventTarget implements Harness {
       batchIds.push(id);
       const mapped = pretransformProgramForModules(program, id);
       const resolver = new EngineProgramResolver(
-        mapped,
-        this.ctRuntime.staticCache,
+        { ...mapped, files: partitionDataFiles(mapped).codeFiles },
+        this.#ctRuntime.staticCache,
       );
-      const resolved = await this.resolve(resolver);
+      const resolved = await this.#resolveWithSourceRoots(
+        resolver,
+        mapped.sourceRoots ?? [],
+      );
       for (const file of uniqueSourcesByName(resolved.files)) {
         if (!unioned.has(file.name)) unioned.set(file.name, file);
       }
@@ -656,7 +972,7 @@ export class Engine extends EventTarget implements Harness {
       files: [...unioned.values()],
     };
 
-    const { compiler } = await this.getCompilerInternals();
+    const { compiler } = await this.#getCompilerInternals();
     const { modules, diagnostics: compileDiagnostics } = compiler
       .compileToModulesCollecting(merged, {
         runtimeModules: Engine.runtimeModuleNames(),
@@ -740,11 +1056,22 @@ export class Engine extends EventTarget implements Harness {
     options: {
       fabricImports?: TypeScriptHarnessProcessOptions["fabricImports"];
       patternCoverage?: PatternCoverageCollector;
+      sourceRoots?: readonly string[];
+      dataFiles?: readonly string[];
     } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
-    const { compiler } = await this.getCompilerInternals();
+    const { compiler } = await this.#getCompilerInternals();
     assertNoReservedFabricPaths(resolvedFiles);
-    assertFabricImportsHaveSpace(resolvedFiles, options);
+    // Data files carry arbitrary bytes; keep them away from every scan, parse
+    // and compile step, and rejoin them at the pristine set below.
+    const { dataPaths, codeFiles, dataSources } = partitionDataFiles({
+      main: entryFilename,
+      files: resolvedFiles,
+      ...(options.dataFiles === undefined
+        ? {}
+        : { dataFiles: [...options.dataFiles] }),
+    });
+    assertFabricImportsHaveSpace(codeFiles, options);
     // The stored source set holds prefix-free AUTHORED TS (the helper import is
     // NOT baked in — identity is over authored source, module-loading.md).
     // Inject the helper BEFORE resolve so the resolver pulls the `commonfabric`
@@ -759,23 +1086,38 @@ export class Engine extends EventTarget implements Harness {
     // stored bytes are exactly what their identities were computed over, so
     // the identity check below still holds, and the successful compile
     // writes back under the current runtimeVersion (self-heal on load).
-    const injectedInput = transformInjectHelperModule({
-      main: entryFilename,
-      files: resolvedFiles,
-    }, { tolerateStoredLegacyEnvelope: true });
+    // This pretransform is pure compute over the verified stored bytes.
+    const injectedInput = deterministicCompileStep(() =>
+      transformInjectHelperModule({
+        main: entryFilename,
+        files: codeFiles,
+        ...(options.sourceRoots === undefined
+          ? {}
+          : { sourceRoots: [...options.sourceRoots] }),
+      }, { tolerateStoredLegacyEnvelope: true })
+    );
+    const sourceRoots = canonicalSourceRoots(
+      entryFilename,
+      injectedInput.sourceRoots,
+    );
     const engineResolver = new EngineProgramResolver(
       { main: entryFilename, files: injectedInput.files },
-      this.ctRuntime.staticCache,
+      this.#ctRuntime.staticCache,
     );
     const fabricResolver = options.fabricImports
       ? new FabricAwareResolver(engineResolver, {
-        runtime: this.ctRuntime,
+        runtime: this.#ctRuntime,
         space: options.fabricImports.space,
         allowUnpinned: options.fabricImports.allowUnpinned,
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
-    const resolvedProgram = await this.resolve(resolver);
+    // Resolution may perform storage/network I/O for fabric mounts. Its
+    // failures are intentionally left unmarked and therefore retryable.
+    const resolvedProgram = await this.#resolveWithSourceRoots(
+      resolver,
+      sourceRoots,
+    );
     const mounts = fabricResolver?.mounts() ?? [];
     const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
     const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
@@ -783,7 +1125,9 @@ export class Engine extends EventTarget implements Harness {
     // compilation (authored entry modules were injected before resolve above).
     const resolvedForCompile = {
       ...resolvedProgram,
-      files: injectMountSources(resolvedProgramFiles),
+      files: deterministicCompileStep(() =>
+        injectMountSources(resolvedProgramFiles)
+      ),
     };
     const moduleFiles = resolvedProgramFiles.filter((f) =>
       !f.name.endsWith(".d.ts")
@@ -794,16 +1138,28 @@ export class Engine extends EventTarget implements Harness {
     // the authored closure — they match the stored identities the source docs
     // were keyed by.
     const authoredByStoredName = new Map(
-      resolvedFiles.map((f) => [f.name, f.contents]),
+      codeFiles.map((f) => [f.name, f.contents]),
     );
-    const pristineModuleFiles = pristineModuleSources(
-      moduleFiles,
-      authoredByStoredName,
-      (name) => storedFilenameFor(name, undefined, mounts),
-    );
+    const pristineSourceFiles = [
+      ...pristineModuleSources(
+        persistableSourceFiles(resolvedProgramFiles),
+        authoredByStoredName,
+        (name) => storedFilenameFor(name, undefined, mounts),
+      ),
+      ...dataSources,
+    ];
     const identityByPath = computeFabricModuleIdentities(
-      pristineModuleFiles,
+      pristineSourceFiles,
       mounts,
+      sourceRoots.length || dataPaths.length
+        ? {
+          sourcePackage: {
+            entryPath: entryFilename,
+            rootPaths: sourceRoots,
+            dataPaths,
+          },
+        }
+        : {},
     );
 
     // Instrumenting does not disturb the identity check below: identity hashes
@@ -814,50 +1170,67 @@ export class Engine extends EventTarget implements Harness {
       {
         id: undefined,
         mounts,
-        sourceFiles: pristineModuleFiles,
+        sourceFiles: pristineSourceFiles,
       },
     );
-
-    const emitted = compiler.compileToModules(resolvedForCompile, {
-      runtimeModules: Engine.runtimeModuleNames(),
-      specifierAliases,
-      // These bytes are durable stored source nobody can re-author;
-      // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
-      // not brick the reload (CT-1916).
-      storedSource: true,
-      beforeTransformers: (program) => {
-        const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)({
-          patternCoverage,
-          moduleIdentities: identityByPath,
-          // Names on this path are already stored-shaped (no `/<id>` prefix);
-          // only mount paths need unmapping to authored spellings.
-          canonicalWriterIdentityFile: (name) =>
-            storedFilenameFor(name, undefined, mounts),
-        });
-        return {
-          factories: pipeline.toFactories(program),
-          getDiagnostics: () => pipeline.getDiagnostics(),
-          getPolicyManifests: () => pipeline.getPolicyManifests(),
-        };
-      },
+    const builderSourceSites = builderSourceSiteOptionsForCompile({
+      id: undefined,
+      mounts,
+      sourceFiles: pristineSourceFiles,
     });
+
+    const emitted = deterministicCompileStep(() =>
+      compiler.compileToModules(resolvedForCompile, {
+        runtimeModules: Engine.runtimeModuleNames(),
+        specifierAliases,
+        // These bytes are durable stored source nobody can re-author;
+        // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
+        // not brick the reload (CT-1916).
+        storedSource: true,
+        beforeTransformers: (program) => {
+          const pipeline = new (compilerStack()
+            .CommonFabricTransformerPipeline)({
+            patternCoverage,
+            builderSourceSites,
+            // The transformer-level twin of `storedSource` above: pattern
+            // shape gates (opaque reserved result keys) demote to warnings
+            // here, so a rule added after these bytes were admitted cannot
+            // brick their reload. The identity check below already
+            // guarantees this compile reconstructs rather than admits.
+            storedSource: true,
+            moduleIdentities: identityByPath,
+            // Names on this path are already stored-shaped (no `/<id>`
+            // prefix); only mount paths need unmapping to authored spellings.
+            canonicalWriterIdentityFile: (name) =>
+              storedFilenameFor(name, undefined, mounts),
+          });
+          return {
+            factories: pipeline.toFactories(program),
+            getDiagnostics: () => pipeline.getDiagnostics(),
+            getBuilderSourceSites: () => pipeline.getBuilderSourceSites(),
+            getPolicyManifests: () => pipeline.getPolicyManifests(),
+          };
+        },
+      })
+    );
     for (const file of moduleFiles) {
       if (!emitted.has(file.name)) {
-        throw new Error(
+        throw deterministicCompileError(
           `Recompile from source produced no body for '${file.name}'`,
         );
       }
     }
 
+    const dataFileSet = new Set(dataPaths);
     const importEdges = resolveModuleImports({
       main: "",
-      files: pristineModuleFiles,
-    });
-    const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
-      const out = emitted.get(file.name)!;
+      files: pristineSourceFiles,
+    }, { dataFiles: dataFileSet });
+    const modules: CacheableModule[] = pristineSourceFiles.map((file) => {
+      const out = emitted.get(file.name);
       const identity = identityByPath.get(file.name)!;
-      const patternCoverageSpans = patternCoverage === undefined
+      const patternCoverageSpans = patternCoverage === undefined ||
+          out === undefined
         ? undefined
         : options.patternCoverage?.spansForFile(
           coverageFilenameFor(file.name, undefined, mounts),
@@ -868,23 +1241,51 @@ export class Engine extends EventTarget implements Harness {
         identityByPath,
         specifierAliases,
       );
-      const policyManifests = validatePolicyManifestsForModule(
-        identity,
-        out.policyManifests,
-      );
+      if (file.name === entryFilename) {
+        for (const rootPath of sourceRoots) {
+          const rootIdentity = identityByPath.get(rootPath);
+          if (rootIdentity === undefined) {
+            throw new Error(
+              `Source root '${rootPath}' has no module identity.`,
+            );
+          }
+          imports.push({
+            specifier: sourceRootSpecifier(
+              storedFilenameFor(rootPath, undefined, mounts),
+            ),
+            targetIdentity: rootIdentity,
+          });
+        }
+        for (const dataPath of dataPaths) {
+          imports.push({
+            specifier: dataFileSpecifier(
+              storedFilenameFor(dataPath, undefined, mounts),
+            ),
+            targetIdentity: identityByPath.get(dataPath)!,
+          });
+        }
+      }
+      const policyManifests = out === undefined
+        ? undefined
+        : validatePolicyManifestsForModule(identity, out.policyManifests);
+      const isData = dataFileSet.has(file.name);
       return {
         identity,
         filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
-        js: out.js,
-        ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        js: isData ? file.contents : (out?.js ?? ""),
+        ...(isData ? { isData: true } : {}),
+        ...(out?.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        ...(out?.builderSourceSites === undefined
+          ? {}
+          : { builderSourceSites: out.builderSourceSites }),
         ...(patternCoverageSpans === undefined ? {} : { patternCoverageSpans }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
       };
     });
     for (const module of modules) {
-      this.ctRuntime.registerCfcPolicyManifests(
+      this.#ctRuntime.registerCfcPolicyManifests(
         undefined,
         module.policyManifests ?? [],
       );
@@ -910,56 +1311,38 @@ export class Engine extends EventTarget implements Harness {
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<EvaluateResult> {
     // Ensure runtime exports + exportsCallback are initialized.
-    await this.getRuntimeInternals();
+    await this.#getRuntimeInternals();
     const { id, graph, mainSpecifier } = await this.compileToRecordGraph(
       program,
       options,
     );
-    return this.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
+    return this.evaluateRecordGraph(id, graph, mainSpecifier, program);
   }
 
   /**
-   * Evaluate a verified ESM record graph: load it synchronously via `importNow`
-   * in a locked-down compartment whose globals are the hardened runtime globals
-   * (runtime-module records, already in the graph, supply the trusted host
-   * APIs), and return the entry namespace as `main` plus the per-module export
-   * map. The graph was security-verified at compile time, so verification is
-   * not repeated.
-   */
-  /**
    * Evaluate a verified ESM record graph (public so the PatternManager can run
    * compile → cache write-back → evaluate as discrete steps). Thin wrapper over
-   * {@link evaluateGraph} with the source-compile registration strategy: module
+   * `#evaluateGraph()` with the source-compile registration strategy: module
    * identities are recomputed from `files`, paths carry the `/<id>` prefix, and
    * `files` flow into the export map for sub-pattern re-instantiation.
+   * `dataFiles` names the members of `files` that are data, so a sub-pattern
+   * re-instantiated from the export map keeps the same source package.
    */
   evaluateRecordGraph(
     id: string,
     graph: CompiledModuleGraph,
     mainSpecifier: string,
-    files: Source[],
+    program: Pick<RuntimeProgram, "files" | "dataFiles">,
   ): EvaluateResult {
     const prefix = `/${id}`;
-    // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
-    // sources are available for the verified set below. Derive them from the
-    // graph's RESOLVED per-module identities (the same content-addressed
-    // `cf:module/<identity>` the cache + source-free reload use), NOT by
-    // re-hashing the raw `files` — those disagree (the resolved set folds the
-    // injected modules into each module's Merkle hash), which would make a
-    // function's `fn.src` (hence its content-addressed identity) differ between
-    // this source-based compile and a source-free by-identity reload, breaking
-    // by-identity resolution (`getVerifiedImplementation`) for resumed
-    // callables (CT-1623).
-    this.registerModuleHashesFromGraph(id, graph);
-
-    return this.evaluateGraph(graph, mainSpecifier, {
+    return this.#evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: id,
-      // Already registered above (idempotent); keep as a no-op so evaluateGraph
-      // doesn't recompute the hashes a second time.
-      registerHashes: () => {},
       fileNameForPath: (path) =>
         path.startsWith(prefix) ? path.slice(prefix.length) : path,
-      filesForExports: files,
+      filesForExports: program.files,
+      ...(program.dataFiles === undefined
+        ? {}
+        : { dataFilesForExports: [...program.dataFiles] }),
     });
   }
 
@@ -969,15 +1352,20 @@ export class Engine extends EventTarget implements Harness {
    * ({@link evaluateCachedModules}); `ctx` supplies the path/identity handling
    * that differs between them (prefixed authored paths vs prefix-free cached
    * identities). The graph is assumed already security-verified.
+   *
+   * The graph loads synchronously via `importNow` in a locked-down compartment
+   * whose globals are the hardened runtime globals (runtime-module records,
+   * already in the graph, supply the trusted host APIs). The entry namespace
+   * comes back as `main`, alongside the per-module export map.
    */
-  private evaluateGraph(
+  #evaluateGraph(
     graph: CompiledModuleGraph,
     mainSpecifier: string,
     ctx: {
       evalIdPrefix: string;
-      registerHashes(): void;
       fileNameForPath(path: string): string;
       filesForExports: Source[];
+      dataFilesForExports?: string[];
     },
   ): EvaluateResult {
     logger.timeStart("evaluateRecordGraph");
@@ -987,64 +1375,30 @@ export class Engine extends EventTarget implements Harness {
       // which scoped CFC identity and registry partitions to a load — is gone
       // (PR E2): identity flows through the content-addressed provenance
       // recorded below.
-      const evalId = `${ctx.evalIdPrefix}:esm:${this.nextEvalId++}`;
-      // Register per-module content hashes — this wires the scheduler's
-      // content-addressed implementation hash. Source-location resolution (the
-      // `indexOf`-into-`script` fallback plus the per-module source maps
-      // registered below) resolves `fn.src` to the canonical
-      // `cf:module/<hash>/<path>` form these hashes key on. Covered by
-      // `action-fingerprint.test.ts` and `esm-source-location.test.ts`.
-      ctx.registerHashes();
+      const evalId = `${ctx.evalIdPrefix}:esm:${this.#nextEvalId++}`;
 
-      const patternCoverage = this.patternCoverageByGraph.get(graph);
+      const patternCoverage = this.#patternCoverageByGraph.get(graph);
       const globals = createModuleCompartmentGlobals({
-        console: this.consoleShim,
+        console: this.#consoleShim,
         ...(patternCoverage
           ? { [PATTERN_COVERAGE_GLOBAL]: patternCoverage.sandboxGlobal() }
           : {}),
       });
-      // Concatenated module bodies give the source-location frame a `script`
-      // for fn.src `indexOf` resolution. (Insertion order need not match the
-      // import-execution order; resolveLocationFromFunctionSource falls back to
-      // a from-zero scan, and any mis-attribution degrades fail-closed at the
-      // CFC identity layer — see the fn.src note in the design doc.)
-      const script = [...graph.compiledBodies.values()].join("\n");
-      // Register a composed bundle source map for `${evalId}.js` so that
-      // `fn.src` coordinates (resolved against `script`) map back to the
-      // original authored sources — without this the ESM loader yields raw
-      // bundle coordinates and the CFC provenance src check fails closed.
+      // Register a composed bundle source map for `${evalId}.js` so that a
+      // stack coordinate from this evaluation maps back to authored source.
+      // Its consumers are error mapping for throws escaping module evaluation
+      // or invocation, plus scheduler action diagnostics.
       // Full module path per specifier.
       const sourceNameBySpecifier = new Map<string, string>();
       for (const [name, specifier] of graph.specifierByPath) {
         sourceNameBySpecifier.set(specifier, name);
       }
-      // On the warm/cached record load (`buildRecordsFromCompiled`) no authored
-      // per-module map is retained, so fall back to an IDENTITY map keyed on the
-      // module's per-module source `name`. Without a registered bundle map the
-      // ESM loader leaves `fn.src` as the raw `${evalId}.js:line:col` bundle
-      // coordinate, which the engine's name → canonical table cannot resolve, so
-      // identity downgrades to `unsupported` and CFC verified-source identity
-      // fails closed (the inSpace-child owner-protected write regression,
-      // CT-1754). The identity map preserves coordinates verbatim and only
-      // re-labels the bundle frame with the canonical source name, so the
-      // EXISTING verified-binding check passes for legitimately compiled modules
-      // without weakening it.
       // Composition + registration are DEFERRED (CT-1819): composing these
       // maps is a per-segment VLQ transcode over every module (~16-22ms per
-      // cold boot post-#4455/#4460), while their only consumers are
-      // on-demand \u2014 error mapping (`parseStack`/`mapThrownError`) and debug
-      // `fn.src` resolution (`mapPosition`; eager only when
-      // EXPERIMENTAL_EAGER_SOURCE_ANNOTATION is on, i.e. dev shells, which
-      // then materialize these providers during boot and keep today's
-      // behavior). Identity no longer needs the maps at boot: scheduler and
-      // CFC verified-source are provenance-rooted (#4436/#4458). The
-      // CT-1754 fail-closed notes below explain why the REGISTRATION must
-      // exist at all \u2014 they are satisfied by lazy materialization, since the
-      // fail-closed check only runs when `fn.src` is resolved, which is
-      // itself what materializes the map. Providers capture per-module LINE
-      // COUNTS and raw maps, never compiled bodies, so the closures retain
-      // KBs, not the bundle text; each is one-shot and dropped after first
-      // use.
+      // cold boot post-#4455/#4460), while error mapping only asks for one
+      // after a throw. Providers capture per-module line counts and raw maps,
+      // never compiled bodies, so the closures retain KBs, not bundle text;
+      // each is one-shot and dropped after first use.
       const lineCountBySpecifier = new Map<string, number>();
       for (const [specifier, body] of graph.compiledBodies) {
         lineCountBySpecifier.set(
@@ -1060,7 +1414,7 @@ export class Engine extends EventTarget implements Harness {
           return { specifier, source, bodyLineCount };
         },
       );
-      this.getSESRuntime().loadSourceMapLazy(
+      this.#getSESRuntime().loadSourceMapLazy(
         `${evalId}.js`,
         () =>
           composeBundleSourceMap(
@@ -1076,30 +1430,20 @@ export class Engine extends EventTarget implements Harness {
           ),
       );
       // ALSO register each module's map under its eval `//# sourceURL` (its
-      // sanitized source name). The browser surfaces the per-module eval frame
-      // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
-      // `fn.src` from that frame FIRST (the indexOf-into-`script` fallback that
-      // `${evalId}.js` covers only wins when the stack frame is absent, e.g.
-      // under Deno's tamed SES stacks). The frame is keyed on the per-module
-      // sourceURL with eval-relative line numbers, so register the per-module
-      // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
+      // sanitized source name). Browsers surface the per-module eval frame in
+      // `new Error().stack` rather than the bundle frame, so it needs a map of
+      // its own. Those coordinates are eval-relative, hence the factory-wrapper
+      // line shift (`(function (...) {\n` = +1).
       //
       // When no authored map exists for a module (the warm/cached record load \u2014
       // `buildRecordsFromCompiled` populates `moduleSourceMaps` only for cached
       // bodies that retained one), fall back to an IDENTITY map keyed on the
-      // module's per-module source `name`. Without this the eval frame stays a
-      // raw `${evalId}.js:line:col` bundle coordinate that the engine's
-      // per-module name \u2192 canonical table cannot canonicalize, so `fn.src`
-      // never reaches `cf:module/<id>/<path>` and CFC verified-source identity
-      // downgrades to `unsupported` \u2014 the inSpace-child owner-protected write
-      // regression (CT-1754). The identity map preserves coordinates verbatim;
-      // it only re-labels the bundle frame with the module's canonical source
-      // name, so the EXISTING verified-binding check passes for legitimately
-      // compiled modules without weakening it.
+      // module's per-module source `name`, so the frame is still re-labeled with
+      // the module source name instead of a raw bundle coordinate.
       for (const [name, specifier] of graph.specifierByPath) {
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
         const bodyLineCount = lineCountBySpecifier.get(specifier) ?? 1;
-        this.getSESRuntime().loadSourceMapLazy(sourceUrl, () => {
+        this.#getSESRuntime().loadSourceMapLazy(sourceUrl, () => {
           const map = moduleSourceMaps.get(specifier) ??
             identitySourceMap(bodyLineCount, name);
           return composeBundleSourceMap(
@@ -1111,12 +1455,8 @@ export class Engine extends EventTarget implements Harness {
       }
 
       const frame = pushFrame({
-        runtime: this.ctRuntime,
-        sourceLocationContext: {
-          script,
-          filename: `${evalId}.js`,
-          nextSearchOffset: 0,
-        },
+        runtime: this.#ctRuntime,
+        moduleEvaluation: true,
       });
 
       // Build the per-module export map (keyed by normalized source path) from
@@ -1131,7 +1471,16 @@ export class Engine extends EventTarget implements Harness {
       // Per-module namespaces keyed by content identity (stripped from the
       // `cf:module/<identity>` specifier) for the in-memory identity cache.
       const exportsByIdentity = new Map<string, Exports>();
+      // Where each module came from, keyed the same way. A pattern loaded BY
+      // IDENTITY carries no program (see `patternFromMain`), so without this
+      // its source location is unrecoverable at the point of use — the
+      // information exists right here and was simply not written down.
+      const sourcePathByIdentity = new Map<string, string>();
       const MODULE_SPECIFIER_PREFIX = "cf:module/";
+      const reachableSpecifiers = reachableModuleSpecifiers(
+        graph.records,
+        mainSpecifier,
+      );
       let main: Exports;
       try {
         const loaded = loadModuleGraph(mainSpecifier, {
@@ -1142,14 +1491,14 @@ export class Engine extends EventTarget implements Harness {
         main = loaded.namespace as Exports;
 
         for (const [path, specifier] of graph.specifierByPath) {
+          if (!reachableSpecifiers.has(specifier)) continue;
           const namespace = loaded.importNow(specifier) as Exports;
           const fileName = ctx.fileNameForPath(path);
           exportMap[fileName] = namespace;
           if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
-            exportsByIdentity.set(
-              specifier.slice(MODULE_SPECIFIER_PREFIX.length),
-              namespace,
-            );
+            const identity = specifier.slice(MODULE_SPECIFIER_PREFIX.length);
+            exportsByIdentity.set(identity, namespace);
+            sourcePathByIdentity.set(identity, fileName);
           }
           for (const [exportName, value] of Object.entries(namespace)) {
             // Only object/function exports are sub-pattern candidates. Skip the
@@ -1164,6 +1513,9 @@ export class Engine extends EventTarget implements Harness {
               main: fileName,
               mainExport: exportName,
               files: ctx.filesForExports,
+              ...(ctx.dataFilesForExports === undefined
+                ? {}
+                : { dataFiles: ctx.dataFilesForExports }),
             });
           }
         }
@@ -1173,12 +1525,11 @@ export class Engine extends EventTarget implements Harness {
         // would otherwise surface with a censored (empty) or raw-coordinate
         // stack. Materialize + source-map it here (once), matching how
         // invoked-function errors are mapped.
-        throw this.getSESRuntime().mapThrownError(error);
+        throw this.#getSESRuntime().mapThrownError(error);
       } finally {
         popFrame(frame);
       }
-
-      this.runtimeInternals?.exportsCallback(exportsByValue);
+      this.#runtimeInternals?.exportsCallback(exportsByValue);
 
       // Content-addressed CFC provenance: record it HERE, where functions
       // become verified (this evaluation), rather than in the PatternManager's
@@ -1191,9 +1542,11 @@ export class Engine extends EventTarget implements Harness {
       // `__cfReg`-registered factory already wears its
       // `__cfVerifiedBindingIdentity` annotation, which recordModuleProvenance
       // folds into the provenance entry.
-      this.recordModuleProvenance(
+      this.#recordModuleProvenance(
         exportsByIdentity,
         graph.registrationSink,
+        graph.builderSourceSitesByIdentity,
+        sourcePathByIdentity,
       );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
@@ -1203,6 +1556,7 @@ export class Engine extends EventTarget implements Harness {
         main,
         exportMap,
         exportsByIdentity,
+        sourcePathByIdentity,
         registrationsByIdentity: graph.registrationSink,
       };
     } finally {
@@ -1219,9 +1573,14 @@ export class Engine extends EventTarget implements Harness {
    * First-write-wins (see `recordVerifiedProvenance`), so an export and a
    * `__cfReg` entry for one artifact agree on a single canonical symbol.
    */
-  private recordModuleProvenance(
+  #recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
+    builderSourceSitesByIdentity: ReadonlyMap<
+      string,
+      BuilderSourceSitesV1
+    >,
+    sourcePathByIdentity: ReadonlyMap<string, string>,
   ): void {
     const record = (identity: string, symbol: string, value: unknown) => {
       if (!isTrustedBuilderArtifact(value)) return;
@@ -1251,14 +1610,39 @@ export class Engine extends EventTarget implements Harness {
         symbol,
         ...(bindingIdentity ? { bindingIdentity } : {}),
       });
+      const sites = builderSourceSitesByIdentity.get(identity)?.sites;
+      const site = sites !== undefined && Object.hasOwn(sites, symbol)
+        ? sites[symbol]
+        : undefined;
+      const sourcePath = sourcePathByIdentity.get(identity);
+      if (site !== undefined && sourcePath !== undefined) {
+        const normalizedPath = authoredDebugSourcePath(sourcePath);
+        const path = normalizedPath.startsWith("/")
+          ? normalizedPath
+          : `/${normalizedPath}`;
+        recordAuthoredDebugSource(implementation, {
+          src: `cf:module/${identity}${path}:${site.line}:${site.col}`,
+          ...(site.bindingName === undefined
+            ? {}
+            : { bindingName: site.bindingName }),
+        });
+      }
       // The strong content-addressed implementation index — the resolution
       // (and eviction-insurance) backing for serialized `$implRef`s; see
       // `ExecutableRegistry.registerVerifiedImplementation`.
-      this.executableRegistry.registerVerifiedImplementation(
+      this.#executableRegistry.registerVerifiedImplementation(
         identity,
         symbol,
         implementation as HarnessedFunction,
       );
+      this.#ctRuntime.telemetry.submit({
+        type: "harness.implementation.register",
+        identity,
+        symbol,
+        ...(bindingIdentity
+          ? { bindingPath: bindingIdentity.bindingPath }
+          : {}),
+      });
     };
     for (const [identity, namespace] of exportsByIdentity) {
       for (const [exportName, value] of Object.entries(namespace)) {
@@ -1282,18 +1666,20 @@ export class Engine extends EventTarget implements Harness {
    * (`cf:module/<entryIdentity>`). Optional `sourceFiles` (the cached source
    * closure) flow into the export map so sub-pattern re-instantiation keeps a
    * program to recompile from; omit them and sub-patterns fall back to identity.
+   * `dataFiles` names the members of `sourceFiles` that are data.
    */
   async evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
     options: {
       sourceFiles?: Source[];
+      dataFiles?: readonly string[];
       trustedBodies?: boolean;
       patternCoverage?: PatternCoverageCollector;
     } = {},
   ): Promise<EvaluateResult> {
-    await this.getRuntimeInternals();
-    const { runtimeExports } = await this.getRuntimeInternals();
+    await this.#getRuntimeInternals();
+    const { runtimeExports } = await this.#getRuntimeInternals();
     const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
       runtimeExports?.[name]
     );
@@ -1309,10 +1695,13 @@ export class Engine extends EventTarget implements Harness {
     // — load the deferred compiler stack first. The warm-cache boot path
     // always carries the surface (runtimeVersion fingerprints the extractor),
     // so the steady boot stays compiler-free.
+    // A data entry has no record surface and is never parsed, so it must not
+    // drag the compiler onto the warm boot path.
     if (
       modules.some((m) =>
-        m.exportNames === undefined || m.starTargetSpecs === undefined ||
-        m.importSpecs === undefined
+        !m.isData &&
+        (m.exportNames === undefined || m.starTargetSpecs === undefined ||
+          m.importSpecs === undefined)
       )
     ) {
       await ensureCompilerStack();
@@ -1323,7 +1712,7 @@ export class Engine extends EventTarget implements Harness {
 
     // The cached bodies carry the coverage probes from the compile that emitted
     // them, and the spans that name the lines those probes stand for. Register
-    // both against this graph so `evaluateGraph` installs the collector as the
+    // both against this graph so `#evaluateGraph` installs the collector as the
     // sandbox global. The spans are what map a probe's `(fileName, id)` back to
     // source lines; a graph registered without them reports nothing for its
     // hits.
@@ -1333,7 +1722,7 @@ export class Engine extends EventTarget implements Harness {
           module.patternCoverageSpans ?? [],
         );
       }
-      this.patternCoverageByGraph.set(graph, options.patternCoverage);
+      this.#patternCoverageByGraph.set(graph, options.patternCoverage);
     }
 
     // Register runtime-module records so cf:runtime/* imports resolve.
@@ -1389,136 +1778,63 @@ export class Engine extends EventTarget implements Harness {
     // the load runs before it rather than after (no-op in Deno).
     await interleaveCompileYield();
 
-    return this.evaluateGraph(graph, mainSpecifier, {
+    return this.#evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: entryIdentity,
-      // Register the KNOWN identities (keyed by normalized filename = the record
-      // sourceURL) instead of recomputing from source — we have no source here,
-      // and the identities are authoritative. Also populate the canonical
-      // source map so `fn.src` resolves to `cf:module/<identity>/<path>`.
-      registerHashes: () => {
-        // Keyed by the same (collision-disambiguated) source names the record
-        // graph uses for sourceURLs, so stack-resolved fn.src coordinates land
-        // on the right module even when an importer and its fabric dependency
-        // share a filename. The canonical value keeps the AUTHORED filename —
-        // unchanged continuity with the source-compile path.
-        const sourceNames = cachedModuleSourceNames(modules);
-        for (const m of modules) {
-          const name = sourceNames.get(m.identity)!;
-          this.moduleHashByPrefixedSource.set(name, m.identity);
-          this.canonicalSourceByPrefixed.set(
-            name,
-            `cf:module/${m.identity}${m.filename}`,
-          );
-        }
-      },
       fileNameForPath: (path) => path, // already normalized
       filesForExports: options.sourceFiles ?? [],
+      ...(options.dataFiles === undefined
+        ? {}
+        : { dataFilesForExports: [...options.dataFiles] }),
     });
   }
 
-  // Invokes a function that should've came from this isolate (unverifiable).
-  // We use this to hook into the isolate's source mapping functionality.
+  /**
+   * Invokes a function that should have come from this SES runtime
+   * (unverifiable). We use this to hook into its source mapping functionality.
+   */
   invoke(fn: () => any): any {
     // Scheduler dictates this is a synchronous function,
     // and if we have functions from this source, this should already
     // be set up.
-    // Some tests invoke values outside of this isolate, so just
+    // Some tests invoke values outside of this SES runtime, so just
     // execute and return if runtime internals have not been initialized.
-    if (!this.runtimeInternals && !this.sesRuntime) {
+    if (!this.#runtimeInternals && !this.#sesRuntime) {
       return fn();
     }
-    return this.getSESRuntime().getIsolate("__engine-invoke__").value(fn)
-      .invoke().inner();
+    return this.#getSESRuntime().exec(fn);
   }
 
   getInvocation(source: string): HarnessedFunction {
-    return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
+    return this.#getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
   getVerifiedImplementation(
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedImplementation(identity, symbol);
+    return this.#executableRegistry.getVerifiedImplementation(identity, symbol);
   }
 
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void {
-    this.executableRegistry.trustHostValue(value, options);
+    this.#executableRegistry.trustHostValue(value, options);
   }
 
   /**
-   * Record the content-addressed identity of every module in a load, keyed by
-   * its prefixed source path (`/<id>/file.tsx`) so it can be matched against
-   * the source-map `source` that appears in an action's source location. Takes
-   * the RESOLVED per-module identities straight from the compiled graph
-   * (`cf:module/<identity>` in `graph.specifierByPath`) instead of re-hashing
-   * the raw program files.
-   *
-   * The two must agree: the cache key, the record-graph specifiers, and the
-   * source-free by-identity reload (`evaluateCachedModules`) all use the
-   * resolved identity (which folds the injected/resolved modules into each
-   * module's Merkle hash). Re-hashing the raw `program.files` here would yield a
-   * DIFFERENT hash for the same module, so a function's `fn.src` — and thus its
-   * content-addressed identity — would differ between this source-based compile
-   * and a source-free reload, and `getVerifiedImplementation` would miss when a
-   * resumed piece invokes a callable (CT-1623). Keying matches the source map's
-   * bundle paths (`/<id>/<authoredPath>`, plus injected modules under their own
-   * specifier path), and the canonical value matches the source-free form.
+   * Parses an error stack trace, mapping all positions back to original
+   * sources. Returns the original stack if runtime internals haven't been
+   * initialized.
    */
-  private registerModuleHashesFromGraph(
-    id: string,
-    graph: CompiledModuleGraph,
-  ): void {
-    const prefix = `/${id}`;
-    for (const [name, specifier] of graph.specifierByPath) {
-      if (!specifier.startsWith("cf:module/")) continue;
-      const identity = specifier.slice("cf:module/".length);
-      const authoredPath = name.startsWith(`${prefix}/`)
-        ? name.slice(prefix.length)
-        : name;
-      this.moduleHashByPrefixedSource.set(name, identity);
-      this.canonicalSourceByPrefixed.set(
-        name,
-        `cf:module/${identity}${authoredPath}`,
-      );
-    }
-  }
-
-  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`,
-  // as returned by the source map) into the reload-stable canonical source
-  // `cf:module/<moduleHash>/<authoredPath>`. Returns undefined for unmapped
-  // (built-in / non-program) sources so callers can fall back to the raw value.
-  canonicalModuleSource(source: string): string | undefined {
-    return this.canonicalSourceByPrefixed.get(source) ??
-      (source.startsWith("/")
-        ? undefined
-        : this.canonicalSourceByPrefixed.get(`/${source}`));
-  }
-
-  // Map a single position to its original source location.
-  // Returns null if no source map is loaded for the filename.
-  mapPosition(
-    filename: string,
-    line: number,
-    column: number,
-  ): MappedPosition | null {
-    if (!this.runtimeInternals) return null;
-    return this.runtimeInternals.runtime.mapPosition(filename, line, column);
-  }
-
-  // Parse an error stack trace, mapping all positions back to original sources.
-  // Returns the original stack if runtime internals haven't been initialized.
   parseStack(stack: string): string {
-    if (!this.runtimeInternals) {
+    if (!this.#runtimeInternals) {
       return stack;
     }
-    return this.runtimeInternals.runtime.parseStack(stack);
+    return this.#runtimeInternals.runtime.parseStack(stack);
   }
 
-  // Returns a map of runtime module types.
+  /** Returns a map of runtime module types. */
   static getRuntimeModuleTypes(cache: StaticCache) {
     return getRuntimeModuleTypes(cache);
   }
@@ -1532,18 +1848,18 @@ export class Engine extends EventTarget implements Harness {
     return [...RuntimeModuleIdentifiers];
   }
 
-  private async getRuntimeInternals(): Promise<RuntimeInternals> {
-    if (!this.runtimeInternals) {
-      this.runtimeInternals = await this.initializeRuntime();
+  async #getRuntimeInternals(): Promise<RuntimeInternals> {
+    if (!this.#runtimeInternals) {
+      this.#runtimeInternals = await this.initializeRuntime();
     }
-    return this.runtimeInternals;
+    return this.#runtimeInternals;
   }
 
-  private async getCompilerInternals(): Promise<CompilerInternals> {
-    if (!this.compilerInternals) {
-      this.compilerInternals = await this.initializeCompiler();
+  async #getCompilerInternals(): Promise<CompilerInternals> {
+    if (!this.#compilerInternals) {
+      this.#compilerInternals = await this.initializeCompiler();
     }
-    return this.compilerInternals;
+    return this.#compilerInternals;
   }
 
   /**
@@ -1551,30 +1867,28 @@ export class Engine extends EventTarget implements Harness {
    * Clears accumulated source maps and other state to prevent memory leaks.
    */
   dispose(): void {
-    if (this.sesRuntime) {
-      this.sesRuntime.clear();
+    if (this.#sesRuntime) {
+      this.#sesRuntime.clear();
     }
-    this.sesRuntime = undefined;
-    this.runtimeInternals = undefined;
-    this.compilerInternals = undefined;
-    this.nextEvalId = 0;
-    this.executableRegistry.clear();
-    this.moduleHashByPrefixedSource.clear();
-    this.canonicalSourceByPrefixed.clear();
+    this.#sesRuntime = undefined;
+    this.#runtimeInternals = undefined;
+    this.#compilerInternals = undefined;
+    this.#nextEvalId = 0;
+    this.#executableRegistry.clear();
   }
 
-  private getSESRuntime(): SESRuntime {
-    if (!this.sesRuntime) {
+  #getSESRuntime(): SESRuntime {
+    if (!this.#sesRuntime) {
       ensureSESLockdown();
-      this.sesRuntime = new SESRuntime({
+      this.#sesRuntime = new SESRuntime({
         globals: createModuleCompartmentGlobals({
-          console: this.consoleShim,
+          console: this.#consoleShim,
         }),
-        hideInternalStackFrames: this.options.hideInternalStackFrames,
+        hideInternalStackFrames: this.#options.hideInternalStackFrames,
         lockdown: false,
       });
     }
-    return this.sesRuntime;
+    return this.#sesRuntime;
   }
 }
 
@@ -1593,10 +1907,14 @@ function validatePolicyManifestsForModule(
   });
 }
 
-function computeId(program: Program): string {
+function computeId(program: RuntimeProgram): string {
+  const sourceRoots = canonicalSourceRoots(program.main, program.sourceRoots);
+  const dataFiles = canonicalDataFiles(program.main, program.dataFiles);
   const source = [
     program.main,
-    ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
+    ...(sourceRoots.length === 0 ? [] : [{ sourceRoots }]),
+    ...(dataFiles.length === 0 ? [] : [{ dataFiles }]),
+    ...persistableSourceFiles(program.files),
   ];
   return hashOf(source).toString();
 }
@@ -1694,18 +2012,63 @@ function injectMountSources(files: readonly Source[]): Source[] {
 // import ahead of the first content line and appends an `h` shim after the last
 // (packages/ts-transformers/src/core/cf-helpers.ts); only the leading import
 // moves the authored lines, so an injected file shifts by exactly one line.
-// Three kinds of file reach the compiler unchanged and keep their authored
+// Two kinds of file reach the compiler unchanged and keep their authored
 // lines: a stored legacy envelope, whose authored bytes already carry the
 // helper import (tolerated only on the storage-fed paths — `checkCFHelperVar`
-// rejects those bytes on every authoring path); a file with no content line to
-// inject ahead of; and a file that disables the transform, whose directive line
-// is blanked in place rather than removed.
+// rejects those bytes on every authoring path), and a file with no content
+// line to inject ahead of.
 export function helperInjectionLineOffset(contents: string): number {
   const { isLegacyInjectedEnvelope } = compilerStack();
   if (isLegacyInjectedEnvelope(contents)) return 0;
   if (findFirstContentLineIndex(contents.split("\n")) === null) return 0;
-  if (sourceDisablesCfTransform(contents)) return 0;
   return -1;
+}
+
+/**
+ * Normalizes transformer source sites from helper-injected compiler inputs to
+ * authored coordinates before the sidecar leaves the compile boundary.
+ */
+function builderSourceSiteOptionsForCompile(params: {
+  id: string | undefined;
+  mounts: readonly FabricMount[];
+  sourceFiles: readonly Source[];
+}): BuilderSourceSiteOptions {
+  const sourceInfo = new Map(
+    params.sourceFiles.map((file) => [
+      coverageFilenameFor(file.name, params.id, params.mounts),
+      {
+        lineOffset: helperInjectionLineOffset(file.contents),
+        lineCount: lineCountOf(file.contents),
+      },
+    ]),
+  );
+  return {
+    mapSite: (sourceFileName, site) => {
+      const fileName = coverageFilenameFor(
+        sourceFileName,
+        params.id,
+        params.mounts,
+      );
+      const info = sourceInfo.get(fileName);
+      if (info === undefined) return undefined;
+      const line = site.line + info.lineOffset;
+      if (line < 1 || line > info.lineCount) return undefined;
+      return { ...site, line };
+    },
+  };
+}
+
+/**
+ * Removes the loader's collision-disambiguation/mount prefix from a debug
+ * source path. Both hot fabric paths (`/~cf/<entry-id>/main.tsx`) and cached
+ * collision paths (`/~cf/<module-id>/main.tsx`) then report the persisted
+ * authored filename (`/main.tsx`).
+ */
+function authoredDebugSourcePath(path: string): string {
+  if (!path.startsWith(FABRIC_MOUNT_ROOT)) return path;
+  const identityAndPath = path.slice(FABRIC_MOUNT_ROOT.length);
+  const pathStart = identityAndPath.indexOf("/");
+  return pathStart < 0 ? path : identityAndPath.slice(pathStart);
 }
 
 // Pattern coverage runs after helper injection. This maps spans back to the

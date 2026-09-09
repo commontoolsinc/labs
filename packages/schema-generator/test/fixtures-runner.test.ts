@@ -9,17 +9,17 @@ import {
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
 import {
-  JsonEncodingContext,
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
-import {
   FabricPrimitive,
   type FabricValue,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { createSchemaTransformerV2 } from "../src/plugin.ts";
+import { SchemaGenerator } from "../src/schema-generator.ts";
 import {
   batchTypeCheckFixtures,
   getTypeFromCode,
@@ -133,7 +133,7 @@ defineFixtureSuite<SchemaResult, string>({
       );
     }
 
-    // A generated schema is a fabric value; `normalizeArrayOrdering` is typed
+    // A generated schema is a `FabricValue`; `normalizeArrayOrdering` is typed
     // loosely because it walks arbitrary structure.
     const normalizedActual = normalizeArrayOrdering(
       actual.normalized,
@@ -170,7 +170,7 @@ defineFixtureSuite<SchemaResult, string>({
 async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
   const code = await Deno.readTextFile(inputPath);
   const { type, checker, typeNode } = await getTypeFromCode(code, TYPE_NAME);
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
   const normalized = normalizeSchema(
     transformer.generateSchema(type, checker, typeNode),
   );
@@ -191,14 +191,14 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
  *
  * The encoding's prefix tag identifies it on the wire but is not part of the
  * JSON, so it cannot survive pretty-printing. Taking it off and putting it back
- * goes through `JsonEncodingContext`'s test-only helpers, which is what keeps
- * the tag defined in exactly one place. Key order needs no help: a conforming
- * encoder emits plain-object keys in canonical order.
+ * goes through `JsonCodecEngine`'s test-only helpers, which is what keeps the tag
+ * defined in exactly one place. Key order needs no help: a conforming encoder
+ * emits plain-object keys in canonical order.
  */
 function encodeGolden(value: unknown): string {
   const body = JSON.parse(
-    JsonEncodingContext.unwrapEncodedValueForTesting(
-      jsonFromValue(value as FabricValue),
+    JsonCodecEngine.unwrapEncodedValueForTesting(
+      jsonFromFabricValue(value as FabricValue),
     ),
   );
   return JSON.stringify(body, null, 2) + "\n";
@@ -206,8 +206,8 @@ function encodeGolden(value: unknown): string {
 
 /** Inverse of {@link encodeGolden}. */
 function decodeGolden(text: string): unknown {
-  return valueFromJson(
-    JsonEncodingContext.wrapEncodedValueForTesting(text.trim()),
+  return fabricFromJsonValue(
+    JsonCodecEngine.wrapEncodedValueForTesting(text.trim()),
   );
 }
 
@@ -244,10 +244,13 @@ function normalizeArrayOrdering(obj: unknown): unknown {
   return obj;
 }
 
+//
 // The golden format exists to hold values plain JSON cannot. Guard that
 // directly: a fixture cannot reach these values on its own yet, and a golden
 // that silently flattens them would agree with buggy output instead of
 // catching it.
+//
+
 Deno.test("golden encoding preserves values JSON cannot represent", () => {
   const schema = {
     type: "object",
@@ -290,8 +293,8 @@ Deno.test("plain JSON would lose exactly those values", () => {
   assertThrows(() => JSON.stringify({ v: 1n }), TypeError);
 });
 
-Deno.test("golden compare keeps Fabric special objects distinct, not flattened to {}", () => {
-  // Both normalizers walk objects by key. A Fabric special object has no
+Deno.test("golden compare keeps `FabricSpecialObject`s distinct, not flattened to {}", () => {
+  // Both normalizers walk objects by key. A `FabricSpecialObject` has no
   // enumerable own properties, so walking it flattens it to `{}` -- and then
   // `valueEqual` sees only `{}` on each side and calls two different values
   // equal. That is exactly the silent agreement this whole harness exists to

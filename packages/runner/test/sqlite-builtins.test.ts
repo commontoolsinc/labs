@@ -4,23 +4,27 @@
 // not-implemented error (asserted here so the wiring — not fabricated results —
 // is what's tested).
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { defer } from "@commonfabric/utils/defer";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
-import { Runtime } from "../src/runtime.ts";
-import { createCell } from "../src/cell.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   type DataUnavailable,
   DataUnavailable as DataUnavailableValue,
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { defer } from "@commonfabric/utils/defer";
+
+import { createBuilder } from "../src/builder/factory.ts";
 import { sqliteQueryStateNodeFactory } from "../src/builtins/sqlite/query-node.ts";
+import { createCell } from "../src/cell.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -283,6 +287,103 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       "sqlite-success-writeback",
     );
     expect(q).toEqual({ rows: [] });
+  });
+
+  it("writes reserved SQLite aliases back in a Fabric-safe row form", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    provider.sqliteQuery = () =>
+      Promise.resolve({
+        rows: [Object.fromEntries([
+          ["constructor", 1],
+          ["__proto__", 2],
+        ])],
+      });
+    try {
+      const q = await runQueryToSettled(
+        'SELECT 1 AS "constructor", 2 AS "__proto__"',
+        "sqlite-reserved-alias-writeback",
+      );
+      expect(q).toEqual({
+        rows: [[
+          ["constructor", 1],
+          ["__proto__", 2],
+        ]],
+      });
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
+  it("attaches row labels to reserved SQLite alias rows", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    provider.sqliteQuery = () =>
+      Promise.resolve({
+        rows: [Object.fromEntries([["constructor", 1]])],
+        columns: [{ output: "constructor", table: "items", column: "id" }],
+      });
+    try {
+      const queryPattern = cf.pattern(() => {
+        const { table, constant } = cf.cfSqlite;
+        const db = cf.sqliteDatabase({
+          tables: {
+            items: table(
+              {
+                id: {
+                  type: "integer",
+                  ifc: { confidentiality: ["column-secret"] },
+                },
+              },
+              () => ({ confidentiality: constant("secret") }),
+            ),
+          },
+        });
+        return cf.sqliteQuery({
+          db,
+          sql: 'SELECT id AS "constructor" FROM items',
+          reactOn: db,
+        });
+      });
+      const resultCell = runtime.getCell(
+        space,
+        "sqlite-reserved-alias-row-label",
+        queryPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, queryPattern, {}, resultCell);
+      await tx.commit();
+
+      const view = result as unknown as {
+        get: () => QueryValue;
+        sink: (f: () => void) => () => void;
+      };
+      const cancel = view.sink(() => {});
+      try {
+        await runtime.idle();
+        await runtime.settled();
+        expect(view.get()).toEqual({ rows: [[["constructor", 1]]] });
+        const rowLabel = cfcLabelViewForCell(
+          result.key("rows").key(0).resolveAsCell(),
+        );
+        expect(cfcConfidentialityForObservationNode({
+          labelView: rowLabel,
+          logicalPath: [],
+        })).toContainEqual("secret");
+        expect(cfcConfidentialityForObservationNode({
+          labelView: rowLabel,
+          logicalPath: ["0", "1"],
+        })).toEqual(expect.arrayContaining(["secret", "column-secret"]));
+      } finally {
+        cancel();
+      }
+    } finally {
+      provider.sqliteQuery = original;
+    }
   });
 
   it("writes an error result when the sqlite read fails, rather than staying pending", async () => {

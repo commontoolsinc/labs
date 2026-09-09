@@ -1,3 +1,10 @@
+/**
+ * Decides where the dashboard's on-disk caches live, so every store that keeps
+ * history across restarts agrees on one directory. DASHBOARD_CACHE_DIR names
+ * it outright; without that the caches fall back to the temporary directory
+ * the platform offers.
+ */
+
 import { join } from "@std/path";
 
 type Environment = (name: string) => string | undefined;

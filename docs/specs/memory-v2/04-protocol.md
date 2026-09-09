@@ -51,11 +51,13 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
-    "entityIdLookup": true
+    "entityIdLookup": true,
+    "sessionHoldings": true
   }
 }
 ```
@@ -68,11 +70,13 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
-    "entityIdLookup": true
+    "entityIdLookup": true,
+    "sessionHoldings": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -87,6 +91,61 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the required data-model
 flags do not match what it implements, it returns a typed error response and
 does not mark the connection ready.
+
+`hello` and `hello.ok` are always ordinary memory text messages. When both
+peers advertise `messageCompressionV1`, either peer may send later messages as
+a versioned binary compression envelope. Its fixed header is followed directly
+by one gzip member:
+
+```text
+bytes 0..3   ASCII "mcmp"
+byte 4       envelope version 1
+bytes 5..8   uncompressed UTF-8 byte length, unsigned 32-bit big-endian
+bytes 9..    raw gzip bytes
+```
+
+A binary first frame violates the protocol because the connection has not yet
+exchanged `hello`. Any binary frame on a connection that did not negotiate
+`messageCompressionV1` is likewise a protocol violation. Memory WebSocket
+hosts close the connection with WebSocket code 1003 in both cases.
+
+A peer expands the binary frame before decoding the memory message inside it.
+Messages below 1,024 UTF-8 bytes stay in their ordinary text form, as do
+messages whose binary envelope would not be smaller. Receivers therefore accept
+both ordinary text and compressed binary messages after negotiation. Expansion
+is limited to 256 MiB per envelope and must produce exactly the declared byte
+count. Compression work preserves WebSocket message order in both directions.
+
+The capability defaults to `false` when absent. A new peer connected to an old
+peer consequently keeps every message in the ordinary form. Each reconnect
+starts again with an uncompressed `hello`; compression from the previous
+connection does not carry across WebSocket boundaries.
+The local `setMessageCompressionConfig(false)` rollback override suppresses
+advertisement on clients and servers, keeping connections text-only even when
+both builds support compression.
+
+After compression negotiation, a client may change the send mode in both
+directions without reconnecting by sending an ordinary text control frame:
+
+```json
+{
+  "type": "memory.compression",
+  "requestId": "debug-1",
+  "enabled": false
+}
+```
+
+The server applies the requested mode to its later sends and returns the same
+control frame as an acknowledgement. It returns `enabled: false` when the
+connection did not negotiate compression. Both peers continue accepting text
+and binary frames after a negotiated connection disables sending compression,
+so compressed work already in flight remains valid. Control frames share the
+application-message queues and therefore cannot reorder the messages around
+them.
+
+The browser shell exposes this exchange as
+`await commonfabric.setMemoryMessageCompression(false)`. Passing `true`
+re-enables compression on connections which negotiated the capability.
 
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed
@@ -127,22 +186,19 @@ After a successful `session.open`, the response includes a new
 `sessionOpen.challenge`. The client uses that new challenge for the next
 `session.open` on the same connection.
 
-`persistentSchedulerState` advertises whether the runner and memory server are
-allowed to write and serve internal scheduler observations. It defaults to
-`false` when absent. When `false`, clients should not send scheduler observation
-payloads, servers ignore scheduler observation payloads if received, and
-snapshot-list requests return no scheduler snapshots even if older scheduler
-rows exist in the database. This flag is negotiated as an optional capability:
-a client and server may connect when their scheduler-state flags differ, and
-the server's flag controls the scheduler-observation data plane for that
-connection.
+`persistentSchedulerState` was RETIRED 2026-08-04 (server-execution v2
+Phase 1 stage C: the persisted observation form was deleted and reduced
+to the `scheduler_basis` index — see
+[the archived spec](../../history/specs/persistent-scheduler-state.md)).
+The server no longer advertises or reads it; an old client that still
+advertises it connects normally (optional-capability flags tolerate
+mismatch) and takes the flag-absent path it already handled.
 
 `syncSchemaTableV2` advertises support for the hash-keyed schema table described
 in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
 when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
-shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
-and does not enable the v2 encoding.
+shape.
 
 `entityIdListing` advertises support for `entity-id.list`. It defaults to
 `false` when absent. A client must not send the request unless the server
@@ -153,6 +209,27 @@ advertises the capability.
 `entity-id.exists`. Both default to `false` when absent. A client connected to
 an older server may make the historical unpaginated list request, but must not
 send continuation fields or an existence request.
+
+`verdictCatchUpMarkers` advertises that the server stages a `caughtUpLocalSeq`
+catch-up obligation for accepts and conflict rejections, delivered on the
+batched fan-out (section 4.11.2). It is build-inherent (always advertised by
+this build) and defaults to `false` when absent: against an older server that
+stamps markers only for conflicts, the client applies verdicts immediately
+instead of parking them.
+
+`sessionHoldings` advertises that the server takes a reconnecting client's
+DECLARED holdings — the `holdings` a resuming `session.open` and a
+re-establishing `session.watch.set` may carry (sections 4.1.2 and 4.3.5) — as
+the base of its delivery diff, in place of its own memory of the session. It is
+build-inherent and defaults to `false` when absent. A client whose consumer
+declares holdings treats the flag's absence as terminal at restore: the initial
+connection proceeds normally (nothing is held yet, so nothing needs declaring),
+but a reconnect MUST fail that session with an explicit error rather than
+silently fall back to the delivery paths the declaration exists to replace — a
+server-memory resume can elide a document the replica lost. A consumer that
+declares no holdings is unaffected: its sessions restore on the
+declaration-less paths (a resumed session diffed against the server's memory, a
+fresh one delivered in full) on any server.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -177,6 +254,25 @@ interface SessionOpenRequest {
   authorization?: {
     signature: SignatureBytes;
   };
+  // The client's declared holdings, sent when resuming (see the rules).
+  // Outside the signed descriptor: it shapes only what this session is
+  // re-sent, never what it may read.
+  holdings?: SessionHolding[];
+}
+
+// One document the client declares it HOLDS: the id, the scope name (the
+// instance resolves from the session, as for every frame), the branch
+// (absent = the default branch; the diff keys by branch, so a same-id
+// document on another branch is a different holding and never stands in
+// for this one), the server seq of the covering commit it has confirmed,
+// and whether that is a tombstone. A document the client does not list is
+// one it does not hold, whatever the server remembers delivering.
+interface SessionHolding {
+  id: EntityId;
+  scope?: CellScope;
+  branch?: BranchId;
+  seq: number;
+  deleted?: true;
 }
 
 interface SessionOpenInvocation {
@@ -201,6 +297,11 @@ interface SessionOpenResult {
   sessionId: SessionId;
   sessionToken: string;
   serverSeq: number;
+  // Highest of the session's own localSeqs whose verdicts are decided and
+  // reflected in delivered/served state (SESSION localSeq space, not server
+  // seqs). Lets a resuming client re-anchor its catch-up point without
+  // waiting for a frame. See section 4.11.2 for the stamping contract.
+  caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: {
@@ -236,9 +337,21 @@ Rules:
 - a stale `sessionToken` MUST fail with `SessionRevokedError`
 - when a resumed session already has watches installed, `sync` carries the
   catch-up delta the client missed while offline
+- a resuming client that advertises `sessionHoldings` (and whose server does)
+  sends `holdings`: the documents its replica holds, each at the seq it holds
+  it at. The server replaces its memory of what the session was delivered with
+  that statement before computing the catch-up, so the delta re-delivers every
+  document the client does not hold — one it never absorbed, or lost with a
+  replaced replica — and elides every one it does. A session with no watches
+  covers nothing: the catch-up retracts as `removes` whatever the declaration
+  (or, undeclared, the delivery memory) still lists, and clears the memory,
+  so nothing outside the empty union lingers as demand. A resume without
+  `holdings` is diffed against the server's memory
 - after reconnect, the client resumes the session, replays retained commits,
   applies inline catch-up `sync` when present, and only re-establishes the
-  watch set if the session was reopened fresh
+  watch set if the session was reopened fresh — declaring its holdings on that
+  `session.watch.set` (section 4.3.5) so the re-establishment carries the
+  difference rather than the whole union
 - a `session.open` denied with an `AuthorizationError` the server did NOT mark
   `retriable` is permanent: the client stops reopening that session and
   terminates it with the real error rather than retrying the identical handshake
@@ -246,7 +359,7 @@ Rules:
   challenge; a stale signed `exp`) and every transport-level disconnect still
   retry, so a transient blip or a fresh-challenge race heals. A permanent
   protocol-flag mismatch at `hello` ends the whole connection the same way. See
-  [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
+  [`../../features/authorization-failure-surfacing.md`](../../features/authorization-failure-surfacing.md)
   for how the client, the runner storage layer, and the CLI act on this
   classification end to end.
 
@@ -268,11 +381,12 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
-    persistentSchedulerState?: boolean;
+    messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
     entityIdLookup?: boolean;
+    sessionHoldings?: boolean;
   };
 }
 
@@ -285,10 +399,30 @@ interface RequestMessage {
     | "entity-id.exists"
     | "session.watch.set"
     | "session.watch.add"
-    | "session.ack";
+    | "session.ack"
+    | "event.attention.resolve";
   requestId: string;
   space: SpaceId;
   sessionId?: SessionId;
+}
+```
+
+The server-owned attention resolver addresses one immutable event-stream entry
+by its stream sidecar, event ID, and stamped sequence. Retry and Dismiss are
+same-space atomic decisions. A replay returns the first recorded resolution,
+including after ordinary event compaction removes the resolved source entry.
+
+```typescript
+// Shown at module scope.
+interface EventAttentionResolveRequest {
+  type: "event.attention.resolve";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  sidecarId: string;
+  eventId: string;
+  seq: number;
+  action: "retry" | "dismiss";
 }
 ```
 
@@ -319,6 +453,12 @@ interface ResponseMessage<Result> {
     // keep reopening a denied session or to terminate it. An older server sends
     // no marker, so its AuthorizationError is read as permanent.
     retriable?: boolean;
+    // Positive, versioned evidence that the server reached a durable no-commit
+    // verdict. Delivery recovery may use this to distinguish a permanent
+    // protocol failure from an ambiguous transport or storage outcome.
+    permanentEvidence?: true;
+    // Engine revision whose ACL state produced an authorization denial.
+    aclRevision?: number;
   };
 }
 
@@ -339,6 +479,18 @@ interface SessionRevoked {
 
 Live data delivery is not routed through the initiating request id.
 
+Attention resolution returns this result through the response envelope:
+
+```typescript
+// Shown at module scope.
+interface EventAttentionResolveResult {
+  serverSeq: number;
+  resolution:
+    | { kind: "dismissed" }
+    | { kind: "retried"; eventId: string };
+}
+```
+
 ### 4.2.3 Session Sync Payload
 
 ```typescript
@@ -347,6 +499,13 @@ interface SessionSync {
   type: "sync";
   fromSeq: number;
   toSeq: number;
+  // Outcome marker (SESSION localSeq space): every verdict of the receiving
+  // session's commits through this localSeq is decided, and this frame
+  // reflects those outcomes for the docs it covers (section 4.11.2).
+  // Releases the client's read-repair gate and applies parked accepts —
+  // the promotion of accepted-but-unpromoted commits from pending overlay
+  // to confirmed mirror.
+  caughtUpLocalSeq?: number;
   upserts: Array<{
     branch: BranchId;
     id: EntityId;
@@ -435,8 +594,8 @@ against the earlier revision continue to expand references at alias schema
 positions, so those positions remain covered by the reservation rule below.
 
 The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
-legacy `$alias` payloads. Link recognition follows the canonical cell-rep
-form — in the legacy representation, the single-key `{ "/": { "link@1": … } }`
+`$alias` payloads. Link recognition follows the canonical cell-rep form — in
+the legacy representation, the single-key `{ "/": { "link@1": … } }`
 envelope — so an envelope carrying sibling keys is not a link and its contents
 are ordinary data. Memory servers MUST reject set or patch operations
 whose resulting stored document uses that prefix as an opaque schema string in
@@ -617,12 +776,23 @@ interface WatchSpec {
   query: GraphQuery;
 }
 
+// As defined in section 4.1.2.
+type SessionHolding = {
+  id: EntityId;
+  scope?: CellScope;
+  seq: number;
+  deleted?: true;
+};
+
 interface WatchSetRequest {
   type: "session.watch.set";
   requestId: string;
   space: SpaceId;
   sessionId: SessionId;
   watches: WatchSpec[];
+  // The client's declared holdings (section 4.1.2): when present, the
+  // response's `sync` is the difference between the new union and these.
+  holdings?: SessionHolding[];
 }
 
 interface WatchSetResult {
@@ -636,7 +806,13 @@ Semantics:
 - the provided watch list replaces the entire prior watch set for the session
 - the server recomputes the union of watched entities
 - the response carries the initial `sync` needed to bring the session cache in
-  line with the new interest set
+  line with the new interest set: the whole union when the request declares no
+  `holdings`, and otherwise the difference between the union and the declared
+  holdings — a held document at its current seq is elided, a changed or
+  unlisted one is delivered, and a held document the union no longer covers is
+  removed. This is how a client whose server session lapsed (an expired
+  resume, a restarted server) re-establishes its watches without downloading
+  again every document it still holds
 - later committed changes continue to arrive via `session/effect`
 
 ### 4.3.6 `session.watch.add` — Extend the Session Watch Set
@@ -738,13 +914,30 @@ last-owner removal are rejected. These shape and genesis rules are hard
 storage invariants in both `observe` and `enforce`; `observe` relaxes only
 ordinary capability shortfalls on an already valid ACL.
 
+The shape and genesis rules are catalogued as **INV-12** (ACL mutation commit
+shape) and **INV-13** (ACL genesis precedence and authority) in
+[`09-invariants.md`](09-invariants.md#inv-12--acl-mutation-commit-shape) —
+go there for the exact admission predicate, what each rejection message means,
+and what is and is not known about why the whole-document rule exists. A client
+that writes the ACL through an ordinary value-surface `set` emits `op: "patch"`
+and is refused with "ACL mutations must replace the space-scoped ACL document";
+it must address the whole document instead.
+
 Genesis remains an explicit transaction. For a fresh named space, the storage
-manager briefly authenticates as the derived space identity, writes
-`{ [activeUser]: "OWNER", "*": "WRITE" }` against a confirmed absent ACL,
-closes that bootstrap session, and mounts the durable session as the active
-user. The wildcard grant is the rollout default until ACL management has a UI;
-the active user remains the concrete owner who can later narrow it. This
-preserves user/session-scoped partitioning. When the active identity already is
+manager briefly authenticates as the derived space identity, writes the genesis
+document against a confirmed absent ACL, closes that bootstrap session, and
+mounts the durable session as the active user. The document is whichever the
+caller registered beside the space key
+(`registerSpaceIdentity(identity, { genesisAcl })` — the space is then born
+with exactly that ACL, this admission check is the only validation it
+receives, and an open of a space that already exists proceeds only if it is
+owned exactly as that document says — grants below OWNER are the owner's to
+evolve — else is refused), else the fallback
+`{ [activeUser]: "OWNER", "*": "WRITE" }`. The wildcard grant is the rollout
+default until ACL management has a UI, spelled once as the runner's
+`DEFAULT_GENESIS_GRANTS`; the active user remains the concrete owner who can
+later narrow it. This preserves user/session-scoped partitioning. When the
+active identity already is
 the space DID (the home space), the same flow instead writes
 `{ [space]: "OWNER" }`; that narrow path also privatizes a populated legacy
 home with no ACL. Populated named spaces with no ACL remain public under the
@@ -769,6 +962,10 @@ Transport security, origin checks, and product-level signing prompts remain
 part of the complete security boundary.
 
 The memory protocol does not add encryption above WebSocket.
+The `messageCompressionV1` envelope changes representation only and provides
+no confidentiality or integrity protection. Compressed frame sizes reveal
+plaintext-length and repeated-substring correlations, so callers must not treat
+wire length as confidential.
 Remote deployments must expose the route over `wss` or another TLS-protected
 transport.
 Plain `ws` is only appropriate for local development or a trusted private
@@ -824,8 +1021,10 @@ When the client replaces the watch set:
 
 - newly relevant entities are sent as `upserts`
 - entities no longer relevant are sent as `removes`
-- entities still relevant but unchanged are not resent unless needed for
-  catch-up
+- entities still relevant but unchanged are not resent when the replacement
+  declares `holdings` (section 4.3.5); a replacement that declares none is
+  delivered in full, since the server does not assume a silent client holds
+  anything
 
 In the current pass, that `removes` guarantee only applies to explicit
 watch-set replacement. Steady-state topology shrink during background refresh
@@ -853,8 +1052,8 @@ All errors are returned in `response`.
 // Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
-  commit: ClientCommit;
-  conflicts: ConflictDetail[];
+  /** Server head seq at rejection time (§3.6.4). */
+  retryAfterSeq: number;
 }
 
 interface TransactionError extends Error {
@@ -933,7 +1132,8 @@ On disconnect:
 1. pending promises reject with `ConnectionError`
 2. the logical session may still be resumable
 3. the client reconnects, replays retained commits, restores the watch set, and
-   resumes integrating sync from `seenSeq`
+   resumes integrating sync from `seenSeq` — declaring what its replica holds
+   (section 4.1.2) so the server re-delivers exactly what it lacks
 
 The client session lifecycle API publishes `ready(epoch)`,
 `disconnected(epoch, cause)`, and `closed(epoch, cause)` states. Subscription
@@ -971,15 +1171,75 @@ Clients MUST:
 The server processes writes serially within a branch, or with equivalent
 serializable isolation.
 
-For live sync:
+For live sync, transact verdicts return INLINE before the independently batched
+fan-out: N commits can apply against one watch-union recompute, which is where
+the subscription pipeline's throughput comes from. A per-space publication lock
+orders transactions and fan-out: the server sends the verdict while holding the
+lock, completes the transaction's post-commit scheduler bookkeeping, and then
+releases the lock for fan-out. Locks for other spaces remain independent. The
+lock covers each complete turn, so a transaction arriving during fan-out for
+its space waits for that fan-out to finish. The remaining ordering contract is
+enforced through the catch-up marker and CLIENT-side verdict parking (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
-- before returning `ConflictError`, the server MUST first flush any already
-  committed relevant changes that would otherwise leave the client's subscribed
-  view stale
-- the server SHOULD carry dirty-document information through this flush so it
-  only recomputes affected watch unions
+- on a live connection, the server MUST send a commit's transact response
+  before any `SessionSync` frame whose `caughtUpLocalSeq` covers that commit
+- for every accept and every `ConflictError` rejection, the server MUST
+  stage a catch-up obligation for the committing session, and the next
+  frame the batched fan-out sends that session MUST carry
+  `caughtUpLocalSeq` at or above the verdict's localSeq — an
+  otherwise-empty frame when nothing the session watches is dirty. Other
+  rejection kinds (protocol, authorization, apply errors) carry no marker
+  obligation; the client applies them immediately
+- the marker means "every verdict of yours through this localSeq is
+  decided, and this frame reflects those outcomes for the docs it covers."
+  The frame includes a doc unless the session provably holds it (CT-1965,
+  decided per doc by the LAST op the session's accepted commit applied):
+  own `set`- and `delete`-produced heads are elided — the writer supplied
+  the bytes (or the absence), and the verdict plus marker promote them —
+  while own `patch`-produced heads are delivered as full post-apply
+  documents, since merged state is truth the writer cannot extrapolate. A
+  head moved past the session's own write, and all foreign novelty, is
+  delivered in full. REJECTED commits' docs are staged origin-less, so
+  repair frames DO cover them, and a frame lost in flight re-stages its
+  docs origin-less, so the retry delivers full documents.
+- the CLIENT MUST NOT apply a verdict's state effects ahead of the marker
+  that covers it: an accept's promotion (pending overlay to confirmed
+  mirror, removing the pending local copy) is PARKED until
+  `caughtUpLocalSeq` reaches its localSeq. For an elided `set` head the
+  promotion installs the client's own value; for a `patch` head the
+  covering frame has already delivered the post-apply document, so
+  promotion retires the overlay against delivered truth. Extrapolating the
+  post-apply state from the client's own ops remains the fallback where no
+  frame channel exists — unwatched docs, servers that still suppress; a
+  conflict rejection's drop/revert is held by the read-repair gate
+  (`finalizeRejection`, with a timeout backstop for lost connections).
+  Visible state is unaffected by parking — the pending overlay already
+  shows the write.
+- parking splits what an accepted commit's client observers wait for. The
+  commit PROMISE the submitting caller awaits resolves at marker coverage:
+  a resolved commit means the caller's subscribed view reflects the
+  committed write and the foreign novelty it was applied on top of.
+  Post-commit effects gated on durability alone — verdict callbacks and
+  the outbox flush — run at the VERDICT instead: delaying them to
+  coverage buys nothing (they do not read the subscribed view) and costs
+  a fan-out window on every effect-bearing commit. Commit callbacks keep
+  the SETTLEMENT timeline — after coverage on accept, after the
+  read-repair gate on rejection — because their consumers act on the
+  post-commit view; a `resolveAt: "verdict"` caller's returned promise
+  settles early, but its commit callbacks still wait. The same split holds on rejection: the fate is sealed
+  at rejection receipt (verdict callbacks fire), while the promise and
+  commit callbacks wait out the read-repair gate a retry needs. A caller may opt a commit back to
+  verdict timing (`commit({ resolveAt: "verdict" })`) when it needs
+  "durably accepted" without forcing the fan-out through —
+  controlled-staleness test fixtures foremost.
+
+The server advertises this contract with the build-inherent
+`verdictCatchUpMarkers` protocol flag. A client that sees it absent (an
+older server that stamps markers only for conflicts) applies verdicts
+immediately, as before; a client with no active sync consumer (no watch
+view — so no frame stream to order against) also applies immediately.
 
 ## 4.12 Mapping from Current Implementation
 

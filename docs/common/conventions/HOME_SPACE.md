@@ -27,7 +27,7 @@ provides.
 Work that counts people — daily active users, for example — rests on that
 assumption. What the assumption costs, and what the server records about the
 identity behind a session, are covered in
-[`docs/development/active-user-counting.md`](../../development/active-user-counting.md).
+[`docs/features/active-user-counting.md`](../../features/active-user-counting.md).
 
 ## Purpose
 
@@ -53,33 +53,31 @@ Favorites are stored on the home default pattern at
 
 ### Accessing Favorites
 
-Via `PieceManager`:
-
-```typescript
-// Shown inside a pattern body.
-const manager = new PieceManager(session, runtime);
-await manager.addFavorite(piece);
-await manager.removeFavorite(piece);
-const isFav = manager.isFavorite(piece);
-const favoritesCell = manager.getFavorites();
-```
-
-Via the favorites functions directly:
+Favorites are reached through the runtime's favorites manager
+(`FavoritesManager`, exported by `@commonfabric/runtime-client`), which reads
+and writes the home space's default pattern directly. A piece is addressed by
+the space it lives in, its entity id there, and the scope that id resolves in,
+carried as the one `FavoritePieceAddress` value since one id in two scopes is
+two documents:
 
 ```typescript
 // Shown for illustration only.
-import {
-  addFavorite,
-  removeFavorite,
-  isFavorite,
-  getHomeFavorites,
-} from "@commonfabric/piece";
+const favorites = rt.favorites();
+const piece = { space, pieceId, scope: "space" };
 
-await addFavorite(runtime, piece);
-await removeFavorite(runtime, piece);
-const isFav = isFavorite(runtime, piece);
-const favoritesCell = getHomeFavorites(runtime);
+await favorites.addFavorite(piece);
+await favorites.removeFavorite(piece);
+
+const entries = await favorites.getFavorites();
+const unsubscribe = favorites.subscribeFavorites((list) => render(list));
 ```
+
+An entry is keyed by that whole address, so favoriting the same piece twice
+replaces its entry rather than adding a second one, removing it reaches that
+entry whatever else the list holds, and one id favorited in two scopes holds
+two entries rather than one. A space-scoped address names no scope in its key,
+that being the scope an address defaults to; only a narrower scope is written,
+and that elision is what keys every favorite in durable storage.
 
 ## Profile
 
@@ -137,12 +135,20 @@ The home space's default pattern is the home experience itself — by default,
 the CF CLI:
 
 ```bash
-# Deploy a custom home pattern
-cf piece set-home -i ./my.key -a http://localhost:8000 ./my-home.tsx
+# Run its automated pattern test
+cf test ./my-home.test.tsx
+
+# Deploy a custom home pattern with the test attached
+cf space set-home -i ./my.key -a http://localhost:8000 \
+  --test ./my-home.test.tsx ./my-home.tsx
 
 # Reset to the system default
-cf piece set-home -i ./my.key -a http://localhost:8000 --reset
+cf space set-home -i ./my.key -a http://localhost:8000 --reset
 ```
+
+Write automated tests for new or changed home-pattern behavior. Repeat
+`--test` for every authored test entry. Deployment packages and type-checks
+the tests but does not run them, so run each entry with `cf test` first.
 
 Under the hood, `set-home` calls `PiecesController.recreateDefaultPattern()`
 with the compiled program. This tears down the existing default pattern, creates
@@ -164,7 +170,7 @@ public under the temporary compatibility rule.
 For local development, prefer one shared PKCS8/PEM key imported into the browser
 and exported through `CF_IDENTITY` for CLI commands. The browser login screen has
 an `Import CLI Key` option for this workflow. See
-[`docs/development/SHARED_IDENTITY.md`](../../development/SHARED_IDENTITY.md).
+[`docs/features/shared-identity.md`](../../features/shared-identity.md).
 
 The browser shell derives identity from a mnemonic via
 `Identity.fromMnemonic()`, while `cf id derive` uses
@@ -180,8 +186,9 @@ To share identity between browser and CLI:
 #    history and the process list:
 deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > ./browser.key
 
-# 3. Use that key with cf
-cf piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
+# 3. Use that key with cf, retaining the tested source package
+cf space set-home -i ./browser.key -a http://localhost:8000 \
+  --test ./my-home.test.tsx ./my-home.tsx
 ```
 
 Note: `cf id derive <passphrase>` will NOT produce the same identity as the
@@ -217,7 +224,7 @@ Both the home pattern and the default app pattern follow the same mechanism:
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` can replace it — either with a URL-based pattern,
    which also stamps `patternSource`, or a custom `RuntimeProgram` (used by
-   `cf piece set-home`), which remains untracked by the URL updater and may carry
+   `cf space set-home`), which remains untracked by the URL updater and may carry
    a separate repository locator
 5. Before an existing eligible root starts, it is reconciled in place. A root
    with stored `patternSource` tracks that source. A pre-provenance root is
@@ -229,5 +236,6 @@ Both the home pattern and the default app pattern follow the same mechanism:
    sourceless roots always remain pinned.
 
 
-Runtime internals (ACL initialization, PieceManager home-space detection) are
-documented in [docs/development/home-space-internals.md](../../development/home-space-internals.md).
+Runtime internals (ACL initialization, PiecesController home-space detection)
+are
+documented in [docs/features/home-space-internals.md](../../features/home-space-internals.md).

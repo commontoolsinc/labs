@@ -1,3 +1,16 @@
+/**
+ * The space cell is the one cell a space always has. It is addressed
+ * deterministically from the space DID rather than looked up in a registry, so
+ * two requests for it name the same cell and a space that has never been
+ * written to still has one.
+ *
+ * Its `defaultPattern` property is declared `asCell`, which means a read hands
+ * back a cell reference whether or not anything was ever stored there. A fresh
+ * space therefore has the reference in hand and nothing behind it, and that
+ * gap -- between the reference existing and its target holding a value -- is
+ * what the baseline cases distinguish.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

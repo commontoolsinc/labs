@@ -5,13 +5,13 @@ import { verifiedWalkChildValues } from "../src/harness/executable-registry.ts";
 // Regression for CT-1623.
 //
 // The verified-value walks (recordVerifiedFunctions / annotateVerifiedPatterns /
-// collectAssociatedFunctions) recurse through `verifiedWalkChildValues`. The
-// AMD/CommonJS bundle exposes exports as data properties; the ESM module-record
-// loader exposes them as SES module-namespace *live-binding accessors* (no
-// `value`). The walk must follow those accessors, otherwise verified functions
-// and their binding metadata (`__cfVerifiedBindingIdentity`) defined by
-// ESM-loaded modules are never registered, leaving the writer's verified
-// binding identity unresolved and breaking CFC `writeAuthorizedBy` for
+// collectAssociatedFunctions) recurse through `verifiedWalkChildValues`, which
+// has to handle both export shapes it can meet. A plain CommonJS exports object
+// carries data properties; a SES module namespace carries *live-binding
+// accessors* (no `value`). The walk must follow those accessors, otherwise
+// verified functions and their binding metadata
+// (`__cfVerifiedBindingIdentity`) are never registered, leaving the writer's
+// verified binding identity unresolved and breaking CFC `writeAuthorizedBy` for
 // trusted-action writes.
 
 const collect = (
@@ -19,7 +19,7 @@ const collect = (
 ): unknown[] => [...verifiedWalkChildValues(value)];
 
 describe("verifiedWalkChildValues (CT-1623)", () => {
-  it("yields data property values (AMD/CommonJS export shape)", () => {
+  it("yields data property values (plain CommonJS export shape)", () => {
     const fn = () => {};
     const exportsObj = { a: fn, b: 7, c: { nested: true } };
     const yielded = collect(exportsObj);

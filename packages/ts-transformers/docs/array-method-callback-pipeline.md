@@ -14,43 +14,59 @@ The stages relevant to array-method callbacks are:
 3.  OpaqueGetValidationTransformer
 4.  PatternContextValidationTransformer
 5.  MergeablePushValidationTransformer
-6.  CfcPolicyAuthoringTransformer
-7.  CfcPolicyOfValidationTransformer
-8.  JsxExpressionSiteRouterTransformer
-9.  AssertDiagnosticsTransformer             ← rewrites assert(...) bodies; not
+6.  VerbReturnValidationTransformer          ← validation-only; not array-method
+                                                related
+7.  IndirectBuilderCallbackValidationTransformer
+                                             ← validation-only; not array-method
+                                                related
+8.  CfcPolicyAuthoringTransformer
+9.  CfcPolicyOfValidationTransformer
+10. JsxExpressionSiteRouterTransformer
+11. AssertDiagnosticsTransformer             ← rewrites assert(...) bodies; not
                                                 array-method related
-10. AvailabilityAnalysisTransformer
-11. LiftLoweringTransformer
-12. ClosureTransformer                       ← lowers .map() to .mapWithPattern()
+12. AvailabilityAnalysisTransformer
+13. LiftLoweringTransformer
+14. ClosureTransformer                       ← lowers .map() to .mapWithPattern()
                                                 + immediately runs the per-callback
                                                 expression-site lowering
-13. PatternOwnedExpressionSiteLoweringTransformer
-14. HelperOwnedExpressionSiteLoweringTransformer
-15. WriteAuthorizedByValidationTransformer
-16. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
+15. PatternOwnedExpressionSiteLoweringTransformer
+16. HelperOwnedExpressionSiteLoweringTransformer
+17. WriteAuthorizedByValidationTransformer
+18. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
                                                 destructuring (ONLY for destructured
                                                 first params)
-17. SchemaInjectionTransformer
-18. BuilderCallHoistingTransformer           ← hoists whole lift/handler calls and
+19. SchemaInjectionTransformer
+20. BuilderCallHoistingTransformer           ← hoists whole lift/handler calls and
                                                 argument-position pattern(...) to
                                                 module-scope consts, after schema
                                                 injection (CT-1644/CT-1655; replaced
                                                 the former BuilderCallbackHoisting +
                                                 LiftHoisting pair, #3864)
-19. SchemaGeneratorTransformer
-20. ReactiveVariableForTransformer
-21. ModuleScopeShadowingTransformer
-22. ModuleScopeCfDataTransformer
-23. PatternCoverageTransformer               ← no-op unless coverage is enabled
-24. ModuleScopeFunctionHardeningTransformer
+21. SchemaGeneratorTransformer
+22. VerbTierMarkTransformer                  ← verb listing marks (WS-F)
+23. ReactiveVariableForTransformer
+24. ModuleScopeShadowingTransformer
+25. ModuleScopeCfDataTransformer
+26. PatternCoverageTransformer               ← no-op unless coverage is enabled
+27. ModuleScopeFunctionHardeningTransformer
 ```
 
 A common misconception worth flagging up front:
-`PatternCallbackLoweringTransformer` (stage 16) runs _last_ among the lowering
+`PatternCallbackLoweringTransformer` (stage 18) runs _last_ among the lowering
 passes, not first. By the time it fires, expression-site lowering during
-`ClosureTransformer` (stage 12) has already had its say. The
+`ClosureTransformer` (stage 14) has already had its say. The
 `key()`-substitution prologue it generates is downstream of the analyzer-driven
 decisions about wrapping.
+
+This document focuses on reactive collection calls that `ClosureTransformer`
+rewrites. An ordinary eager `Array.map()` or `ReadonlyArray.map()` call remains
+plain JavaScript, but a callback in a pattern body can still carry pattern-owned
+value sites that stage 14 lowers. That permission is narrower than the
+`plain-array-value` callback boundary: `isCollectingPlainArrayMethodCallback`
+admits only argument zero of a `map` whose owner symbol includes the configured
+TypeScript default-library `Array`/`ReadonlyArray` declaration. Same-named
+source and ambient types do not qualify, and neither do result-interpreting
+methods such as `filter`, `find`, `sort`, `flatMap`, or `reduce`.
 
 ## What `ClosureTransformer` does for `.map`s
 
@@ -92,7 +108,7 @@ during `ClosureTransformer`. `PatternCallbackLoweringTransformer` sees only the
 synthesized destructured `({element, …})` param and handles all three
 identically as far as the key-prologue is concerned.
 
-| Source form                                             | `ClosureTransformer` (stage 12)                                                                                                                                                                                                                                                                                                               |
+| Source form                                             | `ClosureTransformer` (stage 14)                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `(elem) => …elem.foo…`                                  | Identifier form. `bindingName = elem`, no aliases, body unchanged. Later passes (and our new analyzer hook) recognize `elem` as the element binding via `mapCallbackRegistry`.                                                                                                                                                                |
 | `({piece, name}) => …` (plain object destructure)       | Destructure with no computed property names. `plan.aliases.length === 0`: the destructure binding passes through unchanged (no fresh `element` identifier synthesized). `PatternCallbackLoweringTransformer` sees the destructured param and generates a `key()` prologue (`const piece = __cf_pattern_input.key("element", "piece");` etc.). |
@@ -106,14 +122,14 @@ path is therefore the dominant one and the one most worth understanding deeply.
 
 For the identifier-form path, the late stages handle most of the lowering:
 
-- During `ClosureTransformer` (stage 12), expression-site lowering decides
+- During `ClosureTransformer` (stage 14), expression-site lowering decides
   whether each expression in the body needs an early lift-applied wrapper. The
   decision flows from `analyze(expression)` reporting `containsReactive` /
   `requiresRewrite` / `dataFlows`.
 - Most `elem.foo`-style passthrough reads (inside `{elem.foo}` JSX, inside
   `[elem.foo]` array literals, etc.) are deliberately **not** wrapped at this
   stage. They flow through to `PatternCallbackLoweringTransformer`.
-- During `PatternCallbackLoweringTransformer` (stage 16),
+- During `PatternCallbackLoweringTransformer` (stage 18),
   `pattern-body-reactive-root-lowering` walks the body and rewrites `elem.foo`
   to `elem.key("foo")` in place. This is the cheaper form — it gives the runtime
   a fine-grained key path without pulling `elem` into a lift's inputs.
@@ -170,7 +186,7 @@ recursing into the body. But the analyzer maintains a per-expression cache, and
 `JsxExpressionSiteRouterTransformer` / `LiftLoweringTransformer` can analyze
 expressions in the body before `ClosureTransformer` marks the callback.
 
-`TransformationContext.invalidateReactiveAnalysisCaches()` is called by each
+`TransformationContext.#invalidateReactiveAnalysisCaches()` is called by each
 `mark*` method on the context. It drops three things:
 
 - `#reactiveContextCache`
@@ -189,6 +205,7 @@ See `src/core/mod.ts` for the full registry contract.
 | Per-callback closure transform                             | `src/closures/strategies/array-method-transform.ts`                                          |
 | Element binding analysis (identifier vs destructured)      | `src/closures/strategies/array-method-utils.ts`                                              |
 | Synthesized pattern callback's typed shape                 | `src/closures/utils/schema-factory.ts`                                                       |
+| Plain-array `map` callback value-site permission           | `src/policy/callback-boundary.ts` + `src/ast/call-kind.ts`                                   |
 | `ClosureTransformer` per-callback expression-site lowering | `src/transformers/expression-site-lowering.ts` (`rewriteArrayMethodCallbackExpressionSites`) |
 | The defer-to-late-lowering gate                            | `src/transformers/expression-site-lowering.ts` (`shouldDeferToLateInPlaceLowering`)          |
 | Dataflow analyzer identifier + property-access branches    | `src/ast/dataflow.ts` (around lines 700-900)                                                 |

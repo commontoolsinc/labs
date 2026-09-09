@@ -55,7 +55,6 @@ describe("multi-instance verified-function resolution", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const runOne = async (cause: string) => {

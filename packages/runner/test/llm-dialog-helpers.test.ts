@@ -1,14 +1,16 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
-import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
+
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
+
 import {
   llmDialogTestHelpers,
   llmToolExecutionHelpers,
 } from "../src/builtins/llm-dialog.ts";
 import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 const {
   buildAvailableCellsDocumentation,
@@ -785,8 +787,12 @@ Deno.test("executeToolCalls wraps denied, present-result, pin, and error results
     value: { value: 7 },
   });
   const runtime = {
+    // The stub tx carries an inner `tx` like the real
+    // IExtendedStorageTransaction: effect-completion marking keys its
+    // WeakMap on `tx.tx` (round-2 thread 18 — wrappers share the inner
+    // tx), so a bare `{}` would throw on the WeakMap set.
     editWithRetry: (fn: (tx: unknown) => void) => {
-      fn({});
+      fn({ tx: {} });
       return true;
     },
     getCellFromLink: () => targetCell,
@@ -971,8 +977,10 @@ Deno.test("toolAllowsObservedConfidentiality permits tools within maxConfidentia
   assertEquals(allowed, true);
 });
 
+//
 // Tests for simplifySchemaForContext
 // Note: We cast schemas to `any` to avoid strict type checking on `type` field literals
+//
 
 Deno.test("simplifySchemaForContext preserves asCell stream marker", () => {
   const schema: any = {
@@ -1246,7 +1254,9 @@ Deno.test("simplifySchemaForContext handles primitive and composed schemas", () 
   assertEquals(result.allOf?.[0]?.properties?.id?.type, "string");
 });
 
+//
 // Tests for resolveRefsForLLM
+//
 
 Deno.test("resolveRefsForLLM converts boolean true schema to empty object", () => {
   const result = resolveRefsForLLM(true as any);
@@ -1411,7 +1421,9 @@ Deno.test("resolveRefsForLLM handles mutually recursive types", () => {
   );
 });
 
+//
 // Tests for prepareSchemaForLLM
+//
 
 Deno.test("prepareSchemaForLLM returns primitive schemas unchanged", () => {
   assertEquals(prepareSchemaForLLM("plain" as any), "plain" as any);

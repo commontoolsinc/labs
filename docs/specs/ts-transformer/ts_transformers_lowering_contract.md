@@ -191,7 +191,9 @@ This is especially important for:
 
 - wildcard traversal outside supported whole-call expression-root positions
 - foreign callback-container roots in pattern-facing contexts
-- direct top-level eager `.get()` reads on reactive or cell-like values
+- eager `.get()` reads with no lowerable expression site to carry them, and
+  eager reads on ordinary opaque values — a read on a true cell at a lowerable
+  site lowers into a lift instead (target-language spec §5.7)
 - imperative statement-boundary constructs in top-level pattern context
 
 ## 3.10 Phase Choice Is An Implementation Detail

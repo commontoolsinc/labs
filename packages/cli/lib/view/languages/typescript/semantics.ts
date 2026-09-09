@@ -18,24 +18,33 @@
  * pure parser remains the authoritative, dependency-free path for everything
  * else.
  */
-import ts from "typescript";
-import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+
 import { parse as parseJsonc } from "@std/jsonc";
-import type { Line } from "../../model.ts";
+import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+
+import ts from "typescript";
+
+import { cpLen } from "../../ansi.ts";
 import type { DiffMaps } from "../../diffdoc.ts";
+import type { Line } from "../../model.ts";
 import type {
   DefTarget,
   Semantics,
   SemanticsOptions as Options,
 } from "../language.ts";
-import { languageForFile } from "../language.ts";
-import { cpLen } from "../../ansi.ts";
+import {
+  decodeLanguageInput,
+  languageForFile,
+  readOnlyReasonFor,
+} from "../language.ts";
 
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
   name: string;
+
   /** Global offset of the section's first character in the blob. */
   start: number;
+
   end: number;
   text: string;
 }
@@ -73,7 +82,7 @@ export function createSemantics(
     sections.find((s) => offset >= s.start && offset < s.end);
   const sectionByVfile = new Map(sections.map((s) => [s.name, s] as const));
 
-  // Memoise resolutions and real-file reads: the info card resolves the same
+  // Memoize resolutions and real-file reads: the info card resolves the same
   // offsets repeatedly (a symbol appears in both "depends on" and "defined
   // elsewhere"), and many external defs land in the same large file.
   const defCache = new Map<number, DefTarget[]>();
@@ -81,7 +90,7 @@ export function createSemantics(
   const readReal = (path: string): string | undefined => {
     if (realFiles.has(path)) return realFiles.get(path);
     const content = within(path, root)
-      ? safe(() => Deno.readTextFileSync(path))
+      ? safe(() => readSourceFile(path))
       : undefined;
     realFiles.set(path, content);
     return content;
@@ -185,7 +194,7 @@ export function createDiffSemantics(
   const readReal = (path: string): string | undefined => {
     if (realFiles.has(path)) return realFiles.get(path);
     const content = within(path, root)
-      ? safe(() => Deno.readTextFileSync(path))
+      ? safe(() => readSourceFile(path))
       : undefined;
     realFiles.set(path, content);
     return content;
@@ -371,7 +380,9 @@ function lineAndPreview(
   };
 }
 
-// --- section splitting -------------------------------------------------------
+//
+// section splitting
+//
 
 const HEADER = /^\/\/\s*transformed:\s*(.*)$/;
 
@@ -421,7 +432,9 @@ function uniqueName(
     : `${name}.${dupesBefore}.ts`;
 }
 
-// --- compiler host -----------------------------------------------------------
+//
+// compiler host
+//
 
 function makeHost(
   sections: SectionFile[],
@@ -447,7 +460,7 @@ function makeHost(
     let content: string | undefined;
     if (readable(path)) {
       try {
-        content = Deno.readTextFileSync(path);
+        content = readSourceFile(path);
       } catch {
         content = undefined;
       }
@@ -550,7 +563,9 @@ function extensionOf(path: string): ts.Extension {
   return ts.Extension.Ts;
 }
 
-// --- import map + libs -------------------------------------------------------
+//
+// import map + libs
+//
 
 /**
  * Map a specifier to a real local file via the import map. Values in `importMap`
@@ -636,7 +651,7 @@ function lexicallyWithin(child: string, parent: string): boolean {
 }
 
 /**
- * True if `child` sits beneath `parent` PHYSICALLY: the check canonicalises
+ * True if `child` sits beneath `parent` PHYSICALLY: the check canonicalizes
  * both sides, so an in-workspace symlink pointing outside the workspace does
  * not pass. `child` must exist (a nonexistent path cannot be read anyway).
  */
@@ -654,12 +669,28 @@ function within(child: string, parent: string): boolean {
   }
 }
 
+function readSourceFile(path: string): string {
+  const selected = languageForFile(path);
+  const selectedReadOnlyReason = readOnlyReasonFor(selected);
+  if (selectedReadOnlyReason !== undefined) {
+    throw new TypeError(selectedReadOnlyReason);
+  }
+  const decoded = decodeLanguageInput(path, Deno.readFileSync(path));
+  const decodedReadOnlyReason = readOnlyReasonFor(decoded.language);
+  if (decodedReadOnlyReason !== undefined) {
+    throw new TypeError(decodedReadOnlyReason);
+  }
+  return decoded.source.text;
+}
+
 /** Directory holding the bundled `lib.*.d.ts`, derived from the ts module URL. */
 function defaultLibDir(): string {
   return dirname(fromFileUrl(import.meta.resolve("typescript")));
 }
 
-// --- ast helpers -------------------------------------------------------------
+//
+// ast helpers
+//
 
 /** The deepest node whose range contains `pos`. */
 function nodeAt(sf: ts.SourceFile, pos: number): ts.Node | undefined {

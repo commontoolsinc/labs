@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -162,5 +163,34 @@ describe("traverseValue with FabricPrimitive values", () => {
     );
 
     expect(result.payload).toBe("replaced");
+  });
+});
+
+describe("traverseValue with FabricInstance values", () => {
+  it("throws for a nested FabricInstance rather than flattening one", () => {
+    // A `FabricInstance` is a container reached by its codec contents rather
+    // than by property name, so the `Object.fromEntries(Object.entries(...))`
+    // rebuild would hand back a bare `{}` -- and anything the walk was looking
+    // for inside it would go unseen.
+    const failure = FabricError.fromNativeError(new Error("boom"));
+
+    expect(() => traverseValue({ failure }, () => undefined)).toThrow(
+      "Cannot yet handle `FabricError` (a `FabricInstance`) when traversing " +
+        "a builder value.",
+    );
+  });
+
+  it("lets `fn` replace a FabricInstance ahead of the refusal", () => {
+    // The refusal sits in the descent condition, not ahead of `fn`. An
+    // instance is still a value `fn` gets to see and replace, exactly as a
+    // primitive is; only descending into one is refused.
+    const failure = FabricError.fromNativeError(new Error("boom"));
+
+    const result = traverseValue(
+      { failure },
+      (v) => (v instanceof FabricError ? "replaced" : undefined),
+    );
+
+    expect(result.failure).toBe("replaced");
   });
 });

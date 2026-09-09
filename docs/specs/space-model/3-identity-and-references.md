@@ -53,28 +53,39 @@ Example:
 }
 ```
 
-#### Legacy Formats
+#### Not a Link: `$alias` Bindings
 
-**`$alias` format** — no longer a link. Generic link recognition and parsing
-(`isWriteRedirectLink`, `parseLink`, `isCellLink`) are sigil-only, so an
-`$alias` record found in data is a plain value. The form survives solely as
-Pattern *binding* vocabulary (produced by `toJSONWithAliasBindings`, consumed
-via `isAliasBinding`/`parseAliasBinding`), where it marks intermediate
-bindings — e.g.
+An `$alias` record is Pattern *binding* vocabulary, and it is not a link.
+Generic link recognition and parsing (`isWriteRedirectLink`, `parseLink`,
+`isCellLink`) are sigil-only, so an `$alias` record found in data is a plain
+value. The form is defined in `runner/src/alias-binding.ts`, produced by
+pattern compilation, and recognized only inside Pattern objects — e.g.
 ```json
 { "$alias": { "cell": "argument", "path": ["items"] } }
 ```
-— not cross-document references.
+
+A link addresses a document that exists: it carries that document's
+identifier, and a read or a write through it lands there. A binding carries
+no identifier. It names a position that acquires a document only when the
+pattern graph is instantiated — by role (`cell: "argument"` or
+`cell: "result"`), by derivation (`partialCause`, naming a document to mint
+from the instance's result cell and that cause), or at a nesting level not yet
+reached (`defer`). Those are different kinds of thing, so this is not a legacy
+link format awaiting replacement by a sigil one. It is a separate vocabulary
+that the link model does not reach into, and both its writers and its readers
+are permanent. `runner/src/alias-binding.ts` gives the full reasoning.
 
 The plain-value reading applies to *data* only. Inside a Pattern object the
 interpretation is positional and shape-based with no escape encoding: pattern
-serialization (`toJSONWithAliasBindings`) treats any `$alias`-shaped record it
+serialization (`withAliasBindings`) treats any `$alias`-shaped record it
 encounters as a binding. A literal `{ "$alias": { "path": [...] } }` object
 passed as factory inputs (via `.with(...)`/`.bind(...)`, captured closure
 state, or a pattern's outputs) is therefore not preserved as data: the
 serializer rewrites it as a nested-pattern binding (incrementing `defer`), and
 instantiation later resolves it as a write redirect into the pattern's own
 documents.
+
+#### Legacy Formats
 
 **`LegacyJSONCellLink`** (`{ cell: { "/": string }, path: [...] }`) — removed
 from write and recognition code paths. The type definition still exists in
@@ -106,6 +117,29 @@ source value (and an optional `cause`) via `hashOf()`, and by `entityIdFrom()`,
 which brands an existing content-hash string or `FabricHash`. A `FabricHash` has
 a tagged string form, `<tag>:<hash>` (e.g. `fid1:…`); construct one from that
 string via `FabricHash.fromString()`.
+
+`entityIdFrom()` is the entity-specific intake seam, so it also accepts the
+`of:`-schemed URI over a tagged hash (`of:fid1:…`) — the two spellings name the
+same entity, and both are in circulation wherever an id crosses a boundary a
+person can type into. A KINDED id (`computed:fid1:…`) is refused by name rather
+than stripped: the hash preimage carries no kind, so `computed:fid1:H` and
+`of:fid1:H` are different entities over the same hash bytes, and the bare hash
+is not a complete identity to fall back on (see
+[Computed Cell Identity](../computed-cell-identity.md)). The reduction itself
+lives in `hashStringForEntityAddress()`, which any other address intake shares.
+
+`createRef()` hashes the preimage it is handed, links and all, so what a
+derived id follows is settled by whoever builds the cause. A node's cause is
+built from its bound inputs, and those links carry the schema the node reads
+through, so `causalFormOfBinding()` reduces each of them to the cell it names
+first — down to the addressing members alone (`LINK_ADDRESS_KEYS`), so that
+anything else riding a link, such as cfc's `cfcLabelView`, stays out along
+with the schema. A link's identity is its address — what
+[link equality](#internal-representation) compares — so an id derived through
+one stays put when a pattern's type signature widens, and the `$defs` closure a
+schema drags along stays out of the digest entirely. A deferred `$alias` keeps
+its schema: it is a binding on its way to a nested pattern, part of that
+pattern's structure rather than of this node's cause.
 
 The underlying `hashOf()` function — see
 [Data Model](./1-data-model.md#hashing-and-content-addressing) for the hashing
@@ -182,9 +216,14 @@ simplify content addressing.
 `LegacyJSONCellLink` and bare string links (`{ "/": string }`) have been removed
 from write and recognition code paths. `LegacyJSONCellLink` retains
 backwards-compatible reading for previously persisted data, but is otherwise
-inactive. `$alias` has been removed from link recognition entirely — in data it
-is a plain value. It remains in use as Pattern-binding vocabulary only, and can
-be retired once pattern serialization emits sigil bindings.
+inactive.
+
+`$alias` is not on this list. It is Pattern-binding vocabulary rather than a
+link format, so there is nothing here to deprecate: link recognition already
+ignores it, and it is not a candidate for replacement by a sigil encoding
+because a binding names a position in a pattern instance while a link
+addresses a document. See
+[Not a Link: `$alias` Bindings](#not-a-link-alias-bindings).
 
 ---
 

@@ -6,6 +6,7 @@
  * to a handler, and the Cell reference (state.isEditing) must be properly
  * captured in the lift-applied computation created for the computed.
  */
+
 import { Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {

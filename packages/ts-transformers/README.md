@@ -142,10 +142,9 @@ module-scope finalization (identity naming, `__cf_data` wrapping, coverage, SES
 hardening).
 
 The stage list and order are deliberately **not** restated here: the canonical
-source is `CFC_TRANSFORMER_STAGE_SPECS` in `src/cf-pipeline.ts`, documented
-stage by stage in
-`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` (§3 and
-onward), and pinned to the constant by `test/spec-sync.test.ts`.
+source is `CFC_TRANSFORMER_STAGES` in `src/cf-pipeline.ts`, documented stage by
+stage in `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
+(§3 and onward), and pinned to the constant by `test/spec-sync.test.ts`.
 
 ### Representative Rewrites
 
@@ -215,7 +214,8 @@ Three things about the stage are load-bearing:
 - The callback gets an **explicit return type annotation**, because schema
   injection uses a callback's annotation directly when it has one. An inferred
   `unknown` return would give the assertion `{ type: "unknown" }`, and a field
-  with that schema reads back as `undefined`.
+  with that schema is not materialized: it reads back as an opaque reference
+  carrying none of the value's properties.
 - The record shape is emitted **unconditionally**, since `assert` declares that
   it returns an `AssertRecord` and the value has to match the declared type.
   `TransformationOptions.assertDiagnostics: false` drops the recording calls and

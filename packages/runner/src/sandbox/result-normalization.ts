@@ -1,21 +1,22 @@
 import {
   fabricFromNativeValue,
   type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
-import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 
 import { isReactive } from "../builder/types.ts";
+import { hasEncodableForm } from "../encodable-form.ts";
 import { isCellLink } from "../link-utils.ts";
 
 export interface NormalizedSandboxResult {
   /** The host/Fabric graph that may safely leave the sandbox boundary. */
   value: unknown;
+
   /** Whether the result graph contains a Reactive leaf. */
   hasReactive: boolean;
 }
@@ -35,17 +36,13 @@ const regexpFlagsGetter = Object.getOwnPropertyDescriptor(
   "flags",
 )!.get!;
 
-const hasToJSON = (value: object): boolean =>
-  "toJSON" in value &&
-  typeof (value as { toJSON?: unknown }).toJSON === "function";
-
 /**
  * SES compartments share the host's hardened `Object.prototype` identity.
  * Deliberately do not infer a foreign `Object.prototype` from a null-rooted
  * parent: custom instance prototypes can be null-rooted too.
  */
 function isPlainResultObject(value: object): boolean {
-  if (hasToJSON(value)) return false;
+  if (hasEncodableForm(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === null || proto === Object.prototype;
 }
@@ -60,14 +57,15 @@ function isSandboxResultContainer(
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
-      `Cannot store ${typeName} with extra enumerable properties`,
+      `Not representable as a \`FabricValue\`: ${typeName} with extra ` +
+        "enumerable properties",
     );
   }
 }
 
 /**
  * Canonicalizes native leaf values while their foreign-realm identity is still
- * known. The data model only receives Fabric values or ordinary host values;
+ * known. The data model only receives `FabricValue`s or ordinary host values;
  * it does not need realm-specific dispatch.
  */
 function normalizeSandboxNativeLeaf(value: unknown): unknown {
@@ -107,10 +105,13 @@ function normalizeSandboxNativeLeaf(value: unknown): unknown {
     brand === "[object Uint8Array]" && ArrayBuffer.isView(value) &&
     (value as Uint8Array).BYTES_PER_ELEMENT === 1
   ) {
-    return new FabricBytes(new Uint8Array(value as Uint8Array));
+    // No second argument, so the constructor makes its own copy: `value`
+    // belongs to the sandbox and cannot be ceded. Copying first and then
+    // ceding would cost the same copy and an extra buffer besides.
+    return new FabricBytes(value as Uint8Array);
   }
 
-  if (isNativeError(value)) {
+  if (Error.isError(value)) {
     return FabricError.fromNativeError(value as Error);
   }
 
@@ -144,7 +145,7 @@ function formatActionResultError(
   const actionStr = actionName ? `\n  in action: ${actionName}` : "";
   const hint = hintForActionResult(value);
   const hintStr = hint ? ` ${hint}` : "";
-  const causeIsError = isNativeError(cause);
+  const causeIsError = Error.isError(cause);
   const causeStr = causeIsError ? `\n${(cause as Error).message}` : "";
   return new Error(
     `Action returned a ${typeNameForActionResult(value)}${pathStr}.` +
@@ -180,12 +181,16 @@ function adaptSandboxResult(
   const existing = adapted.get(value);
   if (existing !== undefined) return existing;
 
+  // This boundary returns canonical shapes: a fresh `Array` for anything
+  // array-shaped, and an `Object.prototype`-rooted record for anything else.
+  // A prototype is not part of what a value says as data, and a
+  // `FabricPlainObject` has exactly one shape, so a pattern that builds a
+  // result with `Object.create(null)` or `Object.groupBy()` has it re-rooted
+  // here rather than carried across only to be rejected downstream.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)
-    : Object.create(
-      Object.getPrototypeOf(value) === null ? null : Object.prototype,
-    );
+    : {};
   adapted.set(value, copy);
 
   for (const [key, child] of Object.entries(value)) {
@@ -207,7 +212,7 @@ function adaptSandboxResult(
 
 /**
  * Produces a validation-only graph. Reactive and Cell leaves are legal result
- * placeholders but are not Fabric values, so they become `undefined` while
+ * placeholders but are not `FabricValue`s, so they become `undefined` while
  * graph structure, shared references, cycles, and invalid array properties are
  * retained for the authoritative data-model conversion check.
  */
@@ -228,6 +233,11 @@ function prepareActionResultValidation(
   const existing = prepared.get(value);
   if (existing !== undefined) return existing;
 
+  // Copying the prototype is safe because this runs on the output of
+  // `adaptSandboxResult()`, which has already re-rooted every record -- so the
+  // prototype in hand is `Object.prototype`. Anything that ran this pass
+  // first, on a value straight from the sandbox, would propagate a prototype
+  // no `FabricPlainObject` has.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)

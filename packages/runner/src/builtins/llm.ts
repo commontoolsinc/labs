@@ -1,7 +1,22 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import type { CfcConfClause } from "../cfc/clause.ts";
 import {
-  DEFAULT_GENERATE_OBJECT_MODELS,
+  BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
+  BuiltInLLMMessage,
+  BuiltInLLMParams,
+} from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
+import {
+  internSchema,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model-schema";
+import { hashOf } from "@commonfabric/data-model";
+import {
+  DataUnavailable,
+  type DataUnavailableVariant,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  DEFAULT_GENERATE_OBJECT_MODEL,
   DEFAULT_MODEL_NAME,
   extractTextFromLLMResponse,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
@@ -11,39 +26,35 @@ import {
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
-import {
-  BuiltInGenerateObjectParams,
-  BuiltInGenerateTextParams,
-  BuiltInLLMMessage,
-  BuiltInLLMParams,
-} from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { mapSubschemas } from "../schema-walk.ts";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import {
-  DataUnavailable,
-  type DataUnavailableVariant,
-} from "@commonfabric/data-model/fabric-instances";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CellScope, JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
   validateSchemaValue,
 } from "../cfc/schema-sanitization.ts";
-import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { type Cell, isCell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
+import { selectUnavailableInput } from "../data-unavailability.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
-import { scopedCell } from "./scope-policy.ts";
 import {
   GenerateObjectParamsSchema,
   GenerateObjectResultSchema,
@@ -54,12 +65,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject, isRecord } from "@commonfabric/utils/types";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
-import { selectUnavailableInput } from "../data-unavailability.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -202,11 +208,11 @@ function setStampedModelOutput(
 function mergeLlmDerivedIntoNode(
   node: Record<string, unknown>,
 ): Record<string, unknown> {
-  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const ifc = isObjectOrArray(node.ifc) ? node.ifc : {};
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const stamp = cfcAtom.llmDerived();
   const already = addIntegrity.some((atom) =>
-    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+    isObjectOrArray(atom) && isObjectOrArray(stamp) && atom.type === stamp.type
   );
   return {
     ...node,
@@ -230,7 +236,7 @@ function mergeLlmDerivedIntoNode(
  *
  * A root-only merge is not enough: when a nested value redirects/splits into its
  * own document (an `asCell` field, an ID-anchored array item), the child write
- * descends via `runtime.cfc.getSchemaAtPath`, which carries ancestor
+ * descends via `ContextualFlowControl.getSchemaAtPath`, which carries ancestor
  * confidentiality but NOT `ifc.addIntegrity`. The child doc that stores the
  * model bytes would then persist as unstamped/ordinary output and the D1b
  * provenance guarantee would be lost for structured results (codex P1). Stamping
@@ -250,11 +256,11 @@ function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
   const stampNode = (node: Record<string, unknown>): JSONSchema =>
     mapSubschemas(
       mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
-      (child) => (isRecord(child) ? stampNode(child) : child),
+      (child) => (isObjectOrArray(child) ? stampNode(child) : child),
       { includeDefs: true, includeUnused: true },
     );
 
-  const base: Record<string, unknown> = isRecord(schema)
+  const base: Record<string, unknown> = isObjectOrArray(schema)
     ? schema
     : { type: "object" };
   return internSchema(stampNode(base));
@@ -397,9 +403,27 @@ function createUpdatePartialCallback(
           return;
         }
 
-        // Wait for scheduler to be idle, then commit the batched update
+        // Wait for scheduler to be idle, then commit the batched update.
+        //
+        // Deliberately NOT marked as an effect completion (server-execution
+        // v2 stage G): protocol.md §6 rules settled-result-only commits —
+        // "partials never become commits" under the flag, and the interim
+        // loss of token streaming is ACCEPTED (owner, 2026-08-02). In the
+        // serving posture UNDER THE FLAG the partial is SKIPPED before a
+        // transaction is minted — the same ruled outcome the
+        // unstamped-seal refusal produced here before, without spending a
+        // refused seal, so §3d's `unstampedSealRefusals` counter stays an
+        // undeclared-commit-path signal instead of counting this accepted
+        // baseline. The OFF arm commits it exactly as today — INCLUDING a
+        // serving-posture runtime with the flag off (review thread
+        // r3756175835: posture alone dropped OFF-arm partials, an
+        // unrecorded OFF-arm delta).
         runtime.idle().then(() => {
-          if (completed || thisRun !== getCurrentRun()) {
+          if (
+            completed || thisRun !== getCurrentRun() ||
+            (runtime.servingPosture &&
+              runtime.experimental.serverExecution === true)
+          ) {
             return;
           }
           return runtime.editWithRetry((tx) => {
@@ -552,19 +576,42 @@ async function handleLLMError<T, P>(
   thisRun: number,
   resetPreviousHash: () => void,
   resultForError?: (error: unknown) => unknown,
+  /** The served-effect id this error writeback completes
+   * (`<sink>:<hash>` — the enqueue id). Marks the write as an
+   * effect-completion transaction under the serving posture
+   * (server-execution v2 stage G, serving-loop.md §4's error-shaped
+   * results); inert everywhere else. */
+  effectKey?: string,
+  /** Announces the builtin's result cell, for the caller whose announcement
+   * rode a transaction that was abandoned: a refused request takes the
+   * announcement with it and leaves the pattern pointing at nothing, including
+   * at the error the refusal is about to record. It runs whether or not a newer
+   * request has taken over, because the announcement says where the answer
+   * appears and is the same either way, and the run that took over will not
+   * make it again. */
+  announce?: (tx: IExtendedStorageTransaction) => void,
 ): Promise<void> {
-  if (thisRun !== getCurrentRun()) return;
+  if (thisRun !== getCurrentRun() && announce === undefined) return;
 
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[LLM Error] ${message}`);
-  logger.warn("llm", "Error in LLM request", { error });
+  if (thisRun === getCurrentRun()) {
+    console.warn(`[LLM Error] ${message}`);
+    logger.warn("llm", "Error in LLM request", { error });
+  }
 
   await runtime.idle();
 
-  await runtime.editWithRetry((tx) => {
-    // Revalidate inside the retried callback. The first attempt may conflict,
-    // then a newer request can publish pending before the next attempt runs.
+  let wrote = false;
+  const { error: writeError } = await runtime.editWithRetry((tx) => {
+    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
+    announce?.(tx);
+    // Read at write time rather than from a decision taken before the wait
+    // above: a newer request can start while this one waits for the
+    // scheduler, and from then on the answer is that request's to give. The
+    // announcement still stands, because it says where the answer appears and
+    // is the same either way.
     if (thisRun !== getCurrentRun()) return;
+    wrote = true;
     pendingCell.withTx(tx).set(false);
     errorCell.withTx(tx).set(message);
     if (resultForError) {
@@ -577,8 +624,17 @@ async function handleLLMError<T, P>(
     }
     requestHashCell.withTx(tx).set(requestHash);
   });
+  if (writeError) {
+    // The error had nowhere to land, so a reader of this result cell sees
+    // something other than this failure. Report it here, since nothing
+    // downstream can.
+    console.error(
+      "[LLM] Writing the request's error to its result cell was rejected.",
+      { requestHash, cause: message, rejection: writeError.message },
+    );
+  }
 
-  if (thisRun !== getCurrentRun()) return;
+  if (!wrote) return;
   resetPreviousHash();
 }
 
@@ -646,13 +702,30 @@ function buildContextDocumentation(
     );
 }
 
+/**
+ * Start `start` once the transaction staging this request commits, and call
+ * `onRefused` instead when the commit is rejected in a way that re-running
+ * cannot resolve. A refused request never reaches the model, so the builtin
+ * settles on the refusal rather than leaving `pending` true forever.
+ *
+ * The settled error is recorded against the request hash, so this request is
+ * over and the builtin waits for a different one. A refusal that turns on
+ * something other than the request — the ceiling its result store declares,
+ * say — outlives the change that resolves it, because that change leaves the
+ * hash where it was. Editing the pattern is what moves it.
+ */
 function enqueuePostCommitLLMWork(
   tx: IExtendedStorageTransaction,
   sink: string,
   id: string,
+  /** The PER-TARGET outbox/dedupe key (effectTargetKey of `id` and the
+   * builtin's result cell) — distinct nodes with identical inputs must
+   * not collide on `id` alone (stage-G round-2 headline). */
+  idempotencyKey: string,
   kind: string,
   request: any,
   start: () => void,
+  onRefused: (error: Error) => void,
 ): void {
   enqueueSinkRequestPostCommitEffect(
     tx,
@@ -663,20 +736,29 @@ function enqueuePostCommitLLMWork(
     () => {
       start();
     },
+    { idempotencyKey, onRejected: onRefused },
   );
 }
 
+/**
+ * Record the hash of the request this transaction stages, which a later run
+ * reads to recognize a request already in flight. If the transaction reports an
+ * error, the hash goes back to what it was and `onRollback` runs, so a caller
+ * can undo state it recorded for the same request.
+ */
 function markRequestHashPendingCommit(
   tx: IExtendedStorageTransaction,
   hash: string,
   getPreviousCallHash: () => string | undefined,
   setPreviousCallHash: (hash: string | undefined) => void,
+  onRollback?: () => void,
 ): void {
   const previousCallHash = getPreviousCallHash();
   setPreviousCallHash(hash);
   tx.addCommitCallback((_committedTx, commitResult) => {
     if (commitResult.error && getPreviousCallHash() === hash) {
       setPreviousCallHash(previousCallHash);
+      onRollback?.();
     }
   });
 }
@@ -690,7 +772,7 @@ async function pullContextCells(
         ? getCellOrThrow(value).resolveAsCell()
         : isCell(value)
         ? value.resolveAsCell()
-        : isRecord(value) && typeof value.resolveAsCell === "function"
+        : isObjectOrArray(value) && typeof value.resolveAsCell === "function"
         ? value.resolveAsCell()
         : undefined;
       await resolved?.pull?.();
@@ -767,13 +849,14 @@ export function llm(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llm: { result: cause } },
         LLMResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -825,7 +908,25 @@ export function llm(
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
+    const currentRequestHash = requestHashWithLog.get();
+    if (hash === previousCallHash || hash === currentRequestHash) {
+      // The §4 memo hit, gated on SETTLED state like the sibling
+      // builtins (generateText/generateObject; round-2 thread 8): a
+      // hit is a re-evaluation that resolved from a stored key WITH a
+      // result or error-shaped result landed. The old gate counted a
+      // settled same-runtime re-evaluation as in-flight dedupe (hash
+      // === previousCallHash, which completion never clears) and a
+      // bare unsettled claim (stored hash, no result yet) as a hit —
+      // both miscounts for Phase 2's gate arithmetic.
+      if (
+        hash === currentRequestHash &&
+        (resultWithLog.get() !== undefined ||
+          errorWithLog.get() !== undefined)
+      ) {
+        runtime.effectMemoObserver?.({ kind: "hit", id: `llm:${hash}` });
+      }
+      return;
+    }
 
     if (!Array.isArray(messages) || messages.length === 0) {
       resultWithLog.set(undefined);
@@ -862,12 +963,66 @@ export function llm(
         thisRun,
       );
 
+    const effectKey = effectTargetKey(`llm:${hash}`, resultCell);
+
+    // The one way this request ends badly, whether the model call failed or the
+    // request never went out at all.
+    const settleWithError = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        resultCell.key("pending"),
+        resultCell.key("result"),
+        resultCell.key("error"),
+        resultCell.key("partial"),
+        resultCell.key("requestHash"),
+        hash,
+        getRunForExecution,
+        thisRun,
+        () => {
+          // Only clear if this is still the current request; a newer request
+          // may have already set previousCallHash to its own hash.
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        undefined,
+        effectKey,
+      );
+
+    // This request's own result cell. A later run that finds a different output
+    // scope builds a new one and leaves this variable pointing at that, so the
+    // ending below has to write the cell this request announced.
+    const requestResultCell = resultCell;
+
+    // The abandoned request's ending. It carries the announcement because the
+    // one this run made rode the transaction that was abandoned, and the
+    // `cellsInitialized` latch means no later run makes it again.
+    const settleAbandoned = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        requestResultCell.key("pending"),
+        requestResultCell.key("result"),
+        requestResultCell.key("error"),
+        requestResultCell.key("partial"),
+        requestResultCell.key("requestHash"),
+        hash,
+        () => currentRun,
+        thisRun,
+        () => {
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        undefined,
+        effectKey,
+        (announceTx) => sendResult(announceTx, requestResultCell),
+      );
+
     // Build tool catalog if tools are present, then start execution after the
     // transaction commits.
     enqueuePostCommitLLMWork(
       tx,
       "llm",
       `llm:${hash}`,
+      effectKey,
       "llm-start",
       requestSnapshot,
       () => {
@@ -905,7 +1060,7 @@ export function llm(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
-                    if (hash !== previousCallHash) return;
+                    markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields —
                     // `result`/`partial` carry `LlmDerived`; the control-state
                     // fields (pending/error/requestHash/grounding) do not.
@@ -949,51 +1104,18 @@ export function llm(
         // `runtime.settledFor(parentCell)` both wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
-          resultPromise.catch((e) =>
-            handleLLMError(
-              e,
-              runtime,
-              resultCell.key("pending"),
-              resultCell.key("result"),
-              resultCell.key("error"),
-              resultCell.key("partial"),
-              resultCell.key("requestHash"),
-              hash,
-              getRunForWrite,
-              thisRun,
-              () => {
-                // Only clear if this is still the current request; a newer request
-                // may have already set previousCallHash to its own hash.
-                if (hash === previousCallHash) previousCallHash = undefined;
-              },
-            )
-          ),
+          resultPromise.catch(settleWithError),
           parentCell,
         );
+      },
+      (error) => {
+        cleanupPartial();
+        runtime.trackAsyncWork(settleAbandoned(error), parentCell);
       },
     );
   };
 }
 
-/**
- * Generate text via an LLM.
- *
- * A simplified alternative to `llm` that takes a single prompt string and
- * optional system message, returning plain text rather than a structured
- * content array.
- *
- * Returns the complete result as `result` (string) and the incremental result
- * as `partial` (string). `pending` is true while a request is pending.
- *
- * @param prompt - The user prompt/message to send to the LLM.
- * @param system - Optional system message.
- * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
- * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
- *
- * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
- *   As individual docs, representing `pending` state, final `result` and
- *   incrementally updating `partial` result.
- */
 /**
  * Resolve the effective native-model-tool ids for a request from the friendly
  * `search` flag (shorthand for Google Search grounding) plus any explicit
@@ -1049,6 +1171,25 @@ function extractGroundingSources(
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * Generate text via an LLM.
+ *
+ * A simplified alternative to `llm` that takes a single prompt string and
+ * optional system message, returning plain text rather than a structured
+ * content array.
+ *
+ * Returns the complete result as `result` (string) and the incremental result
+ * as `partial` (string). `pending` is true while a request is pending.
+ *
+ * @param prompt - The user prompt/message to send to the LLM.
+ * @param system - Optional system message.
+ * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
+ * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
+ *
+ * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
+ *   As individual docs, representing `pending` state, final `result` and
+ *   incrementally updating `partial` result.
+ */
 export function generateText(
   inputsCell: Cell<BuiltInGenerateTextParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -1061,6 +1202,10 @@ export function generateText(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  // Whether the most recently issued request went through a queue. Read when a
+  // later run finds no prompt, so the decision follows the request that may
+  // still be in flight rather than whatever the `queue` input says by then.
+  let lastRequestQueued = false;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
   let cellScope: CellScope | undefined;
@@ -1076,13 +1221,14 @@ export function generateText(
     if (unavailableInput) {
       const outputScope = tx.getNarrowestReadScope();
       if (!cellsInitialized || cellScope !== outputScope) {
-        const baseResultCell = runtime.getCell(
-          parentCell.space,
+        resultCell = ownedCell(
+          runtime,
+          tx,
+          parentCell,
           { generateText: { result: cause } },
           GenerateTextResultSchema,
-          tx,
+          outputScope,
         );
-        resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
         resultCell.sync();
         sendResult(tx, resultCell);
         cellsInitialized = true;
@@ -1132,13 +1278,14 @@ export function generateText(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { generateText: { result: cause } },
         GenerateTextResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1153,6 +1300,18 @@ export function generateText(
     // If neither prompt nor messages is provided, don't make a request
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if (!hasPrompt && !messages) {
+      // Abandon a request already in flight, where abandoning one is possible.
+      // Advancing the run makes its response fail the guard on the way back, so
+      // nothing of it reaches the cell, and dropping the remembered hash lets
+      // the same prompt go out again rather than match the in-flight check and
+      // never be sent. A queued request is neither of those: the queue owns its
+      // lifecycle and runs it to completion, so forgetting its hash would
+      // enqueue a second copy of a call that is still going to arrive. The
+      // mode is the one the request in flight was issued under.
+      if (!lastRequestQueued) {
+        currentRun++;
+        previousCallHash = undefined;
+      }
       const unavailable = DataUnavailable.schemaMismatch();
       resultWithLog.setRawUntyped(unavailable);
       errorWithLog.set(undefined);
@@ -1222,6 +1381,9 @@ export function generateText(
       (currentResult !== undefined || currentError !== undefined) &&
       hash === currentRequestHash
     ) {
+      // The §4 memo hit (server-execution v2): stored key matches — the
+      // stored result (or error-shaped result) is the value; no re-fire.
+      runtime.effectMemoObserver?.({ kind: "hit", id: `generateText:${hash}` });
       return;
     }
 
@@ -1230,12 +1392,17 @@ export function generateText(
       return;
     }
 
+    const previousRequestQueued = lastRequestQueued;
+    lastRequestQueued = !!queueName;
     markRequestHashPendingCommit(
       tx,
       hash,
       () => previousCallHash,
       (next) => {
         previousCallHash = next;
+      },
+      () => {
+        lastRequestQueued = previousRequestQueued;
       },
     );
 
@@ -1265,10 +1432,64 @@ export function generateText(
         thisRun,
       );
 
+    const effectKey = effectTargetKey(`generateText:${hash}`, resultCell);
+
+    // The one way this request ends badly, whether the model call failed or the
+    // request never went out at all.
+    const settleWithError = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        resultCell.key("pending"),
+        resultCell.key("result"),
+        resultCell.key("error"),
+        resultCell.key("partial"),
+        resultCell.key("requestHash"),
+        hash,
+        getRunForExecution,
+        thisRun,
+        () => {
+          // Only clear if this is still the current request; a newer request
+          // may have already set previousCallHash to its own hash.
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        errorUnavailable,
+        effectKey,
+      );
+
+    // This request's own result cell. A later run that finds a different output
+    // scope builds a new one and leaves this variable pointing at that, so the
+    // ending below has to write the cell this request announced.
+    const requestResultCell = resultCell;
+
+    // The abandoned request's ending. It carries the announcement because the
+    // one this run made rode the transaction that was abandoned, and the
+    // `cellsInitialized` latch means no later run makes it again.
+    const settleAbandoned = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        requestResultCell.key("pending"),
+        requestResultCell.key("result"),
+        requestResultCell.key("error"),
+        requestResultCell.key("partial"),
+        requestResultCell.key("requestHash"),
+        hash,
+        () => currentRun,
+        thisRun,
+        () => {
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        errorUnavailable,
+        effectKey,
+        (announceTx) => sendResult(announceTx, requestResultCell),
+      );
+
     enqueuePostCommitLLMWork(
       tx,
       "generateText",
       `generateText:${hash}`,
+      effectKey,
       "generateText-start",
       requestSnapshot,
       () => {
@@ -1305,7 +1526,7 @@ export function generateText(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
-                    if (thisRun !== getRunForWrite()) return;
+                    markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields.
                     attributeModelOutputWrite(tx, runtime, "generateText");
                     resultCell.key("pending").withTx(tx).set(false);
@@ -1347,28 +1568,13 @@ export function generateText(
         // `runtime.settledFor(parentCell)` both wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
-          resultPromise.catch((e) =>
-            handleLLMError(
-              e,
-              runtime,
-              resultCell.key("pending"),
-              resultCell.key("result"),
-              resultCell.key("error"),
-              resultCell.key("partial"),
-              resultCell.key("requestHash"),
-              hash,
-              getRunForWrite,
-              thisRun,
-              () => {
-                // Only clear if this is still the current request; a newer request
-                // may have already set previousCallHash to its own hash.
-                if (hash === previousCallHash) previousCallHash = undefined;
-              },
-              errorUnavailable,
-            )
-          ),
+          resultPromise.catch(settleWithError),
           parentCell,
         );
+      },
+      (error) => {
+        cleanupPartial();
+        runtime.trackAsyncWork(settleAbandoned(error), parentCell);
       },
     );
   };
@@ -1384,7 +1590,7 @@ export function generateText(
  * @param schema - JSON Schema to validate the response against.
  * @param system - Optional system message.
  * @param maxTokens - Maximum number of tokens to generate.
- * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODELS).
+ * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODEL).
  * @param cache - Whether to cache the response (defaults to true).
  * @param metadata - Additional metadata to pass to the LLM.
  * @param tools - Optional tools to make available to the LLM.
@@ -1405,6 +1611,10 @@ export function generateObject<T extends Record<string, unknown>>(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  // Whether the most recently issued request went through a queue. Read when a
+  // later run finds no prompt, so the decision follows the request that may
+  // still be in flight rather than whatever the `queue` input says by then.
+  let lastRequestQueued = false;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
   let cellScope: CellScope | undefined;
@@ -1420,13 +1630,14 @@ export function generateObject<T extends Record<string, unknown>>(
     if (unavailableInput) {
       const outputScope = tx.getNarrowestReadScope();
       if (!cellsInitialized || cellScope !== outputScope) {
-        const baseResultCell = runtime.getCell(
-          parentCell.space,
+        resultCell = ownedCell(
+          runtime,
+          tx,
+          parentCell,
           { generateObject: { result: cause } },
           GenerateObjectResultSchema,
-          tx,
+          outputScope,
         );
-        resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
         resultCell.sync();
         sendResult(tx, resultCell);
         cellsInitialized = true;
@@ -1487,13 +1698,14 @@ export function generateObject<T extends Record<string, unknown>>(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const baseResultCell = runtime.getCell(
-        parentCell.space,
+      resultCell = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { generateObject: { result: cause } },
         GenerateObjectResultSchema,
-        tx,
+        outputScope,
       );
-      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
@@ -1511,6 +1723,18 @@ export function generateObject<T extends Record<string, unknown>>(
       (!hasPrompt && (!messages || messages.length === 0)) ||
       schema === undefined
     ) {
+      // Abandon a request already in flight, where abandoning one is possible.
+      // Advancing the run makes its response fail the guard on the way back, so
+      // nothing of it reaches the cell, and dropping the remembered hash lets
+      // the same prompt go out again rather than match the in-flight check and
+      // never be sent. A queued request is neither of those: the queue owns its
+      // lifecycle and runs it to completion, so forgetting its hash would
+      // enqueue a second copy of a call that is still going to arrive. The
+      // mode is the one the request in flight was issued under.
+      if (!lastRequestQueued) {
+        currentRun++;
+        previousCallHash = undefined;
+      }
       const unavailable = DataUnavailable.schemaMismatch();
       resultWithLog.setRawUntyped(unavailable);
       messagesWithLog.set(undefined);
@@ -1562,7 +1786,7 @@ export function generateObject<T extends Record<string, unknown>>(
         observedConfidentiality: [],
       };
     // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const hasTools = isObjectNotArray(tools) && Object.keys(tools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;
@@ -1605,7 +1829,7 @@ export function generateObject<T extends Record<string, unknown>>(
         stop: "",
         maxTokens: maxTokens ?? 8192,
         stream: true,
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+        model: model ?? DEFAULT_GENERATE_OBJECT_MODEL,
         metadata: {
           ...readyMetadata,
           context: "piece",
@@ -1652,6 +1876,7 @@ export function generateObject<T extends Record<string, unknown>>(
         ),
       );
       const hash = hashOf(requestSnapshot).toString();
+      const effectKey = effectTargetKey(`generateObject:${hash}`, resultCell);
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1688,6 +1913,11 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        // The §4 memo hit (server-execution v2): no re-fire.
+        runtime.effectMemoObserver?.({
+          kind: "hit",
+          id: `generateObject:${hash}`,
+        });
         logGenerateObject("skip-cached", toolsRequestSummary);
         return;
       }
@@ -1697,12 +1927,17 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
+      const previousRequestQueued = lastRequestQueued;
+      lastRequestQueued = !!queueName;
       markRequestHashPendingCommit(
         tx,
         hash,
         () => previousCallHash,
         (next) => {
           previousCallHash = next;
+        },
+        () => {
+          lastRequestQueued = previousRequestQueued;
         },
       );
 
@@ -1737,12 +1972,68 @@ export function generateObject<T extends Record<string, unknown>>(
         : () => thisRun !== currentRun;
       const isWriteStale = () => thisRun !== currentRun;
 
+      // The one way this request ends badly, whether the tools loop failed or
+      // the request never went out at all.
+      const settleWithError = (error: unknown) => {
+        logGenerateObject("error", {
+          ...toolsRequestSummary,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return handleLLMError(
+          error,
+          runtime,
+          resultCell.key("pending"),
+          resultCell.key("result"),
+          resultCell.key("error"),
+          resultCell.key("partial"),
+          resultCell.key("requestHash"),
+          hash,
+          queueName ? () => thisRun : () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          generationUnavailableForError,
+          effectKey,
+        );
+      };
+
+      // This request's own result cell. A later run that finds a different
+      // output scope builds a new one and leaves this variable pointing at
+      // that, so the ending below has to write the cell this request
+      // announced.
+      const requestResultCell = resultCell;
+
+      // The abandoned request's ending. It carries the announcement because
+      // the one this run made rode the transaction that was abandoned, and the
+      // `cellsInitialized` latch means no later run makes it again.
+      const settleAbandoned = (error: unknown) =>
+        handleLLMError(
+          error,
+          runtime,
+          requestResultCell.key("pending"),
+          requestResultCell.key("result"),
+          requestResultCell.key("error"),
+          requestResultCell.key("partial"),
+          requestResultCell.key("requestHash"),
+          hash,
+          () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          generationUnavailableForError,
+          effectKey,
+          (announceTx) => sendResult(announceTx, requestResultCell),
+        );
+
       logGenerateObject("enqueue", toolsRequestSummary);
 
       enqueuePostCommitLLMWork(
         tx,
         "generateObject",
         `generateObject:${hash}`,
+        effectKey,
         "generateObject-start",
         requestSnapshot,
         () => {
@@ -1933,7 +2224,7 @@ export function generateObject<T extends Record<string, unknown>>(
               if (isWriteStale()) return;
 
               const writeback = await runtime.editWithRetry((tx) => {
-                if (isWriteStale()) return false;
+                markEffectCompletion(tx, effectKey);
                 // The InjectionSafe annotations on resultSchema are minted by
                 // the trusted sanitizer; attribute this write to the builtin so
                 // the persist-time evidence gate trusts them (audit S4). The
@@ -1981,32 +2272,13 @@ export function generateObject<T extends Record<string, unknown>>(
           // both span it; `idle()` does not, so the handler never blocks on the
           // LLM call.
           runtime.trackAsyncWork(
-            resultPromise.catch((e) => {
-              logGenerateObject("error", {
-                ...toolsRequestSummary,
-                error: e instanceof Error ? e.message : String(e),
-              });
-              return handleLLMError(
-                e,
-                runtime,
-                resultCell.key("pending"),
-                resultCell.key("result"),
-                resultCell.key("error"),
-                resultCell.key("partial"),
-                resultCell.key("requestHash"),
-                hash,
-                queueName ? () => thisRun : () => currentRun,
-                thisRun,
-                () => {
-                  if (hash === previousCallHash) {
-                    previousCallHash = undefined;
-                  }
-                },
-                generationUnavailableForError,
-              );
-            }),
+            resultPromise.catch(settleWithError),
             parentCell,
           );
+        },
+        (error) => {
+          cleanupPartial();
+          runtime.trackAsyncWork(settleAbandoned(error), parentCell);
         },
       );
     } else {
@@ -2017,7 +2289,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           toDeepFrozenSchema(schema),
         ),
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+        model: model ?? DEFAULT_GENERATE_OBJECT_MODEL,
         metadata: {
           ...readyMetadata,
           context: "piece",
@@ -2038,6 +2310,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schemaSanitizePromptInjection,
       });
       const hash = hashOf(requestSnapshot).toString();
+      const effectKey = effectTargetKey(`generateObject:${hash}`, resultCell);
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -2073,6 +2346,11 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        // The §4 memo hit (server-execution v2): no re-fire.
+        runtime.effectMemoObserver?.({
+          kind: "hit",
+          id: `generateObject:${hash}`,
+        });
         logGenerateObject("skip-cached", directRequestSummary);
         return;
       }
@@ -2083,12 +2361,17 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
+      const previousRequestQueued = lastRequestQueued;
+      lastRequestQueued = !!queueName;
       markRequestHashPendingCommit(
         tx,
         hash,
         () => previousCallHash,
         (next) => {
           previousCallHash = next;
+        },
+        () => {
+          lastRequestQueued = previousRequestQueued;
         },
       );
 
@@ -2113,12 +2396,68 @@ export function generateObject<T extends Record<string, unknown>>(
 
       const isWriteStale = () => thisRun !== currentRun;
 
+      // The one way this request ends badly, whether the model call failed or
+      // the request never went out at all.
+      const settleWithError = (error: unknown) => {
+        logGenerateObject("error", {
+          ...directRequestSummary,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return handleLLMError(
+          error,
+          runtime,
+          resultCell.key("pending"),
+          resultCell.key("result"),
+          resultCell.key("error"),
+          resultCell.key("partial"),
+          resultCell.key("requestHash"),
+          hash,
+          queueName ? () => thisRun : () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          generationUnavailableForError,
+          effectKey,
+        );
+      };
+
+      // This request's own result cell. A later run that finds a different
+      // output scope builds a new one and leaves this variable pointing at
+      // that, so the ending below has to write the cell this request
+      // announced.
+      const requestResultCell = resultCell;
+
+      // The abandoned request's ending. It carries the announcement because
+      // the one this run made rode the transaction that was abandoned, and the
+      // `cellsInitialized` latch means no later run makes it again.
+      const settleAbandoned = (error: unknown) =>
+        handleLLMError(
+          error,
+          runtime,
+          requestResultCell.key("pending"),
+          requestResultCell.key("result"),
+          requestResultCell.key("error"),
+          requestResultCell.key("partial"),
+          requestResultCell.key("requestHash"),
+          hash,
+          () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          generationUnavailableForError,
+          effectKey,
+          (announceTx) => sendResult(announceTx, requestResultCell),
+        );
+
       logGenerateObject("enqueue", directRequestSummary);
 
       enqueuePostCommitLLMWork(
         tx,
         "generateObject",
         `generateObject:${hash}`,
+        effectKey,
         "generateObject-start",
         requestSnapshot,
         () => {
@@ -2213,7 +2552,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 if (isWriteStale()) return;
 
                 const writeback = await runtime.editWithRetry((tx) => {
-                  if (isWriteStale()) return false;
+                  markEffectCompletion(tx, effectKey);
                   // The InjectionSafe annotations on resultSchema are minted by
                   // the trusted sanitizer; attribute this write to the builtin
                   // so the persist-time evidence gate trusts them (audit S4).
@@ -2256,32 +2595,12 @@ export function generateObject<T extends Record<string, unknown>>(
                   logGenerateObject("write-complete", directRequestSummary);
                 }
               })
-              .catch((e) => {
-                logGenerateObject("error", {
-                  ...directRequestSummary,
-                  error: e instanceof Error ? e.message : String(e),
-                });
-                return handleLLMError(
-                  e,
-                  runtime,
-                  resultCell.key("pending"),
-                  resultCell.key("result"),
-                  resultCell.key("error"),
-                  resultCell.key("partial"),
-                  resultCell.key("requestHash"),
-                  hash,
-                  queueName ? () => thisRun : () => currentRun,
-                  thisRun,
-                  () => {
-                    if (hash === previousCallHash) {
-                      previousCallHash = undefined;
-                    }
-                  },
-                  generationUnavailableForError,
-                );
-              }),
+              .catch(settleWithError),
             parentCell,
           );
+        },
+        (error) => {
+          runtime.trackAsyncWork(settleAbandoned(error), parentCell);
         },
       );
     }

@@ -4,7 +4,7 @@ import {
   DataUnavailable,
   FabricError,
 } from "@commonfabric/data-model/fabric-instances";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -106,10 +106,10 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
     tx = runtime.edit();
 
-    // Pull first to trigger computation (starts the fetch)
+    // Pull first to trigger computation (starts the fetch), then drain the
+    // in-flight transport frames and post-commit fetch work.
     await resultCell.pull();
-
-    await resultCell.pull();
+    await clock.settle();
 
     const firstCallCount =
       fetchCalls.filter((c) => c.url.includes("/api/first")).length;
@@ -122,8 +122,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
 
     // Pull first to trigger computation with new URL
     await resultCell.pull();
-
-    await resultCell.pull();
+    await clock.settle();
 
     // Should have made a new fetch with the new URL
     const secondCallCount =
@@ -146,8 +145,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
 
     // Pull first to trigger computation
     await resultCell1.pull();
-
-    await resultCell1.pull();
+    await clock.settle();
 
     const jsonCallCount = fetchCalls.length;
     expect(jsonCallCount).toBeGreaterThan(0);
@@ -165,8 +163,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
 
     // Pull first to trigger computation
     await resultCell2.pull();
-
-    await resultCell2.pull();
+    await clock.settle();
 
     // Should have made additional fetch calls for the different builtin
     expect(fetchCalls.length).toBeGreaterThan(jsonCallCount);
@@ -208,8 +205,10 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     );
     tx.commit();
 
-    // Pull first to trigger computation (starts the fetch)
+    // Pull first to trigger computation (starts the fetch), then drain the
+    // in-flight fetch work before reading the final state.
     await result.pull();
+    await clock.settle();
 
     const finalData = (await result.pull()) as {
       pending?: boolean;
@@ -259,6 +258,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     localTx.commit();
 
     await result.pull();
+    await clock.settle();
 
     const data = (await result.pull()) as {
       error?: unknown;
@@ -314,7 +314,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     urlCell.withTx(tx).send("");
     tx.commit();
 
-    await runtime.idle();
+    await clock.settle();
 
     const data = (await resultCell.pull()) as {
       error?: unknown;
@@ -361,7 +361,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
 
     // Pull and wait for the fetch to complete
     await result.pull();
-    await result.pull();
+    await clock.settle();
 
     // Filter to only the calls that hit our endpoint
     const relevantCalls = fetchCalls.filter((c) =>

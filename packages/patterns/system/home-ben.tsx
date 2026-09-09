@@ -8,6 +8,7 @@ import {
   NAME,
   pattern,
   resultOf,
+  toCompactDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -82,9 +83,8 @@ function captureSnapshot(
 
     const value = schemaCell.get();
     if (value !== undefined) {
-      const str = JSON.stringify(value);
-      // Capture up to 2000 chars to give LLM more context about content
-      valueExcerpt = str.length > 2000 ? str.slice(0, 2000) + "..." : str;
+      // Up to 2000 characters, to give the LLM context about the content.
+      valueExcerpt = toCompactDebugString(value, { maxLength: 2000 });
     }
   } catch {
     // Ignore errors - excerpt is optional
@@ -186,7 +186,7 @@ const removeSpaceHandler = handler<
   spaces.set(filtered);
 });
 
-export default pattern((_) => {
+export default pattern(() => {
   // OWN the data cells (.for for id stability)
   const favorites = new Writable<Favorite[]>([]).for("favorites");
   const journal = new Writable<JournalEntry[]>([]).for("journal");

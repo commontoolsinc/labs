@@ -14,7 +14,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   currentPatternIntegrationShard,
   selectPatternIntegrationShard,
@@ -75,19 +75,20 @@ async function checkPattern(rel: string): Promise<Outcome> {
     `${rel}-${crypto.randomUUID()}`,
   );
   const errors: string[] = [];
-  cc.manager().runtime.scheduler.onError((err) => {
+  cc.runtime.scheduler.onError((err) => {
     if (err?.name === "TimeCapabilityError") errors.push(err.message);
   });
   let cancel: (() => void) | undefined;
   try {
-    const program = await cc.manager().runtime.harness.resolve(
-      new FileSystemProgramResolver(join(ROOT, rel), ROOT),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: join(ROOT, rel), root: ROOT },
     );
     const piece = await cc.create(program, { start: true });
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     cancel = resultCell.sink(() => {});
-    await cc.manager().runtime.idle();
-    await cc.manager().synced();
+    await cc.runtime.idle();
+    await cc.synced();
 
     // Substep 3: fire result streams so handler-context clock reads run under
     // real dispatch. Sending to a non-stream key throws and is ignored; we only
@@ -105,7 +106,7 @@ async function checkPattern(rel: string): Promise<Outcome> {
         } catch { /* not a stream / bad shape — tolerated */ }
       }
       try {
-        await cc.manager().runtime.idle();
+        await cc.runtime.idle();
       } catch { /* tolerated */ }
     }
     return { timeCapabilityErrors: errors };

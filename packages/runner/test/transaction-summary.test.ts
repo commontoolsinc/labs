@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
   debugTransactionWrites,
@@ -14,22 +15,30 @@ import type {
 
 // Simple test transaction journal
 class TestJournal implements ITransactionJournal {
+  #noveltyData: IAttestation[];
+  #historyData: IAttestation[];
+  #activityData: any[];
+
   constructor(
-    private noveltyData: IAttestation[] = [],
-    private historyData: IAttestation[] = [],
-    private activityData: any[] = [],
-  ) {}
+    noveltyData: IAttestation[] = [],
+    historyData: IAttestation[] = [],
+    activityData: any[] = [],
+  ) {
+    this.#noveltyData = noveltyData;
+    this.#historyData = historyData;
+    this.#activityData = activityData;
+  }
 
   activity(): Iterable<any> {
-    return this.activityData;
+    return this.#activityData;
   }
 
   novelty(_space: any): Iterable<IAttestation> {
-    return this.noveltyData;
+    return this.#noveltyData;
   }
 
   history(_space: any): Iterable<IAttestation> {
-    return this.historyData;
+    return this.#historyData;
   }
 }
 
@@ -357,7 +366,7 @@ describe("transaction-summary", () => {
     );
   });
 
-  it("should truncate verbose write values in summaries", () => {
+  it("renders a verbose write value bounded in the summary line, and carries it whole in the summary", () => {
     const longText = "x".repeat(120);
     const tx = createInspectableTransaction(
       [
@@ -409,11 +418,18 @@ describe("transaction-summary", () => {
     );
 
     const summary = summarizeTransaction(tx, "did:key:test" as any);
+    const formatted = formatTransactionSummary(tx, "did:key:test" as any);
 
     assertEquals(summary.writes[0].objectId, "a-very-long-object-i...");
-    assertEquals(summary.writes[0].value, `${"x".repeat(100)}...`);
-    assertEquals(summary.writes[1].value, "[Array: 3 items]");
-    assertEquals(summary.writes[2].value, '{"nested":{"count":1}}');
+    expect(summary.writes[0].value).toBe(longText);
+    expect(summary.writes[1].value).toEqual([1, 2, 3]);
+    expect(summary.writes[2].value).toEqual({ nested: { count: 1 } });
+    expect(formatted).toContain(
+      `long = "${"x".repeat(50)}"+...length:120`,
+    );
+    expect(formatted).toContain("items = [1,2,...length:3]");
+    expect(formatted).toContain("details = {nested:{count:1}}");
+    expect(formatted).toContain("done = true");
     assertEquals(
       summarizeTransaction(
         createInspectableTransaction([{
@@ -429,13 +445,8 @@ describe("transaction-summary", () => {
       ).writes[0].value,
       null,
     );
-    assertEquals(summary.summary.includes("... and 1 more"), true);
-    assertEquals(
-      formatTransactionSummary(tx, "did:key:test" as any).includes(
-        "Object a-very-long-object-i...",
-      ),
-      true,
-    );
+    expect(summary.summary).toContain("... and 1 more");
+    expect(formatted).toContain("Object a-very-long-object-i...");
   });
 
   it("should debug journal write activity", () => {

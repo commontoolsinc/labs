@@ -2,7 +2,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { diffAndUpdate, normalizeAndDiff } from "../src/data-updating.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -70,19 +69,9 @@ async function cleanup(
 }
 
 Deno.bench({
-  name: "Cell set shape - recursivelyAddIDIfNeeded only (100x)",
-  group: "shape",
-  baseline: true,
-  fn() {
-    for (let i = 0; i < 100; i++) {
-      recursivelyAddIDIfNeeded(makeUserValue(i), undefined);
-    }
-  },
-});
-
-Deno.bench({
   name: "Cell set shape - normalizeAndDiff only, schemaless (100x)",
   group: "shape",
+  baseline: true,
   async fn() {
     const { runtime, tx } = setup();
     const cell = runtime.getCell<any>(

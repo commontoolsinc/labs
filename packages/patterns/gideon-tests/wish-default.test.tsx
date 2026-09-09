@@ -13,6 +13,7 @@ import {
   NAME,
   pattern,
   resultOf,
+  TESTS,
   wish,
   Writable,
 } from "commonfabric";
@@ -52,7 +53,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // pieceRegistry should be defined (wish resolved successfully)
       { assertion: assert_piece_registry_exists },
       // pieceRegistry should start empty

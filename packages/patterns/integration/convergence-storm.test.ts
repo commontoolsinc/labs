@@ -20,10 +20,53 @@
 import { assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
 } from "./multi-runtime-harness.ts";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+
+// The RAW env posture, read only to key the skip guard below (testing.md
+// §2): the `opposite` lane sets EXPERIMENTAL_SERVER_EXECUTION explicitly
+// to the inverse of the first-party default; the `default` lanes leave it
+// unset and resolve the constant. This value is therefore undefined on the default lane — NOT the
+// resolved posture. The test's runtime posture is not taken from here:
+// `MultiRuntimeHarness` resolves it env-else-first-party-default and picks
+// its backend accordingly.
+const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
+  .serverExecution;
+
+/**
+ * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+ * a step listed there for this file is skipped ONLY when this process runs
+ * the ON posture, loudly (the entry's reason is printed), and only while
+ * the entry exists — the OFF arm and an unlisted step always run. Never a
+ * silent filter: the CI step prints every entry, and the validator
+ * requires this file to name each listed step and call this guard.
+ *
+ * The registry is EMPTY, so this guard is inert everywhere today. Note the
+ * key: it is the RAW env, while the on-skips module asks callers to resolve
+ * env-else-first-party-default (as runtime-client's host now does). Inert
+ * today for exactly that reason — undefined on the default lane — and a
+ * future entry for this file would fail LOUD there (a red lane, never a
+ * silent skip), which is when the key gets converted.
+ */
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "patterns",
+    "integration/convergence-storm.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] patterns: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 const ROOT_PATH = join(import.meta.dirname!, "..");
 const fixture = (name: string): string =>
@@ -140,40 +183,46 @@ describe("convergence storm — observer converges with optional scoped links", 
     await harness?.dispose();
   });
 
-  it("a non-writing session sees every concurrently-posted message", async () => {
-    const K = 20;
-    const storm = async (session: MultiRuntimeSession, author: string) => {
-      const sent: string[] = [];
-      for (let n = 0; n < K; n++) {
-        const body = `${author}-${n}`;
-        // idle:false stacks sends into a deep optimistic pipeline — the
-        // multiplayer contention shape (each browser tab pipelines commits).
-        await session.send("post", { author, body, n }, undefined, {
-          idle: false,
-        });
-        sent.push(body);
-      }
-      return sent;
-    };
-    const [fromAlice, fromBob] = await Promise.all([
-      storm(alice, "alice"),
-      storm(bob, "bob"),
-    ]);
-    const sent = [...fromAlice, ...fromBob];
+  it(
+    "a non-writing session sees every concurrently-posted message",
+    onArmStepSkip(
+      "a non-writing session sees every concurrently-posted message",
+    ),
+    async () => {
+      const K = 20;
+      const storm = async (session: MultiRuntimeSession, author: string) => {
+        const sent: string[] = [];
+        for (let n = 0; n < K; n++) {
+          const body = `${author}-${n}`;
+          // idle:false stacks sends into a deep optimistic pipeline — the
+          // multiplayer contention shape (each browser tab pipelines commits).
+          await session.send("post", { author, body, n }, undefined, {
+            idle: false,
+          });
+          sent.push(body);
+        }
+        return sent;
+      };
+      const [fromAlice, fromBob] = await Promise.all([
+        storm(alice, "alice"),
+        storm(bob, "bob"),
+      ]);
+      const sent = [...fromAlice, ...fromBob];
 
-    await harness.settle(20);
+      await harness.settle(20);
 
-    // The observer never posts, so it has no local pendings of its own — it
-    // reflects purely what the runtime materializes from durable state. It must
-    // see all 2*K messages (delivery + reader convergence), the guarantee B2
-    // restores.
-    const observerView = await messages(observer);
-    assertEquals(
-      bodies(observerView),
-      [...sent].sort(),
-      `observer missed messages: sent=${sent.length} ` +
-        `landed=${observerView.length} ` +
-        `observer=${JSON.stringify(summarize(observerView))}`,
-    );
-  });
+      // The observer never posts, so it has no local pendings of its own — it
+      // reflects purely what the runtime materializes from durable state. It must
+      // see all 2*K messages (delivery + reader convergence), the guarantee B2
+      // restores.
+      const observerView = await messages(observer);
+      assertEquals(
+        bodies(observerView),
+        [...sent].sort(),
+        `observer missed messages: sent=${sent.length} ` +
+          `landed=${observerView.length} ` +
+          `observer=${JSON.stringify(summarize(observerView))}`,
+      );
+    },
+  );
 });

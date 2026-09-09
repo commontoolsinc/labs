@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: void types", () => {
@@ -9,7 +9,7 @@ describe("Schema: void types", () => {
       type X = void;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
     expect(result).toEqual({ asCell: ["opaque"] });
   });
@@ -21,7 +21,7 @@ describe("Schema: void types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const trigger = result.properties?.trigger as Record<string, unknown>;
     expect(trigger).toEqual({ asCell: ["stream", "opaque"] });
@@ -34,7 +34,7 @@ describe("Schema: void types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const input = result.properties?.input as Record<string, unknown>;
     expect(input).toEqual({ asCell: ["opaque"] });

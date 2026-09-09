@@ -1,12 +1,15 @@
 import { assertEquals } from "@std/assert";
+
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
+
 import {
   CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
   createHarnessCfcInvocationContext,
+  summarizeCfcInvocationRunManifest,
   summarizeCfcInvocationSequence,
   summarizeCfcInvocationText,
 } from "../src/contracts/cfc-invocation-context.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inputs without raw values", async () => {
   // Spec: specs/cfc/18-runtime-implementation-profiles.md §18.2.4.1
@@ -305,4 +308,31 @@ Deno.test("createHarnessCfcInvocationContext merges explicit trusted labels with
       },
     }],
   });
+});
+
+Deno.test("summarizeCfcInvocationRunManifest carries the manifest's read ceiling", () => {
+  assertEquals(
+    summarizeCfcInvocationRunManifest(
+      {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        wishId: "W-2201",
+        cfc: {
+          maxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+          onExceed: "skip",
+        },
+      },
+      "/runs/W-2201/manifest.json",
+    ),
+    {
+      present: true,
+      path: "/runs/W-2201/manifest.json",
+      source: "loom",
+      wishId: "W-2201",
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip",
+      promptSlotPresent: false,
+    },
+  );
 });

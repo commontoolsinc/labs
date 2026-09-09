@@ -1,7 +1,6 @@
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
-import type { FabricValue } from "@commonfabric/api";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import { getCommitPreconditionsConfig } from "@commonfabric/memory/v2";
 import type {
@@ -91,10 +90,13 @@ export const CFC_GRANT_ABSENT_DIGEST = "absent";
 export type CfcGrantIdentity = {
   /** Governing space the document lives in (== `owner` in this PR). */
   readonly space: string;
+
   /** Grant kind matched by `policyState` guards ("ShareGrant", …). */
   readonly kind: string;
+
   /** DID whose release authority this grant spends. */
   readonly owner: string;
+
   /** What it releases: a doc reference (URI string) or an atom-pattern
    * scope record (design §2.1 `Reference | AtomPattern`). */
   readonly resource: unknown;
@@ -103,13 +105,18 @@ export type CfcGrantIdentity = {
 /** A verified grant record (design doc §2.1 shape). */
 export type CfcGrant = CfcGrantIdentity & {
   readonly version: typeof CFC_GRANT_VERSION;
+
   /** Principal-like atoms (§3.1.8-validated) the release extends to. */
   readonly audience: readonly unknown[];
+
   readonly grantedAt: number;
   readonly expiresAt?: number;
+
   /** §6 intent attribution once the intent substrate exists. */
   readonly sourceIntentId?: string;
+
   readonly revoked?: { readonly at: number; readonly by: string };
+
   /**
    * Single-use release (design §2.2 "Single-use releases", spec §6.5.1-.2):
    * the grant satisfies a `policyState` guard only while its consumption
@@ -131,13 +138,17 @@ export type CfcGrantWriteInput = {
   readonly owner: string;
   readonly resource: unknown;
   readonly audience: readonly unknown[];
+
   /** Defaults to `owner` — the v1 governing-space posture (module doc). */
   readonly space?: string;
+
   /** Defaults to the runner clock at write time. */
   readonly grantedAt?: number;
+
   readonly expiresAt?: number;
   readonly sourceIntentId?: string;
   readonly revoked?: { readonly at: number; readonly by: string };
+
   /** See {@link CfcGrant.singleUse}: boolean-true or absent, else refused. */
   readonly singleUse?: true;
 };
@@ -205,8 +216,10 @@ export const cfcGrantConsumedReceiptId = (grantId: string): URI =>
 export type CfcGrantConsumptionReceipt = {
   readonly version: typeof CFC_GRANT_VERSION;
   readonly grantConsumed: { readonly grantId: string };
+
   /** Governing space (== the grant's space; the receipt lives beside it). */
   readonly space: string;
+
   /** Runner clock at claim time — captured once per transaction so repeated
    * prepares of the same tx stage a byte-identical receipt. */
   readonly consumedAt: number;
@@ -318,7 +331,7 @@ export const flushCfcGrantConsumptionClaims = (
         id: claim.receiptId,
         type: "application/json",
         path: ["value"],
-      }, receipt as unknown as FabricValue);
+      }, receipt);
     } catch (error) {
       reasons.push(
         `cfc-grant: staging consumption receipt for single-use grant ` +
@@ -339,7 +352,7 @@ const isDid = (value: unknown): value is string =>
 // pattern matching when the entry later lands in a clause — refuse at write.
 const containsVarKey = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.some(containsVarKey);
-  if (!isRecord(value)) return false;
+  if (!isObjectOrArray(value)) return false;
   if (Object.hasOwn(value, "var")) return true;
   return Object.values(value).some(containsVarKey);
 };
@@ -354,7 +367,7 @@ const containsVarKey = (value: unknown): boolean => {
 export const disallowedGrantAudienceEntryReason = (
   entry: unknown,
 ): string | undefined => {
-  if (!isRecord(entry) || Array.isArray(entry)) {
+  if (!isObjectNotArray(entry)) {
     return "audience entries must be principal-like atom records";
   }
   if (isOrClause(entry)) {
@@ -392,7 +405,7 @@ export const prepareCfcGrantWrite = (
   actingPrincipal: string | undefined,
   now: number = Date.now(),
 ): { space: MemorySpace; id: URI; value: CfcGrant } => {
-  if (!isRecord(input) || Array.isArray(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("cfc-grant: write input must be an object");
   }
   const { kind, owner, resource, audience } = input;
@@ -454,7 +467,7 @@ export const prepareCfcGrantWrite = (
   if (input.revoked !== undefined) {
     const revoked = input.revoked;
     if (
-      !isRecord(revoked) || typeof revoked.at !== "number" ||
+      !isObjectOrArray(revoked) || typeof revoked.at !== "number" ||
       !Number.isFinite(revoked.at) || !isDid(revoked.by)
     ) {
       throw new Error("cfc-grant: revoked must be { at: number, by: DID }");
@@ -509,7 +522,7 @@ export const verifyCfcGrantDocument = (
   id: string,
   value: unknown,
 ): CfcGrant | undefined => {
-  if (!isRecord(value) || Array.isArray(value)) return undefined;
+  if (!isObjectNotArray(value)) return undefined;
   const candidate = value as Partial<CfcGrant> & Record<string, unknown>;
   if (candidate.version !== CFC_GRANT_VERSION) return undefined;
   if (
@@ -543,7 +556,7 @@ export const verifyCfcGrantDocument = (
   if (candidate.revoked !== undefined) {
     const revoked = candidate.revoked;
     if (
-      !isRecord(revoked) || typeof revoked.at !== "number" ||
+      !isObjectOrArray(revoked) || typeof revoked.at !== "number" ||
       !isDid((revoked as { by?: unknown }).by)
     ) {
       return undefined;
@@ -737,7 +750,18 @@ const resolveSingleUseGrant = (
  */
 export const createTxCfcGrantResolver = (
   tx: IExtendedStorageTransaction,
-  opts: { readonly now?: () => number } = {},
+  opts: {
+    readonly now?: () => number;
+
+    /**
+     * Out-record set when a grant lookup could not be READ (the catch arm
+     * below) — as opposed to resolving to no facts. A boundary decision that
+     * consults this resolver is only a deterministic verdict when no lookup
+     * was unavailable: an unsynced grant might discharge on the attempt that
+     * syncs it, so the caller reads this to withhold the terminal tag.
+     */
+    readonly availability?: { unavailable: boolean };
+  } = {},
 ): CfcGrantResolver => {
   const now = opts.now ?? Date.now;
   const memo = new Map<string, readonly CfcAtom[]>();
@@ -798,7 +822,12 @@ export const createTxCfcGrantResolver = (
       // unsynced replica, storage failure): the grant does not resolve; the
       // §4.9.3 posture. Nothing is memoized or recorded on this path — a
       // candidate that could not be read never produced a value this
-      // decision could have consumed.
+      // decision could have consumed. Reported as UNAVAILABLE rather than
+      // absent, conservatively covering the deterministic arms too (an
+      // undigestable bound field refuses identically every time): the cost
+      // of over-reporting is a bounded retry, the cost of under-reporting is
+      // a write that never lands.
+      if (opts.availability !== undefined) opts.availability.unavailable = true;
       return [];
     }
     return facts;

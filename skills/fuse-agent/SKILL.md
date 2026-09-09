@@ -21,19 +21,28 @@ FUSE mounting, filesystem layout, and low-level read/write mechanics, see the
 cd ~/code/labs
 export CF_IDENTITY=./shared.key CF_API_URL=http://localhost:8000
 
-# 1. Deploy and capture piece ID
+# 1. Run every authored pattern test
+deno task cf test packages/patterns/<path>.test.tsx
+
+# 2. Deploy with every test entry attached and capture the piece ID
 ID=$(cf piece new packages/patterns/<path>.tsx \
+  --test packages/patterns/<path>.test.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
-# 2. Set title
-cf piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
+# 3. Set title
+cf piece call --quiet --cell $ID --space SPACE setTitle --value "My Title"
 
-# 3. Step to materialise
-cf piece step --piece $ID --space SPACE
+# 4. Step to materialize
+cf piece step --cell $ID --space SPACE
 
-# 4. Re-read pieces.json immediately — stale after deploy
+# 5. Re-read pieces.json immediately — stale after deploy
 cat "MOUNT/SPACE/pieces/pieces.json"
 ```
+
+For new or changed pattern behavior, write an authored pattern test before
+deploying. Repeat `--test` for multiple entries and pass the same complete set
+on every later `piece setsrc`. Deployment packages and type-checks attached
+tests but does not run them.
 
 **Pattern index:** `cat ~/code/labs/packages/patterns/index.md`
 
@@ -92,12 +101,12 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
 | Operation                     | Step needed?                               |
 | ----------------------------- | ------------------------------------------ |
 | `cf piece call` (CLI)         | Always                                     |
-| `cf piece set` (CLI)          | Always                                     |
+| `cf cell set` (CLI)           | Always                                     |
 | FUSE handler invocation       | Sometimes — if count suffix doesn't update |
 | Read/Write/Edit on `index.md` | Never                                      |
 
 When in doubt after a FUSE handler call: run
-`cf piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
+`cf piece step --cell $ID --space SPACE`, then re-read `pieces.json`.
 
 ### NFS timeout and remount
 
@@ -247,13 +256,18 @@ wishes. Use them to leave notes about things noticed without necessarily acting.
 
 **Deploy and configure via CF CLI:**
 
+`annotation.tsx` currently has no authored test entry, so the unchanged support
+pattern deployment below has no `--test` flag. If you change its behavior, first
+create and run an automated pattern test. Then attach every test entry with
+repeatable `--test` flags here and on every later `setsrc` update.
+
 ```bash
 ID=$(cf piece new packages/patterns/annotation.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 echo '"Standup notes mention 5 people with no structured contact list"' \
-  | cf piece set --piece $ID content --space SPACE
-echo '"wish"' | cf piece set --piece $ID kind --space SPACE
-cf piece step --piece $ID --space SPACE
+  | cf cell set --cell $ID content --space SPACE
+echo '"wish"' | cf cell set --cell $ID kind --space SPACE
+cf piece step --cell $ID --space SPACE
 # Re-read pieces.json — name now reflects content: "Standup notes mention..."
 ```
 
@@ -273,8 +287,8 @@ cf piece step --piece $ID --space SPACE
 **Mark a wish resolved** (when fulfilling another agent's annotation):
 
 ```bash
-echo '"resolved"' | cf piece set --piece $WISH_ID status --space SPACE
-cf piece step --piece $WISH_ID --space SPACE
+echo '"resolved"' | cf cell set --cell $WISH_ID status --space SPACE
+cf piece step --cell $WISH_ID --space SPACE
 ```
 
 **Discover open annotations** — deploy `annotation-manager.tsx` for an
@@ -386,7 +400,7 @@ for x in p:
 ## Cleanup
 
 ```bash
-cf piece rm --piece $ID --space SPACE
+cf piece rm --cell $ID --space SPACE
 ```
 
 Use this to clean up duplicate pieces deployed by accident (no `--confirm`

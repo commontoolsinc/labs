@@ -8,17 +8,21 @@
 // Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
+
+import type { PatternUpdateReceipt } from "@commonfabric/piece/ops";
+import { linkRefFrom } from "@commonfabric/runner/shared";
+
+import {
+  type CfcXattrNamespace,
+  getCfcXattrValue,
+  listCfcXattrNames,
+} from "./annotations.ts";
 import {
   CellBridge,
   type HandlerTarget,
   type SourceWritePath,
   type WritePath,
 } from "./cell-bridge.ts";
-import {
-  type CfcXattrNamespace,
-  getCfcXattrValue,
-  listCfcXattrNames,
-} from "./annotations.ts";
 import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
@@ -41,11 +45,34 @@ import {
   isCfcEnforcing,
   metadataFieldsForSetattrFlags,
   normalizeCfcWritebackXattrName,
-  parseCfcMode,
   resolveCfcMode,
   safeReconcileCfcWritebacks,
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
+import {
+  type DirectorySnapshotEntry,
+  replyWithRetainedState,
+  visitDirectoryEntries,
+} from "./directory-handles.ts";
+import {
+  handleHasBufferedContent,
+  handleHasPendingChanges,
+  HandleMap,
+  type HandleState,
+  validateVirtualFileRange,
+} from "./handles.ts";
+import { ReverseInvalidationQueue } from "./invalidation.ts";
+import {
+  buildMountFuseArgs,
+  type MountCacheOptions,
+  resolveMountCacheOptions,
+} from "./mount-options.ts";
+import {
+  closeKernelFileHandle,
+  createFuseOperationState,
+} from "./operation-wiring.ts";
+import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
+import { finalizeCommittedSourceWrite } from "./source-write-finalize.ts";
 import {
   EACCES,
   EFBIG,
@@ -64,32 +91,8 @@ import {
   O_WRONLY,
   readCString,
 } from "./platform.ts";
-import { linkRefFrom } from "@commonfabric/runner/shared";
-import { FsTree } from "./tree.ts";
-import {
-  handleHasBufferedContent,
-  handleHasPendingChanges,
-  HandleMap,
-  type HandleState,
-  validateVirtualFileRange,
-} from "./handles.ts";
-import {
-  type DirectorySnapshotEntry,
-  replyWithRetainedState,
-  visitDirectoryEntries,
-} from "./directory-handles.ts";
-import {
-  closeKernelFileHandle,
-  createFuseOperationState,
-} from "./operation-wiring.ts";
-import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
-import {
-  buildMountFuseArgs,
-  type MountCacheOptions,
-  resolveMountCacheOptions,
-} from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership } from "./stat.ts";
-import { ReverseInvalidationQueue } from "./invalidation.ts";
+import { FsTree } from "./tree.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics
@@ -186,6 +189,27 @@ export function appendDecodedJsonPath(
 
 export function sourceRelPathToTreeSegments(relPath: string): string[] {
   return encodeFusePathSegments(relPath.split("/"));
+}
+
+/**
+ * Decode a write bound for a pattern's source package, or `undefined` when the
+ * bytes are not valid UTF-8 text.
+ *
+ * A source package holds text, so a write that is not text has no faithful
+ * representation in it. Decoding strictly reports that instead of substituting
+ * replacement characters, which would store something other than what was
+ * written. A byte order mark is content and is kept, since an attached data
+ * file is stored byte-for-byte.
+ */
+export function decodeSourceWriteText(
+  buffer: Uint8Array,
+): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+      .decode(buffer);
+  } catch {
+    return undefined;
+  }
 }
 
 export function bufferForNoHandleTruncate(
@@ -444,54 +468,6 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
-  // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
-  // --debug is forwarded through every spawn layer (mount -> supervisor ->
-  // daemon child), and env vars are inherited too, so either switch works.
-  const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
-  const dangerouslyAllowIncompatibleSchema = Boolean(
-    args["dangerously-allow-incompatible-schema"],
-  );
-  const requestedCfcMode = String(args["cfc-mode"] ?? "");
-  if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
-    console.warn(
-      `[FUSE] Unknown --cfc-mode=${requestedCfcMode}; using runner default`,
-    );
-  }
-  const cfcMode: CfcEnforcementMode = resolveCfcMode({
-    cliMode: requestedCfcMode || undefined,
-    envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
-  });
-  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
-    annotationsRequested: Boolean(args["cfc-annotations"]),
-    mode: cfcMode,
-  });
-  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
-  const cfcXattrNamespace = parseCfcXattrNamespace(
-    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
-  );
-  if (!cfcXattrNamespace) {
-    console.error(
-      `[FUSE] Unknown --cfc-xattr-namespace=${
-        args["cfc-xattr-namespace"]
-      }; expected trusted, compat, or both`,
-    );
-    Deno.exit(1);
-  }
-
-  let cacheOptions: MountCacheOptions;
-  try {
-    cacheOptions = resolveMountCacheOptions({
-      noattrcache: Boolean(args.noattrcache),
-      attrcacheTimeout: String(args["attrcache-timeout"] ?? ""),
-      attrcacheTimeoutGiven: argv.some((arg) =>
-        arg === "--attrcache-timeout" || arg.startsWith("--attrcache-timeout=")
-      ),
-    });
-  } catch (e) {
-    console.error(`[FUSE] ${e instanceof Error ? e.message : e}`);
-    return Deno.exit(1);
-  }
-
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
     console.error(
@@ -554,6 +530,67 @@ export async function main(argv: string[] = Deno.args) {
       state,
       extra,
     );
+
+  /**
+   * Report a startup failure and stop.
+   *
+   * The message goes to stderr and to the supervisor status channel. A
+   * background mount's stderr goes nowhere its parent reads, and the channel
+   * is what `cf fuse mount` blocks on.
+   */
+  const failStartup = async (message: string): Promise<never> => {
+    await writeFailedSupervisorStartupStatus(
+      `[FUSE] ${message}`,
+      reportSupervisorState,
+    );
+    return Deno.exit(1);
+  };
+
+  // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
+  // --debug is forwarded through every spawn layer (mount -> supervisor ->
+  // daemon child), and env vars are inherited too, so either switch works.
+  const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
+  const dangerouslyAllowIncompatibleSchema = Boolean(
+    args["dangerously-allow-incompatible-schema"],
+  );
+  let cfcMode: CfcEnforcementMode;
+  try {
+    cfcMode = resolveCfcMode({
+      cliMode: String(args["cfc-mode"] ?? ""),
+      envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
+    });
+  } catch (e) {
+    return await failStartup(e instanceof Error ? e.message : String(e));
+  }
+  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
+    annotationsRequested: Boolean(args["cfc-annotations"]),
+    mode: cfcMode,
+  });
+  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
+  const cfcXattrNamespace = parseCfcXattrNamespace(
+    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
+  );
+  if (!cfcXattrNamespace) {
+    return await failStartup(
+      `Unknown --cfc-xattr-namespace=${
+        args["cfc-xattr-namespace"]
+      }; expected trusted, compat, or both`,
+    );
+  }
+
+  let cacheOptions: MountCacheOptions;
+  try {
+    cacheOptions = resolveMountCacheOptions({
+      noattrcache: Boolean(args.noattrcache),
+      attrcacheTimeout: String(args["attrcache-timeout"] ?? ""),
+      attrcacheTimeoutGiven: argv.some((arg) =>
+        arg === "--attrcache-timeout" || arg.startsWith("--attrcache-timeout=")
+      ),
+    });
+  } catch (e) {
+    return await failStartup(e instanceof Error ? e.message : String(e));
+  }
+
   try {
     await writeSupervisorStatus("starting");
   } catch (error) {
@@ -722,8 +759,7 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
 
-  // --- Callbacks ---
-  // Keep references so GC doesn't collect them.
+  // Callbacks: Keep references so GC doesn't collect them.
   // deno-lint-ignore no-explicit-any
   const callbacks: Deno.UnsafeCallback<any>[] = [];
 
@@ -1680,6 +1716,11 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.markRunnerCommitFailed(handle.ino, operation, reason);
       }
     };
+    const completeWrite = (kind: string): 0 => {
+      writeStats.flushed++;
+      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=${kind}`);
+      return 0;
+    };
     try {
       if (writeTarget?.kind === "ignored") {
         if (handle.version === flushVersion) {
@@ -1720,14 +1761,17 @@ export async function main(argv: string[] = Deno.args) {
           handle.buffer = new Uint8Array(0); // fire-and-forget
           handle.bufferValid = false;
         }
-        writeStats.flushed++;
-        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=handler`);
-        return 0;
+        return completeWrite("handler");
       }
 
       if (writeTarget?.kind === "source") {
         const { piece, relPath, srcIno } = writeTarget.target;
-        const text = new TextDecoder().decode(buffer);
+        const text = decodeSourceWriteText(buffer);
+        if (text === undefined) {
+          console.error(`[source] Write to ${relPath} is not valid UTF-8 text`);
+          markExistingFailed("write is not valid UTF-8 text");
+          return EINVAL;
+        }
 
         // Optimistically update the file content in the tree
         let fileIno: bigint | undefined = srcIno;
@@ -1796,44 +1840,50 @@ export async function main(argv: string[] = Deno.args) {
           return EACCES;
         }
 
+        let receipt: PatternUpdateReceipt;
         try {
-          await piece.setPattern({
+          receipt = await piece.setPattern({
             main: baseMain,
             mainExport: baseMainExport,
             files: updatedFiles,
+            sourceRoots: program.sourceRoots,
+            dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
-          // Clear error.log on success
-          const errorLogIno = tree.lookup(srcIno, "error.log");
-          if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, "");
-          }
-          markExistingReady();
-          await bridge.finalizeSourceWritePath(writeTarget.target);
-          reconcileCfcWritebacks("source flush post-finalize");
-          markExistingFinalized();
-          if (handle.version === flushVersion) {
-            handle.dirty = false;
-            handle.truncatePending = false;
-          }
-          writeStats.flushed++;
-          console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
-          return 0;
         } catch (e) {
-          // Write compile error to error.log
+          // No receipt means no source transaction committed. Report the
+          // write as failed; every operation after this catch is local
+          // projection work and cannot negate the durable outcome.
           const errorMsg = e instanceof Error ? e.message : String(e);
           if (isConnectionWriteFailure(e)) {
             noteWriteFailure(e);
             markExistingFailed(errorMsg);
             return EROFS;
           }
-          const errorLogIno = tree.lookup(srcIno, "error.log");
-          if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, errorMsg);
-          }
+          bridge.writeSourceErrorLog(writeTarget.target, errorMsg);
           console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
           markExistingFailed(errorMsg);
           return EACCES;
         }
+
+        bridge.writeSourceErrorLog(writeTarget.target, "");
+        markExistingReady();
+        const finalize = () =>
+          bridge.finalizeSourceWritePath(writeTarget.target, receipt);
+        const finalized = await finalizeCommittedSourceWrite(receipt, finalize);
+        if (finalized.status === "failed") {
+          const error = finalized.error;
+          // The source is already durable, but the mount should still enter
+          // degraded mode when its projection refresh discovers an outage.
+          if (isConnectionWriteFailure(error)) noteWriteFailure(error);
+          console.error(`[source] ${finalized.warning}`);
+          bridge.writeSourceErrorLog(writeTarget.target, finalized.logWarning);
+        }
+        reconcileCfcWritebacks("source flush post-finalize");
+        markExistingFinalized();
+        if (handle.version === flushVersion) {
+          handle.dirty = handle.truncatePending = false;
+        }
+        return completeWrite("source");
       }
 
       if (
@@ -1870,11 +1920,7 @@ export async function main(argv: string[] = Deno.args) {
         } catch {
           // Stale inode after subscription rebuild — ignore.
         }
-        writeStats.flushed++;
-        console.log(
-          `[write-trace] flush-ok ino=${handle.ino} kind=fsProjection`,
-        );
-        return 0;
+        return completeWrite("fsProjection");
       }
 
       let value: unknown;
@@ -1932,9 +1978,7 @@ export async function main(argv: string[] = Deno.args) {
         // rebuilt the tree with the correct data.
       }
 
-      writeStats.flushed++;
-      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=value`);
-      return 0;
+      return completeWrite("value");
     } catch (e) {
       const logPrefix = writeTarget?.kind === "handler" ||
           (callableNode?.kind === "callable" &&
@@ -3402,7 +3446,7 @@ export async function main(argv: string[] = Deno.args) {
   );
   callbacks.push(symlinkCb);
 
-  // --- Build ops struct ---
+  // Build ops struct
   const opsBuf = new ArrayBuffer(OPS_SIZE);
   const opsView = new DataView(opsBuf);
 
@@ -3443,7 +3487,7 @@ export async function main(argv: string[] = Deno.args) {
   }
   setOp(OPS_OFFSETS.create, createCb);
 
-  // --- Mount ---
+  // Mount
   const fuseArgs = buildMountFuseArgs({
     os: Deno.build.os,
     provider: platform.provider(),

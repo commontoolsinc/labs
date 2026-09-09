@@ -2,7 +2,7 @@
 // ops in the same transaction (the seam db.exec is built on): one commit carries
 // cell ops + a `sqlite` op; on SQL failure the whole commit aborts and the
 // sibling cell write rolls back. (Engine rollback is proven in
-// packages/memory/test/v2-sqlite-atomic-test.ts; this proves the RUNNER wires
+// packages/memory/test/v2-sqlite-atomic.test.ts; this proves the RUNNER wires
 // recordSqliteWrite -> getNativeCommit -> buildCommit.)
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";

@@ -1,0 +1,30 @@
+{
+  "label": "pattern index composition, set B",
+  "notes": "A SECOND addition, built for the same reason as set A and used because set A saturated itself in one batch: the control run published a whole application answering every one of its four tasks, two of them at rank 1. Set A's tasks stay in their own file, unedited, as the record of that. Admissibility rule unchanged: no single hit may answer a task whole, and argumentSchema is the filter for whether a hit is a composable part (object schema) or a finished application (false). Re-check immediately before every batch; a task admissible at one hour is answerable-whole the next, by the runs of this very suite. favour-picker is DELIBERATELY admitted with a near-whole available and is analysed as its own cell, never folded into the aggregate: a published team picker matches it at 8 of 15 terms and manages names, picks randomly and counts picks, so that task measures whether the loop assembles parts when a mediocre whole is in reach, which is the condition the corpus is permanently in. The other three measure whether it assembles at all. No task names the pattern index, names a published pattern, or says the word reuse.",
+  "tasks": [
+    {
+      "id": "book-club-vote",
+      "text": "Make me a page for my book club where I can list the books we might read next and have everyone vote for one."
+    },
+    {
+      "id": "chores-sort",
+      "text": "Give me a page with my chores on it where I can tick them off and sort them by how long each one takes."
+    },
+    {
+      "id": "restaurant-spend",
+      "text": "Give me a page where I choose a restaurant from my list and record what I spent there each time."
+    },
+    {
+      "id": "favour-picker",
+      "text": "Make me a page that keeps track of which friends I owe a favour, and picks one at random for me to call today."
+    }
+  ],
+  "seededPatternIds": [
+    "DRCFljoU1NSWQ8pt8dvVa-mG5cld1tj5J46iq7L7-VE",
+    "dZt8I5yIWD2g6NeftbKv-3ZouzZ2LGCSEhT8ij7wGV0",
+    "6gKBAa1h7f4mlD6AFkKws59l-TQECHWyFjw9BI7DqUg",
+    "bcj98b4SbCLZPtHmCJ2AIP7vQzUFQ_rR0iZxQu2qv9o",
+    "wZDg6zeEezVWIrOPhhV6mJ794Uys1USogIG_c_C_SIY",
+    "M4P9ijx47oHLW60ES54oZrNAgXPgyB86k68EcUYQas8"
+  ]
+}

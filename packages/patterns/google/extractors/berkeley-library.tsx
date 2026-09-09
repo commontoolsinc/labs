@@ -33,6 +33,7 @@ import {
   TILE_UI,
   toIndentedDebugString,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -701,12 +702,14 @@ interface PatternInput {
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   trackedItems: TrackedItem[];
   holdsReady: TrackedItem[];
   overdueCount: number;
   checkedOutCount: number;
   holdsReadyCount: number;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
   // Omnibot actions
   markAsReturned: Stream<{ title: string }>;
   dismissHold: Stream<{ title: string }>;

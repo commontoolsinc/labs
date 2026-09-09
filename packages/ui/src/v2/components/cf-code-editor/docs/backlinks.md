@@ -5,6 +5,11 @@ Backlinks are inline references stored directly in the document text as
 the name is the human-readable label. The user never sees the ID — it is hidden
 by decorations.
 
+This is one of the editor's two mention forms. Given a `$references` cell it
+mints the other, described in [`mention-refs.md`](mention-refs.md), which keeps
+the destination in that cell rather than in the text. Both forms are read
+whichever is being minted, so a document holding either works.
+
 ## The four CM6 building blocks
 
 The implementation uses four distinct CodeMirror 6 features stacked on top of

@@ -20,6 +20,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import ExpenseForm from "./expense-form.tsx";
@@ -117,7 +118,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // Create
       { action: action_set_food_budget },
       { assertion: assert_food_created },

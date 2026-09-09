@@ -1,17 +1,20 @@
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { scopedCell } from "./scope-policy.ts";
-import type { JSONSchema } from "@commonfabric/api";
-import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { hashOf } from "@commonfabric/data-model";
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import type { JSONSchema } from "@commonfabric/api";
+
+import type { CellScope } from "../builder/types.ts";
+import { type Cell } from "../cell.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { effectTargetKey } from "../executor/effect-completion.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { selectUnavailableInput } from "../data-unavailability.ts";
 
 /**
@@ -94,6 +97,16 @@ function createStreamDataAction(
   });
 
   return (tx: IExtendedStorageTransaction) => {
+    // Deferred under server-execution v2: disabled while the flag is on, with
+    // nothing half-working — no cells are minted and no request starts
+    // (docs/specs/server-side-execution/builtins.md §5).
+    if (runtime.experimental.serverExecution) {
+      throw new Error(
+        "The streamData built-in is disabled under " +
+          "EXPERIMENTAL_SERVER_EXECUTION: it is deferred in server-execution " +
+          "v2 (docs/specs/server-side-execution/builtins.md §5).",
+      );
+    }
     tx.resetNarrowestReadScope();
     const inputWithLog = inputsCell.withTx(tx);
     const unavailableInput = contract === "availability"
@@ -112,43 +125,37 @@ function createStreamDataAction(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCall = "";
       }
-      const namespace = contract === "legacy"
-        ? "streamData"
-        : "streamDataResult";
-      const basePending = runtime.getCell<boolean>(
-        parentCell.space,
-        { [namespace]: { pending: cause } },
-        undefined,
+      pending = ownedCell<boolean>(
+        runtime,
         tx,
+        parentCell,
+        { streamData: { pending: cause } },
+        undefined,
+        outputScope,
       );
-      pending = scopedCell(runtime, tx, basePending, outputScope);
       pending.send(false);
 
-      const baseResult = runtime.getCell<any | undefined>(
-        parentCell.space,
-        { [namespace]: { result: cause } },
-        undefined,
+      result = ownedCell<any | undefined>(
+        runtime,
         tx,
-      );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
-
-      if (contract === "availability") {
-        const basePartial = runtime.getCell<any | undefined>(
-          parentCell.space,
-          { [namespace]: { partial: cause } },
-          undefined,
-          tx,
-        );
-        partial = scopedCell(runtime, tx, basePartial, outputScope);
-      }
-
-      const baseError = runtime.getCell<any | undefined>(
-        parentCell.space,
-        { [namespace]: { error: cause } },
+        parentCell,
+        {
+          streamData: { result: cause },
+        },
         undefined,
-        tx,
+        outputScope,
       );
-      error = scopedCell(runtime, tx, baseError, outputScope);
+
+      error = ownedCell<any | undefined>(
+        runtime,
+        tx,
+        parentCell,
+        {
+          streamData: { error: cause },
+        },
+        undefined,
+        outputScope,
+      );
 
       // Link the new result cells to the parent result cell
       setResultCell(pending, parentCell);
@@ -252,6 +259,14 @@ function createStreamDataAction(
     const effectNamespace = contract === "legacy"
       ? "streamData"
       : "streamDataResult";
+    // The outbox key is the request widened by THIS node's result-cell
+    // identity, so two distinct nodes streaming the same url each keep their
+    // own effect and their own ending, rather than sharing one under the bare
+    // request id.
+    const effectKey = effectTargetKey(
+      `${effectNamespace}:${requestId}`,
+      result,
+    );
 
     enqueueSinkRequestPostCommitEffect(
       tx,
@@ -259,6 +274,10 @@ function createStreamDataAction(
       `${effectNamespace}:${requestId}`,
       materializedRequest,
       `${effectNamespace}-start`,
+      // The read loop below lives until the stream ends or is aborted, so it
+      // is not handed to `trackAsyncWork`: a barrier waiting on it would never
+      // return while a stream is connected. The abandonment settle below is
+      // separate work with its own completion, and is registered.
       () => {
         if (thisRun !== status.run) {
           return;
@@ -369,6 +388,42 @@ function createStreamDataAction(
             if (thisRun === status.run) status.controller = undefined;
           });
       },
+      {
+        idempotencyKey: effectKey,
+        onRejected: (rejection) => {
+          runtime.trackAsyncWork(
+            settleAbandonedRequest(
+              runtime,
+              effectNamespace,
+              effectKey,
+              (settleTx) => {
+                // The announcement rode the abandoned transaction, so it is
+                // made again whoever owns the answer now.
+                sendResult(
+                  settleTx,
+                  contract === "availability"
+                    ? { pending, result, partial, error }
+                    : { pending, result, error },
+                );
+                // Decided here rather than when this callback ran: a newer
+                // request can start in between, and the stream it opens owns
+                // these cells from then on.
+                if (thisRun !== status.run) return;
+                pending.withTx(settleTx).set(false);
+                if (contract === "availability") {
+                  const unavailable = DataUnavailable.error(rejection);
+                  result.withTx(settleTx).setRaw(unavailable);
+                  partial!.withTx(settleTx).setRaw(unavailable);
+                } else {
+                  result.withTx(settleTx).set(undefined);
+                }
+                error.withTx(settleTx).set(rejection.message);
+              },
+            ),
+            parentCell,
+          );
+        },
+      },
     );
   };
 }
@@ -469,6 +524,10 @@ function snapshotStreamDataInputs(
       ...(snapshot.schema !== undefined && { schema: snapshot.schema }),
     });
   }
+  // TODO(danfuzz): same gap as the fetch builtin's body handling: the `body`
+  // schema is open (`{}`), and `JSON.stringify` renders a
+  // `FabricSpecialObject` body as `"{}"` — on the wire and in the request id
+  // the snapshot hashes to.
   const options = {
     ...snapshot.options,
     body: body !== undefined && typeof body !== "string"

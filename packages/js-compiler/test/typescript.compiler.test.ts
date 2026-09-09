@@ -1,5 +1,8 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { StaticCache } from "@commonfabric/static";
+
 import {
   CompilerError,
   getTypeScriptEnvironmentTypes,
@@ -8,7 +11,6 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -110,11 +112,25 @@ const TESTS: TestDef[] = [
   },
 ];
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",
 );
+
+/**
+ * The modules a pattern's `commonfabric` import resolves to, as the compiler
+ * takes them: one program file per module name, since the resolver maps a
+ * runtime module to a `.d.ts` of the same name among the program's files.
+ */
+const FABRIC_RUNTIME_MODULES = ["commonfabric", "commonfabric/schema"];
+const fabricTypeModules: Record<string, string> = {
+  "commonfabric.d.ts": types["commonfabric.d.ts"],
+  "commonfabric/schema.d.ts": await staticCache.getText(
+    "types/commonfabric-schema.d.ts",
+  ),
+  "cfc.ts": await staticCache.getText("types/cfc.ts"),
+};
 
 /** Resolve via the compiler's resolver, then emit per-module CommonJS. */
 async function resolveAndCompileToModules(
@@ -127,6 +143,36 @@ async function resolveAndCompileToModules(
 }
 
 describe("TypeScriptCompiler", () => {
+  it("registers virtual environment types as default libraries", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.ts", {
+        "/main.ts": "export const values = [1, 2, 3];",
+      }),
+    );
+    let classifications: Record<string, boolean> | undefined;
+
+    compiler.compileToModules(resolved, {
+      beforeTransformers: (program) => {
+        classifications = Object.fromEntries(
+          program.getSourceFiles()
+            .filter((sourceFile) => sourceFile.fileName.startsWith("$types/"))
+            .map((sourceFile) => [
+              sourceFile.fileName,
+              program.isSourceFileDefaultLibrary(sourceFile),
+            ]),
+        );
+        return [];
+      },
+    });
+
+    expect(classifications).toEqual({
+      "$types/dom.d.ts": true,
+      "$types/es2023.d.ts": true,
+      "$types/jsx.d.ts": true,
+    });
+  });
+
   it("compileToModules emits per-module CommonJS for each source", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {
@@ -146,12 +192,12 @@ describe("TypeScriptCompiler", () => {
     expect(main.js).toContain('require("./math/subtract.ts")');
     expect(main.js).toContain("exports.run");
     expect(main.sourceMap).toBeDefined();
-    // No AMD wrapper / define() — this is bare CommonJS.
+    // Bare CommonJS: no bundler wrapper, no `define()` registration.
     expect(main.js).not.toContain("define(");
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });
 
-  it("carries transformer policy manifests beside emitted JavaScript", async () => {
+  it("carries transformer sidecars beside emitted JavaScript", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.ts", {
       "/main.ts": "export const value = 1;",
@@ -161,23 +207,38 @@ describe("TypeScriptCompiler", () => {
       policyDigest: "sha256:policy",
       manifest: { version: 1 },
     };
+    const builderSourceSites = {
+      formatVersion: 1 as const,
+      sites: { value: { line: 1, col: 13, bindingName: "value" } },
+    };
     const modules = compiler.compileToModules(resolved, {
       beforeTransformers: () => ({
         factories: [],
+        getBuilderSourceSites: () =>
+          new Map([["/main.ts", builderSourceSites]]),
         getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
       }),
     });
 
+    expect(modules.get("/main.ts")?.builderSourceSites).toEqual(
+      builderSourceSites,
+    );
     expect(modules.get("/main.ts")?.policyManifests).toEqual([manifest]);
+    expect(modules.get("/main.ts")?.js).not.toContain("bindingName");
     expect(modules.get("/main.ts")?.js).not.toContain("sha256:policy");
 
     const collected = compiler.compileToModulesCollecting(resolved, {
       beforeTransformers: () => ({
         factories: [],
+        getBuilderSourceSites: () =>
+          new Map([["/main.ts", builderSourceSites]]),
         getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
       }),
     });
     expect(collected.diagnostics).toEqual([]);
+    expect(collected.modules.get("/main.ts")?.builderSourceSites).toEqual(
+      builderSourceSites,
+    );
     expect(collected.modules.get("/main.ts")?.policyManifests).toEqual([
       manifest,
     ]);
@@ -523,6 +584,35 @@ export type PerUser<T> = T & { readonly [SCOPE_BRAND]?: "user" };
     await resolveAndCompileToModules(compiler, program, {
       runtimeModules: ["commonfabric"],
     });
+  });
+
+  it("compiles a pattern whose default export is typed by a branded runtime handle", async () => {
+    // The pattern API's branded handle types key on `unique symbol`s the
+    // sandbox module declares, and TypeScript's declaration emit cannot name
+    // one from the pattern's own emitted declaration. Only the compiler's
+    // filter over those brands (`KNOWN_EXPORTED_SYMBOLS`) keeps this
+    // compiling, and only when the brand is on it — so the real type module
+    // is what this compiles against, not a stand-in.
+
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `
+import { pattern, type SqliteDb } from "commonfabric";
+
+interface BillRow { id: number; subject: string; }
+type Input = { mail: SqliteDb };
+type Output = { bills: unknown };
+
+export default pattern<Input, Output>(({ mail }) => ({
+  bills: mail.query<BillRow>("SELECT id, subject FROM messages", {}),
+}));
+`,
+      ...fabricTypeModules,
+    });
+    const compiler = new TypeScriptCompiler(types);
+    const modules = await resolveAndCompileToModules(compiler, program, {
+      runtimeModules: FABRIC_RUNTIME_MODULES,
+    });
+    expect(modules.get("/main.tsx")).toBeDefined();
   });
 
   it("Inlines errors", async () => {

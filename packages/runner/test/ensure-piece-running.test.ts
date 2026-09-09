@@ -9,6 +9,7 @@ import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 import { getDerivedInternalCell, getMetaCell } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -65,7 +66,7 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({ value: 1 });
-    resultCell.setMetaRaw("argument", { value: 1 });
+    resultCell.setMetaRaw("argument", { value: 1 }, rawMetaWriteAuthorization);
 
     await tx.commit();
     tx = runtime.edit();
@@ -92,8 +93,8 @@ describe("ensurePieceRunning", () => {
     resultCell.setMetaRaw("patternIdentity", {
       identity: "missing-pattern-identity",
       symbol: "default",
-    });
-    resultCell.setMetaRaw("argument", { value: 1 });
+    }, rawMetaWriteAuthorization);
+    resultCell.setMetaRaw("argument", { value: 1 }, rawMetaWriteAuthorization);
 
     await tx.commit();
     tx = runtime.edit();
@@ -168,8 +169,16 @@ describe("ensurePieceRunning", () => {
     resultCell.setRaw({
       doubled: doubledCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, resultCell);
     argumentCell.set({ value: 5 });
 
@@ -235,8 +244,16 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({});
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     argumentCell.set({});
 
     await tx.commit();
@@ -252,14 +269,18 @@ describe("ensurePieceRunning", () => {
     await resultCell.pull();
 
     // Second call should also return true - ensurePieceRunning doesn't track
-    // previous calls because runtime.runSynced() is idempotent for already-running pieces
+    // previous calls: starting an already-running piece is a start-registration
+    // fast path — `doStart` returns as soon as it finds the piece registered,
+    // without running setup at all
     const result2 = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
     expect(result2).toBe(true);
 
-    // The piece's lift should only have run once because runSynced is idempotent
+    // The piece's lift should only have run once: starting an already-running
+    // piece returns from the start-registration fast path without
+    // re-instantiating it
     expect(startCount).toBe(1);
   });
 
@@ -308,8 +329,16 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({});
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     argumentCell.set({});
 
     await tx.commit();
@@ -453,8 +482,8 @@ describe("queueEvent with auto-start", () => {
     );
 
     // Create a internal and argument cells, and attach them to resultCell.
-    // This would be done inside setupInternal, but we want to proactively set up links
-    // to that internal cell in our result cell.
+    // This would be done inside `Runner.#setupInternal()`, but we want to
+    // proactively set up links to that internal cell in our result cell.
     const argumentCell = getMetaCell(resultCell, "argument", tx);
     const doubledCell = getDerivedInternalCell(resultCell, {
       partialCause: "doubled",
@@ -468,8 +497,16 @@ describe("queueEvent with auto-start", () => {
       doubled: doubledCell.getAsWriteRedirectLink(),
       events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
     argumentCell.set({ value: 5 });
@@ -500,13 +537,15 @@ describe("queueEvent with auto-start", () => {
     expect(resultCell.getAsQueryResult()).toMatchObject({ doubled: 10 });
 
     // Send another event - ensurePieceRunning may be called again but
-    // runSynced is idempotent so the piece won't restart
+    // Starting an already-running piece returns from the start-registration
+    // fast path, so it does not restart
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     await runtime.idle();
     await runtime.idle();
 
-    // Lift should still only have run once because runSynced is idempotent
+    // Lift should still only have run once: the start-registration fast path
+    // does not re-instantiate
     expect(liftRunCount).toBe(1);
   });
 
@@ -601,8 +640,8 @@ describe("queueEvent with auto-start", () => {
     );
 
     // Create a internal and argument cells, and attach them to resultCell.
-    // This would be done inside setupInternal, but we want to proactively set up links
-    // to that internal cell in our result cell.
+    // This would be done inside `Runner.#setupInternal()`, but we want to
+    // proactively set up links to that internal cell in our result cell.
     const argumentCell = getMetaCell(resultCell, "argument", tx);
     const doubledCell = getDerivedInternalCell(resultCell, {
       partialCause: "doubled",
@@ -620,8 +659,16 @@ describe("queueEvent with auto-start", () => {
       events: eventsCell.getAsWriteRedirectLink(),
       eventCount: eventCountCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
     setResultCell(eventCountCell, resultCell);
@@ -763,8 +810,16 @@ describe("queueEvent with auto-start", () => {
       doubled: doubledCell.getAsWriteRedirectLink(),
       events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, intermediateCell);
     setResultCell(eventsCell, intermediateCell);
     argumentCell.set({ value: 6 });
@@ -791,5 +846,29 @@ describe("queueEvent with auto-start", () => {
     expect(resultCell.getAsQueryResult()).toMatchObject({
       doubled: 12,
     });
+  });
+});
+
+describe("ensurePieceRunning error propagation (r3739139521)", () => {
+  it("collapses failures to false by default; propagateErrors rethrows so the serving loop's failure arm is reachable", async () => {
+    // A runtime whose edit() throws stands in for any internal failure
+    // (pattern load, start). The default caller (event recovery) keeps
+    // best-effort false; the serving loop's demand cycle opts into the
+    // rethrow so a real failure counts structureLoadFailures instead of
+    // masquerading as a creation-race deferral retried every cycle.
+    const boom = new Error("pattern load fell over");
+    const runtime = {
+      edit: () => {
+        throw boom;
+      },
+    } as unknown as Runtime;
+    const link = {
+      space: "did:key:z6Mk-ensure-piece-test" as never,
+      id: "of:ensure-piece-test" as never,
+      path: [],
+    } as never;
+    await expect(ensurePieceRunning(runtime, link)).resolves.toBe(false);
+    await expect(ensurePieceRunning(runtime, link, { propagateErrors: true }))
+      .rejects.toThrow("pattern load fell over");
   });
 });

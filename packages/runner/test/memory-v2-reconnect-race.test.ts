@@ -12,7 +12,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
 import type { SessionFactory } from "../src/storage/v2.ts";
 import type {
-  IStorageProviderWithReplica,
+  IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import {
@@ -30,7 +30,7 @@ const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   send(
     batch: { uri: URI; value: EntityDocument | undefined }[],
@@ -56,10 +56,16 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   #dropResponses = false;
   #dropped = new Set<number>();
 
+  readonly #server: MemoryV2Server.Server;
+  readonly #dropOnFirstLocalSeqs: number[];
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
-    private readonly dropOnFirstLocalSeqs: number[] = [],
-  ) {}
+    server: MemoryV2Server.Server,
+    dropOnFirstLocalSeqs: number[] = [],
+  ) {
+    this.#server = server;
+    this.#dropOnFirstLocalSeqs = dropOnFirstLocalSeqs;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -79,14 +85,14 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
     if (
       message.type === "transact" &&
       typeof localSeq === "number" &&
-      this.dropOnFirstLocalSeqs.includes(localSeq) &&
+      this.#dropOnFirstLocalSeqs.includes(localSeq) &&
       !this.#dropped.has(localSeq)
     ) {
       this.#dropped.add(localSeq);
       this.droppedLocalSeqs.push(localSeq);
       this.#dropResponses = true;
       try {
-        await this.connection().receive(payload);
+        await this.#openConnection().receive(payload);
       } finally {
         this.#dropResponses = false;
         this.disconnect();
@@ -94,7 +100,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
       return;
     }
 
-    await this.connection().receive(payload);
+    await this.#openConnection().receive(payload);
   }
 
   close(): Promise<void> {
@@ -108,11 +114,11 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
     this.#closeReceiver(new Error("disconnect"));
   }
 
-  private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
+  #openConnection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
       this.onConnectionCount?.(this.connectionCount);
-      this.#connection = this.server.connect((message) => {
+      this.#connection = this.#server.connect((message) => {
         if (!this.#dropResponses) {
           this.#receiver(encodeMemoryBoundary(message));
         }

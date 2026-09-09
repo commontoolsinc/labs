@@ -48,7 +48,7 @@ async function writeChildImportMap(): Promise<string> {
     }
   }
   imports["commonfabric"] = new URL("commonfabric-shim.test.ts", here).href;
-  imports["@commonfabric/html/jsx-runtime"] =
+  imports["@commonfabric/runner/jsx-runtime"] =
     new URL("jsx-runtime-stub.test.ts", here).href;
 
   // Re-establish each workspace member's own `@/` self-alias as a scope, read

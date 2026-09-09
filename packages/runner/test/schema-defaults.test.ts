@@ -812,7 +812,7 @@ describe("Schema - Default Values", () => {
       expect(value.name.get()).toBe("Updated Name");
     });
 
-    it("should make immutable cells if they provide the default value", () => {
+    it("should make immutable cells if a $ref target provides the default value", () => {
       const schema = {
         $defs: {
           NameEntry: {
@@ -830,7 +830,7 @@ describe("Schema - Default Values", () => {
 
       const c = runtime.getCell<any>(
         space,
-        "should make immutable cells if they provide the default value 1",
+        "should make immutable cells if a $ref target provides the default value 1",
         undefined,
         tx,
       );

@@ -9,17 +9,18 @@ What the failure probe contains, and where each piece lives:
 
 - **Fill phase ledger** (`__cfFillDiag`, in
   [`cfc-browser-helpers.ts`](../../../packages/patterns/integration/cfc-browser-helpers.ts))
-  — per-selector progress through the fill (found → visible → filled →
-  committed), naming the exact await that hung.
+  — per-selector progress through the fill (settled → found → visible → filled
+  → committed), naming the exact await that hung. A fill on a page that never
+  exposes `commonfabric.viewSettled` stops at the settle and says so.
 - **Host/bound-cell state** (`readCfInputProbe`, same file) — whether the
   `cf-input` host has a bound cell and a pending commit, alongside DOM
   value/visibility/disabled.
 - **Main-thread pending IPC** (`RuntimeClient.getPendingRequests()`,
-  [`runtime-client.ts`](../../../packages/runtime-client/runtime-client.ts))
+  [`runtime-client.ts`](../../../packages/runtime-client/src/runtime-client.ts))
   — the runtime-client requests still awaiting a worker response; works even
   while the worker is wedged.
 - **Worker request ledger** (`runtime-worker.ipc` counts, wired through
-  [`connection.ts`](../../../packages/runtime-client/client/connection.ts))
+  [`connection.ts`](../../../packages/runtime-client/src/client/connection.ts))
   — received/responded counts per request type. Because `postMessage` is
   FIFO, one failed run triangulates *never sent* vs *delivery starved* vs
   *response lost*.

@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/test/non-idempotent/timestamp.test.tsx --verbose
  */
-import { assert, computed, pattern, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const items = new Writable([{ title: "Task A" }, { title: "Task B" }]);
@@ -33,7 +33,7 @@ export default pattern(() => {
   const hasItems = assert(() => processed.get().length > 0);
 
   return {
-    tests: [{ assertion: hasItems }],
+    [TESTS]: [{ assertion: hasItems }],
     expectNonIdempotent: true,
   };
 });

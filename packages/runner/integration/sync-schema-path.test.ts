@@ -1,12 +1,20 @@
 #!/usr/bin/env -S deno run -A
 
 import { assertEquals } from "@std/assert/equals";
-import { type NormalizedLink, Runtime } from "@commonfabric/runner";
+import {
+  experimentalOptionsFromEnv,
+  type JSONSchema,
+  type MemorySpace,
+  type NormalizedLink,
+  Runtime,
+  type URI,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
-import { parseLink } from "../src/link-utils.ts";
 import { env } from "@commonfabric/integration";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { parseLink } from "../src/link-utils.ts";
 import { IStorageManager } from "../src/storage/interface.ts";
 const { API_URL } = env;
 
@@ -17,8 +25,6 @@ const keyConfig: IdentityCreateConfig = {
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Sync Schema uses Path ===");
-
-const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 function read(
   storageManager: IStorageManager,
@@ -40,6 +46,17 @@ async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),
@@ -112,6 +129,17 @@ async function test() {
   // Attempt to load on runtime2
   const runtime2 = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),
@@ -132,7 +160,12 @@ async function test() {
   // so instead I'll extract the link myself, and check in the heap.
   // This will be the link to the employee's address field
   const sigilLink = JSON.parse(JSON.stringify(newCell.key(0).getRaw()));
-  const normalizedLink = parseLink(sigilLink) as NormalizedLink;
+  // The stored link elides what it shares with the slot holding it, so it has
+  // to be parsed against that slot to recover the space it lives in.
+  const normalizedLink = parseLink(
+    sigilLink,
+    newCell.key(0),
+  ) as NormalizedLink;
   const record = read(
     runtime2.storageManager,
     normalizedLink.space!,
@@ -149,20 +182,7 @@ async function runTest() {
 
 Deno.test({
   name: "sync schema path test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

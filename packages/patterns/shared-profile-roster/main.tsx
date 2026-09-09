@@ -57,8 +57,10 @@ export interface Participant {
    * participants are "the same" iff `equals()` matches on this, never on name.
    */
   profile: ParticipantProfileCell;
+
   /** Display name, snapshotted from the joiner's profile at join time. */
   name: string;
+
   /** Avatar URL or glyph, snapshotted from the joiner's profile (may be ""). */
   avatar: string;
   joinedAt: number;
@@ -72,6 +74,7 @@ export interface Roster {
 export interface ViewerState {
   /** Set once this viewer has contributed their entry to the shared roster. */
   joined?: boolean;
+
   /** The display name shown on the join button after joining (cosmetic only). */
   joinedName?: string;
 }
@@ -126,6 +129,7 @@ const join = handler<JoinEvent, {
 export interface RosterDemoInput {
   /** Shared roster — every user in the space reads & appends to this. */
   roster?: PerSpace<Roster | Default<typeof DEFAULT_ROSTER>>;
+
   /** Current viewer's join marker — follows the user, not broadcast directly. */
   viewer?: PerUser<ViewerState | Default<typeof EMPTY_VIEWER>>;
 }

@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl, join } from "@std/path";
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema } from "../utils.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../../../", import.meta.url));
@@ -11,6 +11,29 @@ const DEEP_FREEZE_STUB = join(
   REPO_ROOT,
   "__schema_factory_input_deep_freeze.d.ts",
 );
+const DATA_MODEL_API = join(REPO_ROOT, "packages/data-model/src/api.ts");
+
+/**
+ * The workspace specifiers `packages/api/index.ts` names, resolved by hand
+ * because this program compiles without an import map. The
+ * `@commonfabric/data-model` barrel is reached for one value, `deepFreeze()`
+ * in `packages/api/cfc.ts`, which no part of the surface under test calls, so
+ * a stub declaring just that function stands in for the whole module; the
+ * fabric value declarations are part of that surface, so they resolve to the
+ * real module.
+ */
+const WORKSPACE_MODULES: ReadonlyMap<string, ts.ResolvedModuleFull> = new Map([
+  ["@commonfabric/data-model", {
+    resolvedFileName: DEEP_FREEZE_STUB,
+    extension: ts.Extension.Dts,
+    isExternalLibraryImport: false,
+  }],
+  ["@commonfabric/data-model/api", {
+    resolvedFileName: DATA_MODEL_API,
+    extension: ts.Extension.Ts,
+    isExternalLibraryImport: false,
+  }],
+]);
 
 function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]): string {
   return diagnostics.map((diagnostic) => {
@@ -89,12 +112,9 @@ function getTypeFromRealApiCode(
     virtualFiles.get(fileName) ?? originalReadFile(fileName);
   host.resolveModuleNames = (moduleNames, containingFile) =>
     moduleNames.map((moduleName) => {
-      if (moduleName === "@commonfabric/data-model/deep-freeze") {
-        return {
-          resolvedFileName: DEEP_FREEZE_STUB,
-          extension: ts.Extension.Dts,
-          isExternalLibraryImport: false,
-        };
+      const workspaceModule = WORKSPACE_MODULES.get(moduleName);
+      if (workspaceModule !== undefined) {
+        return workspaceModule;
       }
       return ts.resolveModuleName(
         moduleName,
@@ -159,7 +179,7 @@ describe("Schema: real API FactoryInput", () => {
       code,
       "SchemaRoot",
     );
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(
       gen.generateSchema(
         type,
@@ -198,7 +218,7 @@ describe("Schema: real API FactoryInput", () => {
       code,
       "SchemaRoot",
     );
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() =>
       gen.generateSchema(

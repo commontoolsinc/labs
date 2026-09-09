@@ -1,7 +1,6 @@
 /**
- * Mutate-in-place write primitives shared between `v2-transaction.ts` and
- * `chronicle.ts`. Both layers want the same "shallow-thaw the spine,
- * create missing intermediates, mutate the leaf in place" behavior.
+ * Mutate-in-place write primitives for `v2-transaction.ts`: shallow-thaw the
+ * spine, create missing intermediates, mutate the leaf in place.
  *
  * The hot path is `applyMutablePathWrite()`. Sibling helpers
  * (`isContainerValue`, `getValueTypeName`, `applyArrayLengthWrite`) are
@@ -13,13 +12,12 @@
 import {
   cloneForMutation,
   CloneForMutationError,
-} from "@commonfabric/data-model/value-clone";
-import {
   type FabricValue,
+  isFabricPlainContainer,
+  toDebugKindString,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isRecord } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
   ITypeMismatchError,
@@ -45,10 +43,16 @@ export type MutablePathWriteOptions = {
   delete?: boolean;
 };
 
+/**
+ * Indicates whether a value is one a path key addresses -- an array or a plain
+ * object. A `FabricInstance` is refused: it is a container, but it holds its
+ * state privately, so reading `value[key]` off one finds an inherited member or
+ * nothing, and writing one leaves an own property the instance never reports.
+ */
 export const isContainerValue = (
   value: FabricValue | undefined,
 ): value is Record<string, FabricValue> | FabricValue[] =>
-  Array.isArray(value) || isRecord(value);
+  isFabricPlainContainer(value);
 
 export const getValueTypeName = (value: FabricValue | undefined): string => {
   if (value === null) {
@@ -146,7 +150,20 @@ export const applyMutablePathWrite = (
       nextKeyAfterPath: leafKey,
       force: false,
     });
-    newRoot = result.value as FabricValue;
+    newRoot = result.value;
+    if (!isFabricPlainContainer(result.pathValue)) {
+      // `cloneForMutation()` hands back any container arm at the end of its
+      // path, and `leafKey` addresses none of them but the plain ones. The
+      // offending value is at `parentPath`, whose last key is the one before
+      // the leaf.
+      return {
+        error: TypeMismatchError(
+          { ...address, path: parentPath },
+          toDebugKindString(result.pathValue),
+          "write",
+        ),
+      };
+    }
     parent = result.pathValue as
       | Record<string, FabricValue>
       | FabricValue[];
@@ -202,20 +219,30 @@ export const applyMutablePathWrite = (
     return { ok: { root: newRoot, previousValue, changed: true } };
   }
 
-  // Object branch.
+  // Object branch. Mirrors the array branch's presence-aware no-op detection
+  // above, but presence on an object is an OWN-property question:
+  // `Object.hasOwn`, not `in`. With `in`, a key named after an
+  // `Object.prototype` member — `toString`, `valueOf`, `hasOwnProperty` — read
+  // as present on every record, `previousValue` came back as the inherited
+  // FUNCTION, and `valueEqual` then threw "Cannot compare a function value".
+  // Writing a property with one of those perfectly legal names failed outright.
+  // (`__proto__`/`constructor` are refused upstream by #5264; these are not,
+  // and are ordinary data keys.)
   const obj = parent as Record<string, FabricValue>;
-  const previousValue = obj[leafKey];
+  const hasOwnLeaf = Object.hasOwn(obj, leafKey);
+  // Absent means absent: without the guard this is the prototype's member.
+  const previousValue = hasOwnLeaf ? obj[leafKey] : undefined;
   if (isDelete) {
-    if (!(leafKey in obj)) {
+    if (!hasOwnLeaf) {
       return { ok: { root: newRoot, previousValue, changed: false } };
     }
     delete obj[leafKey];
     return { ok: { root: newRoot, previousValue, changed: true } };
   }
-  if (leafKey in obj && valueEqual(previousValue, value)) {
+  if (hasOwnLeaf && valueEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
-  obj[leafKey] = value as FabricValue;
+  obj[leafKey] = value;
   return { ok: { root: newRoot, previousValue, changed: true } };
 };
 

@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CfcEnforcementMode } from "../src/cfc/mod.ts";
-import { createSchemaTransformerV2 } from "../../schema-generator/src/plugin.ts";
+import { SchemaGenerator } from "../../schema-generator/src/schema-generator.ts";
 import {
   asObjectSchema,
   getTypeFromCode,
@@ -40,7 +40,7 @@ describe("CFC authoring surface trust-sensitive claims", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.value as any)?.ifc?.writeAuthorizedBy).toEqual({
@@ -106,6 +106,9 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        // The assertion below is that a matching binding identity is
+        // admitted. Only an enforcing rung decides that; a weaker one admits
+        // the claim with a diagnostic and the assertion holds either way.
         cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "trust-snapshot-1",

@@ -16,7 +16,12 @@ export function requireFirstPartyHttpAuth(): MiddlewareHandler<
       // runs earlier in the chain) with the verified user. Defensive: no-op if
       // no span/provider is active.
       trace.getActiveSpan()?.setAttribute("user.did", userDid);
-      // TODO(auth): Check that the verified DID is authorized for this privileged route before continuing.
+      // TODO(auth): Check that the verified DID is authorized for this
+      // privileged route before continuing. Authorization is per-route because
+      // it depends on the resource: see lib/space-authority.ts, where the
+      // ingest control plane resolves the verified DID against the target
+      // space's ACL. Routes that spend server-held authority (agent-tools,
+      // sandbox) still have no such check.
     } catch (error) {
       const logger = c.get("logger");
       logger.warn(

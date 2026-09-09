@@ -83,7 +83,7 @@ export function brandTrustedPattern<T>(value: T): T {
 // Derivation tracking: `copy → root original`. Replaces the former
 // `unsafe_originalPattern` symbol backref. Registered ONLY by trusted-builder
 // copy sites (`noteDerivedCopy` callers: build-time graph serialization in
-// json-utils, traversal copies in traverse-utils, binding copies in
+// to-encodable-form, traversal copies in traverse-utils, binding copies in
 // pattern-binding, and the `asScope`/`inSpace` factory derivations in
 // builder/pattern.ts — the latter reachable from authored pattern code, which
 // is sound because both objects are builder-minted and already branded) —
@@ -130,9 +130,12 @@ export function resolveOriginal<T>(value: T): T {
  *
  * - trust propagates EAGERLY (sound: builders brand their artifacts at
  *   creation time, before any copy can be made);
- * - the entry ref propagates eagerly when already known, but lookups still
- *   walk `derivedFrom` lazily ({@link getArtifactEntryRef}) because refs are
- *   indexed only post-evaluation — AFTER build-time copies were made.
+ * - a REAL entry ref propagates eagerly when already known — a session
+ *   `keyless:` ref never does (pinning the mint onto the copy would shadow
+ *   the root's later real promotion; see the guard in the body) — and
+ *   lookups still walk `derivedFrom` lazily ({@link getArtifactEntryRef})
+ *   because refs are indexed only post-evaluation — AFTER build-time
+ *   copies were made.
  *
  * Only runner-owned copy sites may call this; it is the sole way a copy can
  * inherit trust, so forged values (which are never passed here with a trusted
@@ -146,22 +149,65 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   derivedFrom.set(c, root);
   if (trustedPatterns.has(root)) trustedPatterns.add(c);
   if (trustedBuilderArtifacts().has(root)) trustedBuilderArtifacts().add(c);
+  // Eager ref propagation is an optimization only — the lazy root walk in
+  // `getArtifactEntryRef` serves a copy without an own entry — and it must
+  // never pin a SESSION-synthetic ref onto the copy: `getArtifactEntryRef`
+  // consults the exact object first, so a keyless ref copied here would
+  // shadow the root's later REAL promotion (module indexing after
+  // build-time copies) for this copy forever. Real refs are immutable
+  // facts and safe to pin; keyless ones stay root-resolved.
   const ref = entryRefByValue.get(root);
-  if (ref && !entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+  if (
+    ref && !entryRefByValue.has(c) && !isKeylessPatternIdentity(ref.identity)
+  ) {
+    entryRefByValue.set(c, ref);
+  }
+}
+
+/**
+ * Prefix of a session-synthetic keyless pattern identity — minted by
+ * `PatternManager.ensureKeylessPatternIdentity` for a hand-built pattern with
+ * no content-addressed entry ref. Session-only by construction (no
+ * source/compiled closure exists behind it), so such an identity must never
+ * be written into durable state (L3(a), RULED 2026-08-27).
+ */
+export const KEYLESS_PATTERN_IDENTITY_PREFIX = "keyless:";
+
+/**
+ * Whether `identity` is a session-synthetic keyless pointer rather than a
+ * durable content-addressed artifact identity. A fresh runtime can never load
+ * a keyless pointer.
+ */
+export function isKeylessPatternIdentity(identity: string): boolean {
+  return identity.startsWith(KEYLESS_PATTERN_IDENTITY_PREFIX);
 }
 
 /**
  * Associate a content-addressed `{ identity, symbol }` entry ref with a live
  * builder artifact. First write wins (an artifact may be reachable under
  * several symbols; the first registration is canonical, matching the
- * pre-existing `valueToEntryRef` semantics).
+ * pre-existing `valueToEntryRef` semantics) — with one deliberate exception:
+ * a REAL (content-addressed) ref replaces a session-synthetic `keyless:`
+ * one. The keyless mint can run before a module's post-evaluation indexing
+ * ("refs are indexed only post-evaluation — AFTER build-time copies were
+ * made"), and letting the mint win would permanently shadow the value's real,
+ * loadable identity behind a pointer no other session can resolve.
  */
 export function setArtifactEntryRef(
   value: unknown,
   ref: { identity: string; symbol: string },
 ): void {
   const key = asKey(value);
-  if (key && !entryRefByValue.has(key)) entryRefByValue.set(key, ref);
+  if (!key) return;
+  const existing = entryRefByValue.get(key);
+  if (
+    existing !== undefined &&
+    !(isKeylessPatternIdentity(existing.identity) &&
+      !isKeylessPatternIdentity(ref.identity))
+  ) {
+    return;
+  }
+  entryRefByValue.set(key, ref);
 }
 
 /**
@@ -176,6 +222,101 @@ export function getArtifactEntryRef(
   if (!key) return undefined;
   return entryRefByValue.get(key) ??
     entryRefByValue.get(resolveOriginal(key) as object);
+}
+
+/**
+ * The first REAL (non-keyless) content-addressed entry ref reachable from
+ * `value` along its derivation chain — the value itself, then each recorded
+ * `derivedFrom` step toward the root original ("walk up as many steps as
+ * needed"). This is the module-addressed PRODUCER identity of a runtime-built
+ * pattern value: the keyless population is values whose producing code is
+ * cf:module-addressed (CT-1644/CT-1655 hoisting), and a derived copy's chain
+ * ends at that addressable original.
+ *
+ * Returns undefined when no step carries a real ref — a from-scratch
+ * hand-built value with no recorded producer link (frames carry the building
+ * code's `implementationIdentity`, but nothing records it per-artifact, and a
+ * lift module's identity would not be a loadable PATTERN identity for the
+ * value anyway). Callers must treat that as "no durable convergence
+ * possible", never substitute the keyless ref.
+ */
+export function resolveProducerEntryRef(
+  value: unknown,
+): { identity: string; symbol: string } | undefined {
+  let current = asKey(value);
+  if (!current) return undefined;
+  const seen = new Set<object>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const ref = entryRefByValue.get(current);
+    if (ref !== undefined && !isKeylessPatternIdentity(ref.identity)) {
+      return ref;
+    }
+    const next = derivedFrom.get(current);
+    if (!next || next === current) break;
+    current = next;
+  }
+  return undefined;
+}
+
+// The authored file a pattern was defined in, per live builder artifact.
+//
+// Distinct from `programByPattern`, which holds the whole source CLOSURE and is
+// deliberately absent on the by-identity reload path. This is just the
+// filename, which that path does know and can afford to keep — enough to map a
+// live pattern back to a file without carrying its sources.
+//
+// A WeakMap for the same reason `programByPattern` is one: an evaluated
+// module's exports are HARDENED, so defining a property on one throws ("object
+// is not extensible"). The association has to live beside the value, not on it.
+const sourcePathByValue = new WeakMap<object, string>();
+
+/**
+ * Associate the authored file a builder artifact came from. Written by the
+ * PatternManager when it indexes an evaluated module, alongside the entry ref.
+ *
+ * LAST write wins, which is the opposite of {@link setArtifactEntryRef} and is
+ * load-bearing rather than incidental. A re-export barrel puts the SAME artifact
+ * object in two namespaces, so this is called twice for it — once with the
+ * barrel's filename, once with the defining module's. The defining module is the
+ * answer that is useful (it is the file a reader must edit, and the only one
+ * whose default export is this artifact), and it comes LAST because the evaluate
+ * loop walks `graph.specifierByPath` importer-first. First-write-wins would name
+ * the barrel. `Engine.#recordModuleProvenance` solves the same re-export
+ * ambiguity explicitly; here the traversal order supplies it, so a change to
+ * that order has to preserve this.
+ *
+ * Gated on trusted-builder provenance to match the two writes it sits beside in
+ * `registerEvaluatedModules` — `indexArtifact` and `recordModuleProvenance` both
+ * gate the same way. Nothing that reaches {@link getPatternSourcePath} is
+ * untrusted, so the gate costs no coverage and keeps the table's population
+ * equal to the artifact index's.
+ */
+export function setPatternSourcePath(
+  value: unknown,
+  sourcePath: string,
+): void {
+  if (!isTrustedBuilderArtifact(value)) return;
+  const key = asKey(value);
+  if (key) sourcePathByValue.set(key, sourcePath);
+}
+
+/**
+ * The authored file a builder artifact came from — the exact object first, then
+ * its root original.
+ *
+ * The derivation walk is load-bearing, not defensive: a nested pattern reaches
+ * the runner as a derivation COPY (binding and traversal copies), and the
+ * source path is stamped post-evaluation on the module export it was copied
+ * from. Probing only the exact object misses every sub-pattern, which is the
+ * whole population this table exists to name. Same lazy resolution, and for the
+ * same reason, as {@link getArtifactEntryRef}.
+ */
+export function getPatternSourcePath(value: unknown): string | undefined {
+  const key = asKey(value);
+  if (!key) return undefined;
+  return sourcePathByValue.get(key) ??
+    sourcePathByValue.get(resolveOriginal(key) as object);
 }
 
 /**

@@ -1,52 +1,52 @@
 /**
  * Factory function to create builder functions with runtime dependency injection
  */
-import type {
-  BuilderFunctionsAndConstants,
-  ToSchemaFunction,
-} from "./types.ts";
+
 import {
-  AsCell,
-  AsComparableCell,
-  AsOpaqueCell,
-  AsReadonlyCell,
-  AsStream,
-  AsWriteonlyCell,
-  AuthSchema,
-  CHIP_UI,
-  FS,
-  ID,
-  ID_FIELD,
-  NAME,
-  schema as schemaIdentity,
-  SELF,
-  TILE_UI,
-  TYPE,
-  UI,
-  WebhookConfigSchema,
-} from "./types.ts";
-import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
-import { pattern } from "./pattern.ts";
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  toCompactDebugString,
+  toIndentedDebugString,
+  valueEqual,
+} from "@commonfabric/data-model";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import {
-  action,
-  assert,
-  assertCapture,
-  assertRenderParts,
-  byRef,
-  computed,
-  handler,
-  lift,
-} from "./module.ts";
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
 import {
-  hasError,
-  hasSchemaMismatch,
-  isPending,
-  isSyncing,
-  observeAvailability,
-  partialResultOf,
-  resultOf,
-} from "./data-unavailable.ts";
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
 import {
+  all as rowLabelAll,
+  any as rowLabelAny,
+  authoredBy as rowLabelAuthoredBy,
+  constant as rowLabelConstant,
+  dbOwner as rowLabelDbOwner,
+  endorsedBy as rowLabelEndorsedBy,
+  intersect as rowLabelIntersect,
+  match as rowLabelMatch,
+  principal as rowLabelPrincipal,
+  whenMatches as rowLabelWhenMatches,
+} from "@commonfabric/memory/sqlite/row-label";
+import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
+
+import { cellConstructorFactory } from "../cell.ts";
+import { getEntityId } from "../create-ref.ts";
+import type { RuntimeProgram } from "../harness/types.ts";
+import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
+import {
+  registerUnsafeHostTrustedValue,
+  type UnsafeHostTrust,
+} from "../unsafe-host-trust.ts";
+import {
+  cellFromUrl,
   compileAndRun,
   fetchBinary,
   fetchJson,
@@ -73,58 +73,66 @@ import {
   when,
   wish,
 } from "./built-in.ts";
-import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
-import {
-  all as rowLabelAll,
-  any as rowLabelAny,
-  authoredBy as rowLabelAuthoredBy,
-  constant as rowLabelConstant,
-  dbOwner as rowLabelDbOwner,
-  endorsedBy as rowLabelEndorsedBy,
-  intersect as rowLabelIntersect,
-  match as rowLabelMatch,
-  principal as rowLabelPrincipal,
-  whenMatches as rowLabelWhenMatches,
-} from "@commonfabric/memory/sqlite/row-label";
-import { cellConstructorFactory } from "../cell.ts";
-import { getEntityId } from "../create-ref.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { getPatternEnvironment } from "./env.ts";
-import type { RuntimeProgram } from "../harness/types.ts";
+import { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";
+import {
+  action,
+  assert,
+  assertCapture,
+  assertRenderParts,
+  byRef,
+  computed,
+  handler,
+  lift,
+} from "./module.ts";
+import {
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
+  observeAvailability,
+  partialResultOf,
+  resultOf,
+} from "./data-unavailable.ts";
 import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
+import { pattern } from "./pattern.ts";
+import type {
+  BuilderFunctionsAndConstants,
+  ToSchemaFunction,
+} from "./types.ts";
 import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
+  AuthSchema,
+  CHIP_UI,
+  FS,
+  NAME,
+  schema as schemaIdentity,
+  SELF,
+  TESTS,
+  TILE_UI,
+  TYPE,
+  UI,
+  WebhookConfigSchema,
+} from "./types.ts";
 import {
-  FabricError,
-  FabricLink,
-} from "@commonfabric/data-model/fabric-instances";
-import {
-  FabricBytes,
-  FabricEpochDays,
-  FabricEpochNsec,
-  FabricHash,
-  FabricRegExp,
-} from "@commonfabric/data-model/fabric-primitives";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
-import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
-import {
-  registerUnsafeHostTrustedValue,
-  type UnsafeHostTrust,
-} from "../unsafe-host-trust.ts";
+  CFC_CANONICAL_ALIAS_NAMES,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  isFabricPrimitiveSchemaType,
+  MERGEABLE_OP_METHODS,
+} from "@commonfabric/api";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() must be transformed at compile time - transformer not running\n" +
-      "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> if present, or ensure you are using the Common Fabric build process",
+      "help: the CTS transforms run as part of the Common Fabric build process; check that you are compiling through it",
   );
 };
 
@@ -191,7 +199,12 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     }
   };
 
-  const commonfabric = {
+  // Annotated rather than cast, so the object literal is checked against the
+  // declarations a pattern compiles against: a missing binding, a binding whose
+  // type has drifted from its declaration, and a binding nothing declares are
+  // each an error here. `__cfHelpers` is the one member that cannot be written
+  // in the literal, because its value is the literal.
+  const surface: Omit<BuilderFunctionsAndConstants, "__cfHelpers"> = {
     // Pattern creation
     pattern: trustedPattern,
     patternTool: trustedPatternTool,
@@ -233,12 +246,24 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     generateText,
     generateTextStream,
     fetchBinary,
+    cellFromUrl,
     fetchText,
     fetchJson,
     fetchJsonUnchecked,
     fetchProgram,
     streamData,
     compileAndRun,
+    // Placeholder for the per-module binding. A graph carrying data files hands
+    // each module its own copy of this namespace, whose reader is closed over
+    // that load's files and that module's path (see
+    // `compileSourcesToRecords`). Reaching this body means the module is
+    // running outside a graph that carries any.
+    dataFile: (path: string): string => {
+      throw new Error(
+        `No attached data file "${path}": this pattern was loaded without a ` +
+          `data-file closure.`,
+      );
+    },
     sqliteDatabase,
     sqliteQuery,
     table,
@@ -297,8 +322,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     entityRefToString,
 
     // Constants
-    ID,
-    ID_FIELD,
     SELF,
     TYPE,
     NAME,
@@ -306,6 +329,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     TILE_UI,
     CHIP_UI,
     FS,
+    TESTS,
 
     // Schema utilities
     schema: runtimeSchema,
@@ -314,26 +338,37 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     AuthSchema,
     WebhookConfigSchema,
 
+    // The names `@commonfabric/api` both declares and implements, passed
+    // through so a pattern that imports one reads the value rather than
+    // `undefined`: the sandbox resolves `commonfabric` to this object, not to
+    // that module.
+    FABRIC_PRIMITIVE_SCHEMA_TYPES,
+    isFabricPrimitiveSchemaType,
+    FABRIC_SPECIAL_OBJECT_BRAND,
+    MERGEABLE_OP_METHODS,
+    CFC_CANONICAL_ALIAS_NAMES,
+
     // Render utils
     h,
     UiAction,
     UiPromptSlot,
     UiDisclosure,
 
-    // Fabric value classes -- runtime values backing the type declarations
-    // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-    // checks in patterns. `FabricSpecialObject` is abstract; it is bound for
-    // `instanceof` only. Listed in declaration order, so this list and the
-    // declarations in api/index.ts can be compared directly.
+    // `FabricSpecialObject` classes -- runtime values backing the type
+    // declarations in data-model/src/api.ts. Enables `new FabricEpochNsec(...)`
+    // and `instanceof` checks in patterns. `FabricSpecialObject` is abstract;
+    // it is bound for `instanceof` only. Listed in declaration order, so this
+    // list and those declarations can be compared directly.
     FabricSpecialObject,
     FabricInstance,
     FabricPrimitive,
     FabricEpochNsec,
-    FabricEpochDays,
+    FabricEpochDay,
     FabricHash,
     FabricLink,
     FabricBytes,
     FabricRegExp,
+    FabricKeyPair,
     FabricError,
 
     // Debug stringifiers (helpers exposed for pattern code)
@@ -342,10 +377,13 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Value comparison helper exposed for pattern code
     valueEqual,
-  } as BuilderFunctionsAndConstants & {
-    __cfHelpers?: BuilderFunctionsAndConstants;
   };
-  commonfabric.__cfHelpers = commonfabric;
+
+  // The helpers object the transformer's output reaches for is this same
+  // surface, so it can only be attached once the surface exists.
+  const commonfabric: BuilderFunctionsAndConstants = Object.assign(surface, {
+    __cfHelpers: surface,
+  });
 
   return {
     commonfabric,

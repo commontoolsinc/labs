@@ -1,3 +1,7 @@
+import { assert, assertThrows } from "@std/assert";
+
+import * as ed25519 from "@noble/ed25519";
+
 import {
   NativeEd25519Signer,
   NativeEd25519Verifier,
@@ -7,10 +11,8 @@ import {
   NobleEd25519Verifier,
 } from "../src/ed25519/noble.ts";
 import { didToBytes, isNativeEd25519Supported } from "../src/ed25519/utils.ts";
-import { assert, assertThrows } from "@std/assert";
-import { bytesEqual } from "./utils.ts";
 import { DIDKey } from "../src/interface.ts";
-import * as ed25519 from "@noble/ed25519";
+import { bytesEqual } from "./utils.ts";
 
 type SignerImpl<ID extends DIDKey> =
   | NativeEd25519Signer<ID>
@@ -149,6 +151,24 @@ testBothImpls(
     }
   },
 );
+
+Deno.test("each implementation refuses the key pair state it cannot sign with", async () => {
+  const material = (await NobleEd25519Signer.fromRaw(TEST_PRIVATE_KEY)).keyPair;
+  assertThrows(
+    () => new NativeEd25519Signer(material, TEST_DID),
+    Error,
+    "holds material",
+  );
+
+  if (!await isNativeEd25519Supported()) return;
+
+  const handles = (await NativeEd25519Signer.fromRaw(TEST_PRIVATE_KEY)).keyPair;
+  assertThrows(
+    () => new NobleEd25519Signer(handles),
+    Error,
+    "holds handles",
+  );
+});
 
 // Run tests with both implentations
 function testBothImpls(

@@ -1,4 +1,5 @@
 /// <cts-enable />
+
 /**
  * Shared types for the Agent pattern.
  *

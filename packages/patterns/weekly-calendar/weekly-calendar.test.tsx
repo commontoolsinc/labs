@@ -3,6 +3,7 @@ import {
   assert,
   pattern,
   resultOf,
+  TESTS,
   wish,
   Writable,
 } from "commonfabric";
@@ -82,7 +83,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_create_from_stream },
       { assertion: assert_stream_registers_event },
       { action: action_create_another_from_prompt },

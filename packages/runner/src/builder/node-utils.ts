@@ -1,15 +1,18 @@
-import { isRecord } from "@commonfabric/utils/types";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
+import { FabricInstance } from "@commonfabric/data-model";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
+import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import { resolveLocationFromFunctionSource } from "./module.ts";
+import { traverseValue } from "./traverse-utils.ts";
+import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
@@ -17,15 +20,17 @@ export function connectInputAndOutputs(node: NodeRef) {
     if (isCell(value)) {
       const exported = value.export();
       if (exported.frame !== node.frame) {
-        const implementation = isRecord(node.module)
+        const implementation = isObjectOrArray(node.module)
           ? node.module.implementation
           : undefined;
-        const sourceLocation = typeof implementation === "function"
-          ? resolveLocationFromFunctionSource(
-            implementation as (...args: any[]) => unknown,
-            node.frame,
-          )
-          : null;
+        // A factory applied during module evaluation predates the provenance
+        // walk that records authored positions, so the location is routinely
+        // absent here. The body preview is stamped at mint time and does not
+        // depend on that walk, so it names the offending callback either way.
+        const debugSource = getAuthoredDebugSource(implementation);
+        const preview = typeof implementation === "function"
+          ? (implementation as { preview?: string }).preview
+          : undefined;
         throw new Error(
           closureCaptureErrorMessage({
             capturedCell: {
@@ -33,7 +38,8 @@ export function connectInputAndOutputs(node: NodeRef) {
               scope: exported.scope,
               name: exported.name,
             },
-            sourceLocation,
+            sourceLocation: debugSource?.src ?? null,
+            implementationPreview: preview ?? null,
           }),
         );
       }
@@ -47,7 +53,9 @@ export function connectInputAndOutputs(node: NodeRef) {
 
   // We will also apply ifc tags from inputs to outputs, unless the module has
   // precise built-in flow handling for its result.
-  if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
+  if (
+    !isObjectOrArray(node.module) || node.module.propagateInputIfc !== false
+  ) {
     applyInputIfcToOutput(node.inputs, node.outputs);
   }
 }
@@ -57,11 +65,13 @@ export function applyArgumentIfcToResult(
   resultSchema?: JSONSchema,
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
-    const cfc = new ContextualFlowControl();
     const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, argumentSchema);
     return (joined.size !== 0)
-      ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
+      ? ContextualFlowControl.schemaWithLub(
+        resultSchema ?? true,
+        ContextualFlowControl.lub(joined),
+      )
       : resultSchema;
   }
   return resultSchema;
@@ -73,7 +83,6 @@ export function applyInputIfcToOutput<T, R>(
   outputs: FactoryInput<R>,
 ) {
   const collectedClassifications = new Set<unknown>();
-  const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isCell(item)) {
       const { schema: inputSchema } = item.export();
@@ -83,7 +92,10 @@ export function applyInputIfcToOutput<T, R>(
     }
   });
   if (collectedClassifications.size !== 0) {
-    attachCfcToOutputs(outputs, cfc, cfc.lub(collectedClassifications));
+    attachCfcToOutputs(
+      outputs,
+      ContextualFlowControl.lub(collectedClassifications),
+    );
   }
 }
 
@@ -92,7 +104,6 @@ export function applyInputIfcToOutput<T, R>(
 // TODO(@ubik2) Investigate: can we have cycles here?
 function attachCfcToOutputs(
   outputs: unknown,
-  cfc: ContextualFlowControl,
   lubConfidentiality: readonly CfcConfClause[],
 ) {
   if (isCell(outputs)) {
@@ -101,10 +112,11 @@ function attachCfcToOutputs(
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<unknown>(lubConfidentiality);
     ContextualFlowControl.joinSchema(joined, outputSchema);
-    const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
-      ? { ...outputSchema.ifc }
-      : {};
-    ifc.confidentiality = cfc.lub(joined);
+    const ifc =
+      (isObjectOrArray(outputSchema) && outputSchema.ifc !== undefined)
+        ? { ...outputSchema.ifc }
+        : {};
+    ifc.confidentiality = ContextualFlowControl.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}
       : outputSchema === false
@@ -121,15 +133,32 @@ function attachCfcToOutputs(
       // set during construction, so we cannot override it here.
     }
     return;
-  } else if (isRecord(outputs)) {
-    // Descend into objects and arrays
-    // TODO(danfuzz): This `isRecord`-gated `Object.entries` descent has no
-    // `FabricSpecialObject` guard; a `FabricPrimitive` output is decomposed
-    // (its state is private) and a `FabricInstance` is walked by internal
-    // slots, so CFC labels are not attached to the special object's actual
-    // contents.
+  } else if (isObjectOrArray(outputs)) {
+    // Descend into objects and arrays.
+    //
+    // A `FabricPrimitive` among them is inert here and correctly so: it has
+    // zero enumerable own properties, so the descent ends at it, and a leaf
+    // holds no cell to label.
+    //
+    // A `FabricInstance` is refused. Its codec contents can hold a `Cell`,
+    // unreachable by property name, so passing one through leaves that cell
+    // _unlabelled_ while its plain siblings are labeled -- confidentiality
+    // silently not applied, which is the unsafe direction, unlike the
+    // policy-input walks in `runner.ts` whose equivalent gap fails closed.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that no pattern yet returns one holding a
+    // cell.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (outputs instanceof FabricInstance) {
+      refuseFabricInstance(outputs, "when attaching CFC labels to outputs");
+    }
+
     for (const [_, value] of Object.entries(outputs)) {
-      attachCfcToOutputs(value, cfc, lubConfidentiality);
+      attachCfcToOutputs(value, lubConfidentiality);
     }
   }
 }

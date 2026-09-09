@@ -7,7 +7,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "../src/plugin.ts";
+import { SchemaGenerator } from "../src/schema-generator.ts";
 import {
   asObjectSchema,
   createTestProgram,
@@ -64,6 +64,29 @@ function findWrapperInnerNode(
 
 describe("Common Fabric formatter flap coverage", () => {
   it(
+    "keeps only the scope when a scope wrapper wraps a schema that accepts anything",
+    async () => {
+      // A scope wrapper carries its scope down onto the schema it wraps. When
+      // that schema is `true` there is no object to carry it on, so the scope
+      // becomes the whole schema.
+      const code = `
+        type PerUser<T> = T;
+
+        interface SchemaRoot {
+          anything: PerUser<any>;
+        }
+      `;
+
+      const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+      const schema = asObjectSchema(
+        new SchemaGenerator().generateSchema(type, checker),
+      );
+
+      expect(schema.properties?.anything).toEqual({ scope: "user" });
+    },
+  );
+
+  it(
     "TrustedActionUiContract defaults required event integrity to the trusted pattern",
     async () => {
       // Three type arguments: the requiredEventIntegrity falls back to the
@@ -89,7 +112,7 @@ describe("Common Fabric formatter flap coverage", () => {
 
       const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
       const schema = asObjectSchema(
-        createSchemaTransformerV2().generateSchema(type, checker),
+        new SchemaGenerator().generateSchema(type, checker),
       );
 
       const save = schema.properties?.save as any;
@@ -134,7 +157,7 @@ describe("Common Fabric formatter flap coverage", () => {
 
       const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
       const schema = asObjectSchema(
-        createSchemaTransformerV2().generateSchema(type, checker),
+        new SchemaGenerator().generateSchema(type, checker),
       );
 
       const save = schema.properties?.save as any;
@@ -177,7 +200,7 @@ describe("Common Fabric formatter flap coverage", () => {
       );
 
       const schema = asObjectSchema(
-        createSchemaTransformerV2().generateSchema(type, checker),
+        new SchemaGenerator().generateSchema(type, checker),
       );
 
       const body = schema.properties?.body as any;
@@ -214,7 +237,7 @@ describe("Common Fabric formatter flap coverage", () => {
 
       const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
       const schema = asObjectSchema(
-        createSchemaTransformerV2().generateSchema(type, checker),
+        new SchemaGenerator().generateSchema(type, checker),
       );
 
       const settings = schema.properties?.settings as any;
@@ -245,7 +268,7 @@ describe("Common Fabric formatter flap coverage", () => {
       const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
       schemaHints.set(wrapperNode, { items: false });
 
-      const result = createSchemaTransformerV2().generateSchema(
+      const result = new SchemaGenerator().generateSchema(
         innerArrayType,
         checker,
         wrapperNode,
@@ -280,7 +303,7 @@ describe("Common Fabric formatter flap coverage", () => {
       const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
       schemaHints.set(wrapperNode, { items: false });
 
-      const result = createSchemaTransformerV2().generateSchema(
+      const result = new SchemaGenerator().generateSchema(
         innerArrayType,
         checker,
         wrapperNode,
@@ -320,7 +343,7 @@ describe("Common Fabric formatter flap coverage", () => {
       const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
       schemaHints.set(wrapperNode, { items: false });
 
-      const result = createSchemaTransformerV2().generateSchema(
+      const result = new SchemaGenerator().generateSchema(
         innerMapType,
         checker,
         wrapperNode,

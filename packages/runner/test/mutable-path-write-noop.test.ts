@@ -7,6 +7,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { applyMutablePathWrite } from "../src/storage/transaction/mutable-path-write.ts";
 import type { IMemoryAddress } from "../src/storage/interface.ts";
 
@@ -39,5 +40,21 @@ describe("applyMutablePathWrite no-op detection", () => {
   it("reports changed=false writing array length with its current length", () => {
     const res = applyMutablePathWrite([5, 6, 7], addr(["length"]), 3);
     expect(res.ok?.changed).toBe(false);
+  });
+
+  it("refuses a write whose parent path lands on a `FabricInstance`", () => {
+    // An instance holds its state privately, so `extra` addresses nothing in
+    // one. Writing through it would report success for a value that no reading
+    // of the instance -- the codec's included -- ever sees again.
+    const err = FabricError.fromNativeError(new Error("boom"));
+    const res = applyMutablePathWrite(
+      Object.freeze({ err }),
+      addr(["err", "extra"]),
+      42,
+    );
+
+    expect(res.ok).toBeUndefined();
+    expect(res.error?.name).toBe("TypeMismatchError");
+    expect(Object.getOwnPropertyNames(err)).toEqual([]);
   });
 });

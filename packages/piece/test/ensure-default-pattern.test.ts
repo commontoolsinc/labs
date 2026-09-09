@@ -9,7 +9,6 @@ import {
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("test default pattern");
@@ -20,15 +19,18 @@ const defaultPatternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "/// <cf-disable-transform />",
-        "import { handler, pattern } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+        "import { handler, pattern, type Cell, type Stream } from 'commonfabric';",
+        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
+        "  true,",
+        "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
         "  ({ piece }, { pieceRegistry }) => {",
         "    pieceRegistry.push(piece);",
         "  },",
-        "  { proxy: true },",
         ");",
-        "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+        "export default pattern<",
+        "  { pieceRegistry: unknown[] },",
+        "  { pieceRegistry: unknown[]; addPiece: Stream<{ piece: unknown }> }",
+        ">(({ pieceRegistry }) => ({",
         "  pieceRegistry,",
         "  addPiece: addPiece({ pieceRegistry }),",
         "}));",
@@ -40,7 +42,6 @@ const defaultPatternProgram: RuntimeProgram = {
 describe("PiecesController.ensureDefaultPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
 
   beforeEach(async () => {
@@ -55,9 +56,8 @@ describe("PiecesController.ensureDefaultPattern", () => {
       identity: signer,
       spaceName: "test-space-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   });
 
   afterEach(async () => {
@@ -76,16 +76,8 @@ describe("PiecesController.ensureDefaultPattern", () => {
   });
 
   it("should not have defaultPattern initially", async () => {
-    const pattern = await manager.getDefaultPattern();
+    const pattern = await controller.getDefaultPattern();
     expect(pattern).toBeUndefined();
-  });
-
-  it("should handle disposed controller gracefully", async () => {
-    await controller.dispose();
-
-    await expect(controller.ensureDefaultPattern()).rejects.toThrow(
-      /disposed/,
-    );
   });
 
   it("should link defaultPattern cell successfully", async () => {
@@ -94,17 +86,17 @@ describe("PiecesController.ensureDefaultPattern", () => {
 
     // Create a mock piece cell
     const mockPieceCell = runtime.getImmutableCell(
-      manager.getSpace(),
+      controller.getSpace(),
       { name: "MockDefaultPattern" },
     );
 
     // Link it as the default pattern
-    await manager.linkDefaultPattern(mockPieceCell);
+    await controller.linkDefaultPattern(mockPieceCell);
 
     // Verify the link exists by checking the space cell directly
     const spaceCell = runtime.getCell(
-      manager.getSpace(),
-      manager.getSpace(),
+      controller.getSpace(),
+      controller.getSpace(),
     );
     const defaultPatternCell = spaceCell.key("defaultPattern");
     // The cell should have a reference linked
@@ -115,7 +107,11 @@ describe("PiecesController.ensureDefaultPattern", () => {
     ).toBe("MockDefaultPattern");
   });
 
-  it("should find defaultPattern when its untyped schema view is undefined", async () => {
+  it("finds the defaultPattern when the schema view projects an empty object", async () => {
+    // The stored link's schema requires a field the pattern doc lacks. The
+    // space cell's own shaped reader takes precedence over that link schema,
+    // and projects an empty object — nothing the reader names is present. The
+    // controller's found-decision must not trust such a view: it reads raw.
     const schema = {
       type: "object",
       properties: {
@@ -125,7 +121,7 @@ describe("PiecesController.ensureDefaultPattern", () => {
       required: ["missing"],
     } as const;
     const mockPieceCell = runtime.getCell(
-      manager.getSpace(),
+      controller.getSpace(),
       "schema-invalid-default-pattern",
       schema,
     );
@@ -135,12 +131,20 @@ describe("PiecesController.ensureDefaultPattern", () => {
         [NAME]: "MockDefaultPattern",
       });
     });
-    await manager.linkDefaultPattern(mockPieceCell);
+    await controller.linkDefaultPattern(mockPieceCell);
 
-    const linked = manager.getSpaceCellContents().key("defaultPattern").get();
-    expect(linked?.get()).toBeUndefined();
+    // The reader here is the runtime's own `spaceCellSchema` (the
+    // controller builds its space cell with no explicit schema): its
+    // `defaultPattern` property is a shaped asCell fetch-shape naming only
+    // `spaces`/`defaultAppUrl`/`suggestionHistory`/`recordSuggestion`,
+    // with no `additionalProperties`. That shape wins the crossing, the
+    // pattern doc carries none of those properties ([NAME] is not among
+    // them), so the projection is `{}`.
+    const linked = controller.getSpaceCellContents().key("defaultPattern")
+      .get();
+    expect(linked?.get()).toEqual({});
 
-    const defaultPattern = await manager.getDefaultPattern(false);
+    const defaultPattern = await controller.getDefaultPattern(false);
     expect(defaultPattern).toBeDefined();
     expect(defaultPattern?.get()?.[NAME]).toBe("MockDefaultPattern");
   });
@@ -149,8 +153,8 @@ describe("PiecesController.ensureDefaultPattern", () => {
     it("should have no defaultPattern in space cell initially", () => {
       // The space cell should initially have no defaultPattern
       const spaceCell = runtime.getCell(
-        manager.getSpace(),
-        manager.getSpace(),
+        controller.getSpace(),
+        controller.getSpace(),
       );
       const defaultPatternCell = spaceCell.key("defaultPattern");
 
@@ -164,20 +168,20 @@ describe("PiecesController.ensureDefaultPattern", () => {
     it("should succeed when linking the same pattern twice", async () => {
       // Create a mock piece cell
       const mockPieceCell = runtime.getImmutableCell(
-        manager.getSpace(),
+        controller.getSpace(),
         { name: "MockDefaultPattern" },
       );
 
       // Link it as the default pattern
-      await manager.linkDefaultPattern(mockPieceCell);
+      await controller.linkDefaultPattern(mockPieceCell);
 
       // Link the same pattern again - should be idempotent (no error)
-      await manager.linkDefaultPattern(mockPieceCell);
+      await controller.linkDefaultPattern(mockPieceCell);
 
       // Verify the pattern is still linked correctly by checking space cell
       const spaceCell = runtime.getCell(
-        manager.getSpace(),
-        manager.getSpace(),
+        controller.getSpace(),
+        controller.getSpace(),
       );
       const defaultPatternCell = spaceCell.key("defaultPattern");
       const value = defaultPatternCell.get();
@@ -190,23 +194,23 @@ describe("PiecesController.ensureDefaultPattern", () => {
     it("should replace existing pattern when linking a different one", async () => {
       // Create first mock piece cell
       const mockPieceCell1 = runtime.getImmutableCell(
-        manager.getSpace(),
+        controller.getSpace(),
         { name: "MockDefaultPattern1" },
       );
 
       // Create second mock piece cell
       const mockPieceCell2 = runtime.getImmutableCell(
-        manager.getSpace(),
+        controller.getSpace(),
         { name: "MockDefaultPattern2" },
       );
 
       // Link first pattern
-      await manager.linkDefaultPattern(mockPieceCell1);
+      await controller.linkDefaultPattern(mockPieceCell1);
 
       // Capture first link by serializing
       const spaceCell = runtime.getCell(
-        manager.getSpace(),
-        manager.getSpace(),
+        controller.getSpace(),
+        controller.getSpace(),
       );
       const defaultPatternCell = spaceCell.key("defaultPattern");
       const firstValue = defaultPatternCell.get();
@@ -217,7 +221,7 @@ describe("PiecesController.ensureDefaultPattern", () => {
       const firstJson = JSON.stringify(firstValue);
 
       // Link second pattern (replacing first)
-      await manager.linkDefaultPattern(mockPieceCell2);
+      await controller.linkDefaultPattern(mockPieceCell2);
 
       // Verify second pattern is now linked
       const secondValue = defaultPatternCell.get();
@@ -236,7 +240,6 @@ describe("PiecesController.ensureDefaultPattern", () => {
 describe("PiecesController.recreateDefaultPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
 
   beforeEach(async () => {
@@ -251,9 +254,8 @@ describe("PiecesController.recreateDefaultPattern", () => {
       identity: signer,
       spaceName: "test-space-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   });
 
   afterEach(async () => {
@@ -270,26 +272,18 @@ describe("PiecesController.recreateDefaultPattern", () => {
     await expect(controller.recreateDefaultPattern()).rejects.toThrow();
   });
 
-  it("should handle disposed controller gracefully", async () => {
-    await controller.dispose();
-
-    await expect(controller.recreateDefaultPattern()).rejects.toThrow(
-      /disposed/,
-    );
-  });
-
   it("should unlink existing defaultPattern before creating new one", async () => {
     // Create a mock piece cell and link it as the default pattern
     const mockPieceCell = runtime.getImmutableCell(
-      manager.getSpace(),
+      controller.getSpace(),
       { name: "MockDefaultPattern" },
     );
-    await manager.linkDefaultPattern(mockPieceCell);
+    await controller.linkDefaultPattern(mockPieceCell);
 
     // Verify it's linked by checking the space cell directly
     const spaceCell = runtime.getCell(
-      manager.getSpace(),
-      manager.getSpace(),
+      controller.getSpace(),
+      controller.getSpace(),
     );
     const defaultPatternCell = spaceCell.key("defaultPattern");
     expect(defaultPatternCell.get()).toBeDefined();
@@ -306,8 +300,8 @@ describe("PiecesController.recreateDefaultPattern", () => {
   it("should work even when no defaultPattern exists initially", async () => {
     // Verify no pattern exists by checking the space cell directly
     const spaceCell = runtime.getCell(
-      manager.getSpace(),
-      manager.getSpace(),
+      controller.getSpace(),
+      controller.getSpace(),
     );
     const defaultPatternCell = spaceCell.key("defaultPattern");
     expect(defaultPatternCell.get()?.get()).toBeUndefined();

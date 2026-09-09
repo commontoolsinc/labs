@@ -25,6 +25,11 @@
 //     wall-clock sleep deadlocks and announces itself. The control is
 //     `t.settle()`, attached to each test's context.
 //
+// Both modes also replace `setImmediate`/`clearImmediate`, registering an
+// immediate as a zero-delay timer, so a turn taken through `setImmediate` lands
+// in the same batch and the same census as one taken through
+// `setTimeout(fn, 0)`.
+//
 // In both modes a zero-delay `setTimeout(fn, 0)` fires on a real macrotask, so
 // reactive dispatch that runs on `setTimeout(fn, 0)` drains through the real
 // event loop with no test-side driving. `settle()` resolves once every
@@ -35,10 +40,22 @@
 // the auto-advance pump is paused while it runs, so a test can observe a state
 // partway through a window.
 
+import { registerFrameworkModule } from "../src/records/registration.ts";
+
+// A test registered through this harness is attributed to the file that
+// called `Deno.test`, not to the frame this harness adds between them.
+registerFrameworkModule(import.meta.url);
+
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 const realSetInterval = globalThis.setInterval;
 const realClearInterval = globalThis.clearInterval;
+// Not on `globalThis` in the ambient types, and absent altogether in a
+// browser, so these read back `undefined` rather than a function there.
+const realSetImmediate = (globalThis as { setImmediate?: unknown })
+  .setImmediate;
+const realClearImmediate = (globalThis as { clearImmediate?: unknown })
+  .clearImmediate;
 const realDateNow = Date.now;
 const realPerformanceNow = performance.now.bind(performance);
 
@@ -59,7 +76,19 @@ interface Timer {
   args: unknown[];
   kind: Kind;
   interval?: number;
+  // Where a production timer was armed, so a runaway can name it. Undefined
+  // when the stack carried no frame outside this file.
+  site: string | undefined;
 }
+
+// How many production timers one test may auto-advance through before the pump
+// calls it a livelock. A backoff the real clock would pace re-arms as fast as
+// the event loop turns here, so a retry that cannot succeed never stops. The
+// ceiling has to sit below the point where that loop exhausts the heap,
+// otherwise V8 aborts the process first and no test is named. Across the runner
+// suite — the heaviest user of auto-advance — one test reaches 160 fires and
+// every other one stays under a hundred.
+const AUTO_ADVANCE_LIMIT = 2_000;
 
 /** Which behavior a package's preload selects. */
 export type FakeClockMode = "auto-advance" | "freeze-all";
@@ -131,14 +160,20 @@ function currentStack(): string {
 }
 
 // The immediate caller of setTimeout: the first stack frame outside this file.
-// A frame in a `test/` directory (or a `.test.ts` file) is test code.
-function callerIsTest(): boolean {
+function callerFrame(): string | undefined {
   const stack = currentStack();
   for (const line of stack.split("\n").slice(1)) {
     if (line.includes(HARNESS_FILE)) continue;
-    return /\/test\//.test(line) || /\.test\.ts/.test(line);
+    // Stack lines arrive as `    at <site>`; the caller is the site itself.
+    return line.trim().replace(/^at /, "");
   }
-  return false;
+  return undefined;
+}
+
+// A frame in a `test/` directory (or a `.test.ts` file) is test code.
+function frameIsTest(frame: string | undefined): boolean {
+  return frame !== undefined &&
+    (/\/test\//.test(frame) || /\.test\.ts/.test(frame));
 }
 
 function freezeAround(
@@ -157,10 +192,14 @@ function freezeAround(
       new Promise<void>((resolve) => realSetTimeout(resolve, 0));
 
     // Fire pending zero-delay timers (scheduler dispatch) on a real macrotask.
+    // The batch is snapshotted, so one callback can clear another that is
+    // still to come in it; a real clock would not then fire the cleared one,
+    // so the membership re-check keeps that promise.
     const kick = () => {
       kickScheduled = false;
       for (const tm of [...timers.values()]) {
         if (tm.kind !== "zero" || tm.fireAt > elapsed) continue;
+        if (!timers.has(tm.id)) continue;
         timers.delete(tm.id);
         tm.cb(...tm.args);
       }
@@ -221,15 +260,35 @@ function freezeAround(
     };
     const nextProd = (limit: number) => nextTimer(limit, true);
     let autoCount = 0;
+    // Fires per arming site, so a runaway names the timer that dominated it
+    // rather than whichever one happened to be last.
+    const autoBySite = new Map<string, number>();
+    const busiestSite = (): string => {
+      let worst = "an unrecorded site";
+      let most = 0;
+      for (const [site, count] of autoBySite) {
+        if (count > most) {
+          most = count;
+          worst = `${site} (${count} of them)`;
+        }
+      }
+      return worst;
+    };
     const autoAdvance = () => {
       autoScheduled = false;
       if (ticking) return;
       const next = nextProd(Infinity);
       if (!next) return;
-      if (++autoCount > 200_000) {
+      const site = next.site ?? "an unrecorded site";
+      autoBySite.set(site, (autoBySite.get(site) ?? 0) + 1);
+      if (++autoCount > AUTO_ADVANCE_LIMIT) {
         throw new Error(
-          "clock auto-advance runaway: a production timer keeps re-arming. " +
-            "This test likely needs explicit clock.tick(ms) control.",
+          `clock auto-advance runaway: ${AUTO_ADVANCE_LIMIT} production ` +
+            `timers fired in this test, most of them armed at ${busiestSite()}. ` +
+            "A backoff the real clock would pace re-arms as fast as the event " +
+            "loop turns here, so a retry that cannot succeed never stops. Give " +
+            "the test explicit clock.tick(ms) control, or list its file in the " +
+            "preload's realClockFiles.",
         );
       }
       elapsed = next.fireAt;
@@ -291,12 +350,36 @@ function freezeAround(
       const id = seq++;
       const ms = Number(delay) || 0;
       if (ms <= 0) {
-        timers.set(id, { id, cb, fireAt: elapsed, args, kind: "zero" });
+        timers.set(id, {
+          id,
+          cb,
+          fireAt: elapsed,
+          args,
+          kind: "zero",
+          site: undefined,
+        });
         scheduleKick();
-      } else if (!config.autoAdvance || callerIsTest()) {
-        timers.set(id, { id, cb, fireAt: elapsed + ms, args, kind: "test" });
+        return id;
+      }
+      const site = callerFrame();
+      if (!config.autoAdvance || frameIsTest(site)) {
+        timers.set(id, {
+          id,
+          cb,
+          fireAt: elapsed + ms,
+          args,
+          kind: "test",
+          site,
+        });
       } else {
-        timers.set(id, { id, cb, fireAt: elapsed + ms, args, kind: "prod" });
+        timers.set(id, {
+          id,
+          cb,
+          fireAt: elapsed + ms,
+          args,
+          kind: "prod",
+          site,
+        });
         scheduleAuto();
       }
       return id;
@@ -308,7 +391,8 @@ function freezeAround(
     ): number => {
       const id = seq++;
       const ms = Math.max(1, Number(delay) || 0);
-      const kind: Kind = (!config.autoAdvance || callerIsTest())
+      const site = callerFrame();
+      const kind: Kind = (!config.autoAdvance || frameIsTest(site))
         ? "test"
         : "prod";
       timers.set(id, {
@@ -318,16 +402,30 @@ function freezeAround(
         args,
         kind,
         interval: ms,
+        site,
       });
       if (kind === "prod") scheduleAuto();
       return id;
     };
+    // `setImmediate` asks for the next turn of the event loop, which is what a
+    // zero-delay `setTimeout` asks for, so it is registered as one: same
+    // `kick()` batch, same census `settle()` reads. Code that takes its turn
+    // through `setImmediate` — the memory transport's frame pump and the
+    // memory server's subscription refresh do, because waking Deno's loop for
+    // a timer costs milliseconds — then runs exactly where a zero-delay timer
+    // would have, under the harness's control rather than beside it.
+    const fakeSetImmediate = (
+      cb: (...args: unknown[]) => void,
+      ...args: unknown[]
+    ): number => fakeSetTimeout(cb, 0, ...args);
     const fakeClear = (id: number): void => {
       timers.delete(id);
     };
 
     Reflect.set(globalThis, "setTimeout", fakeSetTimeout);
     Reflect.set(globalThis, "clearTimeout", fakeClear);
+    Reflect.set(globalThis, "setImmediate", fakeSetImmediate);
+    Reflect.set(globalThis, "clearImmediate", fakeClear);
     if (config.fakeInterval) {
       Reflect.set(globalThis, "setInterval", fakeSetInterval);
       Reflect.set(globalThis, "clearInterval", fakeClear);
@@ -355,6 +453,8 @@ function freezeAround(
       timers.clear();
       Reflect.set(globalThis, "setTimeout", realSetTimeout);
       Reflect.set(globalThis, "clearTimeout", realClearTimeout);
+      Reflect.set(globalThis, "setImmediate", realSetImmediate);
+      Reflect.set(globalThis, "clearImmediate", realClearImmediate);
       if (config.fakeInterval) {
         Reflect.set(globalThis, "setInterval", realSetInterval);
         Reflect.set(globalThis, "clearInterval", realClearInterval);

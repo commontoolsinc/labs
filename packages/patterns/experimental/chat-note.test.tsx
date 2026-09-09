@@ -2,7 +2,7 @@ import {
   action,
   assert,
   pattern,
-  resultOf,
+  TESTS,
   UI,
   wish,
   Writable,
@@ -63,7 +63,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_unlinked },
       { action: action_create_backlink },
       { assertion: assert_backlink_registers_and_mentions_piece },

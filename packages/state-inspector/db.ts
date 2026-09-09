@@ -105,10 +105,11 @@ export function tableNames(db: Database): string[] {
 }
 
 /**
- * Scheduler persistence tables only exist when `persistentSchedulerState` was
- * enabled on the server. In practice they are usually absent, so the autopsy
- * core must degrade gracefully rather than assume the dependency graph is here.
+ * The scheduler basis index (serving-loop.md §3b) is the only durable
+ * scheduler state besides the watermark machinery. It exists on every
+ * migrated store but may be absent on a pre-migration snapshot, so the
+ * autopsy core degrades gracefully.
  */
-export function hasSchedulerTables(db: Database): boolean {
-  return tableNames(db).includes("scheduler_observation");
+export function hasSchedulerBasisTable(db: Database): boolean {
+  return tableNames(db).includes("scheduler_basis");
 }

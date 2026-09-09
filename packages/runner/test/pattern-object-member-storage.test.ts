@@ -11,8 +11,8 @@
 // member when the result is run and read.
 //
 // Two candidate outcomes were considered up front:
-//   (a) THROW — storing the result throws "Cannot store function per se (needs
-//       to have a `toJSON()` method)" (packages/data-model native-conversion).
+//   (a) THROW — storing the result throws "Not representable as a
+//       `FabricValue`: function" (packages/data-model native-conversion).
 //   (b) DROP — the function member is silently dropped (the result schema /
 //       projection omits function members before storage) and the rest of the
 //       result is stored fine.
@@ -21,11 +21,11 @@
 // member kinds behave DIFFERENTLY:
 //
 //   * METHOD member (`read() { ... }`) -> THROW. The member is a live function
-//     on the materialized result object. When `Runner.updateResultProjection`
+//     on the materialized result object. When `Runner.#updateResultProjection`
 //     converts the result with `fabricFromNativeValue(result)`, the function
 //     reaches `shallowFabricFromNativeValue` and throws
-//       "Cannot store function per se (needs to have a `toJSON()` method)"
-//     (packages/data-model/src/native-conversion.ts:229). The throw happens
+//       "Not representable as a `FabricValue`: function"
+//     (packages/data-model/src/native-conversion.ts). The throw happens
 //     synchronously inside `runtime.run(...)` at setup time, before any commit.
 //
 //   * GETTER member (`get derived() { return 2; }`) -> NOT a function at all by
@@ -105,10 +105,10 @@ describe("Pattern result object with a function member", () => {
     );
 
     // ...but running it throws synchronously at result-projection time, when
-    // the live function is converted to a fabric value. The error originates in
-    // packages/data-model/src/native-conversion.ts.
+    // the live function is converted to a `FabricValue`. The error originates
+    // in packages/data-model/src/native-conversion.ts.
     expect(() => runtime.run(tx, methodPattern, {}, resultCell)).toThrow(
-      "Cannot store function per se (needs to have a `toJSON()` method)",
+      "Not representable as a `FabricValue`: function",
     );
   });
 

@@ -1,10 +1,11 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { internSchema } from "@commonfabric/data-model-schema";
+
 import type { JSONSchema } from "../src/builder/types.ts";
-import { CELL_KINDS } from "../src/scope.ts";
 import {
   cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,
@@ -18,10 +19,12 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "../src/cfc/mod.ts";
+import { CELL_KINDS } from "../src/scope.ts";
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+  kind:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
   source: "of:hostile",
 } as const;
 
@@ -39,8 +42,12 @@ describe("cfc schema sanitization", () => {
     expect(isPrimitiveJsonValue(false)).toBe(true);
     expect(isPrimitiveJsonValue({})).toBe(false);
 
-    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+    expect(
+      isPromptInjectionMaterialRiskAtom("prompt-injection-risk-unscreened"),
+    )
       .toBe(true);
+    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+      .toBe(false);
     expect(isPromptInjectionMaterialRiskAtom({
       type: CFC_ATOM_TYPE.Caveat,
       kind: "prompt-injection-risk-value-screened",
@@ -313,7 +320,149 @@ describe("cfc schema sanitization", () => {
     }, ["ok"])).toBeUndefined();
   });
 
-  it("strictly validates Common Fabric values for schema migrations", () => {
+  it("reads an optional property holding undefined as absent ONLY on request", () => {
+    // `undefined` is a value in this system, not a hole: the codec stores its
+    // presence as `{"/Undefined@1": null}` and `type: "undefined"` is a type
+    // this validator supports. So measuring it is the DEFAULT, and
+    // `pull-materialization.test.ts` pins both halves of that contract with
+    // "does not hide present explicit undefined behind an optional alias" and
+    // "retains explicit undefined at an optional derived Cell root".
+    //
+    // One caller opts out: the stored-argument check a pattern update runs.
+    // Its refusal is PERMANENT — see `isStoredArgumentSchemaRefusal` in
+    // runner.ts, the same identity refuses identically — and a handler mints
+    // the shape without meaning to. Measured: `topics/topic.tsx` pushes
+    // `{ author, ... }` from `addComment` whenever no `agentName` is supplied,
+    // so the document REFUSED its own pattern's next update with
+    // `comments: 0: author: value does not match type object`;
+    // `lunch-poll/main.tsx` did the same through `imageUrl`.
+    const lenient = { optionalUndefinedIsAbsent: true } as const;
+    const optionalObject = {
+      type: "object",
+      properties: {
+        author: { type: "object", properties: { name: { type: "string" } } },
+        body: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    // Omitted is fine either way — the control that says the cases below are
+    // about PRESENCE of undefined, not about the key being optional.
+    expect(validateSchemaValue(optionalObject, { body: "old" }))
+      .toBeUndefined();
+    expect(
+      validateSchemaValue(optionalObject, { body: "old" }, undefined, lenient),
+    )
+      .toBeUndefined();
+
+    // Default: measured, and it fails. Opted in: absent.
+    const present = { author: undefined, body: "old" };
+    expect(validateSchemaValue(optionalObject, present))
+      .toBe("author: value does not match type object");
+    expect(validateSchemaValue(optionalObject, present, undefined, lenient))
+      .toBeUndefined();
+
+    // The same, inside an array — where the topics document actually holds it.
+    const inArray = { type: "array", items: optionalObject } as const;
+    const rows = [{ author: undefined, body: "old" }];
+    expect(validateSchemaValue(inArray, rows))
+      .toBe("0: author: value does not match type object");
+    expect(validateSchemaValue(inArray, rows, undefined, lenient))
+      .toBeUndefined();
+
+    // The opt-in stops at OPTIONAL. A required object holding undefined keeps
+    // failing on its type even when asked to be lenient.
+    expect(validateSchemaValue(
+      {
+        type: "object",
+        properties: { author: { type: "object" } },
+        required: ["author"],
+      },
+      { author: undefined },
+      undefined,
+      lenient,
+    ))
+      .toBe("author: value does not match type object");
+
+    // Why required is measured rather than read as absent: a REQUIRED property
+    // declared `type: "undefined"` holds undefined legitimately and must still
+    // be ACCEPTED. Reading undefined as absence everywhere reports this as a
+    // missing property — caught by `runner.test.ts`'s "preserves explicit
+    // undefined while combining union defaults", which validates a defaults
+    // object built from exactly this shape.
+    expect(validateSchemaValue(
+      {
+        type: "object",
+        properties: { x: { type: "undefined" } },
+        required: ["x"],
+      },
+      { x: undefined },
+      undefined,
+      lenient,
+    )).toBeUndefined();
+
+    // The opt-in reaches DECLARED properties only. An undeclared key is still
+    // measured, opt-in or not: `required` may name a key that `properties`
+    // does not, so skipping undefined-valued keys in the additional-property
+    // scans let a required-but-undeclared one bypass both
+    // `additionalProperties: false` and an `additionalProperties` subschema
+    // (reported by review on #5251). Nothing measured needed that leniency —
+    // `topic.tsx`'s `author` and `lunch-poll`'s `imageUrl` are both declared.
+    const closed = {
+      type: "object",
+      properties: { body: { type: "string" } },
+      additionalProperties: false,
+    } as const;
+    const withExtra = { body: "old", extra: undefined };
+    expect(validateSchemaValue(closed, withExtra))
+      .toBe("additional property extra");
+    expect(validateSchemaValue(closed, withExtra, undefined, lenient))
+      .toBe("additional property extra");
+    expect(validateSchemaValue(
+      {
+        type: "object",
+        properties: {},
+        required: ["x"],
+        additionalProperties: false,
+      },
+      { x: undefined },
+      undefined,
+      lenient,
+    )).toBe("additional property x");
+  });
+
+  it("drops the undefined-is-absent opt-in inside allOf branches", () => {
+    // `optionalUndefinedIsAbsent` decides "optional" from the `required` array
+    // on the node doing the check, and `allOf` is the combinator that can put
+    // `required` on one node and `properties` on another. Without dropping it
+    // for the branches, the branch that TYPES `x` sees no `required` and skips
+    // the check, accepting `{x: undefined}` against a required string
+    // (reported by review on #5251).
+    //
+    // Dropped rather than plumbed: nothing needs it. `packages/schema-generator`
+    // emits no `allOf` at all and no committed pattern baseline contains one,
+    // so a pattern argument schema — the only place the opt-in is enabled —
+    // cannot reach this branch. Strict is the safe direction for a shape that
+    // does not occur.
+    const split = {
+      allOf: [
+        { required: ["x"] },
+        { properties: { x: { type: "string" } } },
+      ],
+    } as const satisfies JSONSchema;
+    const lenient = { optionalUndefinedIsAbsent: true } as const;
+
+    expect(validateSchemaValue(split, { x: undefined }))
+      .toBe("x: value does not match type string");
+    expect(validateSchemaValue(split, { x: undefined }, undefined, lenient))
+      .toBe("x: value does not match type string");
+    // The control: the branch is still doing its ordinary work either way.
+    expect(validateSchemaValue(split, { x: 1 }, undefined, lenient))
+      .toBe("x: value does not match type string");
+    expect(validateSchemaValue(split, { x: "ok" }, undefined, lenient))
+      .toBeUndefined();
+  });
+
+  it("strictly validates `FabricValue`s for schema migrations", () => {
     expect(validateSchemaValue({ type: "undefined" }, undefined))
       .toBeUndefined();
     expect(validateSchemaValue({ type: "undefined" }, "not undefined"))
@@ -470,6 +619,57 @@ describe("cfc schema sanitization", () => {
       },
     };
     expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
+  });
+
+  it("validates `FabricPrimitive` schema types by prototype", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2]));
+
+    // The `FabricPrimitive` names are legal schema definitions.
+    expect(validateSchemaDefinition({ type: "FabricBytes" })).toBeUndefined();
+    expect(validateSchemaDefinition({ type: ["FabricHash", "null"] }))
+      .toBeUndefined();
+
+    // A FabricBytes satisfies its own type, and "object" via the subtype
+    // rule (each `FabricPrimitive` type is a subtype of "object").
+    expect(validateSchemaValue({ type: "FabricBytes" }, bytes))
+      .toBeUndefined();
+    expect(validateSchemaValue({ type: "object" }, bytes)).toBeUndefined();
+
+    // The specific types don't cross-match, and the subtype relation is
+    // one-way: a plain record is not a FabricBytes.
+    expect(validateSchemaValue({ type: "FabricHash" }, bytes))
+      .toContain("value does not match type FabricHash");
+    expect(validateSchemaValue({ type: "FabricBytes" }, { a: 1 }))
+      .toContain("value does not match type FabricBytes");
+    expect(validateSchemaValue({ type: "FabricBytes" }, "bytes-ish"))
+      .toContain("value does not match type FabricBytes");
+  });
+
+  it("checks an object schema's required keys against a FabricPrimitive's accessors", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2]));
+
+    // Required keys must exist on the leaf; class accessors count (`in`,
+    // prototype chain included). typeMatches stays permissive; this is the
+    // complete check behind the filter.
+    expect(validateSchemaValue({ type: "object", required: ["x"] }, bytes))
+      .toContain("missing required property x");
+    expect(validateSchemaValue({ required: ["x"] }, bytes))
+      .toContain("missing required property x");
+    expect(validateSchemaValue({ type: "object", required: ["length"] }, bytes))
+      .toBeUndefined();
+    // The nominal brand key generated schemas require has no runtime
+    // existence; a `FabricSpecialObject` satisfies it by construction. This
+    // is the shape the schema-generator emits for a FabricBytes-typed field
+    // today.
+    expect(validateSchemaValue({
+      type: "object",
+      required: ["length", "@commonfabric/FabricSpecialObject"],
+    }, bytes)).toBeUndefined();
+    expect(validateSchemaValue({ type: "object", required: [] }, bytes))
+      .toBeUndefined();
+    // A `FabricPrimitive`-typed schema is not gated by `required`.
+    expect(validateSchemaValue({ type: "FabricBytes", required: ["x"] }, bytes))
+      .toBeUndefined();
   });
 
   it("keeps referenced definition bodies in their child-local scope", () => {
@@ -784,6 +984,23 @@ describe("cfc schema sanitization", () => {
       [
         { items: { type: ["number", "number"] } },
         "items",
+      ],
+      // A keyword holding something no schema can be. A stored schema is not
+      // always generator output, and the runner's schema walk defers to this
+      // rule for what a subschema may be.
+      [
+        { properties: { a: null } } as unknown as JSONSchema,
+        "properties.a: schema must be an object or boolean",
+      ],
+      [
+        { additionalProperties: "ab" } as unknown as JSONSchema,
+        "additionalProperties: schema must be an object or boolean",
+      ],
+      // An array is one of those, which is what makes the pre-2019 tuple
+      // spelling of `items` unreadable rather than merely unsupported.
+      [
+        { items: [{ type: "string" }] } as unknown as JSONSchema,
+        "items: schema must be an object or boolean",
       ],
     ];
     for (const [schema, message] of malformed) {
@@ -1149,7 +1366,8 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     // alternative-count path the fuel budget sums over.
     const risk = (i: number) => ({
       type: CFC_ATOM_TYPE.Caveat,
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: `of:hostile-${i}`,
     });
     const keep = (i: number) => ({
@@ -1176,8 +1394,8 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       [
         ...flatRisks,
         ...orRisks,
-        "prompt-injection-risk",
-        { anyOf: ["prompt-injection-risk", keep(100)] },
+        "prompt-injection-risk-unscreened",
+        { anyOf: ["prompt-injection-risk-unscreened", keep(100)] },
       ],
     ) as any;
 
@@ -1264,6 +1482,210 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       properties: { approved: { type: "boolean" } },
     }, { approved: true, body: "extra" })).toContain(
       "additional property body",
+    );
+  });
+
+  it("terminates on a self-recursive combinator branch surface", () => {
+    const recursiveUnion = (keyword: "anyOf" | "oneOf" | "allOf") => ({
+      type: "object",
+      [keyword]: [{ $ref: "#/$defs/Node" }],
+      $defs: {
+        Node: {
+          type: "object",
+          [keyword]: [
+            { type: "object", properties: { leaf: { type: "number" } } },
+            { $ref: "#/$defs/Node" },
+          ],
+        },
+      },
+    } as unknown as JSONSchema);
+
+    for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+      const schema = recursiveUnion(keyword);
+      // The walk that reads a union's property surface follows the same
+      // `$ref` the union declares, so without a visited set this overflows
+      // the stack instead of answering.
+      expect(() => validateAgainstSchema(schema, { leaf: 1 })).not.toThrow();
+      // A cycle contributes nothing rather than opening the surface, so a key
+      // no branch models is still refused.
+      expect(validateAgainstSchema(schema, { leaf: 1, smuggled: "x" }))
+        .toBeDefined();
+    }
+
+    // The branches carry the shape, so a union node still admits what they
+    // declare — the guard cuts the cycle, not the surface.
+    expect(validateAgainstSchema(recursiveUnion("anyOf"), { leaf: 1 }))
+      .toBeUndefined();
+  });
+
+  it("collects the names of two branches that share one `$ref` under different constraints", () => {
+    const schema = {
+      type: "object",
+      anyOf: [
+        { $ref: "#/$defs/Base", properties: { alpha: { type: "number" } } },
+        { $ref: "#/$defs/Base", properties: { beta: { type: "number" } } },
+      ],
+      $defs: { Base: { type: "object" } },
+    } as unknown as JSONSchema;
+
+    // Each branch is a ref SITE of its own: the definition they share says
+    // nothing about properties, so the names live on the sites. A guard that
+    // remembered the ref for the whole walk would skip the second site and
+    // treat the key it declares as unmodeled.
+    expect(validateAgainstSchema(schema, { alpha: 1 })).toBeUndefined();
+    expect(validateAgainstSchema(schema, { beta: 1 })).toBeUndefined();
+    // A name no branch declares is refused, by the branches themselves.
+    expect(validateAgainstSchema(schema, { alpha: 1, smuggled: "x" }))
+      .toBeDefined();
+  });
+
+  it("answers for a combinator chain far deeper than the call stack", () => {
+    const depth = 20_000;
+    let chain: JSONSchema = {
+      type: "object",
+      properties: { [`key${depth}`]: { type: "number" } },
+    } as unknown as JSONSchema;
+    for (let index = depth - 1; index >= 0; index--) {
+      chain = {
+        type: "object",
+        properties: { [`key${index}`]: { type: "number" } },
+        anyOf: [chain],
+      } as unknown as JSONSchema;
+    }
+    // The value matches the first branch, so validation itself stops there;
+    // the surface walk is what visits every link of the chain.
+    const schema = {
+      type: "object",
+      properties: { head: { type: "number" } },
+      anyOf: [
+        { type: "object", properties: { head: { type: "number" } } },
+        chain,
+      ],
+    } as unknown as JSONSchema;
+
+    // Nothing about the chain is cyclic, so no visited set cuts it: only a
+    // walk that keeps its own worklist reaches the end of it and answers.
+    expect(validateAgainstSchema(schema, { head: 1 })).toBeUndefined();
+  });
+
+  it("terminates on a branch surface that cycles through a nested ref", () => {
+    const schema = {
+      type: "object",
+      anyOf: [{ $ref: "#/$defs/Node" }],
+      $defs: {
+        Node: {
+          type: "object",
+          anyOf: [
+            { type: "object", properties: { leaf: { type: "number" } } },
+            { $ref: "#/$defs/Wrapper" },
+          ],
+        },
+        Wrapper: {
+          type: "object",
+          allOf: [{ $ref: "#/$defs/Node" }],
+        },
+      },
+    } as unknown as JSONSchema;
+
+    expect(validateAgainstSchema(schema, { leaf: 1 })).toBeUndefined();
+    expect(validateAgainstSchema(schema, { leaf: 1, smuggled: "x" }))
+      .toBeDefined();
+  });
+
+  it("leaves a union open when a branch of it is open", () => {
+    // The node itself closes only by the implicit default, so it defers to
+    // its branches: one branch that admits anything leaves the whole surface
+    // open, and the node stops policing keys its branches will judge.
+    const openBranch = {
+      type: "object",
+      anyOf: [{
+        type: "object",
+        properties: { a: { type: "number" } },
+        additionalProperties: true,
+      }],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(openBranch, { a: 1, extra: "x" }))
+      .toBeUndefined();
+
+    // A boolean branch is the same answer by a shorter route: `true` models
+    // nothing and refuses nothing.
+    const booleanBranch = {
+      type: "object",
+      anyOf: [true],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(booleanBranch, { extra: "x" }))
+      .toBeUndefined();
+
+    // `false` admits nothing, so it contributes nothing — neither property
+    // names nor openness. The closed branch beside it decides the surface.
+    const rejectingBranch = {
+      type: "object",
+      anyOf: [
+        false,
+        { type: "object", properties: { a: { type: "number" } } },
+      ],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(rejectingBranch, { a: 1 })).toBeUndefined();
+    // The branch judges the key before the node's own surface check does, so
+    // the refusal reads as the branch's rather than the node's — refused
+    // either way.
+    expect(validateAgainstSchema(rejectingBranch, { a: 1, extra: "x" }))
+      .toBeDefined();
+  });
+
+  it("leaves a union open when a branch of a branch is open", () => {
+    // Openness reached through a nested combinator is openness all the same:
+    // the outer branch is a closed object, but its own branch admits
+    // anything, so the surface the outer node reads is open and it stops
+    // policing keys the branches will judge.
+    const nestedOpen = {
+      type: "object",
+      anyOf: [{
+        type: "object",
+        properties: { kind: { type: "string" } },
+        anyOf: [{
+          type: "object",
+          properties: { a: { type: "number" } },
+          additionalProperties: true,
+        }],
+      }],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(nestedOpen, { kind: "a", extra: "x" }))
+      .toBeUndefined();
+
+    // The same shape with the nested branch closed keeps the surface closed,
+    // so the key no branch models is refused.
+    const nestedClosed = {
+      type: "object",
+      anyOf: [{
+        type: "object",
+        properties: { kind: { type: "string" } },
+        anyOf: [{
+          type: "object",
+          properties: { a: { type: "number" } },
+        }],
+      }],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(nestedClosed, { a: 1, extra: "x" }))
+      .toBeDefined();
+    // A key a nested branch does model is admitted either way.
+    expect(validateAgainstSchema(nestedClosed, { a: 1 })).toBeUndefined();
+  });
+
+  it("takes an explicitly closed object at its word over its branches", () => {
+    const schema = {
+      type: "object",
+      properties: { kind: { type: "string" } },
+      additionalProperties: false,
+      oneOf: [{
+        type: "object",
+        properties: { kind: { type: "string" }, count: { type: "number" } },
+      }],
+    } as const satisfies JSONSchema;
+
+    expect(validateAgainstSchema(schema, { kind: "a" })).toBeUndefined();
+    expect(validateAgainstSchema(schema, { kind: "a", count: 1 })).toContain(
+      "additional property count",
     );
   });
 
@@ -1384,6 +1806,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         evidence: { "@link": "opaque:child-run-1#/evidence" },
       },
       linkedStringCount: 1,
+      sealedPaths: [["evidence"]],
     });
   });
 
@@ -1420,6 +1843,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         pair: ["label", { "@link": "opaque:child-run-1#/pair/1" }],
       },
       linkedStringCount: 1,
+      sealedPaths: [["pair", 1]],
     });
   });
 
@@ -1451,6 +1875,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         pair: [5, { "@link": "opaque:child-run-1#/pair/1" }],
       },
       linkedStringCount: 1,
+      sealedPaths: [["pair", 1]],
     });
   });
 
@@ -1490,6 +1915,353 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         evidence: { "@link": "opaque:child-run-1#/raw" },
       },
       linkedStringCount: 0,
+      sealedPaths: [],
+    });
+  });
+
+  it("keeps a raw string a nested oneOf branch names as a constant", () => {
+    // The outer `oneOf` picks the branch, and the branch is a union of its
+    // own: the string survives only if the walk keeps descending through it.
+    const schema = {
+      type: "object",
+      properties: {
+        label: {
+          oneOf: [
+            { oneOf: [{ const: "one" }, { const: "two" }] },
+            { type: "number" },
+          ],
+        },
+      },
+      required: ["label"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { label: "two" },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { label: "two" },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+
+    // A string no branch names is not inert text, so it goes over as a link.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: {
+        type: "object",
+        properties: { label: { oneOf: [{ type: "string" }] } },
+        required: ["label"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema,
+      value: { label: "three" },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { label: { "@link": "opaque:run-1#/label" } },
+      linkedStringCount: 1,
+      sealedPaths: [["label"]],
+    });
+  });
+
+  it("keeps a raw string a nested anyOf branch names as a constant", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        tag: {
+          oneOf: [
+            { anyOf: [{ const: "alpha" }, { const: "beta" }] },
+            { type: "number" },
+          ],
+        },
+      },
+      required: ["tag"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { tag: "beta" },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { tag: "beta" },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+
+    // The number branch of the same union is inert on its own terms.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { tag: 7 },
+      opaqueHandleId: "run-1",
+    })).toEqual({ value: { tag: 7 }, linkedStringCount: 0, sealedPaths: [] });
+  });
+
+  it("seals a very large array without overflowing the argument limit", () => {
+    // 150k sealed siblings under one parent: a spread-append of the child's
+    // sealed paths passes each as a call argument and throws RangeError.
+    const size = 150_000;
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: {
+        type: "object",
+        properties: {
+          notes: { type: "array", items: { type: "string" } },
+        },
+        required: ["notes"],
+        additionalProperties: false,
+      },
+      value: { notes: Array.from({ length: size }, (_, i) => `note ${i}`) },
+      opaqueHandleId: "run-1",
+    });
+    expect(sanitized.linkedStringCount).toBe(size);
+    expect(sanitized.sealedPaths.length).toBe(size);
+    expect(sanitized.sealedPaths[0]).toEqual(["notes", 0]);
+    expect(sanitized.sealedPaths[size - 1]).toEqual(["notes", size - 1]);
+  });
+
+  it("preserves an opaque link an allOf or oneOf branch declares", () => {
+    const opaqueLinkSchema = {
+      type: "object",
+      properties: { "@link": { type: "string" } },
+      required: ["@link"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const allOfSchema = {
+      type: "object",
+      properties: { evidence: { allOf: [opaqueLinkSchema] } },
+      required: ["evidence"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: allOfSchema,
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+
+    const oneOfSchema = {
+      type: "object",
+      properties: {
+        evidence: { oneOf: [opaqueLinkSchema, { type: "number" }] },
+      },
+      required: ["evidence"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: oneOfSchema,
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+  });
+
+  it("drops a reserved key the schema does not model instead of sealing", () => {
+    const schema = {
+      type: "object",
+      properties: { total: { type: "number" } },
+      required: ["total"],
+    } as const satisfies JSONSchema;
+
+    // Reserved names are excused from the unmodeled-key policy, so the
+    // computed number survives instead of the whole object going over as one
+    // opaque link — and the reserved keys are dropped rather than shown.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { total: 42, $NAME: "Doubler", $UI: { tag: "div" } },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME", "$UI"],
+    })).toEqual({
+      value: { total: 42 },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+
+    // A name NOT on the reserved list is refused by the same closed-object
+    // rule the reserved names are excused from.
+    expect(() =>
+      validateAndSanitizeSchemaValueWithOpaqueLinks({
+        schema,
+        value: { total: 42, leaked: "secret" },
+        opaqueHandleId: "run-1",
+        reservedKeys: ["$NAME", "$UI"],
+      })
+    ).toThrow("additional property leaked");
+
+    // Where the schema is open enough to admit it, an unreserved key still
+    // seals the object: a key the schema cannot model is a key whose spelling
+    // may itself be data.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: { ...schema, additionalProperties: true },
+      value: { total: 42, leaked: "secret", $NAME: "Doubler" },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME", "$UI"],
+    })).toEqual({
+      value: { "@link": "opaque:run-1" },
+      linkedStringCount: 0,
+      sealedPaths: [[]],
+    });
+  });
+
+  it("seals a nested object carrying an unmodeled reserved name instead of dropping it", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        total: { type: "number" },
+        nested: {
+          type: "object",
+          properties: { kept: { type: "number" } },
+          additionalProperties: true,
+        },
+      },
+      required: ["total"],
+    } as const satisfies JSONSchema;
+
+    // The framework names the keys of the result it produced, and nothing
+    // inside it: one level down, `$NAME` was chosen by whoever wrote the data
+    // there, so the object seals like any other object with a key the schema
+    // does not model. Dropping the name and releasing `kept` would be author
+    // data leaving on the strength of a spelling the author chose.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: {
+        total: 42,
+        $NAME: "Doubler",
+        nested: { kept: 7, $NAME: "sibling" },
+      },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME", "$UI"],
+    })).toEqual({
+      // The top level keeps its exemption: the reserved key is dropped and
+      // the modeled number beside it survives.
+      value: { total: 42, nested: { "@link": "opaque:run-1#/nested" } },
+      linkedStringCount: 0,
+      sealedPaths: [["nested"]],
+    });
+
+    // Where the nested object is CLOSED, the same unmodeled key is a
+    // validation failure, exactly as an unreserved name would be.
+    expect(() =>
+      validateAndSanitizeSchemaValueWithOpaqueLinks({
+        schema: {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: { kept: { type: "number" } },
+            },
+          },
+        } as const satisfies JSONSchema,
+        value: { $NAME: "Doubler", nested: { kept: 7, $NAME: "sibling" } },
+        opaqueHandleId: "run-1",
+        reservedKeys: ["$NAME", "$UI"],
+      })
+    ).toThrow("additional property $NAME");
+  });
+
+  it("sanitizes against a self-recursive union without walking the call stack", () => {
+    const schema = {
+      type: "object",
+      properties: { node: { $ref: "#/$defs/Node" } },
+      required: ["node"],
+      $defs: {
+        Node: {
+          type: "object",
+          anyOf: [
+            { $ref: "#/$defs/Node" },
+            { type: "object", properties: { leaf: { type: "number" } } },
+          ],
+        },
+      },
+    } as unknown as JSONSchema;
+
+    // Reading which names a union models follows the same `$ref` the union
+    // declares, so the walk has to cut its own cycle rather than ride the
+    // stack down.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { node: { leaf: 1 } },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { node: { leaf: 1 } },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+  });
+
+  it("measures a reserved key the schema does model, and measures it raw", () => {
+    const schema = {
+      oneOf: [{
+        type: "object",
+        properties: {
+          count: { type: "number" },
+          $NAME: { type: "string", const: "allowed" },
+        },
+        required: ["count", "$NAME"],
+      }],
+    } as const satisfies JSONSchema;
+
+    // The value is measured as it arrived: the branch asks what `$NAME`
+    // holds, and a value that does not answer is refused. Projecting the
+    // reserved key out before validating would hand the branch `{count: 42}`
+    // and have it accepted.
+    expect(() =>
+      validateAndSanitizeSchemaValueWithOpaqueLinks({
+        schema,
+        value: { count: 42, $NAME: "wrong" },
+        opaqueHandleId: "run-1",
+        reservedKeys: ["$NAME"],
+      })
+    ).toThrow();
+
+    // A reserved key a composed schema declares is still available: it is
+    // modeled, so it is kept and sanitized rather than dropped.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { count: 42, $NAME: "allowed" },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME"],
+    })).toEqual({
+      value: { count: 42, $NAME: "allowed" },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
+  });
+
+  it("keeps a property only a later matching anyOf branch declares", () => {
+    // `anyOf` is "one or more branches match", so a value matching two of them
+    // is described by both. Reading only the first leaves the second branch's
+    // properties unmodeled — validation accepts `note`, and the sanitizer then
+    // seals the whole object over the very key validation just admitted.
+    const schema = {
+      type: "object",
+      anyOf: [
+        {
+          type: "object",
+          properties: { id: { type: "number" } },
+          additionalProperties: true,
+        },
+        {
+          type: "object",
+          properties: { id: { type: "number" }, note: { const: "ok" } },
+          additionalProperties: true,
+        },
+      ],
+    } as unknown as JSONSchema;
+
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { id: 1, note: "ok" },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { id: 1, note: "ok" },
+      linkedStringCount: 0,
+      sealedPaths: [],
     });
   });
 });

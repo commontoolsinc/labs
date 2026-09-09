@@ -1,18 +1,21 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { StaticCache } from "@commonfabric/static";
+import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
+
 import {
   composeBundleSourceMap,
   getTypeScriptEnvironmentTypes,
   identitySourceMap,
   InMemoryProgram,
+  parseSourceMap,
   type SourceMap,
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
-import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",
@@ -227,9 +230,9 @@ export default errorOnLine6;
       "    at ba4jcaraqictevfcqama4n7ugtfosjasodvm43iojcw4ss6m4y54d3uvn/main.tsx:3:19 (file.js, <anonymous>:20:10)",
       // eval
       "    at eval (recipe-abc.js, <anonymous>:17:10)",
-      // AMDLoader methods
-      "    at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)",
-      "    at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)",
+      // Namespaced methods on a column-1 frame
+      "    at Loader.resolveModule (recipe-abc.js, <anonymous>:1:1764)",
+      "    at Loader.require (recipe-abc.js, <anonymous>:1:923)",
     ];
 
     for (const pattern of patterns) {
@@ -363,7 +366,7 @@ describe("composeBundleSourceMap", () => {
 
   it("overrides the recorded source path when `source` is given", () => {
     // Compiler maps record only the basename; the override rewrites it to the
-    // full module path so resolved coordinates match the verified-source set.
+    // full module path so mapped error stacks keep the authored path.
     const mapA = buildMap("a.js", [{ gen: 1, src: "main.tsx", orig: 10 }]);
     const composed = composeBundleSourceMap(
       [{ body: "x", map: mapA, source: "/id/dir/main.tsx" }],
@@ -819,11 +822,12 @@ export const tag = "util";
   });
 });
 
-// CT-1819: the boot path defers composition, capturing per-module LINE COUNTS
-// instead of bodies — pin that the count-shaped inputs are byte-equivalent to
-// the body-shaped ones, and that the parser's lazy slot has one-shot,
-// lookup-driven semantics.
 describe("deferred composition inputs and lazy registration (CT-1819)", () => {
+  // CT-1819: the boot path defers composition, capturing per-module LINE COUNTS
+  // instead of bodies — pin that the count-shaped inputs are byte-equivalent to
+  // the body-shaped ones, and that the parser's lazy slot has one-shot,
+  // lookup-driven semantics.
+
   const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
     ({
       version: 3,
@@ -958,5 +962,13 @@ describe("deferred composition inputs and lazy registration (CT-1819)", () => {
     // evicts rather than grows). A plain Map would give 4096 then 8192.
     expect(afterFirst).toBeLessThan(4096);
     expect(afterSecond).toBe(afterFirst);
+  });
+});
+
+describe("parseSourceMap()", () => {
+  it("throws naming what the document holds, given JSON that is not a source map", () => {
+    expect(() => parseSourceMap('{"foo": 1}')).toThrow(
+      "Could not parse source map: {\n  foo: 1\n}",
+    );
   });
 });

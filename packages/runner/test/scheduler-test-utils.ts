@@ -1,23 +1,24 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
+
 import { Identity } from "@commonfabric/identity";
 import type { Entity } from "@commonfabric/memory/interface";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { TYPE } from "../src/builder/types.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   type ExperimentalOptions,
   Runtime,
   type RuntimeOptions,
 } from "../src/runtime.ts";
-import { TYPE } from "../src/builder/types.ts";
 import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "../src/scheduler.ts";
-import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import type {
   Action,
   ErrorWithContext,
@@ -25,6 +26,7 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "../src/scheduler.ts";
+import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageNotification,
@@ -72,7 +74,10 @@ async function disposeSchedulerTestRuntime(
   testRuntime: SchedulerTestRuntime,
 ): Promise<void> {
   await testRuntime.tx.commit();
-  await testRuntime.runtime?.dispose();
+  // The manager is the caller's — either handed in via `options.storageManager`
+  // (shared with a sibling runtime that may outlive this one) or created here
+  // and closed on the line below. Either way the runtime must not close it.
+  await testRuntime.runtime?.dispose({ closeStorage: false });
   await testRuntime.storageManager?.close();
 }
 
@@ -120,24 +125,7 @@ type StaleSchedulerInternals = {
 function getStaleSchedulerInternals(
   scheduler: Runtime["scheduler"],
 ): StaleSchedulerInternals {
-  const internal = scheduler as unknown as {
-    pending: Set<Action>;
-    dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
-    nodes: {
-      register: (action: Action, kind: "effect" | "computation") => unknown;
-      get: (
-        action: Action,
-      ) =>
-        | {
-          status: "never-ran" | "clean" | "invalid";
-          invalidCauses: unknown[];
-        }
-        | undefined;
-    };
-    markAndScheduleInvalidAction: (action: Action) => void;
-    isDemandedPullComputation: (action: Action) => boolean;
-    updateDependents: StaleSchedulerInternals["updateDependents"];
-  };
+  const internal = scheduler.accessForTestingOnly;
 
   return {
     pending: internal.pending,
@@ -151,9 +139,9 @@ function getStaleSchedulerInternals(
       const record = internal.nodes.get(action);
       if (!record) return;
       if (record.status === "invalid") {
-        record.status = "clean";
+        internal.nodes.setStatus(action, "clean");
       }
-      record.invalidCauses = [];
+      record.invalidCauses.clear();
     },
     markDirty: (action) => internal.markAndScheduleInvalidAction(action),
     registerEffect: (action) => {

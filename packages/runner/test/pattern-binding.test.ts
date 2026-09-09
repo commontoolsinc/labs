@@ -1,31 +1,61 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
 import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
+import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
+import { Identity } from "@commonfabric/identity";
+import {
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+} from "@commonfabric/memory/v2";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { isAliasBinding } from "../src/alias-binding.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import {
+  linkCfcLabelView,
+  setLinkCfcLabelView,
+} from "../src/cfc/link-label-view.ts";
+import { isCell } from "../src/cell.ts";
+import {
+  areLinksSame,
+  areNormalizedLinksSame,
+  getDerivedInternalCellLink,
+  getMetaCell,
+  parseLink,
+} from "../src/link-utils.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
+import {
+  causalFormOfBinding,
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
   unwrapOneLevelAndBindToDoc,
 } from "../src/pattern-binding.ts";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  areLinksSame,
-  areNormalizedLinksSame,
-  getDerivedInternalCellLink,
-  getMetaCell,
-  isAliasBinding,
-  parseLink,
-} from "../src/link-utils.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { isCell } from "../src/cell.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("pattern-binding", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -67,6 +97,30 @@ describe("pattern-binding", () => {
         $alias: { cell: "result", path: ["value"] },
       }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
+    });
+
+    it("resolves the argument cell from the result cell's meta link when argumentCellLink is undefined", () => {
+      const testCell = runtime.getCell<{ value: number }>(
+        space,
+        "argument meta link fallback 1",
+        undefined,
+        tx,
+      );
+      testCell.set({ value: 0 });
+
+      const argumentCell = getMetaCell(testCell, "argument", tx);
+      argumentCell.set({ input: 0 });
+      testCell.setMetaRaw(
+        "argument",
+        argumentCell.getAsWriteRedirectLink({ base: testCell }),
+        rawMetaWriteAuthorization,
+      );
+
+      sendValueToBinding(tx, testCell, undefined, {
+        $alias: { cell: "argument", path: ["input"] },
+      }, 42);
+
+      expect(argumentCell.getAsQueryResult()).toEqual({ input: 42 });
     });
 
     it("should handle array bindings", () => {
@@ -180,6 +234,10 @@ describe("pattern-binding", () => {
       // A genuine mismatch throws.
       expect(() => sendValueToBinding(tx, testCell, argumentCellLink, 42, 43))
         .toThrow("Got 43 instead of 42");
+      // A produced object is rendered, not stringified as `[object Object]`.
+      expect(() =>
+        sendValueToBinding(tx, testCell, argumentCellLink, 42, { a: 1 })
+      ).toThrow("Got {a:1} instead of 42");
     });
 
     it("normalizes cell values before writing a narrower scoped binding", () => {
@@ -279,6 +337,100 @@ describe("pattern-binding", () => {
       ).toBe(true);
     });
 
+    it("RAGGED redirect (fan-out stage B): a SESSION discovery below an EXISTING user redirect re-points the run's own USER slot, never the SHARED space slot — a sibling principal's next read still resolves the user instance, not a session instance of a node that is user-scoped for them", () => {
+      // The independent review's F3 asked for a deterministic unit pin
+      // here: the E2E (c)/(f-walk) shapes are timing-sensitive, and the
+      // revert-to-shared-slot mutation (M9) survived 3/4 there. This
+      // exercises exactly the flag-gated branch.
+      setServerExecutionConfig(true);
+      try {
+        const output = runtime.getCell<{ value: unknown }>(
+          space,
+          "ragged redirect output",
+          undefined,
+          tx,
+        );
+        output.set({ value: null });
+        const argumentCellLink = getMetaCell(output, "argument", tx)
+          .getAsNormalizedFullLink();
+        const source = runtime.getCell<string>(
+          space,
+          "ragged redirect source",
+          undefined,
+          tx,
+        );
+        source.set("secret");
+
+        const spaceSlot = output.key("value");
+        const userSlot = runtime.getCellFromLink(
+          { ...spaceSlot.getAsNormalizedFullLink(), scope: "user" },
+          undefined,
+          tx,
+        );
+        const sessionSlot = runtime.getCellFromLink(
+          { ...spaceSlot.getAsNormalizedFullLink(), scope: "session" },
+          undefined,
+          tx,
+        );
+
+        // Hop 1: a USER-scope discovery — the shared space slot narrows
+        // to user (structural top hop). Every principal follows it.
+        sendValueToBinding(
+          tx,
+          output,
+          argumentCellLink,
+          spaceSlot.getAsWriteRedirectLink(),
+          source,
+          { narrowestReadScope: "user" },
+        );
+        // The space slot points at the USER instance.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(spaceSlot.getRaw() as never, spaceSlot)!,
+            userSlot.getAsNormalizedFullLink(),
+          ),
+        ).toBe(true);
+
+        // Hop 2: a SESSION discovery for THIS run. The ragged fix points
+        // the run's own USER slot at the session instance — NOT the
+        // shared space slot (which M9 reverts to, re-pointing the slot
+        // every other principal follows at a session instance of a node
+        // that is user-scoped for them).
+        sendValueToBinding(
+          tx,
+          output,
+          argumentCellLink,
+          spaceSlot.getAsWriteRedirectLink(),
+          source,
+          { narrowestReadScope: "session" },
+        );
+
+        // The SHARED space slot is UNCHANGED — still → user.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(spaceSlot.getRaw() as never, spaceSlot)!,
+            userSlot.getAsNormalizedFullLink(),
+          ),
+        ).toBe(true);
+        // The run's own USER slot now → session.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(userSlot.getRaw() as never, userSlot)!,
+            sessionSlot.getAsNormalizedFullLink(),
+          ),
+        ).toBe(true);
+        // The value lands at the SESSION instance.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(sessionSlot.getRaw() as never, sessionSlot)!,
+            { ...source.getAsNormalizedFullLink(), path: [] },
+          ),
+        ).toBe(true);
+      } finally {
+        resetServerExecutionConfig();
+      }
+    });
+
     it("does not stamp scoped asCell alias schemas onto write redirect links", () => {
       const output = runtime.getCell<{ value: unknown }>(
         space,
@@ -340,7 +492,6 @@ describe("pattern-binding", () => {
       );
       argumentCell.set({ b: { c: 2 } });
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
@@ -377,7 +528,6 @@ describe("pattern-binding", () => {
         tx,
       );
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         undefined,
         resultCell,
@@ -400,7 +550,6 @@ describe("pattern-binding", () => {
       );
       expect(() =>
         unwrapOneLevelAndBindToDoc(
-          runtime.cfc,
           binding,
           undefined,
           resultCell,
@@ -442,18 +591,67 @@ describe("pattern-binding", () => {
         tx,
       );
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
       ) as { profile: unknown };
 
-      expect(parseLink(result.profile, resultCell)).toEqual({
+      const parsed = parseLink(result.profile, resultCell)!;
+      expect({ ...parsed, schema: resolvedSchema(parsed.schema) }).toEqual({
         ...argumentCell.getAsNormalizedFullLink(),
         path: ["profile"],
         scope: "user",
         schema: profileSchema,
         overwrite: "redirect",
+        // parseLink of a sigil stamps the read-side data-derived mark (OW51).
+        viaLinkHop: true,
+      });
+    });
+
+    it("binds aliases from a caller-owned circular schema", () => {
+      const circularSchema: JSONSchema & {
+        properties: Record<string, JSONSchema>;
+      } = {
+        type: "object",
+        properties: {},
+      };
+      circularSchema.properties.self = circularSchema;
+      const resultCell = runtime.getCell(
+        space,
+        "circular schema result cell",
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        "circular schema argument cell",
+        undefined,
+        tx,
+      );
+      const argumentLink = {
+        ...argumentCell.getAsNormalizedFullLink(),
+        schema: circularSchema,
+      };
+
+      const result = unwrapOneLevelAndBindToDoc(
+        { self: { $alias: { cell: "argument", path: ["self"] } } },
+        argumentLink,
+        resultCell,
+      );
+
+      const parsed = parseLink(result.self, resultCell)!;
+      expect(Object.isFrozen(circularSchema)).toBe(false);
+      expect(parsed.path).toEqual(["self"]);
+      expect(resolvedSchema(parsed.schema)).toEqual({
+        $ref: "#/$defs/CircularSchema_0",
+        $defs: {
+          CircularSchema_0: {
+            type: "object",
+            properties: {
+              self: { $ref: "#/$defs/CircularSchema_0" },
+            },
+          },
+        },
       });
     });
 
@@ -479,7 +677,7 @@ describe("pattern-binding", () => {
             partialCause: "name",
             path: [],
             scope: "space",
-            schema: { default: "Ada" },
+            schema: externalRefTo({ default: "Ada" }),
           },
         });
       } finally {
@@ -532,7 +730,6 @@ describe("pattern-binding", () => {
       };
 
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         { op: nestedPattern },
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
@@ -556,6 +753,257 @@ describe("pattern-binding", () => {
     });
   });
 
+  describe("unwrapOneLevelAndBindToDoc structure sharing", () => {
+    /** Binds `binding`, with one derived internal cell named `"a"` available. */
+    const bind = <T>(binding: T): T => {
+      const resultCell = runtime.getCell(
+        space,
+        `share ${crypto.randomUUID()}`,
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        `share arg ${crypto.randomUUID()}`,
+        undefined,
+        tx,
+      );
+      return unwrapOneLevelAndBindToDoc(
+        binding as never,
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+        { derivedInternalCells: [{ partialCause: "a" }] },
+      ) as T;
+    };
+
+    const alias = () => ({ $alias: { partialCause: "a", path: [] } });
+
+    it("returns a binding with nothing to rebind by identity", () => {
+      const binding = { x: 1, deep: { y: ["a", "b"] } };
+      const result = bind(binding);
+      expect(result).toBe(binding);
+      expect(result.deep).toBe(binding.deep);
+      expect(result.deep.y).toBe(binding.deep.y);
+    });
+
+    it("copies only the path to a rebound alias, sharing its siblings", () => {
+      const untouched = { deep: [1, 2, 3] };
+      const binding = { changed: { inner: alias() }, untouched };
+      const result = bind(binding);
+
+      // The root and the branch containing the alias are copies...
+      expect(result).not.toBe(binding);
+      expect(result.changed).not.toBe(binding.changed);
+      // ...while a sibling subtree with nothing to rebind is the same object.
+      expect(result.untouched).toBe(untouched);
+      expect(result.untouched.deep).toBe(untouched.deep);
+    });
+
+    it("shares an array whose elements all convert to themselves", () => {
+      const inner = [1, 2];
+      const binding = { list: [inner, "x"] };
+      const result = bind(binding);
+      expect(result).toBe(binding);
+      expect(result.list[0]).toBe(inner);
+    });
+
+    it("preserves holes when a sibling element rebinds", () => {
+      // deno-lint-ignore no-sparse-arrays
+      const binding = [alias(), , "third"] as unknown[];
+      const result = bind(binding);
+
+      expect(result).not.toBe(binding);
+      expect(result.length).toBe(3);
+      expect(1 in result).toBe(false); // still a hole, not `undefined`
+      expect(result[2]).toBe("third");
+      expect(isAliasBinding(result[0])).toBe(false); // it did rebind
+    });
+
+    it("keeps the length of an array whose trailing elements are holes", () => {
+      const binding = [alias()] as unknown[];
+      binding.length = 4;
+      const result = bind(binding);
+
+      expect(result.length).toBe(4);
+      for (const i of [1, 2, 3]) expect(i in result).toBe(false);
+    });
+
+    it("keeps a FabricPrimitive whole instead of flattening it", () => {
+      // A `FabricPrimitive` keeps its state in private fields, so
+      // `Object.entries()` reports none of it. A name-driven rebuild of the
+      // enclosing record therefore used to replace it with a bare `{}`.
+      const stamp = new FabricEpochNsec(123n);
+      const shared = bind({ stamp, n: 1 });
+      expect(shared.stamp).toBeInstanceOf(FabricEpochNsec);
+      expect(shared.stamp).toBe(stamp);
+
+      // ...and it survives the COPY path too, where a sibling rebinds.
+      const copied = bind({ stamp, aliased: alias() });
+      expect(copied).not.toBe(undefined);
+      expect(copied.stamp).toBeInstanceOf(FabricEpochNsec);
+      expect(copied.stamp).toBe(stamp);
+
+      // Same at the root, and inside an array.
+      expect(bind(stamp)).toBe(stamp);
+      expect(bind([stamp, alias()])[0]).toBe(stamp);
+    });
+
+    it("throws on a FabricInstance rather than handing it back unbound", () => {
+      // A `FabricInstance` is a CONTAINER of other `FabricValue`s, reached by
+      // its codec contents rather than by property name. This walk cannot yet
+      // descend one, and handing it back whole would read as success while
+      // leaving a bound alias in its contents silently unbound.
+      const err = FabricError.fromNativeError(new Error("boom"));
+
+      expect(() => bind({ err })).toThrow("FabricError");
+      // ...at the root, and inside an array, on both the shared and copy paths.
+      expect(() => bind(err)).toThrow("FabricError");
+      expect(() => bind([err])).toThrow("FabricError");
+      expect(() => bind({ err, aliased: alias() })).toThrow("FabricError");
+    });
+
+    it("hands an Array subclass's species the same length `map()` would", () => {
+      // Regression: an earlier lazy copy used `slice(0, i)`, which passes the
+      // PREFIX length to `ArraySpeciesCreate`, where `map()` passes the full
+      // length. Only a custom `Symbol.species` can observe the difference.
+      const lengths: number[] = [];
+      class Spy extends Array {
+        constructor(...args: unknown[]) {
+          lengths.push(args[0] as number);
+          super(...(args as []));
+        }
+      }
+      class Watched extends Array {
+        /**
+         * The species, cast: `ArrayConstructor` is what the base class declares
+         * here, and `Spy` does not structurally satisfy it (no
+         * callable-without-`new` form). The cast is the point of the fixture:
+         * an exotic species is exactly what is under test.
+         */
+        static override get [Symbol.species](): ArrayConstructor {
+          return Spy as unknown as ArrayConstructor;
+        }
+      }
+      // A rebind at the LAST index, so a prefix-sized copy would differ most.
+      const binding = Watched.from(["a", "b", alias()]) as unknown[];
+
+      lengths.length = 0;
+      binding.map((x) => x);
+      const viaMap = [...lengths];
+
+      lengths.length = 0;
+      bind(binding);
+      expect(lengths).toEqual(viaMap);
+    });
+  });
+
+  describe("causalFormOfBinding", () => {
+    /** Reduces `binding`, typed as the sibling `bind()` helper above is. */
+    const reduce = <T>(binding: T): T =>
+      causalFormOfBinding(binding as never) as T;
+
+    /** A link carrying a schema, as a bound binding holds one. */
+    const linkWithSchema = () =>
+      runtime.getCell(space, `causal ${crypto.randomUUID()}`, undefined, tx)
+        .asSchema({ type: "object", properties: { v: { type: "number" } } })
+        .getAsLink({ includeSchema: true });
+
+    it("returns a link naming the same cell with no schema on it", () => {
+      const link = linkWithSchema();
+      const before = parseLink(link)!;
+      expect(before.schema).not.toBeUndefined();
+
+      const after = parseLink(reduce({ x: link }).x)!;
+      expect(after.schema).toBeUndefined();
+      expect(areNormalizedLinksSame(after, before)).toBe(true);
+    });
+
+    it("reduces a link nested inside a binding", () => {
+      const binding = { $ctx: { deep: [{ items: linkWithSchema() }] } };
+      const reduced = reduce(binding);
+      expect(parseLink(reduced.$ctx.deep[0].items)!.schema).toBeUndefined();
+    });
+
+    it("returns a binding with no link schema to drop by identity", () => {
+      const binding = { x: 1, deep: { y: ["a", "b"] } };
+      expect(reduce(binding)).toBe(binding);
+    });
+
+    it("copies only the path to a reduced link, sharing its siblings", () => {
+      const untouched = { deep: [1, 2, 3] };
+      const binding = { changed: { inner: linkWithSchema() }, untouched };
+      const reduced = reduce(binding);
+
+      expect(reduced).not.toBe(binding);
+      expect(reduced.changed).not.toBe(binding.changed);
+      expect(reduced.untouched).toBe(untouched);
+      expect(reduced.untouched.deep).toBe(untouched.deep);
+    });
+
+    it("preserves holes when a sibling element reduces", () => {
+      // deno-lint-ignore no-sparse-arrays
+      const binding = [linkWithSchema(), , "third"] as unknown[];
+      const reduced = reduce(binding);
+
+      expect(reduced).not.toBe(binding);
+      expect(reduced.length).toBe(3);
+      expect(1 in reduced).toBe(false);
+      expect(reduced[2]).toBe("third");
+    });
+
+    it("returns a link carrying only addressing members by identity", () => {
+      const link = runtime
+        .getCell(space, `bare ${crypto.randomUUID()}`, undefined, tx)
+        .getAsLink();
+      const binding = { x: link };
+      expect(reduce(binding)).toBe(binding);
+    });
+
+    it("drops a cfc label view riding on a link", () => {
+      // The label view is a flow-control side channel, and cfc's own module
+      // calls it no part of a link's addressing identity -- so it is no part
+      // of what names a node either.
+      const link = runtime
+        .getCell(space, `labeled ${crypto.randomUUID()}`, undefined, tx)
+        .getAsLink();
+      setLinkCfcLabelView(link, {} as never);
+      expect(linkCfcLabelView(link)).not.toBeUndefined();
+
+      const reduced = reduce({ x: link }).x;
+      expect(linkCfcLabelView(reduced)).toBeUndefined();
+      expect(areNormalizedLinksSame(parseLink(reduced)!, parseLink(link)!))
+        .toBe(true);
+    });
+
+    it("returns a link envelope holding no payload record as it stands", () => {
+      // `isSigilLink()` vets the envelope, not what sits inside it, so a
+      // payload that is not a record reaches the reduction. It addresses
+      // nothing and there is nothing to read off it.
+      const binding = { x: { "/": { [LINK_V1_TAG]: null } } };
+      expect(reduce(binding)).toBe(binding);
+    });
+
+    it("leaves a deferred `$alias` as it stands", () => {
+      // An alias is a binding on its way to a nested pattern, not a link, and
+      // its schema is that pattern's structure rather than this node's cause.
+      const binding = {
+        a: {
+          $alias: { cell: "argument", defer: 1, path: ["v"], schema: true },
+        },
+      };
+      const reduced = reduce(binding);
+      expect(reduced).toBe(binding);
+      expect(isAliasBinding(reduced.a)).toBe(true);
+    });
+
+    it("leaves the binding it was handed unchanged", () => {
+      const binding = { x: linkWithSchema() };
+      const before = JSON.stringify(binding);
+      reduce(binding);
+      expect(JSON.stringify(binding)).toBe(before);
+    });
+  });
+
   describe("findAllWriteRedirectCells", () => {
     it("should not find non-unwrapped alias binding", () => {
       const testCell = runtime.getCell<{ foo: number }>(
@@ -570,7 +1018,6 @@ describe("pattern-binding", () => {
       expect(links.length).toBe(0);
 
       const unwrappedBinding = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
         testCell,
@@ -607,7 +1054,6 @@ describe("pattern-binding", () => {
       // aliases survive as aliases (defer crossed, next level's wiring) and
       // stay invisible to the walker.
       const unwrappedBinding = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
         testCell,
@@ -744,7 +1190,6 @@ describe("pattern-binding", () => {
       ];
       const links = findAllWriteRedirectCells(
         unwrapOneLevelAndBindToDoc(
-          runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),
           testCell,
@@ -774,7 +1219,6 @@ describe("pattern-binding", () => {
       };
       const links = findAllWriteRedirectCells(
         unwrapOneLevelAndBindToDoc(
-          runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),
           testCell,

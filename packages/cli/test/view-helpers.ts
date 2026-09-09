@@ -2,19 +2,20 @@
  * Shared fixtures and helpers for the `cf view` test suites. Not a test file
  * itself (the test task globs `*.test.ts`), just an import.
  */
+
 import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
 import type { ViewState } from "../lib/view/render.ts";
 import type { Rgb } from "../lib/view/ansi.ts";
 
 export { parseDocument };
 
-/** The `48;2;r;g;b` background run for a colour, as it appears in an SGR escape;
- * lets a test assert on a theme colour without hard-coding its hex. */
+/** The `48;2;r;g;b` background run for a color, as it appears in an SGR escape;
+ * lets a test assert on a theme color without hard-coding its hex. */
 export function bgCode(rgb: Rgb): string {
   return `48;2;${rgb[0]};${rgb[1]};${rgb[2]}`;
 }
 
-/** The `38;2;r;g;b` foreground run for a colour. */
+/** The `38;2;r;g;b` foreground run for a color. */
 export function fgCode(rgb: Rgb): string {
   return `38;2;${rgb[0]};${rgb[1]};${rgb[2]}`;
 }

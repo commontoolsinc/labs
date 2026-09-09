@@ -1,3 +1,7 @@
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
@@ -7,6 +11,7 @@ import {
 } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
+  type Cell,
   type Frame,
   isModule,
   isPattern,
@@ -24,14 +29,10 @@ import {
   assertCapture,
   assertRenderParts,
   handler,
-  isEagerSourceAnnotationEnabled,
   lift,
-  parseStackFrame,
-  resolveLocationFromFunctionSource,
-  resolveSourceLocationFromStack,
-  setEagerSourceAnnotation,
 } from "../src/builder/module.ts";
 import { reactive } from "../src/builder/reactive.ts";
+import { externalRefTo } from "./schema-ref-helpers.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -53,6 +54,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("module", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -127,8 +137,9 @@ describe("module", () => {
         { unavailableInputPolicy },
       );
 
-      expect(probe.unavailableInputPolicy).toBe(unavailableInputPolicy);
-      expect(probe.type).toBe("javascript-availability");
+      const module = probe as unknown as Module;
+      expect(module.unavailableInputPolicy).toBe(unavailableInputPolicy);
+      expect(module.type).toBe("javascript-availability");
     });
 
     it("supports schema validation with description", () => {
@@ -173,13 +184,14 @@ describe("module", () => {
       expect(isReactive(holds)).toBe(true);
     });
 
-    // The assert-diagnostics transformer normally rewrites an `assert` body
-    // and lowers the call to a lift, so this implementation is what runs when
-    // a source opts out of the transform. It still has to produce the record
-    // `assert` declares it returns — a body handing back a bare boolean would
-    // have the declared type and the value disagree. It records no operands,
-    // having no rewritten body to record them from.
     it("produces the record it declares, carrying the result in `ok`", async () => {
+      // The assert-diagnostics transformer normally rewrites an `assert` body
+      // and lowers the call to a lift, so this implementation is what runs when
+      // a source opts out of the transform. It still has to produce the record
+      // `assert` declares it returns — a body handing back a bare boolean would
+      // have the declared type and the value disagree. It records no operands,
+      // having no rewritten body to record them from.
+
       const testPattern = trustPattern(
         runtime,
         pattern(() => {
@@ -206,6 +218,7 @@ describe("module", () => {
     // What the rewritten body calls for each operand. It has to hand the value
     // back untouched, or wrapping an operand would change what the assertion
     // computes.
+
     it("returns the value it was given", () => {
       const parts: AssertRawPart[] = [];
       expect(assertCapture(parts, "a + b", 3)).toBe(3);
@@ -242,6 +255,7 @@ describe("module", () => {
     // The record's `parts` runs through this. On the passing path it renders
     // nothing — that is what keeps a passing assertion from paying to render
     // operands it will never report.
+
     it("renders nothing for a passing assertion", () => {
       const parts: AssertRawPart[] = [
         { src: "a + b", value: 3 },
@@ -260,28 +274,80 @@ describe("module", () => {
         { src: "items", rendered: "[1,-2]" },
       ]);
     });
+
+    it("renders a deeply nested operand down to its leaf", () => {
+      // A view tree nests two levels per node, so a diagnostic for one soon
+      // runs past the renderer's default depth; the leaf here sits well past
+      // it.
+
+      let value: unknown = "leaf";
+      for (let i = 0; i < 30; i++) value = { children: [value] };
+      const [part] = assertRenderParts(false, [{ src: "tree", value }]);
+      expect(part.rendered).toContain('"leaf"');
+      expect(part.rendered).not.toContain("...");
+    });
+
+    it("renders a long list operand out to its last element", () => {
+      // The renderer's default length elides a list after a hundred elements;
+      // the last element here sits past that.
+
+      const value = Array.from({ length: 150 }, (_, i) => i);
+      const [part] = assertRenderParts(false, [{ src: "items", value }]);
+      expect(part.rendered).toContain(",149]");
+      expect(part.rendered).not.toContain("...");
+    });
+
+    it("renders a long string operand out to its last character", () => {
+      // The renderer's default length carries a string whole to two hundred
+      // characters; the last one here sits past that.
+
+      const value = `${"x".repeat(299)}END`;
+      const [part] = assertRenderParts(false, [{ src: "text", value }]);
+      expect(part.rendered).toContain('END"');
+      expect(part.rendered).not.toContain("...");
+    });
   });
 
   describe("handler function", () => {
     it("creates a node factory for event handlers", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
-        (event, props) => {
-          props.x = event.clientX;
-          props.y = event.clientY;
+      const clickHandler = handler<
+        MouseEvent,
+        { x: Cell<number>; y: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: {
+            x: { type: "number", asCell: ["cell"] },
+            y: { type: "number", asCell: ["cell"] },
+          },
         },
-        { proxy: true },
+        (event, props) => {
+          props.x.set(event.clientX);
+          props.y.set(event.clientY);
+        },
       );
       expect(typeof clickHandler).toBe("function");
       expect(isModule(clickHandler)).toBe(true);
     });
 
     it("creates a opaque ref with stream when called", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
-        (event, props) => {
-          props.x = event.clientX;
-          props.y = event.clientY;
+      const clickHandler = handler<
+        MouseEvent,
+        { x: Cell<number>; y: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: {
+            x: { type: "number", asCell: ["cell"] },
+            y: { type: "number", asCell: ["cell"] },
+          },
         },
-        { proxy: true },
+        (event, props) => {
+          props.x.set(event.clientX);
+          props.y.set(event.clientY);
+        },
       );
       const stream = clickHandler({ x: reactive(10), y: reactive(20) });
       expect(isReactive(stream)).toBe(true);
@@ -387,7 +453,7 @@ describe("module", () => {
           $alias: {
             partialCause: ["a", "b"],
             path: [],
-            schema: { default: 1 },
+            schema: externalRefTo({ default: 1 }),
             scope: "space",
           },
         },
@@ -469,12 +535,22 @@ describe("module", () => {
     });
 
     it("creates a opaque ref with stream when with is called", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
-        (event, props) => {
-          props.x = event.clientX;
-          props.y = event.clientY;
+      const clickHandler = handler<
+        MouseEvent,
+        { x: Cell<number>; y: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: {
+            x: { type: "number", asCell: ["cell"] },
+            y: { type: "number", asCell: ["cell"] },
+          },
         },
-        { proxy: true },
+        (event, props) => {
+          props.x.set(event.clientX);
+          props.y.set(event.clientY);
+        },
       );
       const stream = clickHandler.with({ x: reactive(10), y: reactive(20) });
       expect(isReactive(stream)).toBe(true);
@@ -488,14 +564,15 @@ describe("module", () => {
 
   describe("action function", () => {
     it("throws error when called directly without CTS transforms", () => {
-      // action() is only valid once CTS transforms rewrite it to handler().
-      // A direct runtime call should still fail and point callers at the opt-out flag.
+      // action() is only valid once CTS transforms rewrite it to handler(), so
+      // a direct runtime call fails and names the build process that does it.
       expect(() => {
         action<{ data: string }>(({ data }) => {
           void data;
         });
       }).toThrow(
-        "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
+        "action() must be used with CTS transforms enabled - it is rewritten" +
+          " to handler() at compile time by the Common Fabric build process",
       );
     });
 
@@ -545,68 +622,7 @@ describe("module", () => {
     });
   });
 
-  describe("eagerSourceAnnotation runtime option", () => {
-    afterEach(() => setEagerSourceAnnotation(false));
-
-    it("skips annotation entirely for a non-extensible implementation", () => {
-      // Hardened/frozen fns cannot carry the debug annotation; the annotator
-      // must early-return rather than throw (with eager on OR off).
-      setEagerSourceAnnotation(true);
-      const frozen = Object.freeze((n: number) => n * 5);
-      const fact = lift(frozen);
-      expect(isModule(fact)).toBe(true);
-      expect((frozen as { src?: string }).src).toBe(undefined);
-    });
-
-    it("annotates the RAW (unmapped) stack location when eager annotation is on", () => {
-      // Builder calls from plain test code have no source map behind them, so
-      // the stack walk takes the raw-resolution arm (`file:line:col` of the
-      // first external frame). On main this arm ran for every unit-test
-      // builder call; with the annotation default-off it is only reachable
-      // through eager-on tests — keep it exercised.
-      setEagerSourceAnnotation(true);
-      const dbl = lift((n: number) => n * 2);
-      const impl = (dbl as unknown as Module).implementation as {
-        src?: string;
-      };
-      expect(impl.src).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-
-    it("propagates an explicit option to the ambient flag; undefined leaves it alone", async () => {
-      const mk = (experimental?: { eagerSourceAnnotation?: boolean }) =>
-        new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-          ...(experimental ? { experimental } : {}),
-        });
-
-      // Explicit true / false propagate (and read back on `experimental`).
-      const on = mk({ eagerSourceAnnotation: true });
-      expect(isEagerSourceAnnotationEnabled()).toBe(true);
-      expect(on.experimental.eagerSourceAnnotation).toBe(true);
-      await on.dispose();
-
-      const off = mk({ eagerSourceAnnotation: false });
-      expect(isEagerSourceAnnotationEnabled()).toBe(false);
-      expect(off.experimental.eagerSourceAnnotation).toBe(false);
-      await off.dispose();
-
-      // Undefined must NOT stomp the ambient flag — it doubles as the test
-      // seam (`setEagerSourceAnnotation` toggled directly around runtimes).
-      setEagerSourceAnnotation(true);
-      const inherit = mk();
-      expect(isEagerSourceAnnotationEnabled()).toBe(true);
-      expect(inherit.experimental.eagerSourceAnnotation).toBe(true);
-      await inherit.dispose();
-    });
-  });
-
-  describe("source location tracking", () => {
-    // Eager source-location resolution is off by default (debug-only; the boot
-    // lever). This block tests that resolution, so enable it here.
-    beforeEach(() => setEagerSourceAnnotation(true));
-    afterEach(() => setEagerSourceAnnotation(false));
-
+  describe("authored source locations through the CTS pipeline", () => {
     const compileMain = async (source: string) => {
       const program = {
         main: "/main.tsx",
@@ -655,31 +671,6 @@ describe("module", () => {
       return node;
     };
 
-    it("attaches source location to function implementation via .name", () => {
-      const fn = (x: number) => x * 2;
-      lift(fn);
-
-      // The implementation's .name should now be the source location
-      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-
-    it("attaches source location to handler implementations", () => {
-      const fn = (event: MouseEvent, props: { x: number }) => {
-        props.x = event.clientX;
-      };
-      handler(fn, { proxy: true });
-
-      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-
-    it("attaches source location through lift", () => {
-      const fn = (x: number) => x * 2;
-      lift(fn)(reactive(5));
-
-      // lift should track the original function's source location
-      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-
     it("maps computed callsites through the CTS pipeline", async () => {
       const source = [
         'import { computed, pattern } from "commonfabric";',
@@ -696,10 +687,7 @@ describe("module", () => {
         findNodeByPreview(patternFn, ".filter(Boolean)"),
       );
       expect(computedNode.module.implementation.src).toMatch(
-        /main\.tsx:4:\d+$/,
-      );
-      expect(computedNode.module.implementation.src).not.toContain(
-        "main.tsx:1:23",
+        /main\.tsx:3:\d+$/,
       );
     });
 
@@ -717,10 +705,7 @@ describe("module", () => {
         findNodeByPreview(main?.default, "value + 1"),
       );
       expect(actionNode.module.wrapper).toBe("handler");
-      expect(actionNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
-      expect(actionNode.module.implementation.src).not.toContain(
-        "main.tsx:1:23",
-      );
+      expect(actionNode.module.implementation.src).toMatch(/main\.tsx:3:\d+$/);
     });
 
     it("maps synthetic JSX compute callsites through the CTS pipeline", async () => {
@@ -735,8 +720,7 @@ describe("module", () => {
       const jsxNode = expectTrackedNode(
         findNodeByPreview(main?.default, "value + 1"),
       );
-      expect(jsxNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
-      expect(jsxNode.module.implementation.src).not.toContain("main.tsx:1:23");
+      expect(jsxNode.module.implementation.src).toMatch(/main\.tsx:3:\d+$/);
     });
 
     it("preserves source locations for explicit lift, handler, and nested pattern calls", async () => {
@@ -750,7 +734,7 @@ describe("module", () => {
           ].join("\n"),
           exportName: "default",
           preview: "value * 2",
-          line: 3,
+          line: 2,
         },
         {
           label: "handler",
@@ -761,7 +745,7 @@ describe("module", () => {
           ].join("\n"),
           exportName: "default",
           preview: "state.value + event.delta",
-          line: 3,
+          line: 2,
           wrapper: "handler",
         },
         {
@@ -773,7 +757,7 @@ describe("module", () => {
           ].join("\n"),
           exportName: "Child",
           preview: "value * 2",
-          line: 3,
+          line: 2,
         },
       ];
 
@@ -790,252 +774,7 @@ describe("module", () => {
           node.module.implementation.src,
           testCase.label,
         ).toMatch(new RegExp(`main\\.tsx:${testCase.line}:\\d+$`));
-        expect(
-          node.module.implementation.src,
-          testCase.label,
-        ).not.toContain("main.tsx:1:23");
       }
-    });
-  });
-
-  describe("source-location resolution helpers (direct)", () => {
-    // Annotation is off by default now, so these arms are only reachable
-    // through eager-on paths — exercise the helpers directly.
-    // resolveLocationFromFunctionSource is the `indexOf`-into-script path,
-    // the eager annotation's fallback when the stack capture yields nothing
-    // (in-worker, SES-censored stacks make it the MAIN path).
-    const makeFrame = (script: string, nextSearchOffset = 0) =>
-      ({
-        sourceLocationContext: {
-          filename: "/probe.tsx",
-          script,
-          nextSearchOffset,
-        },
-        runtime: { harness: { mapPosition: () => null } },
-      }) as unknown as Frame;
-
-    it("resolves file:line:col by locating the fn source in the script", () => {
-      const fn = (n: number) => n * 2;
-      const script = `// header line\nconst dbl = ${fn.toString()};\n`;
-      const result = resolveLocationFromFunctionSource(fn, makeFrame(script));
-      expect(result).toBe("/probe.tsx:2:12");
-    });
-
-    it("restarts the scan from the top when the offset overshoots", () => {
-      const fn = (n: number) => n + 1;
-      const script = `const inc = ${fn.toString()};\n// tail`;
-      // nextSearchOffset past the match forces the second indexOf pass.
-      const result = resolveLocationFromFunctionSource(
-        fn,
-        makeFrame(script, script.length - 3),
-      );
-      expect(result).toBe("/probe.tsx:1:12");
-    });
-
-    it("returns null when the source is not in the script or no frame context", () => {
-      const fn = (n: number) => n - 1;
-      expect(resolveLocationFromFunctionSource(fn, makeFrame("// nothing")))
-        .toBe(null);
-      expect(resolveLocationFromFunctionSource(fn, undefined)).toBe(null);
-    });
-
-    it("skips unmapped frames from the capturing file itself (thisFile)", () => {
-      // The first parsed frame names the file doing the capture; an unmapped
-      // frame from that same file later in the walk is self-referential and
-      // must be skipped in favor of the first genuinely external frame.
-      const stack = [
-        "Error",
-        "    at capture (/probe/self.ts:10:5)",
-        "    at alsoSelf (/probe/self.ts:11:9)",
-        "    at userCode (/probe/user-code.ts:42:7)",
-      ].join("\n");
-      const result = resolveSourceLocationFromStack(stack, () => null);
-      expect(result.location).toBe("/probe/user-code.ts:42:7");
-    });
-
-    it("returns null for an empty fn source", () => {
-      const fn = (n: number) => n;
-      Object.defineProperty(fn, "toString", { value: () => "" });
-      expect(resolveLocationFromFunctionSource(fn, makeFrame("anything")))
-        .toBe(null);
-    });
-
-    it("prefers the source-mapped location when the range maps", () => {
-      const fn = (n: number) => n * 3;
-      const script = `const tri = ${fn.toString()};`;
-      const frame = {
-        sourceLocationContext: {
-          filename: "/probe.tsx",
-          script,
-          nextSearchOffset: 0,
-        },
-        runtime: {
-          harness: {
-            mapPosition: () => ({
-              source: "/authored.tsx",
-              line: 7,
-              column: 3,
-              name: null,
-            }),
-          },
-        },
-      } as unknown as Frame;
-      const result = resolveLocationFromFunctionSource(fn, frame);
-      expect(result).toBe("/authored.tsx:7:3");
-    });
-  });
-
-  describe("parseStackFrame", () => {
-    it("parses Deno file:// stack frames with function name", () => {
-      const line =
-        "    at functionName (file:///Users/test/project/src/file.ts:42:15)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "/Users/test/project/src/file.ts",
-        line: 42,
-        col: 15,
-      });
-    });
-
-    it("parses Deno file:// stack frames without function name", () => {
-      const line = "    at file:///Users/test/project/src/file.ts:42:15";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "/Users/test/project/src/file.ts",
-        line: 42,
-        col: 15,
-      });
-    });
-
-    it("parses absolute path stack frames", () => {
-      const line = "    at functionName (/path/to/file.ts:100:5)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "/path/to/file.ts",
-        line: 100,
-        col: 5,
-      });
-    });
-
-    it("parses browser http:// stack frames", () => {
-      const line =
-        "    at getExternalSourceLocation (http://localhost:8000/scripts/index.js:250239:17)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "http://localhost:8000/scripts/index.js",
-        line: 250239,
-        col: 17,
-      });
-    });
-
-    it("parses browser https:// stack frames", () => {
-      const line =
-        "    at functionName (https://example.com/scripts/bundle.js:100:20)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "https://example.com/scripts/bundle.js",
-        line: 100,
-        col: 20,
-      });
-    });
-
-    it("parses browser stack frames with [as name] syntax", () => {
-      const line =
-        "    at Object.eval [as factory] (ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js:52:52)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js",
-        line: 52,
-        col: 52,
-      });
-    });
-
-    it("parses Deno eval stack frames with anonymous suffix", () => {
-      const line =
-        "    at Object.eval [as factory] (recipe-abc.js, <anonymous>:4:52)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "recipe-abc.js",
-        line: 4,
-        col: 52,
-      });
-    });
-
-    it("parses relative path stack frames", () => {
-      const line = "    at eval (somefile.js:10:5)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "somefile.js",
-        line: 10,
-        col: 5,
-      });
-    });
-
-    it("returns null for invalid stack frames", () => {
-      expect(parseStackFrame("Error")).toBeNull();
-      expect(parseStackFrame("    at <anonymous>")).toBeNull();
-      expect(parseStackFrame("")).toBeNull();
-    });
-
-    it("skips internal CTS bundle frames and synthetic 1:23 mappings", () => {
-      const stack = [
-        "Error",
-        "    at getExternalSourceLocation (bundle.js:10:5)",
-        "    at annotateFunctionDebugMetadata (bundle.js:11:5)",
-        "    at createNodeFactory (bundle.js:12:5)",
-        "    at lift (bundle.js:13:5)",
-        "    at Object.eval [as factory] (bundle.js:52:52)",
-      ].join("\n");
-
-      const result = resolveSourceLocationFromStack(
-        stack,
-        (_file, line, _col) => {
-          if (line < 52) {
-            return { source: "/main.tsx", line: 1, column: 23 };
-          }
-          return { source: "/main.tsx", line: 4, column: 26 };
-        },
-      );
-
-      expect(result.location).toBe("/main.tsx:4:26");
-    });
-
-    it("resolves an ESM-loader browser eval frame to the canonical cf:module source", () => {
-      // Under the ESM module loader in a BROWSER, `new Error().stack` surfaces
-      // the per-module eval frame whose file is the `//# sourceURL` the loader
-      // tags each `compartment.evaluate` with (the prefixed per-module source
-      // name). The engine registers a per-module source map under that exact
-      // sourceURL (see engine.ts near `loadSourceMap`), and the production
-      // resolver uses `canonicalizingMapPosition`, which maps the coordinate to
-      // the authored source and then upgrades it to the reload-stable canonical
-      // `cf:module/<hash>/<path>` form. Both source-location consumers (CFC
-      // verified-source AND the scheduler implementation hash) require that
-      // canonical output, so pin the browser resolution path here. (Deno's tamed
-      // SES strips this frame, falling back to the indexOf-into-`script` path
-      // exercised by esm-source-location.test.ts — the browser relies on THIS.)
-      const ESM_SOURCE_URL = "/2b3c/main.tsx"; // per-module eval sourceURL
-      const CANONICAL = "cf:module/2b3cZ9hashZ9/main.tsx";
-      const stack = [
-        "Error",
-        "    at getExternalSourceLocation (bundle.js:10:5)",
-        "    at annotateFunctionDebugMetadata (bundle.js:11:5)",
-        "    at createNodeFactory (bundle.js:12:5)",
-        "    at handler (bundle.js:13:5)",
-        // The authored handler, as a browser eval frame keyed on the sourceURL.
-        `    at inc (${ESM_SOURCE_URL}:2:33)`,
-      ].join("\n");
-
-      const result = resolveSourceLocationFromStack(
-        stack,
-        // Mimics `canonicalizingMapPosition`: only the per-module eval frame has
-        // a registered map, and it resolves to the canonical cf:module form.
-        (file, _line, _col) =>
-          file === ESM_SOURCE_URL
-            ? { source: CANONICAL, line: 2, column: 33 }
-            : null,
-      );
-
-      expect(result.location).toBe(`${CANONICAL}:2:33`);
     });
   });
 });

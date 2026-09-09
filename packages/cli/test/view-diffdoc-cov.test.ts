@@ -1,8 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import type { DiffLine, DiffModel } from "../lib/view/diff.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
+  _internal,
   buildDiffDocument,
   type DiffWorkspace,
   realWorkspace,
@@ -25,7 +28,9 @@ function stubWs(root: string): DiffWorkspace {
 
 const NO_WS: DiffWorkspace = { resolve: () => null, read: () => null };
 
-// --- realWorkspace: read() error branch -------------------------------------
+//
+// realWorkspace: read() error branch
+//
 
 Deno.test("realWorkspace: read of a bounded directory returns null (catch branch)", () => {
   const root = Deno.makeTempDirSync();
@@ -47,6 +52,135 @@ Deno.test("realWorkspace: read of a bounded directory returns null (catch branch
   }
 });
 
+describe("decoded workspace input", () => {
+  it("keeps binary files out of editable source text", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const namedBinary = join(root, "asset.png");
+      Deno.writeTextFileSync(namedBinary, "printable bytes without a NUL\n");
+      const invalidBinary = join(root, "unknown.data");
+      Deno.writeFileSync(invalidBinary, new Uint8Array([0x61, 0xff, 0x62]));
+      const nulBinary = join(root, "nul.data");
+      Deno.writeFileSync(nulBinary, new Uint8Array([0x61, 0x00, 0x62]));
+
+      const ws = realWorkspace(root);
+      expect(ws.read(namedBinary)).toBe(null);
+      expect(ws.read(invalidBinary)).toBe(null);
+      expect(ws.read(nulBinary)).toBe(null);
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("retains the observed encoding when writing text", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.json");
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 1}\n'),
+        ]),
+      );
+
+      const ws = realWorkspace(root);
+      expect(ws.read(path)).toBe('{"value": 1}\n');
+      ws.write!(path, '{"value": 2}\n');
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 2}\n'),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("preserves a UTF-8 BOM during an uncached write", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.json");
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 1}\n'),
+        ]),
+      );
+
+      realWorkspace(root).write!(path, '{"value": 2}\n');
+
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 2}\n'),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("rejects writes outside the workspace", () => {
+    const outer = Deno.makeTempDirSync();
+    const root = join(outer, "repo");
+    const outside = join(outer, "outside.ts");
+    try {
+      Deno.mkdirSync(root);
+      Deno.mkdirSync(join(root, ".git"));
+      Deno.writeTextFileSync(outside, "sentinel\n");
+      expect(() => realWorkspace(root).write!(outside, "replacement\n"))
+        .toThrow(
+          "Cannot write outside the workspace",
+        );
+      expect(Deno.readTextFileSync(outside)).toBe("sentinel\n");
+    } finally {
+      Deno.removeSync(outer, { recursive: true });
+    }
+  });
+
+  it("rejects writes to named and detected binary files", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const named = join(root, "asset.png");
+      Deno.writeTextFileSync(named, "printable bytes\n");
+      const detected = join(root, "asset.data");
+      Deno.writeFileSync(detected, new Uint8Array([0x41, 0x00, 0x42]));
+      const ws = realWorkspace(root);
+
+      expect(() => ws.write!(named, "replacement")).toThrow(
+        "Binary data is shown as a hex dump",
+      );
+      expect(() => ws.write!(detected, "replacement")).toThrow(
+        "Binary data is shown as a hex dump",
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("skips Git batch objects that are not blobs", () => {
+    const object = "a".repeat(40);
+    const output = new TextEncoder().encode(`${object} tree 3\nabc\n`);
+
+    expect(_internal.parseGitBatchOutput([object], output)).toEqual(new Map());
+  });
+});
+
 Deno.test("realWorkspace: resolve of a bounded directory falls through to null", () => {
   const root = Deno.makeTempDirSync();
   try {
@@ -65,7 +199,9 @@ Deno.test("realWorkspace: resolve of a bounded directory falls through to null",
   }
 });
 
-// --- findRepoRoot: no .git ancestor walks to the filesystem root ------------
+//
+// findRepoRoot: no .git ancestor walks to the filesystem root
+//
 
 Deno.test("realWorkspace: a cwd with no .git ancestor leaves only the cwd base", () => {
   // A temp dir with no `.git` anywhere up to `/` exercises the walk that ends
@@ -84,7 +220,9 @@ Deno.test("realWorkspace: a cwd with no .git ancestor leaves only the cwd base",
   }
 });
 
-// --- loadFile: cache hit short-circuits -------------------------------------
+//
+// loadFile: cache hit short-circuits
+//
 
 Deno.test("buildDiffDocument: a shared cache is reused across builds (cache hit)", () => {
   const root = Deno.makeTempDirSync();
@@ -132,7 +270,9 @@ Deno.test("buildDiffDocument: a shared cache is reused across builds (cache hit)
   }
 });
 
-// --- file header lines: an empty meta header line is skipped ----------------
+//
+// file header lines: an empty meta header line is skipped
+//
 
 Deno.test("buildDiffDocument: an empty header line is left untouched", () => {
   // A blank line sits among the file's header lines (between `index` and `---`).
@@ -162,7 +302,9 @@ index 1111111..2222222 100644
   );
 });
 
-// --- hunk body: meta line inside the hunk gets diffMeta spans ----------------
+//
+// hunk body: meta line inside the hunk gets diffMeta spans
+//
 
 Deno.test("buildDiffDocument: a `\\ No newline` line in the hunk body is diffMeta", () => {
   // The `\ No newline at end of file` marker lands inside the hunk body range,
@@ -193,7 +335,9 @@ Deno.test("buildDiffDocument: a `\\ No newline` line in the hunk body is diffMet
   );
 });
 
-// --- hunk body: an empty trailing line is left without spans -----------------
+//
+// hunk body: an empty trailing line is left without spans
+//
 
 Deno.test("buildDiffDocument: a trailing empty line outside the hunk gets no spans", () => {
   // The text ends with a newline, so the split yields a final empty entry. It
@@ -214,7 +358,9 @@ Deno.test("buildDiffDocument: a trailing empty line outside the hunk gets no spa
   );
 });
 
-// --- Markdown hunk with a workspace file: shown headings drive the tree ------
+//
+// Markdown hunk with a workspace file: shown headings drive the tree
+//
 
 Deno.test("buildDiffDocument: a Markdown hunk shows its heading as a section", () => {
   const root = Deno.makeTempDirSync();
@@ -254,7 +400,9 @@ Deno.test("buildDiffDocument: a Markdown hunk shows its heading as a section", (
   }
 });
 
-// --- Markdown hunk where no heading line is shown -> empty heading tree ------
+//
+// Markdown hunk where no heading line is shown -> empty heading tree
+//
 
 Deno.test("buildDiffDocument: a Markdown hunk showing only body has no sections", () => {
   const root = Deno.makeTempDirSync();
@@ -295,7 +443,9 @@ Deno.test("buildDiffDocument: a Markdown hunk showing only body has no sections"
   }
 });
 
-// --- Markdown hunk with NO workspace file: fragment heading tree -------------
+//
+// Markdown hunk with NO workspace file: fragment heading tree
+//
 
 Deno.test("buildDiffDocument: a Markdown hunk with no workspace file builds heading sections from the fragment", () => {
   // No workspace file: ctx.fileDoc is null, so the heading tree comes from the
@@ -325,7 +475,9 @@ Deno.test("buildDiffDocument: a Markdown hunk with no workspace file builds head
   );
 });
 
-// --- fileLineText: a hunk claiming a new-side line past EOF stays unverified -
+//
+// fileLineText: a hunk claiming a new-side line past EOF stays unverified -
+//
 
 Deno.test("buildDiffDocument: a hunk naming new-side lines past the workspace EOF cannot verify", () => {
   const root = Deno.makeTempDirSync();
@@ -364,7 +516,9 @@ Deno.test("buildDiffDocument: a hunk naming new-side lines past the workspace EO
   }
 });
 
-// --- buildMaps.fromFile: a file offset on a hidden line maps to nothing ------
+//
+// buildMaps.fromFile: a file offset on a hidden line maps to nothing
+//
 
 Deno.test("buildDiffDocument: fromFile returns null for a file line the diff hides", () => {
   const root = Deno.makeTempDirSync();
@@ -403,7 +557,9 @@ Deno.test("buildDiffDocument: fromFile returns null for a file line the diff hid
   }
 });
 
-// --- lineEndOffset: a file section whose last line is the final text line ----
+//
+// lineEndOffset: a file section whose last line is the final text line
+//
 
 Deno.test("buildDiffDocument: the file section end offset reaches the end of the text", () => {
   // The diff has no trailing newline, so the file's endLine IS the last line of
@@ -420,7 +576,9 @@ Deno.test("buildDiffDocument: the file section end offset reaches the end of the
   );
 });
 
-// --- findRepoRoot: the 64-deep walk cap -------------------------------------
+//
+// findRepoRoot: the 64-deep walk cap
+//
 
 Deno.test("realWorkspace: a path nested past the walk depth cap finds no repo root", () => {
   // findRepoRoot walks up at most 64 ancestors. A path nested deeper than that,
@@ -441,7 +599,9 @@ Deno.test("realWorkspace: a path nested past the walk depth cap finds no repo ro
   }
 });
 
-// --- crafted DiffModel: synthetic/defensive body and header branches ---------
+//
+// crafted DiffModel: synthetic/defensive body and header branches
+//
 
 /**
  * Build a one-file, one-hunk {@link DiffModel} from a caller-supplied per-line
@@ -514,7 +674,7 @@ Deno.test("buildDiffDocument: a missing model entry inside the hunk body is skip
   ];
   const model = craftedModel(lines, 0, 2, 4);
   const { doc } = buildDiffDocument(text, model, NO_WS);
-  // The hunk loop skips the entry-less body line (no diff colouring); it keeps
+  // The hunk loop skips the entry-less body line (no diff coloring); it keeps
   // only the default plain span the top-level "other" pass assigned.
   assertEquals(
     doc.lines[4].spans.map((s) => s.cls),

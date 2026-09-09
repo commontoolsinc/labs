@@ -15,6 +15,7 @@ import {
   SELF,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
   WriteAuthorizedBy,
@@ -156,7 +157,7 @@ export type MutateVerifiedIdentitiesEvent = {
 
 export type ProfileHomeOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   name: OwnerProtectedProfileWrite<string, typeof setName>;
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
   // A short, human-authored free-text description of the profile owner
@@ -244,8 +245,16 @@ type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 // missing here re-bricks old docs at every consumer seam.
 // Introduction dates: setBio/addPiece 2026-06-17, toggleEditing 2026-06-16,
 // external links #4731 and verified identities #4745 both 2026-07-15.
+//
+// The rendered screen is weakened here too, for the other reason a consumer
+// view exists. `ProfileHomeOutput` names it `VNode`, which is what a reader of
+// a profile's own result needs to reach the tree it holds. An argument
+// declaration is checked the other way round: it has to keep accepting every
+// value it accepted before, and a stored profile written under any earlier
+// vintage of this type has to pass it. `unknown` accepts them all.
 export type BackwardsCompatibleProfile = PartialBy<
-  ProfileHomeOutput,
+  & Omit<ProfileHomeOutput, typeof UI>
+  & { [UI]: unknown },
   | "setBio"
   | "addExternalLink"
   | "removeExternalLink"

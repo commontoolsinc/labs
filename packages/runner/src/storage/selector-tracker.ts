@@ -1,17 +1,36 @@
-import { LRUCache } from "@commonfabric/utils/cache";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
-import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import { isDeepFrozen } from "@commonfabric/data-model";
+import {
+  hashSchema,
+  internSchema,
+  schemaWithProperties,
+} from "@commonfabric/data-model-schema";
 import type { Result, Unit } from "@commonfabric/memory/interface";
-import { isRecord } from "@commonfabric/utils/types";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+  scopeOfScopeKey,
+} from "@commonfabric/memory/v2";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "../schema-registry.ts";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import * as Address from "./transaction/address.ts";
 
-const toKey = ({ id, scope }: BaseMemoryAddress) =>
-  `${scope ?? "space"}\0${id}`;
+// Subscription-selector keys are per scope INSTANCE (key-vocabulary.md §5,
+// the M4-coupled list; stage F): `${scope_key}\0${id}` via the shared
+// vocabulary, resolved against the tracker's bound identity. Name-keyed,
+// A's watch deduped B's at cardinality > 1, so B never subscribed. At
+// cardinality 1 the instance is derivable from the session and the
+// partition is unchanged (key-vocabulary.md §2). The scope NAME is
+// recovered from the key for the wire (watch entries name scopes;
+// instances resolve server-side per session).
 const fromKey = (key: string): BaseMemoryAddress => {
   const separator = key.indexOf("\0");
   if (separator === -1) {
@@ -20,8 +39,10 @@ const fromKey = (key: string): BaseMemoryAddress => {
       type: "application/json",
     };
   }
+  const scopeKey = key.slice(0, separator);
+  const scope = scopeOfScopeKey(scopeKey);
   return {
-    scope: key.slice(0, separator) as BaseMemoryAddress["scope"],
+    ...(scope === "space" ? {} : { scope }),
     id: key.slice(separator + 1) as BaseMemoryAddress["id"],
     type: "application/json",
   };
@@ -67,10 +88,22 @@ const selectorRefFor = (selector: SchemaPathSelector): string =>
 
 // This class helps us maintain a client model of our server side subscriptions.
 export class SelectorTracker<T = Result<Unit, Error>> {
-  private refTracker = new MapSetStringToStrings();
-  private selectors = new Map<string, SchemaPathSelector>();
-  private standardizedSelector = new Map<string, SchemaPathSelector>();
-  private selectorPromises = new Map<string, Promise<T>>();
+  #refTracker = new MapSetStringToStrings();
+  #selectors = new Map<string, SchemaPathSelector>();
+  #standardizedSelector = new Map<string, SchemaPathSelector>();
+  #selectorPromises = new Map<string, Promise<T>>();
+  readonly #identity: () => ScopeKeyIdentity;
+
+  constructor(identity: () => ScopeKeyIdentity) {
+    this.#identity = identity;
+  }
+
+  #toKey({ id, scope, scopeKey }: BaseMemoryAddress): string {
+    // An address that NAMES its instance (server-execution v2 stage A —
+    // an instance-named load) keys by it; else the bound identity
+    // resolves the scope name as before.
+    return `${scopeKey ?? resolveScopeKey(scope, this.#identity())}\0${id}`;
+  }
 
   add(
     address: BaseMemoryAddress,
@@ -81,25 +114,25 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       return;
     }
     const selectorRef = selectorRefFor(selector);
-    this.refTracker.add(toKey(address), selectorRef);
-    this.selectors.set(selectorRef, selector);
-    this.standardizedSelector.set(selectorRef, {
+    this.#refTracker.add(this.#toKey(address), selectorRef);
+    this.#selectors.set(selectorRef, selector);
+    this.#standardizedSelector.set(selectorRef, {
       path: selector.path,
       schema: SelectorTracker.getStandardSchema(selector.schema),
     });
-    const promiseKey = `${toKey(address)}?${selectorRef}`;
-    this.selectorPromises.set(promiseKey, promise);
+    const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+    this.#selectorPromises.set(promiseKey, promise);
   }
 
   has(address: BaseMemoryAddress): boolean {
-    return this.refTracker.has(toKey(address));
+    return this.#refTracker.has(this.#toKey(address));
   }
 
   hasSelector(
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): boolean {
-    const selectorRefs = this.refTracker.get(toKey(address));
+    const selectorRefs = this.#refTracker.get(this.#toKey(address));
     if (selectorRefs !== undefined) {
       const selectorRef = selectorRefFor(selector);
       return selectorRefs.has(selectorRef);
@@ -110,19 +143,18 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   getSupersetSelector(
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
-    cfc: ContextualFlowControl,
   ): [SchemaPathSelector?, Promise<T>?] {
-    const selectorRefs = this.refTracker.get(toKey(address));
+    const selectorRefs = this.#refTracker.get(this.#toKey(address));
     const noMatch: [SchemaPathSelector?, Promise<T>?] = [undefined, undefined];
     if (selectorRefs === undefined) {
       return noMatch;
     }
     const newSelectorRef = selectorRefFor(selector);
     if (selectorRefs.has(newSelectorRef)) {
-      const promiseKey = `${toKey(address)}?${newSelectorRef}`;
+      const promiseKey = `${this.#toKey(address)}?${newSelectorRef}`;
       return [
-        this.standardizedSelector.get(newSelectorRef)!,
-        this.selectorPromises.get(promiseKey)!,
+        this.#standardizedSelector.get(newSelectorRef)!,
+        this.#selectorPromises.get(promiseKey)!,
       ];
     }
     const newAddress = { ...address, path: selector.path };
@@ -130,12 +162,12 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       ? SelectorTracker.getStandardSchema(selector.schema)
       : false;
     const newSchemaHash = newSchema === false ? false : hashSchema(newSchema);
-    const newSchemaObj = isRecord(newSchema) ? newSchema : undefined;
+    const newSchemaObj = isObjectOrArray(newSchema) ? newSchema : undefined;
     // Constant across the candidate loop; hoisted so the $defs-insensitive
     // comparison below doesn't recompute it per tracked selector.
     let newSchemaRefCount: number | undefined;
     for (const selectorRef of selectorRefs) {
-      const existingSelector = this.standardizedSelector.get(selectorRef)!;
+      const existingSelector = this.#standardizedSelector.get(selectorRef)!;
       const existingAddress = { ...address, path: existingSelector.path };
       if (Address.includes(existingAddress, newAddress)) {
         const existingSchema = existingSelector.schema;
@@ -145,7 +177,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         const subPath = newAddress.path.slice(existingAddress.path.length);
         // Tracked schemas are interned (deep-frozen), so this derivation hits
         // cfc.schemaAtPath's identity-keyed memo.
-        const subSchema = cfc.schemaAtPath(
+        const subSchema = ContextualFlowControl.schemaAtPath(
           existingSchema,
           subPath,
           undefined,
@@ -162,10 +194,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           SelectorTracker.checkAnyOf(subSchema, newSchemaHash) ||
           newSchema === false
         ) {
-          const promiseKey = `${toKey(address)}?${selectorRef}`;
-          return [existingSelector, this.selectorPromises.get(promiseKey)!];
+          const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+          return [existingSelector, this.#selectorPromises.get(promiseKey)!];
         } else {
-          const sortedSubSchemaObj = isRecord(sortedSubSchema)
+          const sortedSubSchemaObj = isObjectOrArray(sortedSubSchema)
             ? sortedSubSchema
             : undefined;
           if (newSchemaObj && sortedSubSchemaObj) {
@@ -179,8 +211,11 @@ export class SelectorTracker<T = Result<Unit, Error>> {
               noDefsStandardHash(sortedSubSchemaObj) ===
                 noDefsStandardHash(newSchemaObj)
             ) {
-              const promiseKey = `${toKey(address)}?${selectorRef}`;
-              return [existingSelector, this.selectorPromises.get(promiseKey)!];
+              const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+              return [
+                existingSelector,
+                this.#selectorPromises.get(promiseKey)!,
+              ];
             }
           }
         }
@@ -190,9 +225,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   }
 
   get(address: BaseMemoryAddress): IteratorObject<SchemaPathSelector> {
-    const selectorRefs = this.refTracker.get(toKey(address)) ?? [];
+    const selectorRefs = this.#refTracker.get(this.#toKey(address)) ?? [];
     return selectorRefs.values().map((selectorRef) =>
-      this.selectors.get(selectorRef)!
+      this.#selectors.get(selectorRef)!
     );
   }
 
@@ -201,23 +236,23 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
     const selectorRef = selectorRefFor(selector);
-    const promiseKey = `${toKey(address)}?${selectorRef}`;
-    return this.selectorPromises.get(promiseKey);
+    const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+    return this.#selectorPromises.get(promiseKey);
   }
 
   delete(address: BaseMemoryAddress, selector: SchemaPathSelector): void {
     const selectorRef = selectorRefFor(selector);
-    this.refTracker.deleteValue(toKey(address), selectorRef);
-    const promiseKey = `${toKey(address)}?${selectorRef}`;
-    this.selectorPromises.delete(promiseKey);
-    if (![...this.refTracker].some(([, refs]) => refs.has(selectorRef))) {
-      this.selectors.delete(selectorRef);
-      this.standardizedSelector.delete(selectorRef);
+    this.#refTracker.deleteValue(this.#toKey(address), selectorRef);
+    const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+    this.#selectorPromises.delete(promiseKey);
+    if (![...this.#refTracker].some(([, refs]) => refs.has(selectorRef))) {
+      this.#selectors.delete(selectorRef);
+      this.#standardizedSelector.delete(selectorRef);
     }
   }
 
   getAllPromises(): Iterable<Promise<T>> {
-    return this.selectorPromises.values();
+    return this.#selectorPromises.values();
   }
 
   getAllSubscriptions(): {
@@ -228,10 +263,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       address: BaseMemoryAddress;
       selector: SchemaPathSelector;
     }[] = [];
-    for (const [factKey, selectorRefs] of this.refTracker) {
+    for (const [factKey, selectorRefs] of this.#refTracker) {
       const address = fromKey(factKey);
       for (const selectorRef of selectorRefs) {
-        const selector = this.selectors.get(selectorRef);
+        const selector = this.#selectors.get(selectorRef);
         if (selector) {
           subscriptions.push({ address, selector });
         }
@@ -244,7 +279,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     schema: JSONSchema,
     schemaHash: string | false,
   ): boolean {
-    return isRecord(schema) && Array.isArray(schema.anyOf) &&
+    return isObjectOrArray(schema) && Array.isArray(schema.anyOf) &&
       (schema.anyOf.some((item) =>
         SelectorTracker.#anyOfItemHashes(schema, item).includes(
           schemaHash as string,
@@ -264,6 +299,15 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     Map<JSONSchema, readonly string[]>
   >();
 
+  static {
+    // Entries can embed $ref-resolved forms, so a registry clear (last
+    // lease out) swaps the cache — a resolution success must not outlive
+    // its lease epoch.
+    onSchemaRegistryClear(() => {
+      SelectorTracker.#anyOfItemHashesCache = new WeakMap();
+    });
+  }
+
   static #anyOfItemHashes(
     schema: JSONSchema & object,
     item: JSONSchema,
@@ -278,29 +322,36 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       }
     }
     const hashes: string[] = [];
+    const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
-    const itemOwnsDefs = isRecord(current) && current.$defs !== undefined;
+    const itemOwnsDefs = isObjectNotArray(current) &&
+      current.$defs !== undefined;
     if (!itemOwnsDefs && schema.$defs !== undefined) {
       current = SelectorTracker.getStandardSchema(
         schemaWithProperties(current, { $defs: schema.$defs }),
       );
       hashes.push(hashSchema(current));
     }
-    if (isRecord(current) && current.$ref !== undefined) {
-      const refFullSchema = current.$defs !== undefined ? current : schema;
-      hashes.push(
-        hashSchema(
-          SelectorTracker.getStandardSchema(
-            ContextualFlowControl.resolveSchemaRefs(
-              current,
-              refFullSchema,
-            ) as JSONSchema,
-          ),
-        ),
+    if (isObjectOrArray(current) && current.$ref !== undefined) {
+      // An unresolvable ref contributes no resolved-form hash. For an
+      // external ref that is a recoverable miss — the schema document can
+      // arrive later — which is why the populate below is gated on the
+      // miss counter.
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        current,
+        schema,
       );
+      if (resolved !== undefined) {
+        hashes.push(
+          hashSchema(SelectorTracker.getStandardSchema(resolved)),
+        );
+      }
     }
-    if (cacheable) {
+    // Populate only when no `cid:` resolution missed while computing: a
+    // hash list computed over a hole must not outlive the document's
+    // arrival. The miss counter is exact and walk-free.
+    if (cacheable && externalResolutionMissCount() === missesBefore) {
       if (byItem === undefined) {
         byItem = new Map();
         SelectorTracker.#anyOfItemHashesCache.set(schema, byItem);
@@ -333,10 +384,17 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       }
       return byContent;
     }
+    // TODO(danfuzz): this rebuild filters by key name only, so it also
+    // rebuilds `default`/`examples` VALUES: `isObjectOrArray` admits a
+    // `FabricSpecialObject` and `Object.entries` sees none of its state, so
+    // a fabric-valued default standardizes to `{}` — losing the value in the
+    // interned schema and making two schemas that differ only in such a
+    // default intern identically. Value-bearing keys want to pass through by
+    // reference.
     const traverse = (
       value: Readonly<any>,
     ): FabricValue => {
-      if (isRecord(value)) {
+      if (isObjectOrArray(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
         } else {

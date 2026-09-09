@@ -1,11 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { createDefaultRegistry } from "@/codec-json/createDefaultRegistry.ts";
-import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
+import { ProblematicValue, UnknownValue } from "@/codec-common/index.ts";
+import {
+  CODEC,
+  CODEC_TYPE_TAGS,
+  NULL_LIVE_ENVIRONMENT,
+} from "@/codec-interface/index.ts";
+import {
+  createDefaultJsonRegistry,
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@/codecs.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import {
   DataUnavailable,
@@ -19,8 +25,6 @@ import {
   DataUnavailable as ForeignDataUnavailable,
 } from "@/fabric-instances/DataUnavailable.ts?foreign-copy";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricInstance } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
@@ -182,12 +186,12 @@ describe("DataUnavailable", () => {
   });
 
   it("recognizes a marker whose FabricInstance base came from another bundle", () => {
-    const foreignPending = new DataUnavailable({ reason: "pending" });
     class ForeignDataUnavailable {}
-    Object.setPrototypeOf(
-      foreignPending,
-      ForeignDataUnavailable.prototype,
-    );
+    const foreignPending = Reflect.construct(
+      DataUnavailable,
+      [{ reason: "pending" }],
+      ForeignDataUnavailable,
+    ) as DataUnavailable;
     Object.freeze(foreignPending);
 
     expect(foreignPending instanceof FabricInstance).toBe(false);
@@ -284,25 +288,32 @@ describe("DataUnavailable", () => {
     it("uses DataUnavailable@1 and is in the default registry", () => {
       expect(codec.recognizedTypeTag).toBe(CODEC_TYPE_TAGS.DataUnavailable);
       expect(
-        createDefaultRegistry().codecFromTag(
+        createDefaultJsonRegistry().codecFromTag(
           CODEC_TYPE_TAGS.DataUnavailable,
         ),
       ).toBe(codec);
     });
 
     it("encodes the exact reason-discriminated state", () => {
-      expect(codec.encode(DataUnavailable.pending())).toEqual({
-        reason: "pending",
-      });
+      expect(codec.encode(DataUnavailable.pending(), NULL_LIVE_ENVIRONMENT))
+        .toEqual({
+          reason: "pending",
+        });
       const error = DataUnavailable.error(new Error("encoded"));
-      expect(codec.encode(error)).toEqual({
+      expect(codec.encode(error, NULL_LIVE_ENVIRONMENT)).toEqual({
         reason: "error",
         error: error.error,
       });
-      expect(codec.encode(DataUnavailable.syncing())).toEqual({
-        reason: "syncing",
-      });
-      expect(codec.encode(DataUnavailable.schemaMismatch())).toEqual({
+      expect(codec.encode(DataUnavailable.syncing(), NULL_LIVE_ENVIRONMENT))
+        .toEqual({
+          reason: "syncing",
+        });
+      expect(
+        codec.encode(
+          DataUnavailable.schemaMismatch(),
+          NULL_LIVE_ENVIRONMENT,
+        ),
+      ).toEqual({
         reason: "schema-mismatch",
       });
     });
@@ -316,7 +327,7 @@ describe("DataUnavailable", () => {
       ];
 
       for (const input of inputs) {
-        const output = valueFromJson(jsonFromValue(input));
+        const output = fabricFromJsonValue(jsonFromFabricValue(input));
         expect(output).toBeInstanceOf(DataUnavailable);
         expect((output as DataUnavailable).reason).toBe(input.reason);
         expect(valueEqual(output, input)).toBe(true);
@@ -328,8 +339,8 @@ describe("DataUnavailable", () => {
         cause: { minimum: 1 },
       });
       Object.assign(native, { code: "E_RANGE" });
-      const output = valueFromJson(
-        jsonFromValue(DataUnavailable.error(native)),
+      const output = fabricFromJsonValue(
+        jsonFromFabricValue(DataUnavailable.error(native)),
       ) as DataUnavailable;
 
       expect(output.error).toBeInstanceOf(FabricError);
@@ -364,14 +375,14 @@ describe("DataUnavailable", () => {
         const decoded = codec.decode(
           CODEC_TYPE_TAGS.DataUnavailable,
           state as never,
-          EMPTY_RECONSTRUCTION_CONTEXT,
+          NULL_LIVE_ENVIRONMENT,
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);
       }
     });
 
     it("uses the normal unknown-value path for a future wire version", () => {
-      const decoded = valueFromJson(
+      const decoded = fabricFromJsonValue(
         'fvj1:{"/DataUnavailable@2":{"reason":"pending"}}',
       );
 

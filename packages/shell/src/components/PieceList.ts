@@ -85,7 +85,7 @@ export class XPieceList extends LitElement {
   @property({ attribute: false })
   accessor activePieceId: string | undefined = undefined;
 
-  private _handleClick(e: Event) {
+  #handleClick(e: Event) {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
       "[data-piece-id]",
     );
@@ -120,7 +120,7 @@ export class XPieceList extends LitElement {
                 ? "active"
                 : ""}"
               data-piece-id="${piece.id}"
-              @click="${this._handleClick}"
+              @click="${this.#handleClick}"
             >
               ${piece.name}
             </button>

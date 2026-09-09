@@ -4,6 +4,7 @@
  * transparent to the reported results (it is neither an action nor an
  * assertion). Mirrors test-runner-console-capture.test.ts.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
@@ -40,8 +41,11 @@ describe(
         { root: FIXTURES },
       );
       expect(results[0].error ?? "").toContain(
-        "must have an 'action', 'assertion', 'render', or 'settle'",
+        "must have an 'action', 'assertion', 'render', 'settle', 'label', " +
+          "or 'await'",
       );
+      // The step's own key, not the empty list the peek schema leaves behind.
+      expect(results[0].error ?? "").toContain('Got: ["notAValidStep"]');
     });
   },
 );

@@ -1,5 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
   type CfcConfClause,

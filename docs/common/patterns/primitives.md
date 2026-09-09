@@ -7,12 +7,13 @@ rendering to the host. They live under `packages/patterns/primitives/` and
 form the `primitive` tier in
 [`packages/patterns/index.md`](../../../packages/patterns/index.md).
 
-**Status: the tier currently has no occupants.** The first candidate
-(`EditableList`) was built, proven against real callers, and retired — see
-[Lessons](#lessons-from-the-first-primitive) below, which is required reading
-before building the next one. This document records the composition contract
-that work validated (the contract holds; the candidate didn't) plus the entry
-bar a new primitive must clear.
+**Status: eight occupants, all adopted by the pattern index** — see
+[`packages/patterns/index.md`](../../../packages/patterns/index.md). An earlier
+candidate (`EditableList`) was built, proven against real callers, and retired —
+see [Lessons](#lessons-from-the-first-primitive) below, which is required
+reading before building the next one. This document records the composition
+contract that work validated (the contract holds; the candidate didn't) plus the
+entry bar a new primitive must clear.
 
 ## Entry bar: adopter-first
 
@@ -21,6 +22,10 @@ Do not build a primitive from a duplication census alone. Before any code:
 1. **Name a real adopter** — an existing, non-fixture pattern whose concrete
    code shrinks or simplifies, agreed in advance. "Future patterns will want
    this" is the orphaned-`suggestable/` failure mode; it doesn't count.
+   A published pattern index counts as an adopter only on the same evidence: a
+   shape sessions have actually built for themselves, read off the corpus, not
+   a shape one might plausibly want. The primitives here were each chosen
+   against an entry already in the index that rebuilt it from scratch.
 2. **Two callers from different families** before the primitive is considered
    proven (one caller just reproduces that caller's needs with the serial
    numbers filed off).
@@ -39,6 +44,29 @@ In priority order:
 2. **An optional default `[UI]`.** A static `VNode` giving a caller who just
    wants the thing a working experience for free. A caller who wants custom
    rendering simply does not render it.
+
+### A primitive over an injected handle
+
+A primitive whose input is a capability handle rather than a caller's cell —
+`SqliteDb` is the one in use — exposes the same surface minus the mutation
+half: it reads through the handle, and returns typed rows, counts, the pending
+flag and the failure text as cells. What it owns is the query, and the query is
+the whole reason it exists. A store's column semantics are not in the handle a
+session is given: `describe_handle` discloses the tables and columns and says
+nothing about which value means "deleted", so a session writing its own query
+guesses, and a wrong guess returns zero rows over a full table rather than an
+error. The primitive is where that knowledge is written down once, in code that
+is tested against both spellings.
+
+Such a primitive is left out of the `demo/` host, since a host that embeds one
+has to hand it a database. Its pattern test builds one with `sqliteDatabase()`
+and seeds it through a handler. Two things about that test are worth knowing
+before writing another. A query the primitive declares no `reactOn` for does
+not re-run after the seed, so the test drives one of the primitive's own
+reactive inputs — the month — and that is what reads the seeded rows. And
+reading `[UI]` stores links to the session-scoped query results in the vnode
+tree, which the runtime warns about; the test carries
+`allowConsoleWarnings: true` and says why.
 
 That's the whole surface. In particular, do **not** add string-addressed
 ("ByText"/"ByTitle") mutation layers "for agents": LLM tool-calls round-trip
@@ -96,7 +124,9 @@ For primitives that own a list/set of items, core mutations address an item by
 Two things are explicitly **not** the identity model:
 
 - **Array indices.** Index-based selection/mutation breaks under reordering and
-  concurrent edits.
+  concurrent edits. Note also that a reordering has to be written into the cell
+  the default `[UI]` maps, not derived beside it, or the rows never move — see
+  [mapped-list-order-from-computed](../../development/debugging/gotchas/mapped-list-order-from-computed.md).
 - **User-land id fields.** NEVER mint `id` properties (UUIDs, counters,
   timestamps) on items. The reactive fabric is an object graph, not a keyed
   database; synthetic ids fight the reactivity system (in `.map()` callbacks an

@@ -17,11 +17,9 @@ import {
   type RuntimeTelemetryMarkerResult,
 } from "../src/telemetry.ts";
 
-// ---------------------------------------------------------------------------
 // Hand-rolled recording fakes for the OTel API interfaces. The bridge only
 // depends on `@opentelemetry/api` (interfaces), so tests don't need the SDK:
 // we record every instrument call and assert on the translation directly.
-// ---------------------------------------------------------------------------
 
 interface InstrumentCall {
   instrument: string;
@@ -234,28 +232,6 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     expect(spans[0].setAttributes["error"]).toBe(true);
     const ops = meterCalls.filter((c) => c.instrument === "ct.storage.ops");
     expect(ops[0].attributes?.["ct.storage.error"]).toBe(true);
-  });
-
-  it("tracks subscriptions up and down and connection updates", () => {
-    bridge.handleMarker(marker({ type: "storage.subscription.add" }));
-    bridge.handleMarker(marker({ type: "storage.subscription.remove" }));
-    bridge.handleMarker(marker({
-      type: "storage.connection.update",
-      status: "connected",
-      attempt: 2,
-    }));
-    expect(meterCalls).toEqual([
-      { instrument: "ct.storage.subscriptions", value: 1, attributes: {} },
-      { instrument: "ct.storage.subscriptions", value: -1, attributes: {} },
-      {
-        instrument: "ct.storage.connection.updates",
-        value: 1,
-        attributes: {
-          "ct.connection.status": "connected",
-          "ct.connection.attempt": 2,
-        },
-      },
-    ]);
   });
 
   it("records non-settling windows as busy ratio + counter", () => {

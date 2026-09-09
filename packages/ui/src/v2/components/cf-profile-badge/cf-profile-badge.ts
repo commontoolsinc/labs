@@ -1,19 +1,23 @@
+import { consume } from "@lit/context";
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-avatar/index.ts";
-import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
+
+import type { DID } from "@commonfabric/identity";
+import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
   type CfcLabelView,
   NAME,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
-import type { DID } from "@commonfabric/identity";
-import { navigate, openInNewTab } from "@commonfabric/shell/shared";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+
 import { ownerPrincipalFromLabel } from "../../core/cfc-label.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
 import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
 import {
   registerSeal,
@@ -369,7 +373,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         }
       }
 
-      /* ---- Variants (CT-1761) -------------------------------------------- */
+      /*
+      ** Variants
+      */
 
       /* chip: compact name-first pill. No avatar — a small DID-hued "seal dot"
         carries the identity treatment, so an inline name still reads as a
@@ -469,16 +475,41 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @property({ type: Boolean, reflect: true, attribute: "nonavigate" })
   accessor noNavigate = false;
 
+  /**
+   * Name to present when no profile resolves.
+   *
+   * For a row that RECORDS who someone was without holding their profile —
+   * a roster entry written before the space had profiles, say. Such a row
+   * still knows the name it stored, and showing it beats telling the reader
+   * the person is unknown. It is a fallback only: a resolved profile always
+   * wins, so this can never mask or contradict a real identity, and it earns
+   * no part of the verification treatment.
+   */
+  @property({ type: String, attribute: "fallback-name" })
+  accessor fallbackName: string | undefined = undefined;
+
   @state()
   private accessor _name: string | undefined = undefined;
+
+  /**
+   * Whether a profile VALUE resolved, however little it carried.
+   *
+   * Separate from `_name` because a resolved profile may simply have no name,
+   * and that case must not read as "no profile": verification is derived from
+   * the resolved cell, so a caller-supplied fallback rendered there would sit
+   * beside a seal it did not earn.
+   */
+  @state()
+  private accessor _resolved = false;
 
   @state()
   private accessor _avatar: string | undefined = undefined;
 
-  // CT-1648: extra details surfaced in the hover/focus tooltip.
+  /** The bio, an extra detail surfaced in the hover/focus tooltip. */
   @state()
   private accessor _bio: string | undefined = undefined;
 
+  /** The pinned count, an extra detail surfaced in the hover/focus tooltip. */
   @state()
   private accessor _pinnedCount = 0;
 
@@ -489,23 +520,33 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @state()
   private accessor _seal: IdentitySeal | undefined = undefined;
 
-  // CT-1750: navigation. `_resolvedCell` is the resolved profile cell;
-  // `_navigable` is true only when it's a root cell (a real profile piece). A
-  // badge bound to a real profile (rosters/lists) navigates to that profile's
-  // page on click; one bound to a derived/sub-path cell (e.g. a self-view
-  // `{name, avatar}` cell on the profile page itself) is non-navigable and the
-  // click is a no-op.
+  /** The resolved profile cell. */
   private _resolvedCell: CellHandle | undefined = undefined;
+
+  /**
+   * Whether a click navigates, which is so only when `noNavigate` is unset and
+   * the resolved cell is a root cell (a real profile piece). A badge bound to
+   * a real profile (rosters/lists) navigates to that profile's page on click;
+   * one bound to a derived/sub-path cell (e.g. a self-view `{name, avatar}`
+   * cell on the profile page itself) is non-navigable and the click is a
+   * no-op.
+   */
   @state()
   private accessor _navigable = false;
 
   private _unsubscribe?: () => void;
   private _resolveGeneration = 0;
 
-  // Liveness: whether this seal is currently registered with the shared cursor
-  // controller, and the last sheen alpha written (so far-from-cursor frames can
-  // skip redundant style writes).
+  /**
+   * Whether this seal is currently registered with the shared cursor
+   * controller.
+   */
   private _livenessRegistered = false;
+
+  /**
+   * The last sheen alpha written, so far-from-cursor frames can skip redundant
+   * style writes.
+   */
   private _lastSheenA = -1;
 
   override connectedCallback(): void {
@@ -533,6 +574,21 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     }
   }
 
+  /**
+   * Whether this badge is presenting a VERIFIED profile.
+   *
+   * The single answer the seal nodes, `data-state` and the cursor-sheen
+   * liveness all take, because they are one claim wearing three faces and a
+   * guard on only the nodes leaves the other two asserting it. Verification
+   * is derived from the resolved cell's label, which can arrive while no
+   * VALUE did — a badge showing a fallback name, or nothing, must not be in
+   * a verified state on the strength of a label alone.
+   */
+  private get _verified(): boolean {
+    return this._resolved && this._state === "verified" &&
+      this._seal !== undefined;
+  }
+
   protected override updated(changed: PropertyValues): void {
     super.updated(changed);
     // Reflect navigability to the host so `:host([data-navigable])` can draw the
@@ -541,8 +597,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // Register for cursor sheen only while actually verified + connected. The
     // shared controller manages reduced-motion (it won't run the loop while the
     // user prefers reduced motion, and tears it down live if they enable it).
-    const verified = this._state === "verified" && this._seal !== undefined;
-    this._setLiveness(verified && this.isConnected);
+    this._setLiveness(this._verified && this.isConnected);
   }
 
   private _setLiveness(on: boolean): void {
@@ -622,6 +677,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // re-resolve + attestation gap. `_refreshVerification` re-derives it below.
     this._state = "presented";
     this._seal = undefined;
+    this._resolved = false;
     // Drop navigation state until the (new) cell resolves — a stale link must
     // not survive a re-bind.
     this._resolvedCell = undefined;
@@ -733,6 +789,11 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   private _applyValue(val: unknown): void {
     const { name, avatar } = profileDisplayFromValue(val);
+    // A VALUE arrived, not merely an attempt that finished. The no-cell and
+    // failed-resolve paths both land here with `undefined`, and treating
+    // those as resolved would suppress the fallback in exactly the case it
+    // exists for.
+    this._resolved = val !== undefined;
     const { bio, pinnedCount } = profileTooltipFromValue(val);
     this._name = name;
     this._avatar = avatar;
@@ -773,7 +834,17 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   }
 
   override render() {
-    const verified = this._state === "verified" && this._seal !== undefined;
+    // The fallback stands in for a row that holds NO profile. Once a value
+    // resolves the profile is authoritative, so a nameless one reads as
+    // unknown rather than borrowing a caller-supplied string — and a
+    // fallback never renders beside the seal, which is earned by a resolved
+    // cell's label and cannot be lent to text a caller passed in.
+    const usingFallback = this._name === undefined && !this._resolved &&
+      this.fallbackName !== undefined;
+    const presentedName = this._name ??
+      (usingFallback ? this.fallbackName : undefined);
+    const displayName = presentedName ?? "Unknown profile";
+    const verified = this._verified;
     // The aura ring layer carries the DID-derived conic gradient plus a soft glow
     // in the identity's hue, so the fingerprint reads at badge scale.
     const hue = this._seal?.hue ?? 0;
@@ -798,7 +869,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     const variant = this.variant;
     const showAvatar = variant !== "chip";
     const showName = variant !== "circle";
-    const displayName = this._name ?? "Unknown profile";
 
     // CT-1648: hover/focus tooltip surfacing the profile's configured details
     // (bio + pinned-piece count). Always shown for `circle` (whose name is
@@ -816,7 +886,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         part="root"
         data-cf-profile-badge
         data-variant="${variant}"
-        data-state="${this._state}"
+        data-state="${verified ? "verified" : "presented"}"
         ?data-navigable="${this._navigable}"
         ?data-has-tooltip="${hasTooltip}"
         role="${this._navigable
@@ -838,7 +908,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
                 part="avatar"
                 exportparts="avatar"
                 .src="${this._avatar}"
-                .name="${this._name}"
+                .name="${presentedName}"
                 size="${this.size}"
               ></cf-avatar>
             `
@@ -858,7 +928,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           : null} ${hasTooltip
           ? html`
             <span class="tooltip" part="tooltip" role="tooltip">
-              <span class="tooltip-name">${this._name ?? "Profile"}</span>
+              <span class="tooltip-name">${presentedName ?? "Profile"}</span>
               ${this._bio !== undefined
                 ? html`
                   <span class="tooltip-bio">${this._bio}</span>

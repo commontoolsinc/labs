@@ -1,63 +1,56 @@
-import { createSession, isDID, Session } from "@commonfabric/identity";
-import { loadIdentity } from "./identity.ts";
-import {
-  ACLManager,
-  experimentalOptionsFromEnv,
-  Runtime,
-  runtimePresets,
-} from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { ACLManager } from "@commonfabric/runner";
 import {
   ACL,
   ACLUser,
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
+import {
+  loadPieces,
+  type PieceResolutionDeps,
+  type SpaceConfig,
+} from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { noteWroteTo } from "./write-receipt.ts";
 
-export interface SpaceConfig {
-  apiUrl: URL;
-  identityPath: string;
-  space: string;
-}
+/**
+ * The connection an ACL operation runs over. It carries the loader alone: an
+ * ACL document is addressed by the space DID, so nothing here resolves a
+ * piece address and a `resolvePieceAddress` accepted alongside would be a
+ * promise no function keeps.
+ */
+export type AclConnectionDeps = Pick<PieceResolutionDeps, "loadPieces">;
 
-// Create an identity and session from configuration.
-async function loadSession(config: SpaceConfig): Promise<Session> {
-  const identity = await loadIdentity(config.identityPath);
-  return isDID(config.space)
-    ? createSession({
-      identity,
-      spaceDid: config.space,
-    })
-    : createSession({
-      identity,
-      spaceName: config.space,
-    });
-}
-
-// Creates a Runtime instance for ACL operations
-export async function createRuntime(
+// Open the space and hand an ACLManager to `run`. The ACL document is
+// addressed by the space DID and read through the ACLManager, so the space
+// cell's contents are never needed here and their sync is deferred. That is
+// now `loadPieces`'s default too; it stays explicit here because the check
+// below depends on it, not on whatever the default happens to be.
+async function withAcl<T>(
   config: SpaceConfig,
-  session: Session,
-): Promise<Runtime> {
-  // Shared first-party posture for client runtimes against a deployed API
-  // (CT-1814).
-  const runtime = new Runtime(runtimePresets.remoteClient({
-    apiUrl: config.apiUrl,
-    storageManager: StorageManager.open({
-      as: session.as,
-      memoryHost: new URL(config.apiUrl),
-      spaceIdentity: session.spaceIdentity,
-    }),
-    experimental: experimentalOptionsFromEnv(Deno.env.get),
-  }));
-
-  if (!(await runtime.healthCheck())) {
-    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
-  }
-
-  await runtime.storageManager.synced();
-  return runtime;
+  run: (acl: ACLManager) => Promise<T>,
+  options: { writes?: boolean } = {},
+  deps: AclConnectionDeps = {},
+): Promise<T> {
+  const pieces = await (deps.loadPieces ?? loadPieces)({
+    ...config,
+    deferSpaceCellSync: true,
+  });
+  const runtime = pieces.runtime;
+  // A connection opened here is closed here. One the caller supplied outlives
+  // the call, and closing its runtime would take down a socket still in use.
+  await using _opened = deps.loadPieces ? undefined : runtime;
+  const space = pieces.getSpace();
+  const result = await run(new ACLManager(runtime, space));
+  // Before the authorization check below, which throws on a denial recorded
+  // during the access — after a write that already landed. A receipt owed for
+  // a completed write is not the check's to withhold.
+  if (options.writes === true) noteWroteTo(config.space);
+  // Checked AFTER the ACL access, which is what pulls the space and records any
+  // denial. A denied write already rejects above; this also fails a read that
+  // otherwise collapses to a silent "no ACL".
+  throwOnSpaceAuthorizationError(runtime.storageManager, space);
+  return result;
 }
 
 // Add or update an ACL entry for a DID
@@ -65,41 +58,30 @@ export async function setAclEntry(
   config: SpaceConfig,
   user: string,
   capability: Capability,
+  deps: AclConnectionDeps = {},
 ): Promise<void> {
   const userDid = userToACLUser(user);
-  const session = await loadSession(config);
-  await using runtime = await createRuntime(config, session);
-  const aclManager = new ACLManager(runtime, session.space);
-  await aclManager.set(userDid, capability);
-  // Checked AFTER the ACL access, which is what pulls the space and records any
-  // denial. A denied write already rejects above; this also fails a read that
-  // otherwise collapses to a silent "no ACL".
-  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
+  await withAcl(config, (acl) => acl.set(userDid, capability), {
+    writes: true,
+  }, deps);
 }
 
 // Remove an ACL entry for a DID
 export async function removeAclEntry(
   config: SpaceConfig,
   user: string,
+  deps: AclConnectionDeps = {},
 ): Promise<void> {
   const userDid = userToACLUser(user);
-  const session = await loadSession(config);
-  await using runtime = await createRuntime(config, session);
-  const aclManager = new ACLManager(runtime, session.space);
-  await aclManager.remove(userDid);
-  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
+  await withAcl(config, (acl) => acl.remove(userDid), { writes: true }, deps);
 }
 
 // Get the current ACL for a space
 export async function getAcl(
   config: SpaceConfig,
+  deps: AclConnectionDeps = {},
 ): Promise<ACL | null> {
-  const session = await loadSession(config);
-  await using runtime = await createRuntime(config, session);
-  const aclManager = new ACLManager(runtime, session.space);
-  const acl = await aclManager.get();
-  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
-  return acl;
+  return await withAcl(config, (acl) => acl.get(), {}, deps);
 }
 
 // Use "ANYONE" on the command line to map to "*"

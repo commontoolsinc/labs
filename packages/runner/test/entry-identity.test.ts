@@ -178,6 +178,108 @@ describe("computeEntryIdentity (light, drift-free)", () => {
       ])
     ).toThrow(/produced no identity/);
   });
+  it("matches the engine for an entry importing an authored declaration file", async () => {
+    const program: RuntimeProgram = {
+      main: "/entry.tsx",
+      files: [
+        {
+          name: "/entry.tsx",
+          contents: 'import type { N } from "./types.d.ts";\n' +
+            "export default (): N => 1;\n",
+        },
+        { name: "/types.d.ts", contents: "export type N = number;\n" },
+      ],
+    };
+    const { entryIdentity } = await engine.compileToRecordGraph(program);
+    expect(computeEntryIdentity(program.main, program.files)).toBe(
+      entryIdentity,
+    );
+  });
+
+  it("gives an entry a new identity when only its authored declaration file changed", async () => {
+    // An authored declaration file is a module like any other: a type-only
+    // import edge resolves to it, so editing one moves the importer's identity
+    // and the entry's. Without this a declaration-only change would reuse the
+    // compiled bytes built against the old types.
+    const entry = 'import type { N } from "./types.d.ts";\n' +
+      "export default (): N => 1;\n";
+    const program = (declarations: string): RuntimeProgram => ({
+      main: "/entry.tsx",
+      files: [
+        { name: "/entry.tsx", contents: entry },
+        { name: "/types.d.ts", contents: declarations },
+      ],
+    });
+    const before = program("export type N = number;\n");
+    const after = program("export type N = 1 | 2 | 3;\n");
+
+    const beforeIdentity = computeEntryIdentity(before.main, before.files);
+    const afterIdentity = computeEntryIdentity(after.main, after.files);
+    expect(afterIdentity).not.toBe(beforeIdentity);
+
+    // The engine agrees with the light path on both sides, so the light path
+    // does not merely differ — it differs the same way.
+    expect((await engine.compileToRecordGraph(before)).entryIdentity).toBe(
+      beforeIdentity,
+    );
+    expect((await engine.compileToRecordGraph(after)).entryIdentity).toBe(
+      afterIdentity,
+    );
+  });
+
+  it("ignores an ambient declaration file, which is not authored source", () => {
+    const files = (declarations: string) => [
+      { name: "/entry.tsx", contents: "export default () => 1;\n" },
+      { name: "ambient.d.ts", contents: declarations },
+    ];
+    expect(computeEntryIdentity("/entry.tsx", files("declare const x: 1;\n")))
+      .toBe(
+        computeEntryIdentity("/entry.tsx", files("declare const x: 2;\n")),
+      );
+  });
+
+  it("throws when the entry is named as a data file", () => {
+    const files = [{ name: "/entry.ts", contents: "export default 1;\n" }];
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { dataFiles: ["/entry.ts"] })
+    ).toThrow("cannot be a data file");
+  });
+
+  it("throws when a package path is not among the files", () => {
+    const files = [{ name: "/entry.ts", contents: "export default 1;\n" }];
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { dataFiles: ["/data.json"] })
+    ).toThrow("/data.json");
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { sourceRoots: ["/other.ts"] })
+    ).toThrow("/other.ts");
+  });
+
+  it("returns a different identity when a declaration-named file is data", () => {
+    // The contents would dangle if scanned as an import, and the name would
+    // vanish under the `.d.ts` filter if data were partitioned after it.
+    const files = [
+      { name: "/entry.ts", contents: "export default 1;\n" },
+      { name: "/payload.d.ts", contents: 'import "./missing.ts";\n' },
+    ];
+    const identity = computeEntryIdentity("/entry.ts", files, {
+      dataFiles: ["/payload.d.ts"],
+    });
+    expect(identity).not.toBe(computeEntryIdentity("/entry.ts", files));
+  });
+
+  it("throws for a source root whose closure is incomplete", () => {
+    const files = [
+      { name: "/entry.ts", contents: "export default 1;\n" },
+      {
+        name: "/root.ts",
+        contents: 'import "./gone.ts";\nexport default 2;\n',
+      },
+    ];
+    expect(() =>
+      computeEntryIdentity("/entry.ts", files, { sourceRoots: ["/root.ts"] })
+    ).toThrow("incomplete closure");
+  });
 });
 
 describe("resolveEntryIdentity (closure walk via readFile)", () => {
@@ -214,6 +316,29 @@ describe("resolveEntryIdentity (closure walk via readFile)", () => {
     expect(new Set(reads)).toEqual(
       new Set(["/system/app.tsx", "/lib/shared.ts"]),
     );
+  });
+
+  it("reads a data file without scanning it for imports", async () => {
+    const reads: string[] = [];
+    const contents = new Map([
+      ["/entry.ts", "export default 1;\n"],
+      ["/notes.json", 'import "./missing.ts";\n'],
+    ]);
+    const readFile = (name: string): Promise<string> => {
+      reads.push(name);
+      const found = contents.get(name);
+      if (found === undefined) {
+        return Promise.reject(new Error(`no such file: ${name}`));
+      }
+      return Promise.resolve(found);
+    };
+
+    const identity = await resolveEntryIdentity("/entry.ts", readFile, {
+      dataFiles: ["/notes.json"],
+    });
+    expect(identity.length).toBe(43);
+    // The import-like text inside the data file was never followed.
+    expect(new Set(reads)).toEqual(new Set(["/entry.ts", "/notes.json"]));
   });
 
   it("walks a diamond closure once and skips bare imports", async () => {

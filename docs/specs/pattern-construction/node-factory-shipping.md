@@ -28,7 +28,7 @@ snapshots or the reactive-interpreter migration.
 
 Every builder factory gets the same internal factory protocol, and every
 factory with a cold-resolvable content-addressed artifact ref becomes a durable
-first-class Fabric value:
+first-class `FabricValue`:
 
 - `PatternFactory` returned by `pattern`;
 - `ModuleFactory` returned by `lift`, `byRef`, and other node-factory builders;
@@ -39,7 +39,7 @@ The callable function itself carries an internal Fabric-factory brand and
 codec-state accessor. It serializes as `Factory@1` and decodes to a callable,
 reference-backed factory shell. There is no `FabricPatternFactory` or
 `NodeFactory` wrapper object. Arbitrary JavaScript functions remain invalid
-Fabric values.
+`FabricValue`s.
 
 Patterns additionally gain lexical closure conversion. A nested authored
 `pattern(...)` is hoisted to module scope. Its callback receives public input as
@@ -79,17 +79,29 @@ protocol. An inline pattern closes over the values to bind, and the resulting
 All three factory kinds are already callable function objects with useful
 descriptor state:
 
-- `PatternFactory.toJSON()` emits `$patternRef`, `argumentSchema`, and
+- `PatternFactory.toEncodableForm()` emits `$patternRef`, `argumentSchema`, and
   `resultSchema` at the storage boundary.
-- `ModuleFactory.toJSON()` and `HandlerFactory.toJSON()` emit module
-  descriptors, using `$implRef` for addressable JavaScript implementations.
+- `ModuleFactory.toEncodableForm()` and `HandlerFactory.toEncodableForm()` emit
+  module descriptors, using `$implRef` for addressable JavaScript
+  implementations.
 - `asScope()` and `PatternFactory.inSpace()` return derived callable factories.
 - verified exports and `__cfReg` values already enter the generic artifact
   index, regardless of factory kind.
 
-The existing `toJSON()` path is a one-way conversion. Native conversion calls
-`toJSON()` on a function and replaces the function with inert plain data.
-Generic reads do not recreate a callable factory. Pattern-valued list builtins
+One factory kind carries that state without declaring it. `lift`'s declared
+return type is its call signature alone — a bare function type, which is what
+lets a generic implementation carry its caller's element type through the
+builder (see `LiftFunction` in `packages/api/index.ts`). The object it returns
+is an ordinary `ModuleFactory` with the whole protocol on it, so everything this
+document specifies about module factories holds for a lift's; only TypeScript
+declines to name it. Code that needs the record rather than the call reaches it
+through `isModule()`.
+
+The existing `toEncodableForm()` path is a one-way conversion. The runtime's
+artifact walk (`packages/runner/src/encodable-form.ts`) replaces each factory
+with inert plain data before the value reaches the data model, which has no
+route to a function of its own. Generic reads do not recreate a callable
+factory. Pattern-valued list builtins
 and LLM tools compensate with bespoke `$patternRef` handling.
 
 Serialization alone also does not make a symbolic factory callable. Pattern
@@ -165,7 +177,7 @@ The same applies to modules and handlers:
 interface FactoryInputs {
   value: string;
   transform: ModuleFactory<{ value: string }, { length: number }>;
-  select: HandlerFactory<{ source: string }, { id: string }>;
+  select: HandlerFactory<{ id: string }, { source: string }>;
 }
 
 const useFactories = pattern<FactoryInputs>(({
@@ -215,7 +227,7 @@ The inner pattern's public input remains `{ foo, bar }`. `param2` and
 `otherPattern` are closure params; they do not appear in, merge with, or
 override the public input.
 
-Captures may include reactive values, cells, plain Fabric values, and any of
+Captures may include reactive values, cells, plain `FabricValue`s, and any of
 the three factory kinds. An arbitrary function value is never valid in closure
 params, regardless of where it was declared. A module-scoped helper that the
 hoisted callback references lexically is not a capture; it remains part of the
@@ -271,7 +283,7 @@ already present, so no route permits a second internal curry.
 
 ### Direct factory branding
 
-The factory function is the Fabric value. Trusted builder constructors attach
+The factory function is the `FabricValue`. Trusted builder constructors attach
 a non-enumerable internal brand and a state accessor. The exact symbol names
 are internal; conceptually the dependency-free protocol is:
 
@@ -372,11 +384,11 @@ type LiveFactoryState = {
 type FactoryStateView = LiveFactoryState | FactoryStateV1;
 ```
 
-`LiveFactoryState` is not yet a hashable or encodable Fabric value. During graph
-construction, shared factory traversal maps Cells/Reactives to aliases while
-preserving `rootToken`. After verified module registration, the first Fabric
-boundary calls `sealFactoryState()`: it resolves the factory artifact ref,
-validates and freezes the mapped state, and memoizes one immutable
+`LiveFactoryState` is not yet a hashable or encodable `FabricValue`. During
+graph construction, shared factory traversal maps Cells/Reactives to aliases
+while preserving `rootToken`. After verified module registration, the first
+Fabric boundary calls `sealFactoryState()`: it resolves the factory artifact
+ref, validates and freezes the mapped state, and memoizes one immutable
 `FactoryStateV1`. Encode, hash, equality, and Fabric deep-freeze fail if sealing
 is attempted before the ref exists. Once sealed, the logical state and its hash
 cannot change.
@@ -389,7 +401,7 @@ deep-frozenness; the side-table state is not canonical until sealing succeeds.
 
 `FactoryStateV1.ref` always names the complete builder factory artifact, as
 returned by `getArtifactEntryRef(factory)` through its root token. It is never
-copied from `moduleToJSON(...).$implRef`: that legacy ref names an
+copied from `moduleToEncodableForm(...).$implRef`: that legacy ref names an
 implementation-resolution record and may not recover the factory descriptor or
 methods.
 
@@ -447,7 +459,7 @@ Encoding performs these checks:
 3. The factory has a cold-resolvable, content-addressed artifact ref. A
    keyless/manual or `host:<n>` pseudo-module factory fails encoding rather
    than embedding executable source or writing a session-only ref.
-4. Pattern params, modifier state, and schemas are valid Fabric values and
+4. Pattern params, modifier state, and schemas are valid `FabricValue`s and
    contain no cycles.
 
 Decode validates the discriminant, ref, schemas, allowed fields, and
@@ -477,7 +489,7 @@ Every runner exposure path uses this chokepoint: schema-driven `asFactory`
 reads, recursive Cell/query result materialization, graph binding and dynamic
 module dispatch, and CLI/FUSE/tool adapters. Transformed symbolic invocation
 may pass a cell to the same hook after resolving its value. Context-free
-`valueFromJson()` remains the intentional shell-returning boundary.
+`fabricFromJsonValue()` remains the intentional shell-returning boundary.
 
 Materialization returns another function, not a wrapper object, and preserves
 the canonical codec state for reserialization.
@@ -495,7 +507,7 @@ Canonical factories are immutable functional values:
 - equality compares canonical `Factory@1` state, not function identity or
   `Function.prototype.toString()`; and
 - hashing uses the `Factory@1` tag plus the recursively hashed codec state, the
-  same semantic path used for codec-backed Fabric instances.
+  same semantic path used for codec-backed `FabricInstance`s.
 
 The JSON encoder must include branded functions in its codec cycle tracking.
 

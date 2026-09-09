@@ -2,6 +2,8 @@ import { assert, assertEquals } from "@std/assert";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -17,13 +19,17 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 
 function delayNextServerTransact(
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) {
   const server = (storageManager as unknown as {
     server(): {
-      transact(message: TransactMessage): Promise<TransactResponse>;
+      transact(
+        message: TransactMessage,
+        publishVerdict?: PublishTransactVerdict,
+      ): Promise<TransactResponse>;
     };
   }).server();
   const original = server.transact.bind(server);
@@ -31,12 +37,12 @@ function delayNextServerTransact(
   const release = Promise.withResolvers<void>();
   let shouldDelay = true;
 
-  server.transact = async (message) => {
-    if (!shouldDelay) return await original(message);
+  server.transact = async (message, publishVerdict) => {
+    if (!shouldDelay) return await original(message, publishVerdict);
     shouldDelay = false;
     started.resolve();
     await release.promise;
-    return await original(message);
+    return await original(message, publishVerdict);
   };
 
   return {
@@ -361,11 +367,10 @@ Deno.test(
       );
 
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("navigateTo retry regression");
+      refuseAtCommitBoundary(rejectedTx, "navigateTo retry regression");
       builtin.action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
-      assert(rejectedResult.error !== undefined);
+      assert(isCfcEnforcementRejection(rejectedResult.error));
       await runtime.settled();
       assertEquals(navigations.length, 0);
 

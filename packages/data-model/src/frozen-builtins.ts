@@ -11,14 +11,28 @@
 
 type MapBacking<K, V> = Map<K, V>;
 type SetBacking<T> = Set<T>;
+
+/** Builder for a `FrozenMap`, which fills it before it is handed out. */
 type MapBuilder<K, V> = {
+  /** The map being built. */
   readonly wrapper: FrozenMap<K, V>;
+
+  /** Sets `key` to `value`. */
   set(key: K, value: V): void;
+
+  /** Seals the map and returns it. */
   finish(): FrozenMap<K, V>;
 };
+
+/** Builder for a `FrozenSet`, which fills it before it is handed out. */
 type SetBuilder<T> = {
+  /** The set being built. */
   readonly wrapper: FrozenSet<T>;
+
+  /** Adds `value`. */
   add(value: T): void;
+
+  /** Seals the set and returns it. */
   finish(): FrozenSet<T>;
 };
 
@@ -27,14 +41,20 @@ const SET_BACKING = new WeakMap<object, SetBacking<unknown>>();
 const INTERNAL_MAP_BUILDER = Symbol("FrozenMapBuilder");
 const INTERNAL_SET_BUILDER = Symbol("FrozenSetBuilder");
 
-/** Helper for the mutator methods, which throws to signal a frozen-mutation attempt. */
+/**
+ * Helper for the mutator methods, which throws to signal a frozen-mutation
+ * attempt.
+ */
 function throwFrozenMutation(typeName: string): never {
-  throw new TypeError(`Cannot mutate a ${typeName}`);
+  throw new TypeError(`Cannot mutate a \`${typeName}\``);
 }
 
-/** Helper for builders, which throws to signal a post-`finish()` mutation attempt. */
+/**
+ * Helper for builders, which throws to signal a post-`finish()` mutation
+ * attempt.
+ */
 function throwFinalizedBuilderMutation(typeName: string): never {
-  throw new TypeError(`Cannot mutate a finalized ${typeName} builder`);
+  throw new TypeError(`Cannot mutate a finalized \`${typeName}\` builder`);
 }
 
 /**
@@ -47,7 +67,7 @@ function throwFinalizedBuilderMutation(typeName: string): never {
 function getMapBacking<K, V>(value: object): MapBacking<K, V> {
   const backing = MAP_BACKING.get(value);
   if (!backing) {
-    throw new TypeError("Incompatible FrozenMap receiver");
+    throw new TypeError("Incompatible `FrozenMap` receiver");
   }
   return backing as MapBacking<K, V>;
 }
@@ -60,7 +80,7 @@ function getMapBacking<K, V>(value: object): MapBacking<K, V> {
 function getSetBacking<T>(value: object): SetBacking<T> {
   const backing = SET_BACKING.get(value);
   if (!backing) {
-    throw new TypeError("Incompatible FrozenSet receiver");
+    throw new TypeError("Incompatible `FrozenSet` receiver");
   }
   return backing as SetBacking<T>;
 }
@@ -85,9 +105,9 @@ function forEachSetLikeValue<T>(
 
 /**
  * Effectively-immutable `Map` wrapper. Read methods delegate to a
- * module-private backing `Map`; mutator methods (`set()`, `delete()`, `clear()`,
- * etc.) throw. Instances are frozen at construction time (or at builder
- * `finish()` time, see `createBuilder()`).
+ * module-private backing `Map`; mutator methods (`set()`, `delete()`,
+ * `clear()`, etc.) throw. Instances are frozen at construction time (or at
+ * builder `finish()` time, see `createBuilder()`).
  */
 export class FrozenMap<K, V> implements Map<K, V> {
   /**
@@ -103,35 +123,6 @@ export class FrozenMap<K, V> implements Map<K, V> {
     if (builderToken !== INTERNAL_MAP_BUILDER) {
       Object.freeze(this);
     }
-  }
-
-  /**
-   * Returns a builder that can be used to populate a `FrozenMap` incrementally
-   * before freezing it. Call `set()` to add entries, then `finish()` to freeze
-   * the wrapper and return it.
-   */
-  static createBuilder<K, V>(): MapBuilder<K, V> {
-    const wrapper = new FrozenMap<K, V>(undefined, INTERNAL_MAP_BUILDER);
-    let finalized = false;
-
-    const assertOpen = (): void => {
-      if (finalized) {
-        throwFinalizedBuilderMutation("FrozenMap");
-      }
-    };
-
-    return {
-      wrapper,
-      set(key: K, value: V): void {
-        assertOpen();
-        getMapBacking<K, V>(wrapper).set(key, value);
-      },
-      finish(): FrozenMap<K, V> {
-        finalized = true;
-        Object.freeze(wrapper);
-        return wrapper;
-      },
-    };
   }
 
   /** Same as `Map.prototype.size`. */
@@ -208,6 +199,39 @@ export class FrozenMap<K, V> implements Map<K, V> {
   clear(): void {
     throwFrozenMutation("FrozenMap");
   }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Returns a builder that can be used to populate a `FrozenMap` incrementally
+   * before freezing it. Call `set()` to add entries, then `finish()` to freeze
+   * the wrapper and return it.
+   */
+  static createBuilder<K, V>(): MapBuilder<K, V> {
+    const wrapper = new FrozenMap<K, V>(undefined, INTERNAL_MAP_BUILDER);
+    let finalized = false;
+
+    const assertOpen = (): void => {
+      if (finalized) {
+        throwFinalizedBuilderMutation("FrozenMap");
+      }
+    };
+
+    return {
+      wrapper,
+      set(key: K, value: V): void {
+        assertOpen();
+        getMapBacking<K, V>(wrapper).set(key, value);
+      },
+      finish(): FrozenMap<K, V> {
+        finalized = true;
+        Object.freeze(wrapper);
+        return wrapper;
+      },
+    };
+  }
 }
 
 Object.setPrototypeOf(FrozenMap.prototype, Map.prototype);
@@ -216,8 +240,8 @@ Object.setPrototypeOf(FrozenMap, Map);
 /**
  * Effectively-immutable `Set` wrapper. Read methods and set-algebra methods
  * delegate to a module-private backing `Set`; mutator methods (`add()`,
- * `delete()`, `clear()`) throw. Instances are frozen at construction time (or at
- * builder `finish()` time, see `createBuilder()`).
+ * `delete()`, `clear()`) throw. Instances are frozen at construction time (or
+ * at builder `finish()` time, see `createBuilder()`).
  */
 export class FrozenSet<T> implements Set<T> {
   /**
@@ -230,35 +254,6 @@ export class FrozenSet<T> implements Set<T> {
     if (builderToken !== INTERNAL_SET_BUILDER) {
       Object.freeze(this);
     }
-  }
-
-  /**
-   * Returns a builder that can be used to populate a `FrozenSet` incrementally
-   * before freezing it. Call `add()` to add values, then `finish()` to freeze
-   * the wrapper and return it.
-   */
-  static createBuilder<T>(): SetBuilder<T> {
-    const wrapper = new FrozenSet<T>(undefined, INTERNAL_SET_BUILDER);
-    let finalized = false;
-
-    const assertOpen = (): void => {
-      if (finalized) {
-        throwFinalizedBuilderMutation("FrozenSet");
-      }
-    };
-
-    return {
-      wrapper,
-      add(value: T): void {
-        assertOpen();
-        getSetBacking<T>(wrapper).add(value);
-      },
-      finish(): FrozenSet<T> {
-        finalized = true;
-        Object.freeze(wrapper);
-        return wrapper;
-      },
-    };
   }
 
   /** Same as `Set.prototype.size`. */
@@ -350,7 +345,10 @@ export class FrozenSet<T> implements Set<T> {
     return result;
   }
 
-  /** Same as `Set.prototype.symmetricDifference`. Returns a new (mutable) `Set`. */
+  /**
+   * Same as `Set.prototype.symmetricDifference`. Returns a new (mutable)
+   * `Set`.
+   */
   symmetricDifference<U>(other: ReadonlySetLike<U>): Set<T | U> {
     const result = new Set<T | U>(this.values());
     forEachSetLikeValue(other, (value) => {
@@ -408,6 +406,39 @@ export class FrozenSet<T> implements Set<T> {
   /** Always throws (instance is frozen). */
   clear(): void {
     throwFrozenMutation("FrozenSet");
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Returns a builder that can be used to populate a `FrozenSet` incrementally
+   * before freezing it. Call `add()` to add values, then `finish()` to freeze
+   * the wrapper and return it.
+   */
+  static createBuilder<T>(): SetBuilder<T> {
+    const wrapper = new FrozenSet<T>(undefined, INTERNAL_SET_BUILDER);
+    let finalized = false;
+
+    const assertOpen = (): void => {
+      if (finalized) {
+        throwFinalizedBuilderMutation("FrozenSet");
+      }
+    };
+
+    return {
+      wrapper,
+      add(value: T): void {
+        assertOpen();
+        getSetBacking<T>(wrapper).add(value);
+      },
+      finish(): FrozenSet<T> {
+        finalized = true;
+        Object.freeze(wrapper);
+        return wrapper;
+      },
+    };
   }
 }
 

@@ -1,0 +1,59 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "category": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "dexterity": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 1,
+        "type": "number"
+      },
+      "score": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 3,
+        "type": "number"
+      },
+      "strength": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 1,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "primitives/demo/atoms-demo.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "score": {
+        "type": "number"
+      },
+      "statTotal": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "score",
+      "statTotal",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

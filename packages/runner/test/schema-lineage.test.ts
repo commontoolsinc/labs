@@ -1,15 +1,18 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { type JSONSchema } from "../src/builder/types.ts";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { isCell } from "../src/cell.ts";
-import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createBuilder } from "../src/builder/factory.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
+import { isCell } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -80,7 +83,7 @@ describe("Schema Lineage", () => {
 
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
-      expect(cell.schema).toEqual(schema);
+      expect(resolvedSchema(cell.schema)).toEqual(schema);
 
       // When we access a nested property, it should have the correct schema
       const countCell = cell.key("count");
@@ -191,7 +194,7 @@ describe("Schema Lineage", () => {
 
       // The cell should have picked up the schema from the alias chain
       expect(cell.schema).toBeDefined();
-      expect(cell.schema).toEqual(numberSchema);
+      expect(resolvedSchema(cell.schema)).toEqual(numberSchema);
       expect(cell.get()).toBe(5);
     });
 
@@ -341,7 +344,7 @@ describe("Schema propagation end-to-end example", () => {
 
     const cValue = c.get() as any;
     expect(isCell(cValue.props.value)).toBe(true);
-    expect(cValue.props.value.schema).toEqual({
+    expect(resolvedSchema(cValue.props.value.schema)).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
       additionalProperties: false,

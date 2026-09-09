@@ -1,9 +1,9 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 
 import { transformSource, validateSource } from "./utils.ts";
 
-const commonfabricTypes = await new StaticCacheFS().getText(
+const commonfabricTypes = await StaticCache.fromFileSystem().getText(
   "types/commonfabric.d.ts",
 );
 

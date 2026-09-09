@@ -1,29 +1,37 @@
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import {
   CODEC,
   CODEC_TYPE_TAGS,
-  EmptyReconstructionContext,
+  NullLiveEnvironment,
 } from "@commonfabric/data-model/codec-common";
-import type {
-  FabricPlainObject,
-  FabricValue,
-} from "@commonfabric/data-model/interface";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
+
+import type { CellScope } from "../builder/types.ts";
+import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
+import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   computeInputHashFromValue,
   liveFetchInputsMatch,
   selectUnavailableFetchInput,
   writeUnavailableFetchResult,
 } from "./fetch-utils.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
+import {
+  enrollRuntimeOwnedStore,
+  ownedCell,
+  recordRuntimeOwnedStore,
+} from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
 import {
   DataUnavailable,
@@ -51,7 +59,7 @@ import {
  * showing a spinner. A duplicated resolution is wasted work; a spinner that
  * never resolves is a dead end, so the trade goes to the lower value.
  *
- * `docs/development/fetch-request-deadlines.md` records why this bound stays
+ * `docs/features/fetch-request-deadlines.md` records why this bound stays
  * and what an early takeover costs.
  */
 const PROGRAM_CLAIM_STALE_AFTER = 1000 * 10;
@@ -85,17 +93,24 @@ type FetchState =
   };
 
 function encodeFetchError(error: FabricError): FetchErrorState {
-  return FabricError[CODEC].encode(error) as FetchErrorState;
-}
-
-function decodeFetchError(state: FetchErrorState): FabricError {
-  const decoded = FabricError[CODEC].decode(
-    CODEC_TYPE_TAGS.Error,
-    state,
-    new EmptyReconstructionContext(
+  return FabricError[CODEC].encode(
+    error,
+    new NullLiveEnvironment(
       true,
       "fetchProgram durable error cache",
     ),
+  ) as FetchErrorState;
+}
+
+function decodeFetchError(state: FetchErrorState): FabricError {
+  const env = new NullLiveEnvironment(
+    true,
+    "fetchProgram durable error cache",
+  );
+  const decoded = FabricError[CODEC].decode(
+    CODEC_TYPE_TAGS.Error,
+    state,
+    env,
   );
   if (!(decoded instanceof FabricError)) {
     throw new TypeError("Invalid FabricError in fetchProgram cache");
@@ -287,6 +302,18 @@ export function fetchProgram(
     const tx = runtime.edit();
 
     try {
+      // Teardown tx on piece stop — no scheduler run stamps it;
+      // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+      // serving runtime releases this replica's claims instead of
+      // refusing the unstamped seal. No-op off the serving posture.
+      // INSIDE the try (review thread r3756175831): a throwing stamper
+      // must route through the abort path below like any other failure
+      // here, not leak the manually-opened tx and skip claim release.
+      runtime.stampServerRun(tx, {
+        actionId: `fetchProgram/teardown/${parentCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+
       // If we were fetching, transition back to idle
       const currentCache = cache.withTx(tx).get();
       const updates: Record<string, FetchCacheEntry> = {};
@@ -331,36 +358,36 @@ export function fetchProgram(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
-      if (cellsInitialized) {
-        releaseOwnedRequests(tx, "Output scope changed");
-      }
-      const basePending = runtime.getCell<boolean>(
-        parentCell.space,
+      pending = ownedCell<boolean>(
+        runtime,
+        tx,
+        parentCell,
         { fetchProgram: { pending: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      const baseResult = runtime.getCell<ProgramResult | DataUnavailable>(
-        parentCell.space,
+      result = ownedCell<ProgramResult | DataUnavailable>(
+        runtime,
+        tx,
+        parentCell,
         {
           fetchProgram: { result: cause },
         },
         undefined,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      const baseError = runtime.getCell<any | undefined>(
-        parentCell.space,
+      error = ownedCell<any | undefined>(
+        runtime,
+        tx,
+        parentCell,
         {
           fetchProgram: { error: cause },
         },
         undefined,
-        tx,
+        outputScope,
       );
-      error = scopedCell(runtime, tx, baseError, outputScope);
 
       const baseCache = runtime.getCell(
         parentCell.space,
@@ -374,6 +401,8 @@ export function fetchProgram(
         baseCache,
         outputScope,
       ) as Cell<Record<string, FetchCacheEntry>>;
+      recordRuntimeOwnedStore(tx, parentCell, cache);
+      enrollRuntimeOwnedStore(tx, parentCell, cache);
 
       // Link the new result cells to the parent result cell
       setResultCell(pending, parentCell);
@@ -441,10 +470,14 @@ export function fetchProgram(
 
     if (!resolvingHere && (state.type === "idle" || claimAbandoned)) {
       // Try to transition to fetching. The claim id names this replica; the
-      // outbox id stays the input hash, which is what makes it an idempotency
-      // key for the same request from anywhere.
+      // outbox/dedupe key is the input hash WIDENED BY THIS NODE's cache-cell
+      // identity (effectTargetKey): the per-node cache doc is the writeback
+      // target, so a DISTINCT node with the same URL must keep its own
+      // effect — a shared bare-hash key dropped the second node's closure
+      // and left its cache entry `fetching` forever (round-2 headline).
       const requestId = `${runtime.id}:${inputHash}`;
       const startTime = Date.now();
+      const effectKey = effectTargetKey(`fetchProgram:${inputHash}`, cache);
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
@@ -503,6 +536,7 @@ export function fetchProgram(
               inputHash,
               url,
               controller.signal,
+              effectKey,
             );
           })().finally(() => {
             if (inFlight.get(inputHash)?.requestId === requestId) {
@@ -510,6 +544,53 @@ export function fetchProgram(
             }
           });
           runtime.trackAsyncWork(work, parentCell);
+        },
+        {
+          idempotencyKey: effectKey,
+          onRejected: (rejection) => {
+            runtime.trackAsyncWork(
+              settleAbandonedRequest(
+                runtime,
+                "fetchProgram",
+                effectKey,
+                (settleTx) => {
+                  // The claim this run staged rode the abandoned transaction,
+                  // so the entry reads `idle` and a reader waits on a fetch
+                  // nobody is running. Record the refusal in its place — but
+                  // read the entry at write time first: a later request for
+                  // the same inputs claims it or answers it, and that state is
+                  // the newer request's, not this one's to overwrite.
+                  const entry = cache.withTx(settleTx).get()?.[inputHash];
+                  if (entry !== undefined && entry.state.type !== "idle") {
+                    return;
+                  }
+                  const unavailable = DataUnavailable.error(rejection);
+                  cache.withTx(settleTx).update({
+                    [inputHash]: {
+                      inputHash,
+                      state: {
+                        type: "error",
+                        error: encodeFetchError(unavailable.error),
+                      },
+                    },
+                  });
+                  // A run derives these from the entry above and announces
+                  // them at its end. No run follows this one, so the ending
+                  // does both itself.
+                  sendResult(settleTx, { pending, result, error });
+                  writeUnavailableFetchResult(
+                    settleTx,
+                    pending,
+                    result,
+                    error,
+                    unavailable,
+                    rejection.message,
+                  );
+                },
+              ),
+              parentCell,
+            );
+          },
         },
       );
     }
@@ -584,6 +665,7 @@ async function startFetch(
   inputHash: string,
   url: string,
   abortSignal: AbortSignal,
+  effectKey: string,
 ) {
   try {
     // Create HTTP program resolver
@@ -611,6 +693,11 @@ async function startFetch(
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {
+        // Marked on the arm that writes (round-2 thread 12): a
+        // suppressed writeback (the entry already resolved by a
+        // competing resolution) must not commit as a spurious no-op
+        // effect-completion for an already-completed key.
+        markEffectCompletion(tx, effectKey);
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,
@@ -643,6 +730,9 @@ async function startFetch(
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {
+        // Marked on the arm that writes — see the success path above
+        // (round-2 thread 12).
+        markEffectCompletion(tx, effectKey);
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,

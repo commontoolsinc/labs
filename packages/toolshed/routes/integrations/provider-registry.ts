@@ -8,14 +8,20 @@
  * (see airtable.descriptor.ts or google.descriptor.ts for examples) and
  * add it to the DESCRIPTORS array below.
  *
- * Note: Plaid and Discord use non-standard OAuth flows and remain as
- * manual imports in app.ts. The shared /api/integrations/bg route is
- * registered on the first provider router with valid credentials.
+ * Note: Plaid uses a non-standard OAuth flow and remains a manual import
+ * in app.ts. The shared /api/integrations/bg route is registered on the
+ * first provider router with valid credentials.
  */
 
-import { createRouter } from "@/lib/create-app.ts";
-import type { AppRouteHandler } from "@/lib/types.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 import { cors } from "@hono/hono/cors";
+
+import { AirtableDescriptor } from "./airtable-oauth/airtable.descriptor.ts";
+import { DiscordDescriptor } from "./discord-oauth/discord.descriptor.ts";
+import { GitHubDescriptor } from "./github-oauth/github.descriptor.ts";
+import { GoogleDescriptor } from "./google-oauth/google.descriptor.ts";
+import { LinearDescriptor } from "./linear-oauth/linear.descriptor.ts";
+import { NotionDescriptor } from "./notion-oauth/notion.descriptor.ts";
 import {
   createOAuth2Handlers,
 } from "./oauth2-common/oauth2-common.handlers.ts";
@@ -27,26 +33,21 @@ import {
   type OAuth2LogoutRoute,
   type OAuth2RefreshRoute,
 } from "./oauth2-common/oauth2-common.routes.ts";
-import { discoverProviderConfig } from "./oauth2-common/oauth2-common.utils.ts";
 import type {
   OAuth2ProviderConfig,
   ProviderDescriptor,
 } from "./oauth2-common/oauth2-common.types.ts";
-import { AirtableDescriptor } from "./airtable-oauth/airtable.descriptor.ts";
-import { DiscordDescriptor } from "./discord-oauth/discord.descriptor.ts";
-import { GitHubDescriptor } from "./github-oauth/github.descriptor.ts";
-import { GoogleDescriptor } from "./google-oauth/google.descriptor.ts";
-import { LinearDescriptor } from "./linear-oauth/linear.descriptor.ts";
-import { NotionDescriptor } from "./notion-oauth/notion.descriptor.ts";
+import { discoverProviderConfig } from "./oauth2-common/oauth2-common.utils.ts";
 import { SpotifyDescriptor } from "./spotify-oauth/spotify.descriptor.ts";
 import { StravaDescriptor } from "./strava-oauth/strava.descriptor.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { createRouter } from "@/lib/create-app.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 const logger = getLogger("provider-registry");
 
-// ---------------------------------------------------------------------------
+//
 // Shared CORS configuration for all OAuth2 provider routes
-// ---------------------------------------------------------------------------
+//
 
 const OAUTH_CORS_CONFIG = {
   origin: "*",
@@ -57,9 +58,9 @@ const OAUTH_CORS_CONFIG = {
   credentials: true,
 };
 
-// ---------------------------------------------------------------------------
+//
 // Descriptor catalog — add new OAuth2 providers here
-// ---------------------------------------------------------------------------
+//
 
 const DESCRIPTORS: ProviderDescriptor[] = [
   GoogleDescriptor,
@@ -72,9 +73,9 @@ const DESCRIPTORS: ProviderDescriptor[] = [
   StravaDescriptor,
 ];
 
-// ---------------------------------------------------------------------------
+//
 // Descriptor → OAuth2ProviderConfig
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Resolve a ProviderDescriptor to a fully populated OAuth2ProviderConfig.
@@ -119,9 +120,9 @@ async function resolveProviderConfig(
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Single-provider router factory
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Create a fully wired Hono router for a single OAuth2 provider.
@@ -153,7 +154,7 @@ async function createProviderRouter(
 
   // The generic factory handlers return broader types than the route schemas
   // declare (e.g. Record<string, unknown> vs specific fields). We cast to the
-  // route-specific handler types here; runtime behaviour is correct.
+  // route-specific handler types here; runtime behavior is correct.
   let router = createRouter()
     .openapi(routes.login, handlers.login as AppRouteHandler<OAuth2LoginRoute>)
     .openapi(
@@ -188,9 +189,9 @@ async function createProviderRouter(
   return router;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Public API
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Build routers for all registered OAuth2 provider descriptors.

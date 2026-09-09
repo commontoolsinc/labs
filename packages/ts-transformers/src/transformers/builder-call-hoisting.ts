@@ -5,12 +5,20 @@ import {
   getLiftAppliedInnerCall,
   getPatternToolHoistablePatternCall,
   getWithPatternHoistablePatternCall,
+  isCallbackReference,
   isHandlerAppliedCall,
+  resolveCallbackFunctionExpression,
   SYNTHETIC_HANDLER_HOIST_PREFIX,
   SYNTHETIC_LIFT_HOIST_PREFIX,
   SYNTHETIC_PATTERN_HOIST_PREFIX,
 } from "../ast/call-kind.ts";
-import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { recoverAuthoredPosition } from "../ast/utils.ts";
+import {
+  type BuilderSourceSite,
+  HelpersOnlyTransformer,
+  TransformationContext,
+} from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 /**
  * Hoist every reactive *builder call* to module scope: `lift` (CT-1644, Phase 2
@@ -112,6 +120,7 @@ interface HoistableBuilderSpec {
     call: ts.CallExpression,
     context: TransformationContext,
   ) => ts.CallExpression | undefined;
+
   /**
    * Optional: produce the replacement for the visited site once the inner call
    * has been hoisted to `hoistedName`. Omit for applied builders, which take
@@ -131,7 +140,7 @@ const LIFT_BUILDER: HoistableBuilderSpec = {
   resolveHoistable: (call, context) => {
     // The lift-applied shape is `__cfHelpers.lift(...)(captures)`: an applied
     // call whose callee is itself the inner `lift(...)` call. detectCallKind
-    // is the single source of truth for recognising it (it guards against
+    // is the single source of truth for recognizing it (it guards against
     // over-application chains like `lift(cb)(x)(y)`).
     if (detectCallKind(call, context.checker)?.kind !== "lift-applied") {
       return undefined;
@@ -149,7 +158,7 @@ const HANDLER_BUILDER: HoistableBuilderSpec = {
     // mechanic applies: relocate the inner `handler(...)` call, leave
     // `__cfHandler_N(captures)` at the site (the `.for(...)` tail stays
     // anchored on the outer call). Unlike lift this is NOT a `lift-applied`
-    // CallKind — `isHandlerAppliedCall` recognises it while keeping the applied
+    // CallKind — `isHandlerAppliedCall` recognizes it while keeping the applied
     // call classifying as `{ kind: "builder", builderName: "handler" }`, so
     // handler-specific downstream dispatchers are untouched (CT-1655).
     if (!isHandlerAppliedCall(call, context.checker)) {
@@ -202,6 +211,29 @@ function hoistBuilderCalls(
   context: TransformationContext,
 ): ts.SourceFile {
   const factory = context.factory;
+  const inputSourceFile = context.program.getSourceFile(sourceFile.fileName);
+  const builderSourceSites = Object.create(null) as Record<
+    string,
+    BuilderSourceSite
+  >;
+
+  const recordBuilderSourceSite = (
+    symbol: string,
+    artifact: BuilderArtifact | undefined,
+  ): void => {
+    const mapSite = context.options.builderSourceSites?.mapSite;
+    if (
+      mapSite === undefined || artifact === undefined ||
+      Object.hasOwn(builderSourceSites, symbol)
+    ) {
+      return;
+    }
+    const site = resolveCompilerInputSite(artifact, inputSourceFile);
+    if (site === undefined) return;
+    // `mapSite` is what turns compiler-input coordinates into authored ones.
+    const mapped = mapSite(sourceFile.fileName, site);
+    if (mapped !== undefined) builderSourceSites[symbol] = mapped;
+  };
 
   // Hoisted consts produced while visiting the CURRENT top-level statement.
   // They are flushed immediately before that statement (see below), not pooled
@@ -236,6 +268,7 @@ function hoistBuilderCalls(
   // injected duplicate. See PatternManager.registerHoistedValues / the
   // `__cfReg` factory parameter wired up by the module-record compiler.
   const registeredNames: string[] = [];
+  const exportedSymbolsByLocalName = collectExportedLocalSymbols(sourceFile);
 
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
     const visited = ts.visitEachChild(node, visit, context.tsContext);
@@ -254,6 +287,10 @@ function hoistBuilderCalls(
       const nameText = `${builder.prefix}_${next}`;
       const name = factory.createIdentifier(nameText);
       registeredNames.push(nameText);
+      recordBuilderSourceSite(
+        nameText,
+        resolveBuilderArtifact(innerCall, context.checker),
+      );
       // Carry the hoisted call's identity on the synthetic call-site identifier.
       // The checker can't resolve a synthetic identifier to its const
       // initializer, so detectCallKind would otherwise fail to recognize
@@ -317,8 +354,6 @@ function hoistBuilderCalls(
   // NOT also routed through `__cfReg` (and `export const` has no local binding
   // after CommonJS emit anyway). `__cfReg` covers exactly the gap: hoists and
   // non-exported top-level builder consts.
-  const exportedLocalNames = collectExportedLocalNames(sourceFile);
-
   const resultStatements: ts.Statement[] = [];
   for (const statement of sourceFile.statements) {
     // Also register AUTHORED non-exported top-level builder artifacts
@@ -327,11 +362,17 @@ function hoistBuilderCalls(
     // statement (the checker resolves real, not synthetic, nodes). Only a direct
     // builder CALL counts, so an import/alias (`const x = imported`) — whose value
     // belongs to another module — is never mis-attributed to this identity.
-    collectTopLevelBuilderArtifactNames(
+    collectTopLevelBuilderArtifacts(
       statement,
       context,
-      exportedLocalNames,
+      exportedSymbolsByLocalName,
       registeredNames,
+      recordBuilderSourceSite,
+    );
+    collectDefaultExportBuilderArtifact(
+      statement,
+      context.checker,
+      recordBuilderSourceSite,
     );
     pendingHoists = [];
     const visitedStatement = ts.visitNode(statement, visit) as ts.Statement;
@@ -339,8 +380,8 @@ function hoistBuilderCalls(
   }
 
   // Register every hoisted builder artifact with one trailing call. `__cfReg` is
-  // a free identifier supplied by the module wrapper (the 4th factory parameter
-  // under the ESM loader; a no-op global on the legacy/AMD path). The object uses
+  // a free identifier supplied by the module wrapper (its 4th factory parameter,
+  // which shadows a no-op compartment global). The object uses
   // shorthand so each value is the module-level `const` binding itself — the
   // registrar receives `{ symbol -> live value }` and the runtime pairs it with
   // this module's content identity. Emitted only when there is something to
@@ -366,6 +407,13 @@ function hoistBuilderCalls(
     );
   }
 
+  if (Object.keys(builderSourceSites).length > 0) {
+    context.state.recordBuilderSourceSites(sourceFile.fileName, {
+      formatVersion: 1,
+      sites: builderSourceSites,
+    });
+  }
+
   return factory.updateSourceFile(sourceFile, resultStatements);
 }
 
@@ -382,22 +430,23 @@ function hoistBuilderCalls(
  * registered here, so identity is never mis-attributed. Non-artifact builders are
  * harmlessly trust-filtered at registration time. Destructuring is skipped.
  *
- * Names in `exportedLocalNames` are skipped: they leave the module through an
- * export and are addressable by their export name through the namespace (and an
- * `export const` has no local binding after CommonJS emit anyway, so a shorthand
- * would read `undefined`). `__cfReg` covers exactly the gap — hoists and
- * non-exported top-level builder consts.
+ * An exported name is omitted from `__cfReg`: it leaves through the namespace
+ * under every symbol in `exportedSymbolsByLocalName`. `__cfReg` covers exactly
+ * the remaining gap — hoists and non-exported top-level builder consts.
  */
-function collectTopLevelBuilderArtifactNames(
+function collectTopLevelBuilderArtifacts(
   statement: ts.Statement,
   context: TransformationContext,
-  exportedLocalNames: ReadonlySet<string>,
+  exportedSymbolsByLocalName: ReadonlyMap<string, readonly string[]>,
   out: string[],
+  recordSourceSite: (
+    symbol: string,
+    artifact: BuilderArtifact | undefined,
+  ) => void,
 ): void {
   if (!ts.isVariableStatement(statement)) return;
   for (const decl of statement.declarationList.declarations) {
     if (!ts.isIdentifier(decl.name)) continue;
-    if (exportedLocalNames.has(decl.name.text)) continue;
     // Unwrap `as` / `satisfies` / parenthesized / type-assertion wrappers before
     // the call check: a cast-typed builder const (`const x = handler(...) as
     // XFactory`) has an AsExpression initializer, not a CallExpression. Without
@@ -408,61 +457,187 @@ function collectTopLevelBuilderArtifactNames(
       ? unwrapTypeWrappers(decl.initializer)
       : undefined;
     if (!init || !ts.isCallExpression(init)) continue;
-    if (detectCallKind(init, context.checker)?.kind === "builder") {
-      out.push(decl.name.text);
-    }
+    if (detectCallKind(init, context.checker)?.kind !== "builder") continue;
+    const exportSymbols = exportedSymbolsByLocalName.get(decl.name.text);
+    const runtimeSymbols = exportSymbols ?? [decl.name.text];
+    if (exportSymbols === undefined) out.push(decl.name.text);
+    const artifact = resolveBuilderArtifact(init, context.checker);
+    for (const symbol of runtimeSymbols) recordSourceSite(symbol, artifact);
   }
 }
 
-/** Strip parentheses and `as` / `satisfies` / type-assertion wrappers to reach
- * the underlying builder/identifier expression. Used both for `export default x`
- * recognition and for top-level `const foo = handler(...) as XFactory`
- * registration — without unwrapping, a cast-wrapped builder const is excluded
- * from `__cfReg`, loses content-addressed provenance, and falls to the SES
- * fallback at resolve time (CT-1743). */
+/** Strip the transparent wrapper set to reach the underlying
+ * builder/identifier expression. Used both for `export default x` recognition
+ * and for top-level `const foo = handler(...) as XFactory` registration —
+ * without unwrapping, a wrapped builder const is excluded from `__cfReg`, loses
+ * content-addressed provenance, and falls to the SES fallback at resolve time
+ * (CT-1743). Reading the shared set is what keeps that true of every spelling
+ * rather than of the casts alone. */
 function unwrapTypeWrappers(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (
-    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
-    ts.isSatisfiesExpression(current) || ts.isTypeAssertionExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
+  return unwrapExpression(expr);
 }
 
 /**
- * The set of LOCAL binding names that are exported from the module by any form:
- * `export const foo`, `export { foo }` / `export { foo as bar }` (the local name
- * `foo`), and `export default foo`. Used to keep exported builder artifacts out
- * of `__cfReg` (they are addressable through the module namespace instead).
+ * Runtime export symbols for each local binding. The values both keep exported
+ * artifacts out of `__cfReg` and key their debug sidecar entries exactly as the
+ * engine's namespace walk encounters them.
  */
-function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
-  const names = new Set<string>();
+function collectExportedLocalSymbols(
+  sourceFile: ts.SourceFile,
+): Map<string, readonly string[]> {
+  const symbols = new Map<string, string[]>();
+  const add = (localName: string, exportName: string): void => {
+    const names = symbols.get(localName) ?? [];
+    if (!names.includes(exportName)) names.push(exportName);
+    symbols.set(localName, names);
+  };
   for (const statement of sourceFile.statements) {
     if (
       ts.isVariableStatement(statement) &&
       statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
     ) {
       for (const decl of statement.declarationList.declarations) {
-        if (ts.isIdentifier(decl.name)) names.add(decl.name.text);
+        if (ts.isIdentifier(decl.name)) add(decl.name.text, decl.name.text);
       }
     } else if (
       ts.isExportDeclaration(statement) && !statement.moduleSpecifier &&
       statement.exportClause && ts.isNamedExports(statement.exportClause)
     ) {
-      // `export { local as exported }`: the LOCAL name is `propertyName` when
-      // aliased, otherwise `name`.
       for (const el of statement.exportClause.elements) {
-        names.add((el.propertyName ?? el.name).text);
+        add((el.propertyName ?? el.name).text, el.name.text);
       }
     } else if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
-      // `export default foo` — unwrap parens / `as` / `satisfies` so a wrapped
-      // identifier (`export default (foo)`, `export default foo satisfies T`) is
-      // still recognized as exporting the local `foo`.
       const expr = unwrapTypeWrappers(statement.expression);
-      if (ts.isIdentifier(expr)) names.add(expr.text);
+      if (ts.isIdentifier(expr)) add(expr.text, "default");
     }
   }
-  return names;
+  return symbols;
+}
+
+/** Records a direct function-bearing `export default <builder>(...)`. */
+function collectDefaultExportBuilderArtifact(
+  statement: ts.Statement,
+  checker: ts.TypeChecker,
+  recordSourceSite: (
+    symbol: string,
+    artifact: BuilderArtifact | undefined,
+  ) => void,
+): void {
+  if (!ts.isExportAssignment(statement) || statement.isExportEquals) return;
+  const expression = unwrapExpression(statement.expression);
+  if (ts.isIdentifier(expression)) return;
+  recordSourceSite("default", resolveBuilderArtifact(expression, checker));
+}
+
+/** A function-bearing builder call and its best same-file function anchor. */
+interface BuilderArtifact {
+  readonly call: ts.CallExpression;
+  readonly fn?:
+    | ts.ArrowFunction
+    | ts.FunctionExpression
+    | ts.FunctionDeclaration;
+}
+
+/** Returns the function-bearing builder artifact denoted by `expression`. */
+function resolveBuilderArtifact(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): BuilderArtifact | undefined {
+  const call = unwrapExpression(expression);
+  if (!ts.isCallExpression(call)) return undefined;
+  if (detectCallKind(call, checker)?.kind !== "builder") return undefined;
+  for (const argument of call.arguments) {
+    const fn = resolveCallbackFunctionExpression(argument, checker);
+    if (fn) return { call, fn };
+    const declaration = resolveSameFileFunctionDeclaration(argument, checker);
+    if (declaration) return { call, fn: declaration };
+  }
+  return call.arguments.some((argument) =>
+      isCallbackReference(argument, checker)
+    )
+    ? { call }
+    : undefined;
+}
+
+/** Returns the same-file function declaration named by `argument`. */
+function resolveSameFileFunctionDeclaration(
+  argument: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.FunctionDeclaration | undefined {
+  const target = unwrapExpression(argument);
+  if (!ts.isIdentifier(target)) return undefined;
+  const symbol = checker.getSymbolAtLocation(target);
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (!declaration || !ts.isFunctionDeclaration(declaration)) return undefined;
+  return declaration.getSourceFile().fileName ===
+      target.getSourceFile().fileName
+    ? declaration
+    : undefined;
+}
+
+/**
+ * Resolves one artifact's position and declaration name in COMPILER-INPUT
+ * coordinates. The input carries the helper prelude the compiler injects, so
+ * these line numbers are authored only once `mapSite` has normalized them; the
+ * transformer records nothing without a mapper for exactly that reason.
+ */
+function resolveCompilerInputSite(
+  artifact: BuilderArtifact,
+  inputSourceFile: ts.SourceFile | undefined,
+): BuilderSourceSite | undefined {
+  if (!inputSourceFile) return undefined;
+  const candidates = artifact.fn
+    ? [artifact.fn, artifact.call]
+    : [artifact.call];
+  for (const candidate of candidates) {
+    const range = recoverAuthoredPosition(candidate);
+    if (!range) continue;
+    const enclosing = findAuthoredNodeAt(inputSourceFile, range.pos);
+    const start = enclosing?.node.getStart(inputSourceFile) ?? range.pos;
+    const position = inputSourceFile.getLineAndCharacterOfPosition(
+      start >= range.pos && start < range.end ? start : range.pos,
+    );
+    return {
+      line: position.line + 1,
+      col: position.character,
+      ...(enclosing?.bindingName === undefined
+        ? {}
+        : { bindingName: enclosing.bindingName }),
+    };
+  }
+  return undefined;
+}
+
+/** Finds the innermost authored node covering `pos` and its declaration name. */
+function findAuthoredNodeAt(
+  sourceFile: ts.SourceFile,
+  pos: number,
+): { node: ts.Node; bindingName: string | undefined } | undefined {
+  let node: ts.Node = sourceFile;
+  let bindingName: string | undefined;
+  let found = false;
+
+  for (;;) {
+    const child = ts.forEachChild(
+      node,
+      (candidate) =>
+        candidate.pos <= pos && pos < candidate.end ? candidate : undefined,
+    );
+    if (!child) break;
+    if (ts.isFunctionLike(node)) bindingName = undefined;
+    bindingName = authoredDeclarationName(child) ?? bindingName;
+    node = child;
+    found = true;
+  }
+
+  return found ? { node, bindingName } : undefined;
+}
+
+/** Returns the authored name introduced by a supported declaration node. */
+function authoredDeclarationName(node: ts.Node): string | undefined {
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+    return node.name.text;
+  }
+  if (ts.isFunctionDeclaration(node) && node.name) return node.name.text;
+  return undefined;
 }

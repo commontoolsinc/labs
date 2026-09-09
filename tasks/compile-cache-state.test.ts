@@ -8,10 +8,11 @@ import {
   inferCurrentRunFallbackState,
   matcherForGlob,
   pathTouchesCompileCacheKey,
-  recordUnstampedBaselineRunState,
-  uniformCacheStates,
 } from "./compile-cache-state.ts";
-import type { CompileCacheStates } from "./ci-check-lib.ts";
+import {
+  COMPILE_CACHE_FAMILIES,
+  type CompileCacheStates,
+} from "./ci-check-lib.ts";
 
 async function captureLogs(fn: () => void | Promise<void>): Promise<string[]> {
   const logs: string[] = [];
@@ -67,14 +68,6 @@ Deno.test("classifyCacheKeyState is cold iff a changed file touches the key set"
   assertEquals(classifyCacheKeyState([]), "warm");
 });
 
-Deno.test("uniformCacheStates covers every compile-cache family", () => {
-  const cold = uniformCacheStates("cold");
-  assertEquals(Object.values(cold), Object.keys(cold).map(() => "cold"));
-  assert(Object.keys(cold).includes("pattern-unit"));
-  assert(Object.keys(cold).includes("pattern-integration"));
-  assert(Object.keys(cold).includes("generated-patterns"));
-});
-
 Deno.test("classifyRunAgainstPredecessor classifies via changed files", async () => {
   assertEquals(
     await classifyRunAgainstPredecessor("headsha", "basesha", (base, head) => {
@@ -116,11 +109,12 @@ Deno.test("classifyRunAgainstPredecessor fails open to unknown", async () => {
   );
 });
 
-// The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
-// argument list of every cc-* compile-cache key in the workflow. If this
-// fails, update the constant and the workflow together (and matcherForGlob
-// if a new glob shape appeared).
 Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", async () => {
+  // The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
+  // argument list of every cc-* compile-cache key in the workflow. If this
+  // fails, update the constant and the workflow together (and matcherForGlob if
+  // a new glob shape appeared).
+
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
@@ -147,7 +141,7 @@ Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", asy
   }
 });
 
-Deno.test("pattern integration cache rotates for .ts and .tsx changes", async () => {
+Deno.test("pattern integration cache follows sources and shard selector", async () => {
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
@@ -158,9 +152,26 @@ Deno.test("pattern integration cache rotates for .ts and .tsx changes", async ()
   const job = workflow.slice(start, end);
   assert(
     job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx')",
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts', 'tasks/weighted-shards.ts')",
     ),
-    "pattern integration cache must rotate when either TypeScript extension changes",
+    "pattern integration cache must rotate when source or file assignment changes",
+  );
+});
+
+Deno.test("pattern unit cache follows sources and shard selector", async () => {
+  const workflow = await Deno.readTextFile(
+    new URL("../.github/workflows/deno.yml", import.meta.url),
+  );
+  const start = workflow.indexOf("  pattern-unit-test:\n");
+  const end = workflow.indexOf("\n  # ---", start);
+  assert(start >= 0 && end > start, "pattern unit job not found");
+
+  const job = workflow.slice(start, end);
+  assert(
+    job.includes(
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts')",
+    ),
+    "pattern unit cache must rotate when source or file assignment changes",
   );
 });
 
@@ -298,7 +309,7 @@ Deno.test("fillMissingFamiliesFromFingerprint fills only unknown families, only 
   assertEquals(recorded["pattern-integration"], "cold");
   assertEquals(recorded["generated-patterns"], "cold");
 
-  const allFamilies = Object.keys(uniformCacheStates("cold")).sort();
+  const allFamilies = [...COMPILE_CACHE_FAMILIES].sort();
   assertEquals(Object.keys(recorded).sort(), allFamilies);
   assertEquals(filled, allFamilies.length - 1);
   // A non-zero fill is announced in the transcript, with the count.
@@ -318,54 +329,4 @@ Deno.test("fillMissingFamiliesFromFingerprint is a no-op (and silent) for warm a
     assertEquals(recorded, { "pattern-unit": "warm" });
     assertEquals(logs.length, 0);
   }
-});
-
-Deno.test("recordUnstampedBaselineRunState retro-classifies against the predecessor and logs only cold", async () => {
-  // Cold: the compare against the predecessor touches the key set → every
-  // family recorded cold, with a transcript line naming the run.
-  const cold = new Map<number, CompileCacheStates>();
-  const coldLogs = await captureLogs(() =>
-    recordUnstampedBaselineRunState(
-      cold,
-      { id: 42, head_sha: "head" },
-      "prev",
-      "PR #4586",
-      (base, head) => {
-        assertEquals([base, head], ["prev", "head"]);
-        return Promise.resolve(["deno.lock"]);
-      },
-    )
-  );
-  assertEquals(cold.get(42), uniformCacheStates("cold"));
-  assertEquals(coldLogs.length, 1);
-  assert(coldLogs[0]!.includes("42"));
-  assert(coldLogs[0]!.includes("PR #4586"));
-  assert(coldLogs[0]!.includes("retro-classified cold"));
-
-  // Warm: the compare touches nothing in the key set → uniform-warm, no log.
-  const warm = new Map<number, CompileCacheStates>();
-  const warmLogs = await captureLogs(() =>
-    recordUnstampedBaselineRunState(
-      warm,
-      { id: 7, head_sha: "head" },
-      "prev",
-      "abc1234",
-      () => Promise.resolve(["docs/readme.md"]),
-    )
-  );
-  assertEquals(warm.get(7), uniformCacheStates("warm"));
-  assertEquals(warmLogs.length, 0);
-
-  // Unknown: no predecessor → records nothing, and never runs the compare.
-  const unknown = new Map<number, CompileCacheStates>();
-  await recordUnstampedBaselineRunState(
-    unknown,
-    { id: 9, head_sha: "head" },
-    undefined,
-    "def5678",
-    () => {
-      throw new Error("must not compare without a predecessor");
-    },
-  );
-  assertEquals(unknown.size, 0);
 });

@@ -11,24 +11,14 @@
  *
  * So the list is debt, made visible. The gate fails on an evaluation error
  * that is NOT listed here, and fails when a listed entry starts evaluating
- * again — so the list can only shrink, never quietly grow.
+ * again — so the list can only shrink, never quietly grow. It also fails on
+ * an entry naming a required pattern: an unevaluable pattern is exempt from
+ * the gate entirely, which the aggressively auto-updating roots may never be
+ * (`pattern-break-registry-guards.ts`).
  *
- * Entries are the pattern key (path relative to `packages/patterns`). Several
- * of these are real `export default pattern(...)` entries, not helpers, so
- * anyone who created a piece from one back when it worked has a piece that
- * this gate does not protect.
+ * An entry is the pattern key (path relative to `packages/patterns`). An
+ * entry may name a real `export default pattern(...)` rather than a helper
+ * module, so anyone who created a piece from one back when it worked has a
+ * piece that this gate does not protect.
  */
-export const UNEVALUABLE_PATTERNS: ReadonlySet<string> = new Set([
-  // "Bidirectionally bound property $items is not reactive"
-  "examples/cf-picker.tsx",
-  // "Possible HTML comment rejected ... (SES_HTML_COMMENT_REJECTED)"
-  "google/WIP/google-docs-importer.tsx",
-  "google/core/util/google-docs-client.ts",
-  "google/core/util/google-docs-markdown.ts",
-  // "Reactive.map(fn) is no longer supported: an inline pattern has no stable
-  // identity" — the authored `.map(...)` lowering.
-  "google/extractors/email-pattern-dreamer.tsx",
-  "google/extractors/email-pattern-launcher.tsx",
-  "google/extractors/hotel-membership-gmail-agent.tsx",
-  "google/extractors/usps-informed-delivery.tsx",
-]);
+export const UNEVALUABLE_PATTERNS: ReadonlySet<string> = new Set([]);

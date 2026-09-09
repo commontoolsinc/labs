@@ -3,6 +3,7 @@
  * Every non-empty line is one plain span. The document has no structure or
  * definitions.
  */
+
 import type { Document, Line } from "../../model.ts";
 import type { Highlighter } from "../language.ts";
 

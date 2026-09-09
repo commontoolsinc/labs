@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { preserveSourceMapRange } from "../ast/utils.ts";
 import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
@@ -43,18 +44,20 @@ export class CFHelpers {
     return !!this.#helperIdent;
   }
 
-  // Returns an PropertyAccessExpression of the requested
-  // helper name e.g. `(__cfHelpers.lift)`.
+  /**
+   * Carries the source-map range of `originalNode` and the checker identity of
+   * `identityNode` onto `node` without assigning a text range. The range and
+   * identity nodes may differ or coincide.
+   */
   preserveNodeSourceMap<T extends ts.Node>(
     node: T,
     originalNode: ts.Node,
-    identityNode?: ts.Node,
+    identityNode: ts.Node,
   ): T {
-    const sourceMapRange = ts.getSourceMapRange(originalNode) ?? originalNode;
-    const preserved = ts.setSourceMapRange(node, sourceMapRange);
-    return identityNode
-      ? ts.setOriginalNode(preserved, identityNode) as T
-      : preserved as T;
+    return ts.setOriginalNode(
+      preserveSourceMapRange(node, originalNode),
+      identityNode,
+    ) as T;
   }
 
   getHelperExpr(
@@ -77,11 +80,11 @@ export class CFHelpers {
       originalNode,
       this.#helperIdent!,
     );
-    const helperName = this.preserveNodeSourceMap(
+    const helperName = preserveSourceMapRange(
       this.#factory.createIdentifier(name),
       originalNode,
     );
-    return this.preserveNodeSourceMap(
+    return preserveSourceMapRange(
       this.#factory.createPropertyAccessExpression(
         helperIdent,
         helperName,
@@ -96,7 +99,7 @@ export class CFHelpers {
     typeArguments: readonly ts.TypeNode[] | undefined,
     argumentsArray: readonly ts.Expression[],
   ): ts.CallExpression {
-    return this.preserveNodeSourceMap(
+    return preserveSourceMapRange(
       this.#factory.createCallExpression(
         this.getHelperExpr(name, originalNode),
         typeArguments,
@@ -106,8 +109,10 @@ export class CFHelpers {
     );
   }
 
-  // Returns an QualifiedName of the requested
-  // helper name e.g. `__cfHelpers.JSONSchema`.
+  /**
+   * Returns a `QualifiedName` for the requested helper name, e.g.
+   * `__cfHelpers.JSONSchema`.
+   */
   getHelperQualified(
     name: string,
   ): ts.QualifiedName {
@@ -121,20 +126,13 @@ export class CFHelpers {
   }
 }
 
-// The disable-directive check lives in runtime-contract.ts (typescript-free,
+// The first-content-line scan lives in runtime-contract.ts (typescript-free,
 // runtime-importable); re-exported here for the existing compile-side callers.
-export {
-  findFirstContentLineIndex,
-  sourceDisablesCfTransform,
-  sourceHasIgnoredDisableDirective,
-} from "./runtime-contract.ts";
-import {
-  findFirstContentLineIndex,
-  sourceDisablesCfTransform,
-} from "./runtime-contract.ts";
+export { findFirstContentLineIndex } from "./runtime-contract.ts";
+import { findFirstContentLineIndex } from "./runtime-contract.ts";
 
-// Rewrite a leading transform directive line, or inject helpers by default,
-// so the AST transformer pipeline has access to helpers like `lift`.
+// Inject helpers so the AST transformer pipeline has access to helpers like
+// `lift`.
 // This operates on strings, and to be used outside of
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.
@@ -161,14 +159,6 @@ export function transformCfDirective(
   const firstContentLineIndex = findFirstContentLineIndex(lines);
   if (firstContentLineIndex === null) {
     return source;
-  }
-
-  if (sourceDisablesCfTransform(source)) {
-    return [
-      ...lines.slice(0, firstContentLineIndex),
-      "",
-      ...lines.slice(firstContentLineIndex + 1),
-    ].join("\n");
   }
 
   return injectCfHelpers(source, fileName);

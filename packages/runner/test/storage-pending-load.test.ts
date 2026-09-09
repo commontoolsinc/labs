@@ -1,7 +1,12 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
+import {
+  type MemorySpace,
+  ReplicaLoadFailureError,
+  type URI,
+} from "../src/storage/interface.ts";
+import { StorageManager } from "../src/storage/v2.ts";
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,
@@ -20,16 +25,32 @@ describe("storage pending-load generations", () => {
     await disposeSchedulerTestRuntime(env);
   });
 
+  it("rejects event attention resolution when the replica lacks the capability", async () => {
+    const storage = {
+      open: () => ({ replica: {} }),
+    };
+    await expect(
+      StorageManager.prototype.resolveEventAttention.call(
+        storage,
+        space,
+        "of:event",
+        1,
+        "of:sidecar",
+        "retry",
+      ),
+    ).rejects.toThrow("storage replica does not support event attention");
+  });
+
   it("keeps the document pending until its CFC schema load settles", async () => {
     const { runtime, tx } = env;
     const cell = runtime.getCell(space, "pending-through-cfc", undefined);
     await tx.commit();
     env.tx = runtime.edit();
 
-    const storage = runtime.storageManager as any;
+    const storage = runtime.storageManager as StorageManager;
     const schemaStarted = Promise.withResolvers<void>();
     const releaseSchema = Promise.withResolvers<void>();
-    storage.syncCfcSchemaDocument = async () => {
+    storage.accessForTestingOnly.cfcSchemaDocumentSyncer = async () => {
       schemaStarted.resolve();
       await releaseSchema.promise;
       return undefined;
@@ -57,12 +78,12 @@ describe("storage pending-load generations", () => {
 
   it("tracks linked-document pulls kicked from data values", async () => {
     const { runtime } = env;
-    const storage = runtime.storageManager as any;
+    const storage = runtime.storageManager as StorageManager;
     const targetId = "of:pending-linked-target";
     const syncStarted = Promise.withResolvers<void>();
     const releaseSync = Promise.withResolvers<void>();
     const originalOpen = storage.open.bind(storage);
-    storage.open = (openSpace: string) => {
+    storage.open = (openSpace: MemorySpace) => {
       const provider = originalOpen(openSpace);
       return new Proxy(provider, {
         get(target, property, receiver) {
@@ -89,7 +110,7 @@ describe("storage pending-load generations", () => {
 
     const base: NormalizedLink = {
       space,
-      id: "of:data-root" as any,
+      id: "of:data-root" as URI,
       scope: "space",
       path: [],
     };
@@ -99,11 +120,10 @@ describe("storage pending-load generations", () => {
       },
     };
     const promises: Promise<unknown>[] = [];
-    storage.collectLinkedCellSyncs(
+    storage.accessForTestingOnly.collectLinkedCellSyncs(
       value,
       base,
       undefined,
-      new ContextualFlowControl(),
       promises,
       new Set(),
     );
@@ -118,11 +138,11 @@ describe("storage pending-load generations", () => {
 
   it("releases the pending generation when syncCell rejects", async () => {
     const { runtime } = env;
-    const storage = runtime.storageManager as any;
+    const storage = runtime.storageManager as StorageManager;
     const id = "of:pending-sync-rejection";
     const cell = runtime.getCell(space, id);
     const originalOpen = storage.open.bind(storage);
-    storage.open = (openSpace: string) => {
+    storage.open = (openSpace: MemorySpace) => {
       const provider = originalOpen(openSpace);
       return new Proxy(provider, {
         get(target, property, receiver) {
@@ -149,10 +169,10 @@ describe("storage pending-load generations", () => {
   });
 
   it("releases linked-document loads when provider sync throws synchronously", () => {
-    const storage = env.runtime.storageManager as any;
+    const storage = env.runtime.storageManager as StorageManager;
     const targetId = "of:pending-linked-sync-throw";
     const originalOpen = storage.open.bind(storage);
-    storage.open = (openSpace: string) => {
+    storage.open = (openSpace: MemorySpace) => {
       const provider = originalOpen(openSpace);
       return new Proxy(provider, {
         get(target, property, receiver) {
@@ -170,7 +190,7 @@ describe("storage pending-load generations", () => {
     try {
       const base: NormalizedLink = {
         space,
-        id: "of:throwing-data-root" as any,
+        id: "of:throwing-data-root" as URI,
         scope: "space",
         path: [],
       };
@@ -178,11 +198,10 @@ describe("storage pending-load generations", () => {
         "/": { "link@1": { id: targetId, path: [], space } },
       };
       expect(() =>
-        storage.collectLinkedCellSyncs(
+        storage.accessForTestingOnly.collectLinkedCellSyncs(
           value,
           base,
           undefined,
-          new ContextualFlowControl(),
           [],
           new Set(),
         )
@@ -195,10 +214,10 @@ describe("storage pending-load generations", () => {
   });
 
   it("rejects linked-document loads when provider sync rejects", async () => {
-    const storage = env.runtime.storageManager as any;
+    const storage = env.runtime.storageManager as StorageManager;
     const targetId = "of:pending-linked-sync-rejection";
     const originalOpen = storage.open.bind(storage);
-    storage.open = (openSpace: string) => {
+    storage.open = (openSpace: MemorySpace) => {
       const provider = originalOpen(openSpace);
       return new Proxy(provider, {
         get(target, property, receiver) {
@@ -214,7 +233,7 @@ describe("storage pending-load generations", () => {
     try {
       const base: NormalizedLink = {
         space,
-        id: "of:rejecting-data-root" as any,
+        id: "of:rejecting-data-root" as URI,
         scope: "space",
         path: [],
       };
@@ -222,11 +241,10 @@ describe("storage pending-load generations", () => {
         "/": { "link@1": { id: targetId, path: [], space } },
       };
       const promises: Promise<unknown>[] = [];
-      storage.collectLinkedCellSyncs(
+      storage.accessForTestingOnly.collectLinkedCellSyncs(
         value,
         base,
         undefined,
-        new ContextualFlowControl(),
         promises,
         new Set(),
       );
@@ -243,20 +261,87 @@ describe("storage pending-load generations", () => {
   });
 
   it("rejects failed generations and gives a later load a new identity", async () => {
-    const storage = env.runtime.storageManager as any;
-    const address = { space, scope: "space", id: "of:generation" };
+    const storage = env.runtime.storageManager as StorageManager;
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:generation" as URI,
+    };
     const key = `${address.space}/${address.scope}/${address.id}`;
+    const recoveries: Array<{
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }> = [];
+    storage.loadRecoveryObserver = (recovery: typeof recoveries[number]) => {
+      recoveries.push(recovery);
+    };
 
-    const releaseFirst = storage.registerPendingLoad(address);
+    const releaseFirst = storage.accessForTestingOnly.registerPendingLoad(
+      address,
+    );
     const firstGeneration = storage.pendingLoadGeneration(key);
+    expect(firstGeneration).toBeDefined();
+    expect(recoveries).toEqual([]);
     const firstSettled = storage.loadsSettled([key]);
     releaseFirst(new Error("transport failed"));
     await expect(firstSettled).rejects.toThrow("transport failed");
+    expect(recoveries).toEqual([]);
 
-    const releaseSecond = storage.registerPendingLoad(address);
+    const releaseSecond = storage.accessForTestingOnly.registerPendingLoad(
+      address,
+    );
     const secondGeneration = storage.pendingLoadGeneration(key);
-    expect(secondGeneration).toBeGreaterThan(firstGeneration);
+    expect(secondGeneration).toBeGreaterThan(firstGeneration!);
+    expect(recoveries).toEqual([]);
     releaseSecond();
     await storage.loadsSettled([key]);
+    expect(recoveries).toEqual([{
+      failedEpoch: `load-key:${key}`,
+      recoveryEpoch: expect.stringContaining(`:${secondGeneration}`),
+    }]);
+  });
+
+  it("matches a failed load after the storage manager is recreated", async () => {
+    const first = env.runtime.storageManager as StorageManager;
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:recreated-generation" as URI,
+    };
+    const key = `${address.space}/${address.scope}/${address.id}`;
+    const releaseFirst = first.accessForTestingOnly.registerPendingLoad(
+      address,
+    );
+    const firstSettled = first.loadsSettled([key]);
+    releaseFirst(new Error("transport failed before recreation"));
+
+    let failedEpoch: string | undefined;
+    try {
+      await firstSettled;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReplicaLoadFailureError);
+      failedEpoch = (error as ReplicaLoadFailureError).failure.recoveryEpoch;
+    }
+    expect(failedEpoch).toBeDefined();
+
+    const replacementEnv = createSchedulerTestRuntime(import.meta.url);
+    try {
+      const replacement = replacementEnv.runtime
+        .storageManager as StorageManager;
+      let recovery:
+        | { failedEpoch: string; recoveryEpoch: string }
+        | undefined;
+      replacement.loadRecoveryObserver = (value: typeof recovery) => {
+        recovery = value;
+      };
+      const releaseReplacement = replacement.accessForTestingOnly
+        .registerPendingLoad(address);
+      expect(recovery).toBeUndefined();
+      releaseReplacement();
+      expect(recovery?.failedEpoch).toBe(failedEpoch);
+      expect(recovery?.recoveryEpoch).not.toBe(failedEpoch);
+    } finally {
+      await disposeSchedulerTestRuntime(replacementEnv);
+    }
   });
 });

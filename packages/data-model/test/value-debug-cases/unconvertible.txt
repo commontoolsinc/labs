@@ -1,0 +1,18 @@
+{
+  // A value the conversion cannot read at all, here because listing its keys
+  // throws, is represented by a marker carrying the error's message.
+  "keys throw": new Proxy({}, {
+    ownKeys() {
+      throw new Error("no keys");
+    },
+  }),
+}
+
+--
+
+keys throw:
+/unconvertible("no keys")
+/unconvertible("no keys")
+{
+  "/unconvertible": "no keys"
+}

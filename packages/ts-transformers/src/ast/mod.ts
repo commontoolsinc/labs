@@ -1,4 +1,8 @@
 export {
+  type CallArgumentPosition,
+  getCallArgumentPosition,
+} from "./call-arguments.ts";
+export {
   type ArrayCallbackContainerCallKind,
   type ArrayMethodAccessKind,
   type ArrayMethodCallSiteInfo,
@@ -14,6 +18,7 @@ export {
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
   classifyWildcardTraversalCall,
+  declaredVerbResultTypeNode,
   detectCallKind,
   detectDirectBuilderCall,
   detectNewExpressionKind,
@@ -24,6 +29,7 @@ export {
   getLoweredArrayMethodName,
   getPatternBuilderCallbackArgument,
   hasReactiveCollectionProvenance,
+  isCallbackReference,
   isConsumedByTerminalChainCall,
   isPatternBuilderCall,
   isReactiveOriginCall,
@@ -33,6 +39,8 @@ export {
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
   isWildcardTraversalCall,
+  resolveCallbackFunctionExpression,
+  type VerbBuilderName,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {
@@ -67,11 +75,14 @@ export {
   getNodeText,
   getTypeAtLocationWithFallback,
   getVariableInitializer,
+  hasAuthoredSourceSite,
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,
+  isSyntheticNode,
   preserveLineage,
   preserveSourceMapRange,
+  recoverAuthoredPosition,
   setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";

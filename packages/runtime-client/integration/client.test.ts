@@ -1,5 +1,10 @@
 #!/usr/bin/env -S deno run -A
 
+import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { render } from "@commonfabric/html/client";
+import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
   createSession,
   Identity,
@@ -7,23 +12,27 @@ import {
   Session,
 } from "@commonfabric/identity";
 import { env, waitFor } from "@commonfabric/integration";
-import { defer } from "@commonfabric/utils/defer";
+import { Program } from "@commonfabric/js-compiler";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import {
   $conn,
+  attachOptionsFrom,
   CellHandle,
   type JSONSchema,
   RequestType,
+  type RuntimeAttachOptions,
   RuntimeClient,
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { Program } from "@commonfabric/js-compiler";
-import { render } from "@commonfabric/html/client";
-import { MockDoc } from "@commonfabric/html/mock-doc";
+import {
+  experimentalOptionsFromEnv,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+import { MessagePortRuntimeTransport } from "@commonfabric/runtime-client/transports/message-port";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
+import { defer } from "@commonfabric/utils/defer";
 
 const { API_URL } = env;
 
@@ -35,6 +44,41 @@ const keyConfig: IdentityCreateConfig = {
 };
 
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
+
+// The server-execution v2 posture this test process runs (testing.md §2):
+// resolved exactly like a deployed entry point — the canonical env
+// mapping, else the first-party default (ON since the flip) — so the
+// worker below runs the arm the lane's toolshed runs: the DEFAULT lane's
+// unset flag resolves ON, the explicit-`false` OFF regression-guard
+// lane the OFF arm. An UNDECLARED worker resolves the ambient baseline
+// instead, which post-flip is the P7 review's finding-7 mixed posture.
+const SERVER_EXECUTION_RESOLVED = withServerExecutionDefault(
+  experimentalOptionsFromEnv(Deno.env.get),
+).serverExecution;
+
+/**
+ * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+ * a step listed there for this file is skipped ONLY when this process runs
+ * the ON posture, loudly (the entry's reason is printed), and only while
+ * the entry exists — the OFF arm and an unlisted step always run. Never a
+ * silent filter: the CI step prints every entry, and the validator
+ * requires this file to name each listed step and call this guard.
+ */
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_RESOLVED !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "runtime-client",
+    "integration/client.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] runtime-client: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 const TEST_PROGRAM = `import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
@@ -144,14 +188,97 @@ describe("RuntimeClient", () => {
       assertEquals(value, input);
     });
 
+    it("carries a fabric value through a real worker, set to sync to subscribe", async () => {
+      // The envelope's whole purpose, at the seam it exists for: a real
+      // `RuntimeClient` over a real Worker, with no encoding double standing
+      // in for the crossing. Structured cloning would have stripped the
+      // `FabricBytes` to `{}` on the way, and a `bigint` it refuses outright,
+      // so each arm below fails differently without the envelope rather than
+      // all of them failing the same way.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const schema = { type: "object" } as const satisfies JSONSchema;
+      const cause = "test-fabric-value-" + Date.now();
+      const cell = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
+
+      const content = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+      await cell.set({
+        bytes: new FabricBytes(content),
+        big: 9007199254740993n,
+        tag: Symbol.for("cf.test.interned"),
+      });
+      await rt.idle();
+
+      const synced = await cell.sync() as Record<string, unknown>;
+      assert(
+        synced.bytes instanceof FabricBytes,
+        `synced back ${
+          (synced.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(synced.bytes)
+        }, not a FabricBytes`,
+      );
+      assertEquals(synced.bytes.slice(), content);
+      // A `bigint` past `Number.MAX_SAFE_INTEGER`, so a number round trip
+      // would not return it even if one carried the arm at all.
+      assertEquals(synced.big, 9007199254740993n);
+      // Interned, which is the only symbol the fabric boundary admits: a
+      // unique one has no identity to rebuild on the far side.
+      assertEquals(synced.tag, Symbol.for("cf.test.interned"));
+
+      // The notification path is a separate crossing from the response path,
+      // and it is watched from a SECOND handle on the same cell. The writing
+      // handle is no good for it: `set()` updates its own cache and calls its
+      // own subscribers synchronously with the object it was handed, so a
+      // subscriber there would be shown the value it just built and would say
+      // `instanceof FabricBytes` about a `FabricBytes` that never left the
+      // process. `getCell()` returns a fresh handle, and this one never
+      // writes, so every value it is given arrived over the connection.
+      const nextContent = new Uint8Array([1, 2, 3]);
+      const reader = await rt.getCell<Record<string, unknown>>(
+        session.space,
+        cause,
+        schema,
+      );
+      const gotNext = defer<Record<string, unknown>>();
+      const cancel = reader.subscribe((value) => {
+        const record = value as Record<string, unknown> | undefined;
+        if (record?.marker === "second") gotNext.resolve(record);
+      });
+
+      const sent = {
+        bytes: new FabricBytes(nextContent),
+        marker: "second",
+      };
+      await cell.set(sent);
+
+      const delivered = await gotNext.promise;
+      cancel();
+      // Not the object that was written, which is what says this came back
+      // rather than across.
+      assert(delivered !== sent);
+      assert(
+        delivered.bytes instanceof FabricBytes,
+        `delivered ${
+          (delivered.bytes as { constructor?: { name?: string } })?.constructor
+            ?.name ?? String(delivered.bytes)
+        }, not a FabricBytes`,
+      );
+      assertEquals(delivered.bytes.slice(), nextContent);
+    });
+
     it("recursively returns VNodes inline with schema-driven serialization", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEMP_PATTERN, session.space, {
+      const piece = await rt.createPiece(TEMP_PATTERN, session.space, {
         run: true,
       });
-      const cell = page.cell();
+      const cell = piece.cell();
       const value = await cell.sync() as { $UI?: VNode; $NAME?: string };
       // With schema-driven serialization (asCell: ["cell"]), children are resolved
       // inline as VNodes rather than wrapped in CellHandle indirection.
@@ -401,25 +528,25 @@ describe("RuntimeClient", () => {
     });
   });
 
-  describe("page operations", () => {
-    it("creates a page from URL and retrieves it", async () => {
+  describe("piece operations", () => {
+    it("creates a piece from URL and retrieves it", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: true,
       });
-      assertExists(page.id());
+      assertExists(piece.id());
     });
 
     it("reads a created piece's source state", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: true,
       });
-      const source = await rt.getPieceSource(page.id(), session.space);
+      const source = await rt.getPieceSource(piece.id(), session.space);
 
       assertEquals(source.space, session.space);
       assertExists(source.pattern);
@@ -438,6 +565,68 @@ describe("RuntimeClient", () => {
         source.files.some((file) => file.contents.includes("home")),
         true,
       );
+      const revisionSource = await rt.getPieceSourceRevision(
+        piece.id(),
+        session.space,
+        source.history[0].revisionId,
+      );
+      assertEquals(revisionSource.pattern, source.history[0].pattern);
+      assertEquals(revisionSource.files, source.files);
+    });
+
+    it("clones a piece into another named space and follows it", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      const sourcePiece = await rt.createPiece(TEST_PROGRAM, session.space, {
+        run: true,
+      });
+      const destinationName = `piece-clone-${crypto.randomUUID()}`;
+      const destinationSpace = await rt.resolveSpaceName(destinationName);
+
+      const clone = await rt.clonePiece(
+        sourcePiece.id(),
+        session.space,
+        destinationSpace,
+      );
+      const source = await rt.getPieceSource(sourcePiece.id(), session.space);
+      const cloned = await rt.getPieceSource(clone.id(), destinationSpace);
+
+      assertEquals(cloned.space, destinationSpace);
+      assertEquals(cloned.pattern, source.pattern);
+      assertEquals(cloned.origin, {
+        url: `cf:/${session.space}/${sourcePiece.cell().id()}`,
+        kind: "fabric-piece",
+      });
+      assertEquals(
+        cloned.history.map((revision) => revision.operation),
+        ["create"],
+      );
+    });
+
+    it("clones a piece's input data through the runtime protocol", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      const sourcePiece = await rt.createPiece(TEMP_PATTERN, session.space, {
+        argument: { count: 7, label: "copied label" },
+        run: true,
+      });
+      const destinationName = `piece-clone-data-${crypto.randomUUID()}`;
+      const destinationSpace = await rt.resolveSpaceName(destinationName);
+
+      const clone = await rt.clonePiece(
+        sourcePiece.id(),
+        session.space,
+        destinationSpace,
+        { copyData: true },
+      );
+      const response = await rt[$conn]().request<RequestType.CellGet>({
+        type: RequestType.CellGet,
+        cell: clone.cell().ref(),
+        meta: "argument",
+        includeRef: true,
+      });
+
+      assertEquals(response.value, { count: 7, label: "copied label" });
     });
 
     it("detaches a followed root through the runtime-client protocol", async () => {
@@ -466,113 +655,112 @@ describe("RuntimeClient", () => {
     });
 
     it("confirms an incompatible followed source with a one-use token", async () => {
-      let servedSource = FOLLOWED_SOURCE_V1;
-      const sourceServer = Deno.serve(
-        {
-          hostname: "127.0.0.1",
-          port: 0,
-          onListen: () => {},
-        },
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      await assertRejects(
         () =>
-          new Response(servedSource, {
+          rt.createPiece(
+            new URL("data:text/typescript,export%20default%2042"),
+            session.space,
+          ),
+        Error,
+        "Piece source URL must use HTTP or HTTPS",
+      );
+
+      // A URL is a place to read a program from once, not an origin: the piece
+      // it creates records none, and its owner names one afterwards.
+      const sourceServer = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(FOLLOWED_SOURCE_V1, {
             headers: { "content-type": "text/typescript-jsx" },
           }),
       );
       const address = sourceServer.addr as Deno.NetAddr;
-      const sourceUrl = new URL(
-        `http://${address.hostname}:${address.port}/followed.tsx`,
-      );
-
       try {
-        const session = await createTestSession();
-        await using rt = await createRuntimeClient(session);
-        await assertRejects(
-          () =>
-            rt.createPage(
-              new URL("data:text/typescript,export%20default%2042"),
-              session.space,
-            ),
-          Error,
-          "Piece source URL must use HTTP or HTTPS",
-        );
-        const page = await rt.createPage(sourceUrl, session.space, {
-          argument: {},
-          run: true,
-        });
-        const followed = await rt.getPieceSource(page.id(), session.space);
-        assertEquals(followed.origin?.url, sourceUrl.href);
-
-        const detached = await rt.updatePieceSource(
-          page.id(),
+        const fetched = await rt.createPiece(
+          new URL(`http://${address.hostname}:${address.port}/fetched.tsx`),
           session.space,
-          { kind: "detach" },
+          { argument: {}, run: true },
         );
-        const followedRevision = detached.source.history.find((revision) =>
-          revision.origin?.url === sourceUrl.href
-        );
-        assertExists(followedRevision);
-        servedSource = FOLLOWED_SOURCE_V2;
-        const action = {
-          kind: "follow" as const,
-          revisionId: followedRevision.revisionId,
-        };
-
-        const warning = await rt.updatePieceSource(
-          page.id(),
+        const fetchedSource = await rt.getPieceSource(
+          fetched.id(),
           session.space,
-          action,
         );
-        assertExists(warning.compatibilityWarning);
-        assertExists(warning.confirmationToken);
-
-        await assertRejects(
-          () =>
-            rt.updatePieceSource(page.id(), session.space, action, {
-              confirmationToken: "",
-            }),
-          Error,
-          "confirmationToken must be a non-empty string",
-        );
-        await assertRejects(
-          () =>
-            rt.updatePieceSource(page.id(), session.space, action, {
-              confirmationToken: 42,
-            } as unknown as { confirmationToken: string }),
-          Error,
-          "confirmationToken must be a non-empty string",
-        );
-
-        const applied = await rt.updatePieceSource(
-          page.id(),
-          session.space,
-          action,
-          { confirmationToken: warning.confirmationToken },
-        );
-        assertEquals(applied.compatibilityWarning, undefined);
-        assertEquals(applied.confirmationToken, undefined);
-        assertEquals(applied.source.origin?.url, sourceUrl.href);
-
-        await assertRejects(
-          () =>
-            rt.updatePieceSource(page.id(), session.space, action, {
-              confirmationToken: warning.confirmationToken,
-            }),
-          Error,
-          "compatibility confirmation is no longer valid",
-        );
+        assertEquals(fetchedSource.origin, undefined);
+        assertEquals(fetchedSource.unusableOrigin, undefined);
       } finally {
         await sourceServer.shutdown();
       }
+
+      // The upstream piece runs source whose argument contract differs from
+      // the follower's, so following it is a contract change its owner has to
+      // confirm. That confirmation is what this test drives over the wire.
+      const upstream = await rt.createPiece(FOLLOWED_SOURCE_V2, session.space, {
+        argument: {},
+        run: true,
+      });
+      const piece = await rt.createPiece(FOLLOWED_SOURCE_V1, session.space, {
+        argument: {},
+        run: true,
+      });
+      const url = `cf:/${session.space}/${upstream.id()}`;
+      const action = { kind: "repoint" as const, url };
+
+      const warning = await rt.updatePieceSource(
+        piece.id(),
+        session.space,
+        action,
+      );
+      assertExists(warning.compatibilityWarning);
+      assertExists(warning.confirmationToken);
+      assertEquals(warning.source.origin, undefined);
+
+      await assertRejects(
+        () =>
+          rt.updatePieceSource(piece.id(), session.space, action, {
+            confirmationToken: "",
+          }),
+        Error,
+        "confirmationToken must be a non-empty string",
+      );
+      await assertRejects(
+        () =>
+          rt.updatePieceSource(piece.id(), session.space, action, {
+            confirmationToken: 42,
+          } as unknown as { confirmationToken: string }),
+        Error,
+        "confirmationToken must be a non-empty string",
+      );
+
+      const applied = await rt.updatePieceSource(
+        piece.id(),
+        session.space,
+        action,
+        { confirmationToken: warning.confirmationToken },
+      );
+      assertEquals(applied.compatibilityWarning, undefined);
+      assertEquals(applied.confirmationToken, undefined);
+      assertEquals(applied.source.origin?.url, url);
+
+      await assertRejects(
+        () =>
+          rt.updatePieceSource(piece.id(), session.space, action, {
+            confirmationToken: warning.confirmationToken,
+          }),
+        Error,
+        "compatibility confirmation is no longer valid",
+      );
     });
 
-    it("retrieves a page with its result schema, including UI", async () => {
+    it("retrieves a piece with its result schema, including UI", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: true,
       });
-      const retrieved = await rt.getPage(page.id(), session.space, true);
+      const retrieved = await rt.getPiece(piece.id(), session.space, true);
       assertExists(retrieved);
 
       const cell = retrieved.cell();
@@ -580,38 +768,38 @@ describe("RuntimeClient", () => {
       const value = cell.get() as { $UI?: VNode; $NAME?: string };
 
       assertEquals(value.$NAME, "Home");
-      assertExists(value.$UI, "Retrieved page cell should include $UI");
+      assertExists(value.$UI, "Retrieved piece cell should include $UI");
       assertEquals(value.$UI.name, "h1");
     });
 
-    it("starts and stops page execution", async () => {
+    it("starts and stops piece execution", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: false,
       });
-      await page.start();
+      await piece.start();
       await rt.idle();
-      await page.stop();
+      await piece.stop();
     });
 
-    it("removes a page", async () => {
+    it("removes a piece", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: false,
       });
-      await rt.removePage(page.id(), session.space);
+      await rt.removePiece(piece.id(), session.space);
       await rt.synced(session.space);
 
-      // Note: getPage may still return a reference to a removed page
+      // Note: getPiece may still return a reference to a removed piece
       // because the ID still maps to a cell that existed. The removal
-      // affects the pages list, not the ability to lookup by ID.
+      // affects the pieces list, not the ability to lookup by ID.
     });
 
-    it("gets the pages list cell", async () => {
+    it("gets the pieces list cell", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
@@ -625,7 +813,7 @@ describe("RuntimeClient", () => {
   });
 
   describe("events", () => {
-    it("emits console events from page execution", async () => {
+    it("emits console events from piece execution", async () => {
       const consolePattern = `import { NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
   console.log('hello');
@@ -645,7 +833,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const consoleEvents: { method: string; args: unknown[] }[] = [];
+      const consoleEvents: { method: string; args: readonly unknown[] }[] = [];
       const gotHello = defer<void>();
       rt.on(
         "console",
@@ -661,7 +849,7 @@ export default pattern((_) => {
         },
       );
 
-      await rt.createPage(consoleProgram, session.space, { run: true });
+      await rt.createPiece(consoleProgram, session.space, { run: true });
       await rt.idle();
 
       await gotHello.promise;
@@ -717,14 +905,14 @@ export default pattern((_) => {
   });
 
   describe("html render", () => {
-    it("retrieves UI markup from page cell", async () => {
+    it("retrieves UI markup from piece cell", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: true,
       });
-      const cell = page.cell();
+      const cell = piece.cell();
       await cell.sync();
       const value = cell.get() as { $UI?: VNode; $NAME?: string };
 
@@ -734,14 +922,14 @@ export default pattern((_) => {
       assertEquals(value.$UI.name, "h1");
     });
 
-    it("renders page UI using html render function with CellHandle", async () => {
+    it("renders piece UI using html render function with CellHandle", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+      const piece = await rt.createPiece(TEST_PROGRAM, session.space, {
         run: true,
       });
-      const cell = page.cell();
+      const cell = piece.cell();
       await cell.sync();
       const typedCell = cell as typeof cell & { key(k: "$UI"): typeof cell };
       const uiCell = typedCell.key("$UI").asSchema(rendererVDOMSchema);
@@ -760,24 +948,24 @@ export default pattern((_) => {
       assertEquals(
         root.innerHTML,
         expected,
-        "Should render the page UI correctly",
+        "Should render the piece UI correctly",
       );
 
       cancel();
     });
 
-    it("renders nested pattern components when page UI is typed unknown", async () => {
-      const unknownUiPattern =
-        `import { NAME, pattern, UI } from "commonfabric";
+    it("renders a nested pattern component placed in a parent's tree", async () => {
+      const nestedPattern =
+        `import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 interface ChildOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
 }
 
 interface ParentOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
 }
 
 const Child = pattern<unknown, ChildOutput>(() => {
@@ -800,18 +988,18 @@ export default pattern<unknown, ParentOutput>(() => {
   };
 });`;
 
-      const unknownUiProgram: Program = {
+      const nestedProgram: Program = {
         main: "/main.tsx",
         files: [{
           name: "/main.tsx",
-          contents: unknownUiPattern,
+          contents: nestedPattern,
         }],
       };
 
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(unknownUiProgram, session.space, {
+      const piece = await rt.createPiece(nestedProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -820,7 +1008,7 @@ export default pattern<unknown, ParentOutput>(() => {
       const { document, renderOptions } = mock;
       const root = document.getElementById("root")!;
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+      const cancel = render(root, piece.cell() as any, renderOptions);
 
       await waitFor(
         () =>
@@ -870,7 +1058,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(valueProgram, session.space, {
+      const piece = await rt.createPiece(valueProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -879,7 +1067,7 @@ export default pattern<State>(({ value }) => {
       const { document, renderOptions } = mock;
       const root = document.getElementById("root")!;
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+      const cancel = render(root, piece.cell() as any, renderOptions);
 
       await waitFor(
         () => Promise.resolve(root.innerHTML.includes("Value is 10")),
@@ -924,10 +1112,10 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(derivedProgram, session.space, {
+      const piece = await rt.createPiece(derivedProgram, session.space, {
         run: true,
       });
-      const cell = page.cell() as CellHandle<VNode>;
+      const cell = piece.cell() as CellHandle<VNode>;
       const mock = new MockDoc(
         `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
       );
@@ -943,8 +1131,14 @@ export default pattern<State>(({ value }) => {
       cancel();
     });
 
-    it("renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)", async () => {
-      const scopedHeaderPattern = `import {
+    it({
+      name:
+        "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+      ...onArmStepSkip(
+        "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+      ),
+      fn: async () => {
+        const scopedHeaderPattern = `import {
   computed,
   Default,
   NAME,
@@ -987,60 +1181,61 @@ export default pattern<Input, Output>(({ question, myName }) => {
   };
 });`;
 
-      const scopedHeaderProgram: Program = {
-        main: "/main.tsx",
-        files: [{
-          name: "/main.tsx",
-          contents: scopedHeaderPattern,
-        }],
-      };
+        const scopedHeaderProgram: Program = {
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: scopedHeaderPattern,
+          }],
+        };
 
-      const session = await createTestSession();
-      await using rt = await createRuntimeClient(session);
+        const session = await createTestSession();
+        await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(scopedHeaderProgram, session.space, {
-        run: true,
-      });
-      const cell = page.cell() as CellHandle<VNode>;
-      const nameCell = (page.cell() as any).key("myName").asSchema({
-        type: "string",
-        scope: "user",
-      });
-      const mock = new MockDoc(
-        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
-      );
-      const { document, renderOptions } = mock;
-      const root = document.getElementById("root")!;
-
-      const cancel = render(root, cell, renderOptions);
-
-      try {
-        await waitFor(
-          () => {
-            const html = root.innerHTML;
-            return Promise.resolve(
-              html.includes("Where should we eat?") &&
-                html.includes("me is: &quot;&quot;") &&
-                html.includes("body renders"),
-            );
-          },
-          { timeout: 15000 },
+        const piece = await rt.createPiece(scopedHeaderProgram, session.space, {
+          run: true,
+        });
+        const cell = piece.cell() as CellHandle<VNode>;
+        const nameCell = (piece.cell() as any).key("myName").asSchema({
+          type: "string",
+          scope: "user",
+        });
+        const mock = new MockDoc(
+          `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
         );
+        const { document, renderOptions } = mock;
+        const root = document.getElementById("root")!;
 
-        await nameCell.set("Alex");
-        await waitFor(
-          () =>
-            Promise.resolve(
-              root.innerHTML.includes("me is: &quot;Alex&quot;"),
-            ),
-          { timeout: 5000 },
-        );
-      } finally {
-        cancel();
-      }
+        const cancel = render(root, cell, renderOptions);
+
+        try {
+          await waitFor(
+            () => {
+              const html = root.innerHTML;
+              return Promise.resolve(
+                html.includes("Where should we eat?") &&
+                  html.includes("me is: &quot;&quot;") &&
+                  html.includes("body renders"),
+              );
+            },
+            { timeout: 15000 },
+          );
+
+          await nameCell.set("Alex");
+          await waitFor(
+            () =>
+              Promise.resolve(
+                root.innerHTML.includes("me is: &quot;Alex&quot;"),
+              ),
+            { timeout: 5000 },
+          );
+        } finally {
+          cancel();
+        }
+      },
     });
 
-    it("dispatches click events through rendered page handlers", async () => {
+    it("dispatches click events through rendered piece handlers", async () => {
       const clickPattern =
         `import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";
 
@@ -1076,10 +1271,10 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(clickProgram, session.space, {
+      const piece = await rt.createPiece(clickProgram, session.space, {
         run: true,
       });
-      const valueCell = (page.cell() as any).key("value").asSchema({
+      const valueCell = (piece.cell() as any).key("value").asSchema({
         type: "number",
       });
       const mock = new MockDoc(
@@ -1088,7 +1283,7 @@ export default pattern<State>(({ value }) => {
       const { document, renderOptions } = mock;
       const root = document.getElementById("root")!;
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+      const cancel = render(root, piece.cell() as any, renderOptions);
 
       await waitFor(
         () => Promise.resolve(root.innerHTML.length > 0),
@@ -1150,10 +1345,10 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(clickProgram, session.space, {
+      const piece = await rt.createPiece(clickProgram, session.space, {
         run: true,
       });
-      const valueCell = (page.cell() as any).key("value").asSchema({
+      const valueCell = (piece.cell() as any).key("value").asSchema({
         type: "number",
       });
       const mock = new MockDoc(
@@ -1162,7 +1357,7 @@ export default pattern<State>(({ value }) => {
       const { document, renderOptions } = mock;
       const root = document.getElementById("root")!;
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+      const cancel = render(root, piece.cell() as any, renderOptions);
 
       await waitFor(
         () => Promise.resolve(root.innerHTML.length > 0),
@@ -1224,7 +1419,7 @@ export default pattern<Record<string, never>>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, session.space, {
+      const piece = await rt.createPiece(navigateProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -1239,7 +1434,7 @@ export default pattern<Record<string, never>>(() => {
         });
       });
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+      const cancel = render(root, piece.cell() as any, renderOptions);
 
       await waitFor(
         () => Promise.resolve(root.innerHTML.length > 0),
@@ -1271,9 +1466,15 @@ export default pattern<Record<string, never>>(() => {
       cancel();
     });
 
-    it("dispatches one navigateTo when a rendered handler changes local state", async () => {
-      const navigatePattern =
-        `import { Default, computed, handler, NAME, navigateTo, pattern, UI, Writable } from "commonfabric";
+    it({
+      name:
+        "dispatches one navigateTo when a rendered handler changes local state",
+      ...onArmStepSkip(
+        "dispatches one navigateTo when a rendered handler changes local state",
+      ),
+      fn: async () => {
+        const navigatePattern =
+          `import { Default, computed, handler, NAME, navigateTo, pattern, UI, Writable } from "commonfabric";
 
 interface ChildState {
   label: Default<string, "target">;
@@ -1307,50 +1508,51 @@ export default pattern<Record<string, never>>(() => {
   };
 });`;
 
-      const navigateProgram: Program = {
-        main: "/main.tsx",
-        files: [{
-          name: "/main.tsx",
-          contents: navigatePattern,
-        }],
-      };
+        const navigateProgram: Program = {
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: navigatePattern,
+          }],
+        };
 
-      const session = await createTestSession();
-      await using rt = await createRuntimeClient(session);
+        const session = await createTestSession();
+        await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, session.space, {
-        run: true,
-      });
-      const mock = new MockDoc(
-        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
-      );
-      const { document, renderOptions } = mock;
-      const root = document.getElementById("root")!;
-      const navigations: string[] = [];
-      const gotNavigation = defer<void>();
-      rt.on("navigaterequest", ({ cell }) => {
-        navigations.push(cell.id());
-        if (navigations.length > 0) gotNavigation.resolve();
-      });
+        const piece = await rt.createPiece(navigateProgram, session.space, {
+          run: true,
+        });
+        const mock = new MockDoc(
+          `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+        );
+        const { document, renderOptions } = mock;
+        const root = document.getElementById("root")!;
+        const navigations: string[] = [];
+        const gotNavigation = defer<void>();
+        rt.on("navigaterequest", ({ cell }) => {
+          navigations.push(cell.id());
+          if (navigations.length > 0) gotNavigation.resolve();
+        });
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+        const cancel = render(root, piece.cell() as any, renderOptions);
 
-      await waitFor(
-        () => Promise.resolve(root.innerHTML.length > 0),
-        { timeout: 5000 },
-      );
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.length > 0),
+          { timeout: 5000 },
+        );
 
-      const button = root.getElementsByTagName("button")[0] as any;
-      assertExists(button);
+        const button = root.getElementsByTagName("button")[0] as any;
+        assertExists(button);
 
-      button.dispatchEvent({ type: "click", target: button });
+        button.dispatchEvent({ type: "click", target: button });
 
-      await gotNavigation.promise;
-      await rt.idle();
+        await gotNavigation.promise;
+        await rt.idle();
 
-      assertEquals(navigations.length, 1);
+        assertEquals(navigations.length, 1);
 
-      cancel();
+        cancel();
+      },
     });
   });
 
@@ -1484,7 +1686,7 @@ export default pattern<Record<string, never>>(() => {
           properties: { note: { type: "string" } },
         } as const satisfies JSONSchema,
       );
-      await cell.set({ note: "labelled" });
+      await cell.set({ note: "labeled" });
       await rt.idle();
 
       await assertRejects(
@@ -1563,6 +1765,184 @@ export default pattern<Record<string, never>>(() => {
       );
     });
   });
+
+  describe("multi-document attachment", () => {
+    // Two documents over one worker's runtime, joined the way a family root's
+    // piece joins them: the piece that spawned the worker hands a port across,
+    // and the document at the far end attaches to the runtime already running.
+    // Everything under here is real -- a real worker, a real backend, real
+    // ports -- because what these pin is exactly what a stand-in on either
+    // side of the IPC cannot show.
+
+    /**
+     * The owner's client and its transport, which is what a port is handed
+     * over through. `createRuntimeClient` drops the transport it connects, and
+     * these tests need to keep it.
+     */
+    async function owningClient(session: Session) {
+      const transport = await WebWorkerRuntimeTransport.connect();
+      const options = await clientOptionsFor(session);
+      const client = await RuntimeClient.initialize(transport, options);
+      await client.synced(session.space);
+      return { client, transport, options };
+    }
+
+    /** A second document, attached over a port the owner hands the worker. */
+    async function attachingClient(
+      owner: { transport: WebWorkerRuntimeTransport },
+      options: RuntimeClientOptions,
+      overrides: Partial<RuntimeAttachOptions> = {},
+    ) {
+      const channel = new MessageChannel();
+      owner.transport.attachClientPort(channel.port2);
+      return await RuntimeClient.attach(
+        new MessagePortRuntimeTransport({ port: channel.port1 }),
+        { ...attachOptionsFrom(options), ...overrides },
+      );
+    }
+
+    const counterSchema = {
+      type: "object",
+      properties: { counter: { type: "number" } },
+    } as const satisfies JSONSchema;
+
+    it("feeds both documents from one runtime, and one unsubscribe stops one feed", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      const second = await attachingClient(owner, owner.options);
+      try {
+        const cause = "multi-document-attachment-" + crypto.randomUUID();
+        const first = await owner.client.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        const mirror = await second.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        await first.set({ counter: 0 });
+        await owner.client.idle();
+        await mirror.sync();
+
+        // Both documents watch the same cell. Before this change the second
+        // subscribe was a no-op on the first's, so the second document heard
+        // nothing and the first's unsubscribe silenced both.
+        const firstSeen: number[] = [];
+        const secondSeen: number[] = [];
+        const sawOne = defer<void>();
+        const cancelFirst = first.subscribe((value) => {
+          if (value) firstSeen.push(value.counter);
+        });
+        const cancelSecond = mirror.subscribe((value) => {
+          if (!value) return;
+          secondSeen.push(value.counter);
+          if (value.counter === 1) sawOne.resolve();
+        });
+
+        await first.set({ counter: 1 });
+        await sawOne.promise;
+        assertEquals(secondSeen.includes(1), true);
+        assertEquals(firstSeen.includes(1), true);
+
+        // The first document leaves the cell. The second's feed is its own.
+        cancelFirst();
+        await owner.client.idle();
+
+        const sawTwo = defer<void>();
+        const secondSeenBefore = secondSeen.length;
+        const firstSeenBefore = firstSeen.length;
+        const watchTwo = mirror.subscribe((value) => {
+          if (value?.counter === 2) sawTwo.resolve();
+        });
+        await first.set({ counter: 2 });
+        await sawTwo.promise;
+
+        // The second document heard the write; the first, having left the
+        // cell, heard nothing further. A write's echo can arrive behind the
+        // local delivery it confirms, so this asks what reached each feed
+        // rather than in which order.
+        assert(secondSeen.length > secondSeenBefore);
+        assertEquals(secondSeen.includes(2), true);
+        assertEquals(firstSeen.includes(2), false);
+        assertEquals(firstSeen.length, firstSeenBefore);
+
+        watchTwo();
+        cancelSecond();
+      } finally {
+        await second.dispose();
+        await owner.client.dispose();
+      }
+    });
+
+    it("keeps the runtime and the first document running when the second leaves", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      const second = await attachingClient(owner, owner.options);
+      const cause = "multi-document-departure-" + crypto.randomUUID();
+      try {
+        const cell = await owner.client.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        await cell.set({ counter: 0 });
+        await owner.client.idle();
+
+        const mirror = await second.getCell<{ counter: number }>(
+          session.space,
+          cause,
+          counterSchema,
+        );
+        const cancelMirror = mirror.subscribe(() => {});
+        await second.idle();
+
+        // The second document's departure is its own: its subscription stops,
+        // and the runtime it was borrowing keeps serving the first.
+        cancelMirror();
+        await second.dispose();
+
+        const seen: number[] = [];
+        const sawThree = defer<void>();
+        const cancel = cell.subscribe((value) => {
+          if (!value) return;
+          seen.push(value.counter);
+          if (value.counter === 3) sawThree.resolve();
+        });
+        await cell.set({ counter: 3 });
+        await sawThree.promise;
+        // Membership rather than the last value: a write's echo can arrive
+        // behind the local delivery it confirms, so the tail of this list is
+        // delivery order and not what the test is about.
+        assertEquals(seen.includes(3), true);
+        cancel();
+      } finally {
+        await owner.client.dispose();
+      }
+    });
+
+    it("refuses a second document asserting a different acting principal", async () => {
+      const session = await createTestSession();
+      const owner = await owningClient(session);
+      try {
+        const stranger = await Identity.fromPassphrase(
+          "a different operator",
+          keyConfig,
+        );
+        await assertRejects(
+          () =>
+            attachingClient(owner, owner.options, {
+              identity: stranger.did(),
+            }),
+          Error,
+          "Attach refused",
+        );
+      } finally {
+        await owner.client.dispose();
+      }
+    });
+  });
 });
 
 async function createTestSession(): Promise<Session> {
@@ -1572,10 +1952,15 @@ async function createTestSession(): Promise<Session> {
   });
 }
 
-async function createRuntimeClient(
+/**
+ * What this process's clients are configured with. A second document attaches
+ * by asserting the security half of these, so the two callers build them from
+ * one place rather than each stating a posture of its own.
+ */
+async function clientOptionsFor(
   session: Session,
   extraOptions: Partial<RuntimeClientOptions> = {},
-): Promise<RuntimeClient> {
+): Promise<RuntimeClientOptions> {
   // If a space identity was created, replace it with a transferrable
   // key in Deno using the same derivation as Session
   if (session.spaceIdentity && session.spaceName) {
@@ -1584,15 +1969,33 @@ async function createRuntimeClient(
     ).derive(session.spaceName, keyConfig);
   }
 
-  const transport = await WebWorkerRuntimeTransport.connect();
-  const worker = await RuntimeClient.initialize(transport, {
+  return {
     apiUrl: new URL(API_URL),
     identity: session.as,
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
+    // The HOST declares the worker's posture (runtime-client's posture
+    // agreement; the worker refuses to initialize on a mismatch). Only the
+    // server-execution flag is declared: the other experimental keys keep
+    // the worker's own defaults. Always declared since the flip — the
+    // resolved value is env-else-first-party-default, never the worker's
+    // ambient baseline (which would be the finding-7 mixed posture under
+    // default ON).
+    experimental: { serverExecution: SERVER_EXECUTION_RESOLVED },
     ...extraOptions,
-  });
+  };
+}
+
+async function createRuntimeClient(
+  session: Session,
+  extraOptions: Partial<RuntimeClientOptions> = {},
+): Promise<RuntimeClient> {
+  const transport = await WebWorkerRuntimeTransport.connect();
+  const worker = await RuntimeClient.initialize(
+    transport,
+    await clientOptionsFor(session, extraOptions),
+  );
 
   await worker.synced(session.space);
   return worker;

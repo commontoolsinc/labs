@@ -9,16 +9,22 @@ import type { AuthState } from "./auth-types.ts";
 export interface AuthManagerDescriptor {
   /** Internal name, e.g. "google", "airtable" */
   name: string;
+
   /** Display name, e.g. "Google", "Airtable" */
   displayName: string;
+
   /** Brand color hex, e.g. "#4285f4", "#18BFFF" */
   brandColor: string;
+
   /** Primary wish tag, e.g. "#googleAuth", "#airtableAuth" */
   wishTag: string;
+
   /** Variant wish tags for multi-account support, e.g. { personal: "#googleAuthPersonal" } */
   variantWishTags?: Record<string, string>;
+
   /** Token field name on the auth object */
   tokenField: "token" | "accessToken";
+
   /**
    * Unified scope registry. Each key is a short scope identifier (e.g. "gmail",
    * "data.records:read"). `description` is the human-readable label shown in UI.
@@ -26,6 +32,7 @@ export interface AuthManagerDescriptor {
    * Airtable this equals the key, for Google it's the full URL.
    */
   scopes: Record<string, { description: string; scopeString: string }>;
+
   /** Whether the provider supports user avatar images (Google: true, Airtable: false) */
   hasAvatarSupport: boolean;
 }

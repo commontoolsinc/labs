@@ -82,15 +82,15 @@ function childDocIntegrity(
 }
 
 describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
-  // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
-  // Prove the gate keys the stamp on the write's authoring identity at the
-  // result field-path: a builtin write stamps, a pattern write is stripped.
   it("stamps a builtin write to the result field; strips a pattern write", async () => {
+    // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
+    // Prove the gate keys the stamp on the write's authoring identity at the
+    // result field-path: a builtin write stamps, a pattern write is stripped.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // Model-output write: builtin identity + the stamp schema at ["result"].
@@ -168,7 +168,6 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     tx = runtime.edit();
     ({ commonfabric: builder } = createTrustedBuilder(runtime));
@@ -381,7 +380,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     // OWN document (here an `asCell` array item), the model-produced bytes land
     // in that separate child doc. The D1b stamp is merged only into the schema
     // ROOT (`withLlmDerivedStamp`); the child write descends via
-    // `runtime.cfc.getSchemaAtPath`, which carries ancestor confidentiality but
+    // `ContextualFlowControl.getSchemaAtPath`, which carries ancestor confidentiality but
     // NOT `ifc.addIntegrity`. So the child doc that actually stores the model
     // bytes must still carry `LlmDerived` in its persisted labelMap — otherwise
     // a later integrity check reading that child doc by its own id sees ordinary,
@@ -576,6 +575,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
+      // The assertion below reads that `result` carries no LlmDerived atom.
+      // That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const disabledTx = disabledRuntime.edit();
@@ -625,6 +626,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
+      // The assertion below reads that `result` carries no LlmDerived atom.
+      // That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const disabledTx = disabledRuntime.edit();

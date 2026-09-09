@@ -1,5 +1,7 @@
 // Scheduler reactive retry tests.
 
+import { defer } from "@commonfabric/utils/defer";
+
 import {
   afterEach,
   beforeEach,
@@ -18,6 +20,7 @@ import type {
   ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
 
 describe("reactive retries", () => {
@@ -49,14 +52,21 @@ describe("reactive retries", () => {
       await tx.commit();
       tx = runtime.edit();
 
-      // Count runs; force commit failure each time
+      // Count runs; force commit failure each time. The action reports its
+      // own runs: the run that spends the last of the retry budget resolves
+      // `budgetExhausted`, and the run that a later input change triggers
+      // resolves `retriggered`.
       let attempts = 0;
+      const budgetExhausted = defer();
+      const retriggered = defer();
       const reactiveAction: Action = (actionTx) => {
         attempts++;
         // Read to establish dependency so later changes re-trigger
         source.withTx(actionTx).get();
         // Force commit to fail so scheduler retries
         actionTx.abort("force-abort-for-reactive-retry");
+        if (attempts === MAX_RETRIES_FOR_REACTIVE) budgetExhausted.resolve();
+        if (attempts === MAX_RETRIES_FOR_REACTIVE + 1) retriggered.resolve();
       };
 
       // Subscribe and run immediately
@@ -66,24 +76,27 @@ describe("reactive retries", () => {
         { isEffect: true },
       );
 
-      // Allow retries to process. Idle may resolve before re-queue occurs,
-      // so loop a few times until attempts reach the expected amount.
-      for (let i = 0; i < 20 && attempts < 10; i++) {
-        await runtime.idle();
-      }
+      // The initial run plus its retries spend the whole budget.
+      await budgetExhausted.promise;
+      // The commit of that run is still in flight, and whether to retry is
+      // decided in that commit's continuation. The commit-aware barrier spans
+      // both, so a run past the budget is counted before the assertion reads
+      // the count.
+      await runtime.scheduler.idleWithPendingCommits();
 
-      // MAX_RETRIES_FOR_REACTIVE is 10; expect initial + retries == 10 attempts
-      expect(attempts).toBe(10);
+      expect(attempts).toBe(MAX_RETRIES_FOR_REACTIVE);
 
       // After reaching retry limit, a subsequent input change should re-trigger
       source.withTx(tx).send(2);
       await tx.commit();
       tx = runtime.edit();
 
-      // Wait for the follow-up run
-      await runtime.idle();
+      // Wait for the run the change triggers, then span its commit as well.
+      // The budget is spent, so nothing is retried after that run.
+      await retriggered.promise;
+      await runtime.scheduler.idleWithPendingCommits();
 
-      expect(attempts).toBe(11);
+      expect(attempts).toBe(MAX_RETRIES_FOR_REACTIVE + 1);
     },
   );
 
@@ -94,10 +107,17 @@ describe("reactive retries", () => {
   const runWatcher = async (
     errorName: string | undefined,
     initialRetries: number,
-    // Share `action` + `offBudgetRetries` across calls to accumulate an
-    // off-budget streak; both default to fresh per call.
-    shared?: { action: Action; offBudgetRetries: WeakMap<Action, number> },
+    options: {
+      rejectPromise?: boolean;
+      restoreInvalidCauses?: () => void;
+      shared?: {
+        action: Action;
+        offBudgetRetries: WeakMap<Action, number>;
+      };
+      error?: { name: string; message: string };
+    } = {},
   ) => {
+    const { rejectPromise = false, shared } = options;
     const action = shared?.action ?? ((() => {}) as unknown as Action);
     const retries = new WeakMap<Action, number>();
     if (initialRetries > 0) retries.set(action, initialRetries);
@@ -105,13 +125,18 @@ describe("reactive retries", () => {
       new WeakMap<Action, number>();
     let queued = 0;
     let resubscribed = 0;
-    const error = errorName === undefined
-      ? undefined
-      : { name: errorName, message: `injected ${errorName}` };
-    const commitPromise = Promise.resolve({ error }) as unknown as ReturnType<
-      IExtendedStorageTransaction["commit"]
-    >;
-    watchReactiveActionCommit({
+    const reported: Error[] = [];
+    const error = options.error ??
+      (errorName === undefined
+        ? undefined
+        : { name: errorName, message: `injected ${errorName}` });
+    const commitPromise =
+      (rejectPromise
+        ? Promise.reject(error)
+        : Promise.resolve({ error })) as unknown as ReturnType<
+          IExtendedStorageTransaction["commit"]
+        >;
+    await watchReactiveActionCommit({
       action,
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
@@ -127,11 +152,19 @@ describe("reactive retries", () => {
         queued++;
       },
       getActionId: () => "test-action",
-      restoreInvalidCauses: () => {},
+      restoreInvalidCauses: options.restoreInvalidCauses ?? (() => {}),
+      reportTerminalRejection: (terminalError) => {
+        reported.push(terminalError);
+      },
     });
-    await commitPromise;
-    await new Promise((r) => setTimeout(r, 0));
-    return { queued, resubscribed, retries, offBudgetRetries, action };
+    return {
+      queued,
+      resubscribed,
+      retries,
+      offBudgetRetries,
+      action,
+      reported,
+    };
   };
 
   it(
@@ -155,6 +188,55 @@ describe("reactive retries", () => {
       const r = await runWatcher("PreconditionFailedError", 3);
       expect(r.queued).toBe(0);
       expect(r.retries.has(r.action)).toBe(false);
+      // A permanent rejection is a benign lost idempotency race, not a
+      // verdict on the action's output — it stays off the error channel.
+      expect(r.reported).toEqual([]);
+    },
+  );
+
+  it(
+    "surfaces a terminal rejection with its refusal reasons and piece attribution",
+    async () => {
+      // A terminal rejection is a verdict on the action's own output, so it
+      // reaches the error channel. The commit rejection is a plain object;
+      // the surfaced Error keeps its name and structured reasons, and — a
+      // commit rejection carrying no pattern frame — takes its piece
+      // attribution from the action's observation identity, scope stripped.
+      const action = (() => {}) as unknown as Action;
+      (action as {
+        schedulerObservationIdentity?: {
+          pieceId: string;
+          pieceRootId?: string;
+          ownerSpace?: string;
+        };
+      }).schedulerObservationIdentity = {
+        // A `user:` scope key carries its own colon, so attribution must come
+        // from `pieceRootId` rather than from slicing `pieceId`.
+        pieceId: "user:did:key:zPrincipal:of:fid1:attributed",
+        pieceRootId: "of:fid1:attributed",
+        ownerSpace: "did:key:zTest",
+      };
+      const r = await runWatcher("CfcCommitRefusalError", 3, {
+        shared: { action, offBudgetRetries: new WeakMap<Action, number>() },
+        error: {
+          name: "CfcCommitRefusalError",
+          message: "CFC enforcement rejected commit: writer-fit misfit",
+          reasons: ["writer-fit misfit"],
+        } as { name: string; message: string },
+      });
+      expect(r.queued).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+      expect(r.reported.length).toBe(1);
+      const surfaced = r.reported[0] as Error & {
+        reasons?: readonly string[];
+        pieceId?: string;
+        space?: string;
+      };
+      expect(surfaced.name).toBe("CfcCommitRefusalError");
+      expect(surfaced.message).toContain("writer-fit misfit");
+      expect(surfaced.reasons).toEqual(["writer-fit misfit"]);
+      expect(surfaced.pieceId).toBe("of:fid1:attributed");
+      expect(surfaced.space).toBe("did:key:zTest");
     },
   );
 
@@ -168,6 +250,61 @@ describe("reactive retries", () => {
       expect(r.retries.get(r.action)).toBe(1);
     },
   );
+
+  it("retries when the storage commit promise rejects", async () => {
+    const r = await runWatcher("TransactionError", 0, {
+      rejectPromise: true,
+    });
+    expect(r.queued).toBe(1);
+    expect(r.resubscribed).toBe(1);
+    expect(r.retries.get(r.action)).toBe(1);
+  });
+
+  it(
+    "retries a rejected stale-basis error without charging the bounded budget",
+    async () => {
+      const r = await runWatcher("ConflictError", 3, {
+        rejectPromise: true,
+      });
+      expect(r.queued).toBe(1);
+      expect(r.resubscribed).toBe(1);
+      expect(r.retries.get(r.action)).toBe(3);
+      expect(r.offBudgetRetries.get(r.action)).toBe(1);
+    },
+  );
+
+  it(
+    "does not retry a rejected terminal error and clears the retry budget",
+    async () => {
+      const r = await runWatcher("RowLabelCommitError", 3, {
+        rejectPromise: true,
+      });
+      expect(r.queued).toBe(0);
+      expect(r.resubscribed).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+    },
+  );
+
+  it("retries when the storage commit promise rejects without a reason", async () => {
+    const r = await runWatcher(undefined, 0, {
+      rejectPromise: true,
+    });
+    expect(r.queued).toBe(1);
+    expect(r.resubscribed).toBe(1);
+    expect(r.retries.get(r.action)).toBe(1);
+  });
+
+  it("settles when reactive retry handling throws", async () => {
+    const retryHandlingError = new Error("retry handling failed");
+    const r = await runWatcher("TransactionError", 0, {
+      restoreInvalidCauses: () => {
+        throw retryHandlingError;
+      },
+    });
+    expect(r.queued).toBe(0);
+    expect(r.resubscribed).toBe(0);
+    expect(r.retries.get(r.action)).toBe(1);
+  });
 
   it(
     "retries a same-replica-race rejection off the bounded budget",
@@ -198,11 +335,11 @@ describe("reactive retries", () => {
         action: (() => {}) as unknown as Action,
         offBudgetRetries: new WeakMap<Action, number>(),
       };
-      await runWatcher("StorageTransactionInconsistent", 0, shared);
-      await runWatcher("ConflictError", 0, shared);
+      await runWatcher("StorageTransactionInconsistent", 0, { shared });
+      await runWatcher("ConflictError", 0, { shared });
       expect(shared.offBudgetRetries.get(shared.action)).toBe(2);
       // A successful commit ends the streak and clears the count.
-      await runWatcher(undefined, 0, shared);
+      await runWatcher(undefined, 0, { shared });
       expect(shared.offBudgetRetries.has(shared.action)).toBe(false);
     },
   );
@@ -252,6 +389,10 @@ describe("reactive retries", () => {
       let action1Attempts = 0;
       let action2Attempts = 0;
       const action2Values: number[] = [];
+      // Action 1 commits on its third run, and action 2 then re-runs against
+      // the value that run wrote. Action 2's second run is the end of that
+      // cascade, and resolves `cascadeComplete`.
+      const cascadeComplete = defer();
 
       // Action 1: reads source, writes intermediate (will fail first 2 times)
       const action1: Action = (actionTx) => {
@@ -271,6 +412,7 @@ describe("reactive retries", () => {
         const val = intermediate.withTx(actionTx).get();
         action2Values.push(val);
         output.withTx(actionTx).send(val + 5);
+        if (action2Attempts === 2) cascadeComplete.resolve();
       };
 
       // Subscribe both actions with correct dependencies
@@ -295,10 +437,16 @@ describe("reactive retries", () => {
         {},
       );
 
-      // Allow all actions to complete (action1 will retry twice)
-      for (let i = 0; i < 20 && action1Attempts < 3; i++) {
-        await output.pull();
-      }
+      // Neither action is an effect, so the scheduler runs one only while
+      // something demands what it writes. The sink holds that demand for the
+      // whole wait: it reaches action 2 through `output`, and action 1 through
+      // action 2's read of `intermediate`.
+      const cancel = output.sink(() => {});
+      await cascadeComplete.promise;
+      // Span the commit of action 2's second run, so a run past the cascade is
+      // counted before the assertions read the counters.
+      await runtime.scheduler.idleWithPendingCommits();
+      cancel();
 
       // Verify action1 ran 3 times (2 aborts + 1 success)
       expect(action1Attempts).toBe(3);

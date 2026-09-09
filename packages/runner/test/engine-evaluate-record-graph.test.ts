@@ -8,9 +8,13 @@ import {
   signer,
   StorageManager,
 } from "./engine-test-support.ts";
+import {
+  compileWithEntryBody,
+  evaluateWithEntryBody,
+} from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 import { validateCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
-import { getTopFrame, popFrame } from "../src/builder/pattern.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 describe("Engine.evaluateRecordGraph()", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -113,7 +117,7 @@ describe("Engine.evaluateRecordGraph()", () => {
         id,
         graph,
         mainSpecifier,
-        program.files,
+        program,
       );
       expect(result.main!["default"]).toBe(42);
     } finally {
@@ -161,24 +165,20 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(typeof utilExports["triple"]).toBe("function");
   });
 
-  it("evaluates type-only dependency exports with a runtime frame", async () => {
+  it("retains source roots without evaluating them", async () => {
     const program: RuntimeProgram = {
-      main: "/main.ts",
+      main: "/main.tsx",
+      sourceRoots: ["/main.test.tsx"],
       files: [
         {
-          name: "/main.ts",
-          contents: [
-            'import type { DependencyOutput } from "./dependency.tsx";',
-            "export const read = (_value: DependencyOutput): number => 42;",
-            "export default 42;",
-          ].join("\n"),
+          name: "/main.tsx",
+          contents: "export default 42;",
         },
         {
-          name: "/dependency.tsx",
+          name: "/main.test.tsx",
           contents: [
             'import { pattern } from "commonfabric";',
-            "export type DependencyOutput = { value: number };",
-            "export const Dependency = pattern<{}, DependencyOutput>(() => ({ value: 1 }));",
+            "export default pattern(() => ({ test: true }));",
           ].join("\n"),
         },
       ],
@@ -187,28 +187,515 @@ describe("Engine.evaluateRecordGraph()", () => {
     const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
       program,
     );
-    // A compiled/cached graph can contain source modules reached only for type
-    // information. They have no runtime edge from the entry and are first
-    // evaluated when evaluateRecordGraph builds its all-module export map.
-    // Make the test independent of Runtime's process-global compatibility
-    // frame: graph evaluation supplies its own explicit runtime frame.
-    const ambientFrame = getTopFrame();
-    expect(ambientFrame?.runtime).toBe(runtime);
-    popFrame(ambientFrame);
+    expect(
+      [...graph.specifierByPath.keys()].some((path) =>
+        path.endsWith("/main.test.tsx")
+      ),
+    ).toBe(true);
 
     const result = engine.evaluateRecordGraph(
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
-
     expect(result.main?.default).toBe(42);
-    const dependencyPath = Object.keys(result.exportMap ?? {}).find((path) =>
-      path.endsWith("/dependency.tsx")
+    expect(
+      Object.keys(result.exportMap ?? {}).some((path) =>
+        path.endsWith("/main.test.tsx")
+      ),
+    ).toBe(false);
+    expect(graph.registrationSink.size).toBe(0);
+  });
+
+  it("retains data files without compiling them", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json", "/data/notes.txt"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "export default 42;",
+        },
+        {
+          name: "/data/cities.json",
+          contents: '{"cities": ["Oslo", "Lima"]}',
+        },
+        {
+          // Bytes that are not TypeScript, and that a parser would read as an
+          // import edge if a data file were ever scanned.
+          name: "/data/notes.txt",
+          contents: 'import nonsense from "./nowhere.ts";\nnot code at all',
+        },
+      ],
+    };
+
+    const { id, graph, mainSpecifier, modules, entryIdentity } = await engine
+      .compileToRecordGraph(program);
+
+    expect(
+      [...graph.specifierByPath.keys()].some((path) =>
+        path.endsWith("/data/cities.json")
+      ),
+    ).toBe(false);
+
+    const stored = new Map(modules.map((m) => [m.filename, m]));
+    expect(stored.get("/data/cities.json")?.source).toBe(
+      '{"cities": ["Oslo", "Lima"]}',
     );
-    expect(dependencyPath).toBeDefined();
-    expect(result.exportMap?.[dependencyPath!].Dependency).toBeDefined();
+    // A data entry's compiled form is its own bytes, so the compiled set alone
+    // carries what a warm load needs.
+    expect(stored.get("/data/cities.json")?.js).toBe(
+      '{"cities": ["Oslo", "Lima"]}',
+    );
+    expect(stored.get("/data/cities.json")?.isData).toBe(true);
+    expect(stored.get("/main.tsx")).not.toHaveProperty("isData");
+    expect(stored.get("/data/notes.txt")?.imports).toEqual([]);
+
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    expect(
+      entry.imports.map((edge) => edge.specifier).filter((specifier) =>
+        specifier.startsWith("cf:data-file/")
+      ),
+    ).toEqual(["cf:data-file/data/cities.json", "cf:data-file/data/notes.txt"]);
+
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program,
+    );
+    expect(result.main?.default).toBe(42);
+    expect(
+      Object.keys(result.exportMap ?? {}).some((path) =>
+        path.startsWith("/data/")
+      ),
+    ).toBe(false);
+  });
+
+  it("marks the data files on the program it records for an export", async () => {
+    // Every exported pattern is recorded with the program it came from, and
+    // that program names data entries among its files. Recorded without
+    // `dataFiles`, the entries are there with nothing saying they are data, so
+    // anything that later builds from that program compiles the JSON.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "import { pattern } from 'commonfabric';\n" +
+            "export const child = pattern(() => ({ value: 1 }));\n" +
+            "export default child;\n",
+        },
+        { name: "/data/cities.json", contents: '["Oslo"]\n' },
+      ],
+      dataFiles: ["/data/cities.json"],
+    };
+
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program,
+    );
+    const child = (result.main as Record<string, unknown>).child;
+    expect(getPatternProgram(child)?.dataFiles).toEqual(["/data/cities.json"]);
+  });
+
+  it("reads an attached data file's bytes from the pattern", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            // A value computed at module scope is a top-level value like any
+            // other, so it takes the same `__cf_data` snapshot the SES verifier
+            // requires of one. Reading inside a pattern body needs no wrapper.
+            "const cities = __cf_data(",
+            '  JSON.parse(dataFile("/data/cities.json")).cities,',
+            ");",
+            "export default cities;",
+          ].join("\n"),
+        },
+        { name: "/data/cities.json", contents: '{"cities": ["Oslo", "Lima"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect(main?.default).toEqual(["Oslo", "Lima"]);
+  });
+
+  it("resolves a relative read against the module that makes it", async () => {
+    // The reading module sits two directories down and names the file beside
+    // it. Nothing in the program spells the path the file is stored under, so
+    // the read has to work it out from where the reader is.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/lists/nordic/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./lists/nordic/read.ts";\n',
+        },
+        {
+          name: "/lists/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        {
+          name: "/lists/nordic/cities.json",
+          contents: '{"cities": ["Oslo", "Bergen"]}',
+        },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).cities).toEqual([
+      "Oslo",
+      "Bergen",
+    ]);
+  });
+
+  it("resolves a bare read against the module that makes it", async () => {
+    // No leading `./`. A data file has no bare-package namespace, so a path
+    // that is not grounded at the package root is relative to the reader.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/lists/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./lists/read.ts";\n',
+        },
+        {
+          name: "/lists/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/lists/cities.json", contents: '{"cities": ["Rio"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).cities).toEqual(["Rio"]);
+  });
+
+  it("climbs out of the reading module's directory for a parent read", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/shared/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./nordic/read.ts";\n',
+        },
+        {
+          name: "/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("../shared/cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/shared/cities.json", contents: '{"cities": ["Lima"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).cities).toEqual(["Lima"]);
+  });
+
+  it("gives two modules at different depths their own sibling file", async () => {
+    // Both modules read `./cities.json`, and each gets the one beside it.
+    // A read resolved anywhere but at the reader would hand both the same
+    // file.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/nordic/cities.json", "/andean/deep/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'export { cities as nordic } from "./nordic/read.ts";',
+            'export { cities as andean } from "./andean/deep/read.ts";',
+          ].join("\n"),
+        },
+        {
+          name: "/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        {
+          name: "/andean/deep/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/nordic/cities.json", contents: '{"cities": ["Oslo"]}' },
+        { name: "/andean/deep/cities.json", contents: '{"cities": ["Lima"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).nordic).toEqual(["Oslo"]);
+    expect((main as Record<string, unknown>).andean).toEqual(["Lima"]);
+  });
+
+  it("leaves a module's own export named dataFile alone", async () => {
+    // Only the runtime's `dataFile` reads attached data. A local module is free
+    // to export a value under that name, and an importer gets the one it
+    // imported.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data } from "commonfabric";',
+            'import { dataFile } from "./local.ts";',
+            'export default __cf_data(dataFile("/cities.json"));',
+          ].join("\n"),
+        },
+        {
+          name: "/local.ts",
+          contents:
+            "export const dataFile = (path: string) => `local:${path}`;\n",
+        },
+        { name: "/cities.json", contents: '{"cities": []}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect(main?.default).toBe("local:/cities.json");
+  });
+
+  it("names the path a failed relative read resolved to", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/nordic/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { text } from "./nordic/read.ts";\n',
+        },
+        {
+          name: "/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            'export const text = __cf_data(dataFile("./absent.json"));',
+          ].join("\n"),
+        },
+        { name: "/nordic/cities.json", contents: "[]" },
+      ],
+    };
+
+    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
+      'No attached data file "/nordic/absent.json". ' +
+        "Attached: /nordic/cities.json.",
+    );
+  });
+
+  it("names the attached data files when a path matches none", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            'export default __cf_data(dataFile("/data/absent.json"));',
+          ].join("\n"),
+        },
+        { name: "/data/cities.json", contents: "[]" },
+      ],
+    };
+
+    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
+      'No attached data file "/data/absent.json". Attached: /data/cities.json.',
+    );
+  });
+
+  it("separates identities for data files differing only in line endings", async () => {
+    // A data file's bytes are the payload a pattern reads, so CRLF and LF are
+    // different content — unlike source text, where they are formatting.
+    const compile = (contents: string) =>
+      engine.compileToRecordGraph({
+        main: "/main.tsx",
+        dataFiles: ["/data/rows.csv"],
+        files: [
+          { name: "/main.tsx", contents: "export default 42;" },
+          { name: "/data/rows.csv", contents },
+        ],
+      });
+
+    const lf = await compile("a,b\nc,d\n");
+    const crlf = await compile("a,b\r\nc,d\r\n");
+
+    expect(lf.entryIdentity).not.toBe(crlf.entryIdentity);
+    const dataIdentity = (r: Awaited<ReturnType<typeof compile>>) =>
+      r.modules.find((m) => m.filename === "/data/rows.csv")!.identity;
+    expect(dataIdentity(lf)).not.toBe(dataIdentity(crlf));
+  });
+
+  it("refuses a program naming its entry as a data file", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/main.tsx"],
+      files: [{ name: "/main.tsx", contents: "export default 42;" }],
+    })).rejects.toThrow("cannot be a data file");
+  });
+
+  it("refuses an import that lands on a data file", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/data.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'import data from "./data.json";\nexport default data;',
+        },
+        { name: "/data.json", contents: "{}" },
+      ],
+    })).rejects.toThrow(/Could not resolve ".*\/data\.json"/);
+  });
+
+  it("refuses a program naming a data file it does not carry", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/absent.json"],
+      files: [{ name: "/main.tsx", contents: "export default 42;" }],
+    })).rejects.toThrow(
+      "Program names data files it does not carry: /absent.json",
+    );
+  });
+
+  it("separates load identities for different data-file sets", async () => {
+    const files = [
+      { name: "/main.tsx", contents: "export default 42;" },
+      { name: "/a.json", contents: '{"a": 1}' },
+      { name: "/b.json", contents: '{"b": 2}' },
+    ];
+
+    const aOnly = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      dataFiles: ["/a.json"],
+    });
+    const both = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      dataFiles: ["/a.json", "/b.json"],
+    });
+    const reordered = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      dataFiles: ["/b.json", "/a.json", "/a.json"],
+    });
+    const contentChanged = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files: files.map((file) =>
+        file.name === "/a.json" ? { ...file, contents: '{"a": 9}' } : file
+      ),
+      dataFiles: ["/a.json", "/b.json"],
+    });
+
+    expect(aOnly.entryIdentity).not.toBe(both.entryIdentity);
+    expect(reordered.id).toBe(both.id);
+    expect(reordered.entryIdentity).toBe(both.entryIdentity);
+    expect(contentChanged.entryIdentity).not.toBe(both.entryIdentity);
+  });
+
+  it("separates load identities for different source-root sets", async () => {
+    const files = [
+      {
+        name: "/main.tsx",
+        contents: "export default 42;",
+      },
+      {
+        name: "/a.test.tsx",
+        contents: [
+          'import "./b.test.tsx";',
+          'import type { Marker } from "./types.d.ts";',
+          "export type TestMarker = Marker;",
+          "export default 1;",
+        ].join("\n"),
+      },
+      {
+        name: "/b.test.tsx",
+        contents: "export default 2;",
+      },
+      {
+        name: "/types.d.ts",
+        contents: "export interface Marker { value: number; }",
+      },
+    ];
+
+    const aOnly = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      sourceRoots: ["/a.test.tsx"],
+    });
+    const both = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      sourceRoots: ["/a.test.tsx", "/b.test.tsx"],
+    });
+    const reordered = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      sourceRoots: ["/b.test.tsx", "/a.test.tsx", "/a.test.tsx"],
+    });
+    const declarationChanged = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files: files.map((file) =>
+        file.name === "/types.d.ts"
+          ? {
+            ...file,
+            contents: "export interface Marker { value: string; }",
+          }
+          : file
+      ),
+      sourceRoots: ["/a.test.tsx", "/b.test.tsx"],
+    });
+
+    expect(aOnly.id).not.toBe(both.id);
+    expect(aOnly.entryIdentity).not.toBe(both.entryIdentity);
+    expect(reordered.id).toBe(both.id);
+    expect(reordered.entryIdentity).toBe(both.entryIdentity);
+    expect(declarationChanged.id).not.toBe(both.id);
+    expect(declarationChanged.entryIdentity).not.toBe(both.entryIdentity);
+    expect(
+      reordered.modules.find((module) =>
+        module.identity === reordered.entryIdentity
+      )?.imports,
+    ).toEqual(
+      both.modules.find((module) => module.identity === both.entryIdentity)
+        ?.imports,
+    );
   });
 
   it("serializes verified javascript modules by stable $implRef", async () => {
@@ -386,40 +873,36 @@ describe("Engine.evaluateRecordGraph()", () => {
   it("rejects raw mutable top-level exports without __cf_data()", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            "export default {",
-            "  nested: { count: 1 },",
-            "};",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
+    await expect(
+      compileWithEntryBody(
+        engine,
+        program,
+        "exports.default = { nested: { count: 1 } };\n",
+      ),
+    ).rejects.toThrow();
   });
 
   it("rejects raw top-level helper calls without __cf_data()", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            "function build() {",
-            "  return { count: 1 };",
-            "}",
-            "export default build();",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
+    await expect(
+      compileWithEntryBody(
+        engine,
+        program,
+        [
+          "function build() {",
+          "  return { count: 1 };",
+          "}",
+          "exports.default = build();",
+        ].join("\n"),
+      ),
+    ).rejects.toThrow(
       "Top-level call results must be wrapped in __cf_data() in SES mode",
     );
   });
@@ -580,7 +1063,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe(25);
   });
@@ -624,7 +1107,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe(25);
   });
@@ -632,23 +1115,24 @@ describe("Engine.evaluateRecordGraph()", () => {
   it("throws when handler() relies on CTS inference without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            'import { handler } from "commonfabric";',
-            "export default handler((_event: { count: number }, state: { count: number }) => {",
-            "  state.count = state.count + 1;",
-            "});",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
-      "Handler requires schemas or CTS transformer",
-    );
+    // A handler built from a single callback has no schemas of its own and
+    // depends on the ones CTS infers, so a body that never went through the
+    // transform has to fail rather than build a schemaless handler.
+    await expect(
+      evaluateWithEntryBody(
+        engine,
+        program,
+        [
+          'const commonfabric_1 = require("commonfabric");',
+          "exports.default = commonfabric_1.handler((_event, state) => {",
+          "  state.count = state.count + 1;",
+          "});",
+        ].join("\n"),
+      ),
+    ).rejects.toThrow("Handler requires schemas or CTS transformer");
   });
 
   it("keeps handler implementation refs bound to the handler callback", async () => {

@@ -31,6 +31,10 @@ pair of files:
 | `handler-schema/` | Handler-specific schema generation |
 | `ast-transform/` | General AST transforms: pattern schemas, builder patterns |
 
+`bug-repro/` is not a suite: it holds `cf check`-runnable repros for
+diagnostic-producing shapes, which cannot be golden pairs because the runner
+fails any fixture whose transform reports an error. See `bug-repro/README.md`.
+
 ## Documenting test intent
 
 Since these are golden tests, there's no explicit setup/execute/assert

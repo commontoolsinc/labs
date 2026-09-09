@@ -19,7 +19,9 @@
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
-import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import { sqlAffinity } from "./columns.ts";
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */
 export type FieldRef = {
@@ -29,6 +31,7 @@ export type FieldRef = {
 export type MatchOpts = {
   /** Capture group to extract instead of the whole match. */
   group?: number;
+
   /** Minimum number of matches; fewer fails closed (required anchor). */
   min?: number;
 };
@@ -49,15 +52,13 @@ export type RowLabelRule<C extends Record<string, unknown>> = (
   f: RowFieldHandles<C>,
 ) => { confidentiality?: FabricValue; integrity?: FabricValue };
 
-const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === "object" && x !== null && !Array.isArray(x);
-
 const isFieldRef = (x: unknown): x is FieldRef =>
-  isRecord(x) && typeof x.field === "string" && Object.keys(x).length === 1;
+  isObjectNotArray(x) && typeof x.field === "string" &&
+  Object.keys(x).length === 1;
 
-// ---------------------------------------------------------------------------
+//
 // Builders — each returns its serialized AST node.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Run `re` (forced global) over a column's text ⟹ the ordered list of matches
@@ -122,7 +123,7 @@ export function principal(
       `principal(): invalid DID protocol ${JSON.stringify(protocol)}`,
     );
   }
-  if (!isRecord(of) || !isRecord(of.match)) {
+  if (!isObjectNotArray(of) || !isObjectNotArray(of.match)) {
     throw new TypeError("principal() takes a match(...) term");
   }
   return { principal: { protocol, of } };
@@ -189,14 +190,14 @@ function assertRegExp(x: unknown, who: string): asserts x is RegExp {
   if (!(x instanceof RegExp)) throw new TypeError(`${who} takes a RegExp`);
 }
 function assertPrincipal(x: unknown, who: string) {
-  if (!isRecord(x) || !isRecord(x.principal)) {
+  if (!isObjectNotArray(x) || !isObjectNotArray(x.principal)) {
     throw new TypeError(`${who} takes a principal(...) term`);
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Validation — fail closed at authoring AND on wire-supplied specs.
-// ---------------------------------------------------------------------------
+//
 
 const MAX_REGEX_SOURCE = 512;
 
@@ -281,21 +282,21 @@ function validateAnyOfAlternative(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (isRecord(node) && ("allOf" in node || "anyOf" in node)) {
+  if (isObjectNotArray(node) && ("allOf" in node || "anyOf" in node)) {
     return "an any() alternative must be a single principal-like term, not " +
       "all()/any() — a conjunction or nested disjunction cannot be an " +
       "OR-clause alternative (CFC spec §3.1.8)";
   }
-  if (isRecord(node)) {
+  if (isObjectNotArray(node)) {
     // Before the `when` branch below follows the gate: a dual-op alternative
     // (e.g. {when, then, principal}) would be validated as a when() here but
     // EVALUATED as a principal (evalConf dispatches on `principal` first).
     const amb = ambiguousOpReason(node, "any()-alternative");
     if (amb) return amb;
   }
-  if (isRecord(node) && "when" in node) {
+  if (isObjectNotArray(node) && "when" in node) {
     const test = (node as { when?: unknown }).when;
-    const gate = isRecord(test) && "match" in test
+    const gate = isObjectNotArray(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
       : "malformed when gate (use whenMatches())";
     if (gate) return gate;
@@ -309,7 +310,7 @@ function validateMatchNode(
   columns: ReadonlySet<string>,
   who: string,
 ): string | undefined {
-  if (!isRecord(node)) return `${who}: malformed match node`;
+  if (!isObjectNotArray(node)) return `${who}: malformed match node`;
   const { field, source, flags, group, min } = node;
   if (typeof field !== "string") return `${who}: match without a field`;
   if (!columns.has(field)) {
@@ -341,14 +342,14 @@ function validatePrincipalNode(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node) || typeof node.protocol !== "string") {
+  if (!isObjectNotArray(node) || typeof node.protocol !== "string") {
     return "malformed principal node";
   }
   if (!/^[a-z][a-z0-9.+-]*$/.test(node.protocol)) {
     return `invalid DID protocol ${JSON.stringify(node.protocol)}`;
   }
   const of = node.of;
-  if (!isRecord(of) || !("match" in of)) {
+  if (!isObjectNotArray(of) || !("match" in of)) {
     return "principal() takes a match(...) term";
   }
   return validateMatchNode(of.match, columns, "principal");
@@ -396,7 +397,7 @@ function validateConfTerm(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node)) return "malformed confidentiality term";
+  if (!isObjectNotArray(node)) return "malformed confidentiality term";
   const amb = ambiguousOpReason(node, "confidentiality");
   if (amb) return amb;
   if ("anyOf" in node) return validateConfAnyOf(node, columns);
@@ -417,7 +418,7 @@ function validateConfTerm(
   if ("constant" in node) return undefined;
   if ("when" in node) {
     const test = (node as { when?: unknown }).when;
-    const r = isRecord(test) && "match" in test
+    const r = isObjectNotArray(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
       : "malformed when gate (use whenMatches())";
     if (r) return r;
@@ -430,7 +431,7 @@ function validateConfExpr(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node)) return "malformed confidentiality expression";
+  if (!isObjectNotArray(node)) return "malformed confidentiality expression";
   const amb = ambiguousOpReason(node, "confidentiality");
   if (amb) return amb;
   if ("anyOf" in node) return validateConfAnyOf(node, columns);
@@ -452,7 +453,7 @@ function validateIntegTerm(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node)) return "malformed integrity term";
+  if (!isObjectNotArray(node)) return "malformed integrity term";
   const amb = ambiguousOpReason(node, "integrity");
   if (amb) return amb;
   if ("anyOf" in node) {
@@ -461,7 +462,7 @@ function validateIntegTerm(
   }
   if ("authoredBy" in node || "endorsedBy" in node) {
     const inner = (node.authoredBy ?? node.endorsedBy) as unknown;
-    if (!isRecord(inner) || !("principal" in inner)) {
+    if (!isObjectNotArray(inner) || !("principal" in inner)) {
       return "authoredBy()/endorsedBy() take a principal(...) term";
     }
     return validatePrincipalNode(inner.principal, columns);
@@ -479,7 +480,7 @@ function validateIntegTerm(
   }
   if ("when" in node) {
     const test = node.when;
-    const r = isRecord(test) && "match" in test
+    const r = isObjectNotArray(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
       : "malformed when gate (use whenMatches())";
     if (r) return r;
@@ -489,17 +490,52 @@ function validateIntegTerm(
   return unknownOp(node, "integrity");
 }
 
+// A rule reads a column as text, and two declared types settle what the column
+// holds before any rule sees it. A REAL-affinity column forces every value it
+// stores to a float, and this evaluator renders none: the fractional ones
+// refuse (its rendering is not reproducible — see `regexInputText`) and a
+// whole one shows "7" where SQLite shows "7.0", so a rule written from the
+// column's declared type never fires, and a gate that never fires drops a
+// confidentiality clause. A BLOB column's bytes are refused outright. Neither
+// is a rule anyone can write correctly, so neither is accepted — declare a
+// column that carries text as TEXT.
+function unreadableRuleInput(
+  field: string,
+  sqlType: unknown,
+): string | undefined {
+  if (typeof sqlType !== "string") return undefined; // no declared type
+  // By affinity, not by substring: `INT BLOB` is an INTEGER column to
+  // SQLite (INT matches first), and only a type SQLite itself reads as BLOB
+  // is refused. An empty declared type also has BLOB affinity but stores
+  // each value as bound, so text stays text; it is left readable.
+  if (sqlAffinity(sqlType) === "blob" && sqlType.trim() !== "") {
+    return `rule input "${field}" is declared ${sqlType} — a rule reads a ` +
+      "column as text, and a BLOB has none";
+  }
+  if (sqlAffinity(sqlType) === "real") {
+    return `rule input "${field}" is declared ${sqlType}, which gives it ` +
+      "REAL affinity — a rule reads a column as text, and this evaluator " +
+      "renders no REAL (declare a column holding text as TEXT)";
+  }
+  return undefined;
+}
+
 /**
  * Validate a rowLabel spec against the declared column names. Returns the
  * failure reason, or undefined when valid. Used by `table()` at authoring
  * (throws) and MUST be re-run on wire-supplied specs before evaluation —
  * "couldn't validate" is never "no label".
+ *
+ * `properties` is the table schema's column map, when the caller holds one:
+ * with it, a rule reading a column whose declared type settles its storage
+ * class against the rule is refused here rather than at evaluation.
  */
 export function validateRowLabelSpec(
   spec: unknown,
   columns: readonly string[],
+  properties?: Readonly<Record<string, unknown>>,
 ): string | undefined {
-  if (!isRecord(spec)) return "rowLabel spec must be an object";
+  if (!isObjectNotArray(spec)) return "rowLabel spec must be an object";
   if (spec.version !== 1) {
     return `unsupported rowLabel version ${JSON.stringify(spec.version)}`;
   }
@@ -515,6 +551,18 @@ export function validateRowLabelSpec(
     const r = validateIntegTerm(spec.integrity, cols);
     if (r) return r;
   }
+  if (properties !== undefined) {
+    // After the structural pass, so the walk reads a spec whose match nodes
+    // are known to be well formed.
+    for (const field of ruleInputFields(spec as RowLabelSpec)) {
+      const column = properties[field];
+      const reason = unreadableRuleInput(
+        field,
+        isObjectNotArray(column) ? column.sqlType : undefined,
+      );
+      if (reason) return reason;
+    }
+  }
   return undefined;
 }
 
@@ -523,12 +571,13 @@ export function validateRowLabelSpec(
 export function buildRowLabelSpec<C extends Record<string, unknown>>(
   columns: readonly string[],
   rule: RowLabelRule<C>,
+  properties?: Readonly<Record<string, unknown>>,
 ): RowLabelSpec {
   const handles = Object.fromEntries(
     columns.map((name) => [name, { field: name }]),
   ) as RowFieldHandles<C>;
   const out = rule(handles);
-  if (!isRecord(out)) {
+  if (!isObjectNotArray(out)) {
     throw new TypeError(
       "table(): a rowLabel rule must return { confidentiality?, integrity? }",
     );
@@ -538,16 +587,16 @@ export function buildRowLabelSpec<C extends Record<string, unknown>>(
     spec.confidentiality = out.confidentiality;
   }
   if (out.integrity !== undefined) spec.integrity = out.integrity;
-  const reason = validateRowLabelSpec(spec, columns);
+  const reason = validateRowLabelSpec(spec, columns, properties);
   if (reason) {
     throw new TypeError(`table(): invalid rowLabel rule — ${reason}`);
   }
   return spec;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Evaluation — one pure function, shared by write gate, server, and read.
-// ---------------------------------------------------------------------------
+//
 
 class RowLabelEvalError extends Error {}
 
@@ -563,7 +612,7 @@ export function atomKey(v: unknown): string {
   if (typeof v === "string") return `s:${v}`;
   return `j:${
     JSON.stringify(v, (_k, val) =>
-      isRecord(val)
+      isObjectNotArray(val)
         ? Object.fromEntries(Object.keys(val).sort().map((k) => [k, val[k]]))
         : val)
   }`;
@@ -592,6 +641,89 @@ function normalizeForProtocol(protocol: string, v: string): string {
   }
 }
 
+//
+// Regex input — the text a row value shows a rule's regex.
+//
+
+// An INTEGER is an int64; a JS number carries 53 bits of integer precision.
+// Past that a number no longer names one integer — a large INTEGER read into
+// a double has already lost its low digits, and the driver's own bind wraps
+// on the way back (1e21 binds as 3875820019684212736) — so no text we
+// produced would honestly be the row's.
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
+/**
+ * The text a row value shows a rule's regex, or `undefined` for a value class
+ * the evaluator refuses (the caller fails closed on it).
+ *
+ * A rule gates on stored data, and a column keyed by an INTEGER — a mailbox
+ * id, an account id — is the ordinary thing to gate on, so a whole integer
+ * shows the regex its decimal digits. Those are the digits SQLite shows for
+ * that INTEGER, which is what makes a rule writable from the row: the read
+ * side reads whole integers (`read-pool.ts` opens the labeled reads with
+ * `int64`) and commit evaluation renders them (`commit-eval.ts`), so the
+ * digits here are the stored ones rather than a truncation of them. One value
+ * has one text, so the write gate, the server commit, and read re-derivation
+ * derive one label from one row.
+ *
+ * A REAL does not coerce. SQLite renders one with "%!.15g" over its OWN
+ * decoded digits, and that rendering is not a function of the double this
+ * evaluator holds: the SQLite builds behind this driver disagree about the
+ * last digit of -0.009598882198146955, which one returns as
+ * "-0.00959888219814696" and another as the correctly rounded
+ * "-0.00959888219814695" (the split follows the architecture, whose long
+ * double the decoder uses where it is wider than a double). A gate is an
+ * anchored comparison against the text SQLite would show, so a text that can
+ * only be nearly reproduced is a gate that silently fails to fire on some
+ * rows, dropping a confidentiality clause.
+ * (`v2-sqlite-row-label-number-text.test.ts` pins the disagreement.)
+ *
+ * A column declared REAL or BLOB is refused a rule outright, at declaration —
+ * see `validateRowLabelSpec`. What reaches here is a REAL a column of some
+ * other affinity happens to hold, and one exception to the digits being
+ * SQLite's: a whole REAL in a column with no affinity arrives as a JS number
+ * carrying no storage class, and shows "7" where SQLite shows "7.0".
+ */
+export function regexInputText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  // `Number.isSafeInteger` also rejects NaN and the infinities, which are not
+  // SQLite INTEGERs either (SQLite stores a NaN as NULL).
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? String(value) : undefined;
+  }
+  // A driver in int64 mode hands large INTEGERs over as bigints, whose digits
+  // ARE exact; one outside int64 never came out of a row.
+  if (typeof value === "bigint") {
+    return value >= INT64_MIN && value <= INT64_MAX ? String(value) : undefined;
+  }
+  return undefined;
+}
+
+/** Why a value has no regex text — its CLASS only. The refusal reaches a
+ *  model-facing consumer, so it carries nothing of the row itself. */
+function regexInputRefusal(field: string, value: unknown): string {
+  const kind = typeof value === "number"
+    ? (Number.isNaN(value)
+      ? "NaN, which SQLite stores as NULL"
+      : !Number.isFinite(value)
+      ? "an infinity, which is a REAL"
+      : Number.isInteger(value)
+      ? "a whole number too large to name one SQLite INTEGER exactly"
+      : "a REAL, whose SQLite text this evaluator cannot reproduce")
+    : typeof value === "bigint"
+    ? "a bigint outside SQLite's int64 range"
+    : ArrayBuffer.isView(value) || value instanceof ArrayBuffer
+    ? "a BLOB"
+    : typeof value === "boolean"
+    ? "a boolean, which is not a SQLite value (bind 1 or 0)"
+    : typeof value === "object"
+    ? "an object"
+    : `a ${typeof value}`;
+  return `field "${field}" is ${kind} — regex input must be TEXT or a whole ` +
+    "INTEGER";
+}
+
 /** Extract the match list for a field per the strict-if-present contract. */
 function evalMatch(
   node: Record<string, unknown>,
@@ -604,11 +736,8 @@ function evalMatch(
   const value = row[field];
   const values: string[] = [];
   if (value !== null && value !== undefined && value !== "") {
-    if (typeof value !== "string") {
-      return fail(
-        `field "${field}" is ${typeof value}, not a string — regex input`,
-      );
-    }
+    const text = regexInputText(value);
+    if (text === undefined) return fail(regexInputRefusal(field, value));
     // Force the global flag like match() does at authoring: matchAll throws
     // on non-global regexes, and a hostile/legacy wire spec must degrade to
     // the documented split semantics, not an uncaught exception.
@@ -616,7 +745,7 @@ function evalMatch(
     const flags = rawFlags.includes("g") ? rawFlags : rawFlags + "g";
     const re = new RegExp(node.source as string, flags);
     const group = node.group as number | undefined;
-    for (const m of value.matchAll(re)) {
+    for (const m of text.matchAll(re)) {
       const picked = group !== undefined ? m[group] : m[0];
       if (typeof picked === "string") values.push(picked);
     }
@@ -643,7 +772,7 @@ function evalTest(
   test: unknown,
   row: Record<string, unknown>,
 ): boolean {
-  if (!isRecord(test) || !isRecord(test.match)) {
+  if (!isObjectNotArray(test) || !isObjectNotArray(test.match)) {
     return fail("malformed when gate (use whenMatches())");
   }
   const { field, source, flags } = test.match as Record<string, unknown>;
@@ -652,12 +781,9 @@ function evalTest(
   }
   const value = row[field];
   if (value === null || value === undefined || value === "") return false;
-  if (typeof value !== "string") {
-    return fail(
-      `field "${field}" is ${typeof value}, not a string — regex input`,
-    );
-  }
-  return new RegExp(source as string, (flags as string) ?? "").test(value);
+  const text = regexInputText(value);
+  if (text === undefined) return fail(regexInputRefusal(field, value));
+  return new RegExp(source as string, (flags as string) ?? "").test(text);
 }
 
 function evalPrincipal(
@@ -677,7 +803,7 @@ function evalPrincipal(
 // fails closed on the same shape the validator rejects, even for a wire spec
 // that bypassed validation.
 function anyOfAlternativeHasConjunction(node: unknown): boolean {
-  if (!isRecord(node)) return false;
+  if (!isObjectNotArray(node)) return false;
   if ("allOf" in node || "anyOf" in node) return true;
   if ("when" in node) {
     return anyOfAlternativeHasConjunction((node as { then?: unknown }).then);
@@ -690,7 +816,7 @@ function evalConf(
   row: Record<string, unknown>,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  if (!isRecord(node)) return fail("malformed confidentiality term");
+  if (!isObjectNotArray(node)) return fail("malformed confidentiality term");
   // Defense in depth against a wire spec that bypassed validation: a dual-op
   // node must refuse, never be resolved by this dispatch's key precedence
   // (the validator and the static analysis each have their own).
@@ -749,7 +875,7 @@ function evalInteg(
   row: Record<string, unknown>,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  if (!isRecord(node)) return fail("malformed integrity term");
+  if (!isObjectNotArray(node)) return fail("malformed integrity term");
   const amb = ambiguousOpReason(node, "integrity");
   if (amb) return fail(amb);
   if ("anyOf" in node) return fail("disjunctive integrity does not exist");
@@ -812,10 +938,10 @@ export function evaluateRowLabel(
 ):
   | { confidentiality: unknown[]; integrity: unknown[] }
   | { error: string } {
-  if (!isRecord(spec) || spec.version !== 1) {
+  if (!isObjectNotArray(spec) || spec.version !== 1) {
     return {
       error: `unsupported rowLabel version ${
-        JSON.stringify(isRecord(spec) ? spec.version : spec)
+        JSON.stringify(isObjectNotArray(spec) ? spec.version : spec)
       }`,
     };
   }
@@ -842,7 +968,7 @@ function staticUnconditionalAlternatives(
   node: unknown,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  if (!isRecord(node)) return [];
+  if (!isObjectNotArray(node)) return [];
   // A dual-op node is ambiguous (the evaluator dispatches by a DIFFERENT key
   // precedence — e.g. {principal, dbOwner} labels rows with only the
   // principal): it contributes no static reader, so the aggregate refuses.
@@ -873,7 +999,7 @@ function staticUnconditionalAlternatives(
 // {allOf: [], constant} keeps counting as a constraint rather than reading as
 // the degenerate empty conjunction (which would make an aggregate public).
 function flattenConfConjuncts(conf: unknown): unknown[] {
-  return isRecord(conf) && Array.isArray(conf.allOf) &&
+  return isObjectNotArray(conf) && Array.isArray(conf.allOf) &&
       presentOps(conf).length === 1
     ? conf.allOf.flatMap(flattenConfConjuncts)
     : [conf];
@@ -893,7 +1019,7 @@ export function ruleCommonAlternatives(
   spec: RowLabelSpec,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  const conf = isRecord(spec) ? spec.confidentiality : undefined;
+  const conf = isObjectNotArray(spec) ? spec.confidentiality : undefined;
   if (conf === undefined) return [];
   const conjuncts = flattenConfConjuncts(conf);
   if (conjuncts.length === 0) return [];
@@ -924,7 +1050,7 @@ export function ruleCommonAlternatives(
  * across tables must skip unconstrained rules, not treat them as a refusal.
  */
 export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
-  const conf = isRecord(spec) ? spec.confidentiality : undefined;
+  const conf = isObjectNotArray(spec) ? spec.confidentiality : undefined;
   if (conf === undefined) return false;
   return flattenConfConjuncts(conf).length > 0;
 }
@@ -932,9 +1058,9 @@ export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
 /** The rule attached to a (possibly wire-supplied) table schema, or undefined.
  *  Presence gates all Phase 3 work, so rule-less tables pay nothing. */
 export function rowLabelSpecOf(tableSchema: unknown): RowLabelSpec | undefined {
-  if (!isRecord(tableSchema)) return undefined;
+  if (!isObjectNotArray(tableSchema)) return undefined;
   const spec = tableSchema.rowLabel;
-  return isRecord(spec) ? spec as unknown as RowLabelSpec : undefined;
+  return isObjectNotArray(spec) ? spec as unknown as RowLabelSpec : undefined;
 }
 
 /**
@@ -951,9 +1077,11 @@ export function ruleInputFields(spec: RowLabelSpec): string[] {
       for (const x of n) walk(x);
       return;
     }
-    if (!isRecord(n)) return;
+    if (!isObjectNotArray(n)) return;
     const m = n.match;
-    if (isRecord(m) && typeof m.field === "string" && !seen.has(m.field)) {
+    if (
+      isObjectNotArray(m) && typeof m.field === "string" && !seen.has(m.field)
+    ) {
       seen.add(m.field);
       out.push(m.field);
     }

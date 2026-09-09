@@ -1,16 +1,11 @@
-import type {
-  CellScope,
-  JSONSchema,
-  JSONValue,
-  LinkScope,
-} from "@commonfabric/api";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { URI } from "@commonfabric/memory/interface";
+import type { JSONSchema, LinkScope } from "@commonfabric/api";
 import {
   LINK_V1_TAG,
   type LinkRef,
   type WireLinkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
 import { isLinkScope } from "./scope.ts";
 
 export type { URI } from "@commonfabric/memory/interface";
@@ -44,7 +39,19 @@ export type CellLinkRefPayload = {
  */
 export type WebhookCellLinkRefPayload = Omit<CellLinkRefPayload, "schema">;
 
-const WEBHOOK_LINK_KEYS = [
+/**
+ * The payload members that address a cell: which document, in which space and
+ * scope, at which path, and whether a write there redirects. This is the whole
+ * of what a link says about where it points; everything else a payload may
+ * carry -- `schema`, cfc's `cfcLabelView` -- describes how the value there is
+ * read or labeled.
+ *
+ * Two consumers turn on that distinction, and share this list so they cannot
+ * drift apart on what "addressing" means. The webhook wire admits these and
+ * refuses the rest ({@link assertWebhookCellLinkRefPayload}), and a node's
+ * cause is reduced to them (`sigilLinkAddressOnly`).
+ */
+export const LINK_ADDRESS_KEYS = [
   "id",
   "space",
   "scope",
@@ -63,7 +70,7 @@ export function assertWebhookCellLinkRefPayload(
   payload: WireLinkRefPayload,
 ): asserts payload is WebhookCellLinkRefPayload {
   for (const key of Object.keys(payload)) {
-    if (!(WEBHOOK_LINK_KEYS as readonly string[]).includes(key)) {
+    if (!(LINK_ADDRESS_KEYS as readonly string[]).includes(key)) {
       throw new Error(`Unexpected cell-link field: "${key}".`);
     }
   }
@@ -106,55 +113,12 @@ export function assertWebhookCellLinkRefPayload(
  */
 export type SigilLink<P extends CellLinkRefPayload = CellLinkRefPayload> =
   LinkRef<P>;
+
 /**
- * A {@link SigilLink} whose payload is a write redirect (an alias) — its
- * `overwrite` is fixed to `"redirect"`.
+ * A {@link SigilLink} whose payload is a write redirect — its `overwrite` is
+ * fixed to `"redirect"`, so a write through it lands at the target rather
+ * than replacing the link.
  */
 export type SigilWriteRedirectLink = LinkRef<
   CellLinkRefPayload & { overwrite: "redirect" }
 >;
-
-/**
- * `$alias` Pattern binding.
- *
- * These are used in intermediate bindings at runtime and are persisted in
- * saved patterns, like the map op. They are not links: in data, an `$alias`
- * record is a plain value.
- */
-type AliasBindingBase = {
-  path: readonly string[];
-  schema?: JSONSchema;
-};
-
-// Named-cell aliases carry no scope: the referenced argument/result cell's
-// own link determines the scope when the binding is unwrapped.
-type AliasBindingNamedCell = AliasBindingBase & {
-  cell: "result" | "argument";
-  partialCause?: never;
-  scope?: never;
-  defer?: number;
-};
-
-/**
- * These are partial bindings that may not be applicable to the current
- * pattern. We track the defer count, and each time we unwrap bindings,
- * we decrement that. Once it's 0, we know that it's associated with the
- * current pattern, and we can generate real cells based ont the combination
- * of the pattern's result (parent) and the partialCause.
- *
- * `scope` names where the derived internal cell is minted. It is a concrete
- * `CellScope`: "inherit" is never generated (the builder's `cell.export()`
- * filters non-cell scopes), and would mean the same as omitting it.
- */
-type AliasBindingPartialCause = AliasBindingBase & {
-  cell?: never;
-  partialCause: JSONValue;
-  scope?: CellScope;
-  defer?: number;
-};
-
-export type AliasBinding = {
-  $alias:
-    | AliasBindingNamedCell
-    | AliasBindingPartialCause;
-};

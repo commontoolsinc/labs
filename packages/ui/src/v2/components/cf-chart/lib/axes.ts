@@ -4,6 +4,7 @@
  * Renders tick marks and labels for x and y axes as SVG groups.
  * Accepts AxisConfig for customization (label, tickFormat, grid, tickCount).
  */
+
 import { svg, type TemplateResult } from "lit";
 // @ts-types="@types/d3-scale"
 import type { ScaleBand } from "d3-scale";

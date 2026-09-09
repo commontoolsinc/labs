@@ -6,7 +6,7 @@ import {
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
 import { ContextualFlowControl, type JSONSchema } from "@commonfabric/runner";
-import { hashSchema } from "@commonfabric/data-model/schema-hash";
+import { hashSchema } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Runtime } from "../src/runtime.ts";
@@ -28,7 +28,9 @@ describe("SelectorTracker", () => {
       storageManager,
     });
 
-    selectorTracker = new SelectorTracker();
+    selectorTracker = new SelectorTracker(() =>
+      storageManager.scopeKeyIdentity()
+    );
   });
 
   afterEach(async () => {
@@ -113,20 +115,22 @@ describe("SelectorTracker", () => {
         ...initialSelector,
         schema: SelectorTracker.getStandardSchema(initialSelector.schema),
       };
-      const cfc = new ContextualFlowControl();
-      const vnodeChildrenSchema = cfc.schemaAtPath(vnodeSchema, ["children"]);
+      const vnodeChildrenSchema = ContextualFlowControl.schemaAtPath(
+        vnodeSchema,
+        ["children"],
+      );
       const [existingSelector1, _existingPromise1] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "children"],
           schema: vnodeChildrenSchema,
-        }, runtime.cfc);
+        });
       expect(existingSelector1).toEqual(standardInitialSelector);
 
       const [existingSelector2, _existingPromise2] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "children", "0"],
           schema: vnodeSchema,
-        }, runtime.cfc);
+        });
       expect(existingSelector2).toEqual(standardInitialSelector);
     });
 
@@ -156,7 +160,7 @@ describe("SelectorTracker", () => {
         .getSupersetSelector(address, {
           path: ["$UI", "name"],
           schema: nameSchema,
-        }, runtime.cfc);
+        });
       expect(existingSelector1).toEqual(standardInitialSelector);
     });
 
@@ -183,7 +187,6 @@ describe("SelectorTracker", () => {
       const [existingSelector] = selectorTracker.getSupersetSelector(
         sessionAddress,
         selector,
-        runtime.cfc,
       );
 
       expect(existingSelector).toBeUndefined();

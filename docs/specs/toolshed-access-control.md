@@ -22,11 +22,24 @@ These routes require a first-party HTTP request proof:
 - `POST /api/agent-tools/web-search`
 - `POST /api/agent-tools/web-read`
 - `POST /api/sandbox/exec`
+- `POST /api/ingest-channels/{mint,list,rotate,revoke}`
 
-They were selected first because first-party code calls them through the
+The first three were selected because first-party code calls them through the
 fetch builtins, and each route spends server-held or local runtime authority.
 `web-search` uses the AI gateway. `web-read` uses the Jina key. `sandbox/exec`
 uses the sandbox service to run commands.
+
+The ingest-channel control plane is different in kind, and is the first route
+family to close the authorization half of the gap described below. It does not
+merely authenticate the caller: it takes the verified DID and requires an
+explicit `OWNER` grant for it in the target space's ACL document before minting
+anything (`packages/toolshed/lib/space-authority.ts`). It is called by `cf
+ingest`, not by a fetch builtin, so its paths are deliberately **not** in
+`PROTECTED_TOOLSHED_FIRST_PARTY_ROUTES` — adding them would let any pattern mint
+a channel with the user's authority and read the one-time token back, which
+needs the `cf-secret-viewer` treatment webhooks use. All four verbs are POST so
+that remains possible later. See
+`docs/features/self-serve-ingest-channels.md`.
 
 The protected routes do not expose wildcard CORS. Same-origin shell calls do not
 need CORS. Cross-origin callers must not get a credentialed wildcard surface for
@@ -84,7 +97,9 @@ These routes are privileged but are not changed in this pass:
   service caller model is written down.
 - Webhook admin routes such as create, list, and delete. They write toolshed
   service storage. External webhook ingest is separate because it authenticates
-  with a webhook bearer secret and has a different caller model.
+  with a webhook bearer secret and has a different caller model. The ingest
+  channel control plane above is the worked example of what these should adopt:
+  request proof for authentication, space ACL for authorization.
 - Integration admin routes that create, exchange, refresh, or remove tokens.
   OAuth callbacks are separate because the identity provider calls them. Login,
   refresh, logout, and token exchange routes need a focused design that binds
@@ -99,14 +114,23 @@ These routes are privileged but are not changed in this pass:
   observing and replaying a request on the wire. If a complete valid request is
   obtained some other way, it can be replayed until the proof expires. Short
   expiration and method, authority, path, query, DID, and body binding limit
-  where that captured request can be used.
+  where that captured request can be used. A route whose response MINTS a
+  credential needs more than that, because a replay would hand the replayer a
+  live token that outlives the proof window: `/api/ingest-channels/mint` and
+  `/rotate` therefore take a caller-supplied `requestId`, persisted beside the
+  registration, and answer a repeat with 409 and no secret. Any future
+  credential-minting route needs the same treatment.
 - A verified proof proves control of the DID key. It does not prove that the
   caller is code shipped by the shell. Toolshed does not yet have a server-side
   logged-in user registry or DID allowlist for these local HTTP routes.
 - The deferred privileged routes remain unauthenticated unless they already have
   a route-specific mechanism.
-- Authentication identifies the caller. It does not yet authorize which user DID
-  may operate on which sandbox, auth cell, or service record.
+- Authentication identifies the caller. For most routes it still does not
+  authorize which user DID may operate on which sandbox, auth cell, or service
+  record. The ingest-channel control plane is the exception and the pattern to
+  copy: it resolves authorization against the space ACL document, so its
+  strength is inherited from the memory layer rather than asserted locally, and
+  it tightens automatically as the ACL model tightens.
 - This does not add new URL allowlists or destination filtering. Existing SSRF
   defenses stay in their current route handlers.
 

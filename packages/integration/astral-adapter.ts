@@ -1,10 +1,111 @@
 import {
-  type Browser as AstralBrowser,
   ElementHandle as AstralElementHandle,
   type Page as AstralPage,
   type WaitForSelectorOptions,
 } from "@astral/astral";
 
+/**
+ * Where a system browser lives, per platform, in preference order. Chrome
+ * before Chromium because it is the one a developer is more likely to have
+ * kept current, and the one CI runs. This project does not target Windows, so
+ * neither does this.
+ */
+const SYSTEM_BROWSERS: Readonly<Record<string, readonly string[]>> = Object
+  .freeze({
+    darwin: Object.freeze([
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]),
+    linux: Object.freeze([
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+    ]),
+  });
+
+/**
+ * Helper for `astralBinaryPath()`, which reports the `ASTRAL_BIN_PATH`
+ * override, or `undefined` where it is unset or unreadable.
+ *
+ * The permission is asked exactly the way astral asks it, so that a caller
+ * which has not granted it gets the same answer from both rather than a throw
+ * from this one.
+ */
+function pathFromEnvironment(): string | undefined {
+  const permission = Deno.permissions.querySync({
+    name: "env",
+    variable: "ASTRAL_BIN_PATH",
+  });
+
+  return (permission.state === "granted")
+    ? (Deno.env.get("ASTRAL_BIN_PATH") || undefined)
+    : undefined;
+}
+
+/** Helper for `astralBinaryPath()`, which reports whether a path is a file. */
+function isExecutableFile(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
+  } catch {
+    // Absent, or unreadable under the permissions this process was given.
+    // Either way it is not a binary to hand a launch.
+    return false;
+  }
+}
+
+/**
+ * Returns the browser binary a **Chrome** astral launch should be given, or
+ * `undefined` to leave the choice to astral. The paths searched are Chrome's
+ * and Chromium's, so a caller launching anything else must not ask -- leaving
+ * `path` unset is what hands the whole question back to astral, including its
+ * own reading of `ASTRAL_BIN_PATH` for that product.
+ *
+ * This answers the same question astral's own `getBinary()` answers, and
+ * differs from it in one way: where astral falls straight through to
+ * downloading a browser, this looks for one already installed. Which browser
+ * astral downloads is a constant inside astral rather than anything this
+ * repository sets, and its latest release still names Chromium 125. CI never
+ * meets that constant, because the workflow points `ASTRAL_BIN_PATH` at the
+ * runner's own Chrome; a developer's machine meets it every time, so a local
+ * browser run and a CI browser run have been exercising engines years apart,
+ * the local one older.
+ *
+ * `ASTRAL_BIN_PATH` still wins outright, which is what keeps CI's
+ * configuration authoritative and leaves anyone a way to name a specific
+ * binary -- astral's downloaded one included, if a system browser ever
+ * misbehaves. `undefined` comes back when no system browser is installed, so
+ * astral's download stays the last resort rather than being taken away.
+ *
+ * @param candidates The paths to search, in preference order. Defaults to the
+ *   ones this platform installs a browser at, and is a parameter so that the
+ *   search can be asked about a list whose answers are known: on a machine
+ *   where the first default happens to exist, a search that skipped the
+ *   existence check entirely would return the same thing as one that made it.
+ */
+export function astralBinaryPath(
+  candidates: readonly string[] = SYSTEM_BROWSERS[Deno.build.os] ?? [],
+): string | undefined {
+  const fromEnvironment = pathFromEnvironment();
+  if (fromEnvironment !== undefined) return fromEnvironment;
+
+  for (const candidate of candidates) {
+    if (isExecutableFile(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
+/**
+ * How `$`, `$$`, and `waitForSelector` resolve a selector.
+ *
+ * `native` hands the selector to the page's own `querySelector`, which stops at
+ * every shadow boundary. `pierce` matches everything `native` matches, in the
+ * light DOM, and in addition every element inside an open shadow root at any
+ * depth. A pierce query walks the page in document order and searches an
+ * element's shadow tree as soon as it reaches that element, so the first match
+ * is the first one in the rendered page.
+ */
 export type QueryStrategy = "native" | "pierce";
 
 export type SelectorOptions = {
@@ -24,12 +125,15 @@ export type ElementHandle = AstralElementHandle & {
 };
 
 export interface InteractionObserver {
+  // `element` is absent when the click was aimed at a point rather than
+  // resolved to a handle, which is how the CFC helpers dispatch: the wait that
+  // settles the control returns coordinates, and no handle is taken.
   beforeClick?(
-    element: ElementHandle,
+    element: ElementHandle | undefined,
     point: { x: number; y: number },
   ): Promise<void> | void;
   afterClick?(
-    element: ElementHandle,
+    element: ElementHandle | undefined,
     point: { x: number; y: number },
     error?: unknown,
   ): Promise<void> | void;
@@ -55,20 +159,15 @@ export interface ScreencastFrame {
   sessionId: number;
 }
 
-export async function closeAstralBrowser(
-  browser: Pick<AstralBrowser, "close">,
-): Promise<void> {
-  try {
-    await browser.close();
-  } catch (error) {
-    if (
-      error instanceof TypeError &&
-      error.message === "Child process has already terminated"
-    ) {
-      return;
-    }
-    throw error;
-  }
+/**
+ * Whether `error` is what Deno throws for an operation on a child process that
+ * has already exited. Both killing such a process and waiting on one report it
+ * this way, and the message is the only thing telling it from any other
+ * `TypeError`.
+ */
+export function isChildProcessGone(error: unknown): boolean {
+  return error instanceof TypeError &&
+    error.message === "Child process has already terminated";
 }
 
 type CelestialBindings = ReturnType<
@@ -130,9 +229,9 @@ async function runProtocolCleanup(
 
 let objectGroupSequence = 0;
 
-function nextObjectGroup(): string {
+function nextObjectGroup(purpose = "pierce"): string {
   objectGroupSequence++;
-  return `common-tools-pierce-${objectGroupSequence}`;
+  return `common-tools-${purpose}-${objectGroupSequence}`;
 }
 
 function exceptionMessage(
@@ -224,6 +323,80 @@ async function remoteRoot(
   };
 }
 
+export interface ContentQuadPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Measure the composed content quad of an element retained on `globalThis`.
+ *
+ * The caller puts the exact element at `retainedKey` while it can still resolve
+ * its Astral handle. Addressing that remote object directly gives CDP enough
+ * information to include ancestor transforms, 3D projection, and SVG layout
+ * without returning to Astral's invalidatable DOM node id.
+ *
+ * The retained property and its remote object group are consumed by this call,
+ * including when measurement fails.
+ */
+export async function measureRetainedContentQuad(
+  page: AstralPage,
+  retainedKey: string,
+): Promise<ContentQuadPoint[]> {
+  const bindings = page.unsafelyGetCelestialBindings();
+  const objectGroup = nextObjectGroup("aim");
+  try {
+    const remote = await runProtocolCommand(
+      bindings,
+      () =>
+        bindings.Runtime.evaluate({
+          expression: `globalThis[${JSON.stringify(retainedKey)}]`,
+          objectGroup,
+          returnByValue: false,
+        }),
+    );
+    if (remote.exceptionDetails) {
+      throw new Error(exceptionMessage(remote.exceptionDetails));
+    }
+    const objectId = remote.result.objectId;
+    if (!objectId) {
+      throw new Error("Astral did not return a remote element object");
+    }
+
+    const { model } = await runProtocolCommand(
+      bindings,
+      () => bindings.DOM.getBoxModel({ objectId }),
+    );
+    const points: ContentQuadPoint[] = [];
+    for (let index = 0; index < model.content.length; index += 2) {
+      points.push({
+        x: model.content[index],
+        y: model.content[index + 1],
+      });
+    }
+    if (points.length === 0) {
+      throw new Error("Element content quad is empty");
+    }
+    return points;
+  } finally {
+    try {
+      await runProtocolCleanup(
+        bindings,
+        () =>
+          bindings.Runtime.evaluate({
+            expression: `delete globalThis[${JSON.stringify(retainedKey)}]`,
+            returnByValue: true,
+          }),
+      );
+    } finally {
+      await runProtocolCleanup(
+        bindings,
+        () => bindings.Runtime.releaseObjectGroup({ objectGroup }),
+      );
+    }
+  }
+}
+
 async function nodeIdsFromArray(
   bindings: CelestialBindings,
   objectId: string,
@@ -285,7 +458,7 @@ export async function queryAllPierce(
       bindings,
       () =>
         bindings.Runtime.callFunctionOn({
-          functionDeclaration: contentPierceQuerySelector.toString(),
+          functionDeclaration: pierceDeclaration(contentPierceQuerySelector),
           objectId: remote.objectId,
           arguments: [
             { value: selector },
@@ -351,7 +524,9 @@ export async function waitForPierceSelector(
         bindings,
         () =>
           bindings.Runtime.callFunctionOn({
-            functionDeclaration: contentWaitForPierceSelector.toString(),
+            functionDeclaration: pierceDeclaration(
+              contentWaitForPierceSelector,
+            ),
             objectId: remote.objectId,
             arguments: [
               { value: selector },
@@ -392,29 +567,58 @@ export async function waitForPierceSelector(
   }
 }
 
-function contentPierceQuerySelector(
-  this: Document | Element,
+// The single definition of what a pierce selector matches. It runs in the page,
+// serialized into every in-page function that resolves one, so an immediate
+// query and a wait for the same selector settle on the same elements.
+//
+// The walk is document order over `root`'s descendants, entering an element's
+// open shadow tree as soon as it reaches that element, and entering `root`'s own
+// shadow tree first when `root` is an element. `root` itself is never a match,
+// which is how `querySelector` scopes a search to an element.
+function collectPierceMatches(
+  root: Document | Element,
   selector: string,
   firstOnly: boolean,
 ): Element[] {
   const matches: Element[] = [];
 
-  const visit = (root: Document | Element | ShadowRoot): boolean => {
-    for (const element of root.querySelectorAll("*")) {
-      const shadowRoot = element.shadowRoot;
-      if (!shadowRoot) continue;
-
-      for (const match of shadowRoot.querySelectorAll(selector)) {
-        matches.push(match);
+  const visit = (node: Document | Element | ShadowRoot): boolean => {
+    if (node instanceof Element && node.shadowRoot) {
+      if (visit(node.shadowRoot)) return true;
+    }
+    for (const element of node.querySelectorAll("*")) {
+      if (element.matches(selector)) {
+        matches.push(element);
         if (firstOnly) return true;
       }
-      if (visit(shadowRoot) && firstOnly) return true;
+      if (element.shadowRoot && visit(element.shadowRoot)) return true;
     }
     return false;
   };
 
-  visit(this);
+  visit(root);
   return matches;
+}
+
+// Build the `functionDeclaration` for an in-page function that resolves a pierce
+// selector. The traversal's source is declared in the enclosing scope, so the
+// serialized function's call to `collectPierceMatches` binds to it in the page
+// the same way it binds to the module-scope function here.
+function pierceDeclaration(
+  contentFunction: (this: Document | Element, ...args: never[]) => unknown,
+): string {
+  return `function (...args) {
+    const collectPierceMatches = ${collectPierceMatches.toString()};
+    return (${contentFunction.toString()}).apply(this, args);
+  }`;
+}
+
+function contentPierceQuerySelector(
+  this: Document | Element,
+  selector: string,
+  firstOnly: boolean,
+): Element[] {
+  return collectPierceMatches(this, selector, firstOnly);
 }
 
 function contentWaitForPierceSelector(
@@ -455,27 +659,8 @@ function contentWaitForPierceSelector(
     }).navigation;
     let finished = false;
 
-    const findMatch = (): Element | undefined => {
-      const visit = (
-        root: Document | Element | ShadowRoot,
-      ): Element | undefined => {
-        if (root instanceof Element && root.shadowRoot) {
-          const match = root.shadowRoot.querySelector(selector);
-          if (match) return match;
-          const nestedMatch = visit(root.shadowRoot);
-          if (nestedMatch) return nestedMatch;
-        }
-        for (const element of root.querySelectorAll("*")) {
-          const shadowRoot = element.shadowRoot;
-          if (!shadowRoot) continue;
-          const match = shadowRoot.querySelector(selector);
-          if (match) return match;
-          const nestedMatch = visit(shadowRoot);
-          if (nestedMatch) return nestedMatch;
-        }
-      };
-      return visit(this);
-    };
+    const findMatch = (): Element | undefined =>
+      collectPierceMatches(this, selector, true)[0];
 
     let state = stateOwner[stateKey];
     if (!state) {

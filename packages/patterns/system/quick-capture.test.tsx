@@ -1,4 +1,4 @@
-import { action, assert, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import type { MentionablePiece } from "./backlinks-index.tsx";
 import { createNotebookHandler, createNoteHandler } from "./quick-capture.tsx";
 
@@ -28,7 +28,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_create_note },
       { assertion: assert_note_is_registered },
       { action: action_create_notebook },

@@ -4,15 +4,16 @@
  * Integration test: verify writable-array `.push()` works against the real
  * remote memory transport and toolshed app.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
 import { type JSONSchema, Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 (Error as any).stackTraceLimit = 100;
 
 const TOTAL_COUNT = 20;
-const TIMEOUT_MS = 180000;
 
 const OutputSchema = {
   type: "object",
@@ -66,10 +67,12 @@ function createRuntime(identity: Identity, base: URL): Runtime {
       memoryHost: new URL(base),
     }),
     experimental: {
+      // Server-execution v2 posture (testing.md §2): this test serves
+      // toolshed's `app.ts` IN-PROCESS with NO ExecutorHost — a
+      // single-process harness whose client is OFF BY CONSTRUCTION,
+      // whatever EXPERIMENTAL_SERVER_EXECUTION says (P7 review finding 7:
+      // only the tests that talk to the lane's toolshed declare it).
       modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),
-      persistentSchedulerState: readExperimentalFlag(
-        "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
-      ),
     },
   });
 }
@@ -83,7 +86,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./array_push.test.tsx", import.meta.url),
+      new URL("./array_push.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,
@@ -168,17 +171,9 @@ Deno.test({
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
 
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
     try {
-      await Promise.race([runTest(base), timeoutPromise]);
+      await runTest(base);
     } finally {
-      clearTimeout(timeoutHandle!);
       await server.shutdown();
     }
   },

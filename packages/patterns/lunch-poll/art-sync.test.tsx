@@ -16,8 +16,13 @@
  * the sub-pattern level in generated-art.test.tsx.
  */
 
-import { action, computed, pattern, UI } from "commonfabric";
-import CozyPoll from "./main.tsx";
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
+import {
+  findElement,
+  findNodeByProp,
+  readValue,
+} from "../test/vnode-helpers.ts";
+import CozyPoll, { type LunchProfile } from "./main.tsx";
 
 // 1×1 transparent PNG, the mocked generation response body. The persisted
 // value is its exact data URL: FetchBinary bytes → base64 re-encode is an
@@ -37,79 +42,24 @@ export const fetchMocks = [
   },
 ];
 
-const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
-  typeof value === "object" && value !== null;
-
-const readValue = (value: unknown): unknown => {
-  if (!isRecord(value) || typeof value.get !== "function") {
-    return value;
-  }
-  return (value.get as () => unknown)();
-};
-
-const propsOf = (node: unknown): Record<PropertyKey, unknown> | undefined => {
-  const value = readValue(node);
-  if (!isRecord(value)) return undefined;
-  const props = readValue(value.props);
-  return isRecord(props) ? props : undefined;
-};
-
-const childrenArray = (children: unknown): unknown[] => {
-  const value = readValue(children);
-  if (Array.isArray(value)) return value;
-  return value === undefined || value === null || typeof value === "boolean"
-    ? []
-    : [value];
-};
-
-const childNodes = (node: unknown): unknown[] => {
-  const value = readValue(node);
-  if (Array.isArray(value)) return value;
-  if (!isRecord(value)) return [];
-  const ui = value[UI];
-  return [
-    ...(ui === undefined || ui === value ? [] : [ui]),
-    ...childrenArray(value.children),
-  ];
-};
-
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined => {
-  const value = readValue(root);
-  const props = propsOf(value);
-  if (props && readValue(props[prop]) === expected) return value;
-  return childNodes(value)
-    .map((child) => findNodeByProp(child, prop, expected))
-    .find((child) => child !== undefined);
-};
-
-// Walk the rendered tree for a vnode by element name (e.g. "cf-image").
-const findNodeByName = (
-  root: unknown,
-  name: string,
-): unknown | undefined => {
-  const value = readValue(root);
-  if (isRecord(value) && readValue(value.name) === name) return value;
-  return childNodes(value)
-    .map((child) => findNodeByName(child, name))
-    .find((child) => child !== undefined);
-};
-
 export default pattern(() => {
+  // Identity is a profile cell; claim the host's through the test seam.
+  const host = Writable.of<LunchProfile>({ name: "Host" });
   const poll = CozyPoll({});
 
+  const action_become_host = action(() => {
+    poll.overrideViewer.send({ profile: host, name: "Host" });
+  });
+
   const action_join_as_host = action(() => {
-    poll.joinAs.send({ name: "Host" });
+    poll.joinAs.send({});
   });
 
   const action_add_sushi = action(() => {
     poll.addOption.send({ title: "Sushi Palace" });
   });
 
-  const assert_option_added = computed(() =>
+  const assert_option_added = assert(() =>
     poll.options.length === 1 && poll.options[0]?.title === "Sushi Palace"
   );
 
@@ -117,8 +67,8 @@ export default pattern(() => {
   // (generated, not yet stored) is in the rendered tree — the fetch-derived
   // read chain through both sub-pattern boundaries works. (Until CT-1836's
   // traversal fix this file carried a canary pinning the opposite.)
-  const assert_generated_overlay_renders = computed(() =>
-    findNodeByName(poll[UI], "cf-image") !== undefined
+  const assert_generated_overlay_renders = assert(() =>
+    findElement(poll[UI], "cf-image") !== undefined
   );
 
   // The host keeps the art: the same payload the card's keep button sends
@@ -132,16 +82,17 @@ export default pattern(() => {
     });
   });
 
-  const assert_image_persisted = computed(() =>
+  const assert_image_persisted = assert(() =>
     readValue(poll.options[0]?.imageUrl) === EXPECTED_DATA_URL
   );
 
-  const assert_stored_img_renders = computed(() =>
+  const assert_stored_img_renders = assert(() =>
     findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined
   );
 
   return {
-    tests: [
+    [TESTS]: [
+      { action: action_become_host },
       { action: action_join_as_host },
       { action: action_add_sushi },
       { assertion: assert_option_added },

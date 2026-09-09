@@ -18,7 +18,7 @@ primitive), and are run via `cf test`.
 
 1. **Patterns all the way down** - Tests are patterns, proving the system works
 2. **Fast feedback loops** - Tests run with emulated storage (~10ms setup)
-3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf piece get`)
+3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf cell get`)
 4. **Minimal infrastructure** - Reuse existing `piece step` machinery
 5. **Self-contained tests** - Test logic lives inside actions, not external scripts
 
@@ -71,35 +71,50 @@ A test pattern is a regular pattern file with `.test.tsx` extension that:
 2. **Instantiates it with test data**
 3. **Defines test actions using `action()`** (for triggering events on the pattern)
 4. **Defines assertions as `assert(() => boolean)`** computed from pattern state
-5. **Returns a `tests` array** of discriminated union objects
+5. **Returns a `[TESTS]` array** of discriminated union objects
 
 ### Test Step Format (Discriminated Union)
 
-The `tests` array uses a discriminated union to avoid TypeScript declaration emit issues:
+The `[TESTS]` array is a discriminated union — each step is exactly one of the
+shapes below. Keeping an assertion's `Cell` and an action's `Stream` in
+separate members, rather than mixing the two in one array element, is what
+avoids the declaration-emit errors TypeScript raises for such a mix:
 
 ```typescript
 // Shown at module scope.
 import type { AssertRecord } from "commonfabric";
 
 type TestStep =
-  // from assert(() => condition), or computed(() => condition)
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord> }
-  | { action: Stream<void> }           // from action(() => handler.send())
-  | { render: VNode }                  // one headless VDOM demand window
-  | { settle: true };                  // wait for full async settlement
+  | { assertion: Reactive<AssertRecord> } // from assert(() => condition)
+  | {
+    action: Stream<unknown>; // from action(() => handler.send())
+    event?: unknown; // the payload, sent to the stream as authored
+    trustedUi?: { surface: string; action: string };
+  }
+  | { render: VNode } // one headless VDOM demand window
+  | { settle: true } // wait for full async settlement
+  | { label: string } // announce a marker to other participants
+  | { await: string }; // block until a participant announces it
 ```
 
-This format keeps `action()` streams and assertion cells separate in the type
-system.
+An action step's `event` is the payload the stream receives, sent as authored:
+an object arrives as an object. `trustedUi` names a trusted UI surface and the
+control inside it, for an action that must originate from rendered UI under
+enforcement.
 
-An `assert(...)` assertion carries an `AssertRecord` — `{ ok, source, parts }` —
-rather than a bare boolean. The transformer rewrites its body to record each
-operand as it is computed, so a failure can report the operands and their
-values instead of only `false`. A `computed(...)` assertion carries the boolean
-and reports `Expected true, got false`. See
+`{ label }` and `{ await }` synchronize a multi-user test — a participant
+announces reaching `label`, and another blocks on `await` until it is
+announced. A single-user run has no participant to synchronize with, so both
+are inert there: recognized, skipped, and absent from the reported results.
+
+An assertion is an `AssertRecord` — `{ ok, source, parts }` — which `assert()`
+is the only way to write; a bare `Reactive<boolean>` is a compile error. The
+transformer rewrites the `assert` body to record each operand as it is
+computed, so a failure can report the operands and their values instead of
+only `false`. See
 [Assertion diagnostics](../../packages/ts-transformers/README.md#assertion-diagnostics)
 for the rewrite, and
-[Pattern Testing](../common/workflows/pattern-testing.md#prefer-assert-over-computed)
+[Pattern Testing](../common/workflows/pattern-testing.md#write-assertions-with-assert)
 for the authoring side.
 
 `cf test` does not mount a renderer by default. Under the pull scheduler, a
@@ -153,9 +168,9 @@ export default pattern(() => {
     return byCategory.food === 5 && byCategory.transport === 40;
   });
 
-  // 4. Return tests array using discriminated union format
+  // 4. Return the test steps under the [TESTS] key
   return {
-    tests: [
+    [TESTS]: [
       { action: action_add_expense },       // Runner calls .send()
       { assertion: assert_has_one_expense }, // Runner checks its `ok`
       { action: action_add_another },
@@ -170,9 +185,9 @@ export default pattern(() => {
 
 ### Test Execution Flow
 
-The `cf test` runner processes the `tests` array **in order**:
+The `cf test` runner processes the `[TESTS]` array **in order**:
 
-1. For each item in `tests`:
+1. For each item in `[TESTS]`:
    - If it has `action` key: call `.send()`, then `await runtime.idle()`
    - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
      its `ok` is true, any other value passes when it equals `true`
@@ -181,12 +196,12 @@ The `cf test` runner processes the `tests` array **in order**:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  tests: [                                                     │
-│    { action: action1 },                                       │
-│    { assertion: assert1 },                                    │
-│    { action: action2 },                                       │
-│    { assertion: assert2 },                                    │
-│  ]                                                            │
+│  [TESTS]: [                                                  │
+│    { action: action1 },                                      │
+│    { assertion: assert1 },                                   │
+│    { action: action2 },                                      │
+│    { assertion: assert2 },                                   │
+│  ]                                                           │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -275,11 +290,15 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     storageManager,
     apiUrl: new URL(import.meta.url)
   });
-  const engine = new Engine(runtime);
+  // The runtime's OWN harness, never a second Engine: verified-load
+  // registration, source maps and module hashes live on the engine that
+  // evaluates the bundle, and splitting them breaks CFC verified bindings.
+  const engine = runtime.harness;
 
   // 2. Compile and run the test pattern
-  const program = await engine.resolve(
-    new FileSystemProgramResolver(testPath)
+  const program = await resolveLocalProgram(
+    (resolver) => engine.resolve(resolver),
+    { main: testPath, dataFilePaths: options.dataFilePaths },
   );
   const { main } = await engine.process(program, { noCheck: false, noRun: false });
   const testPatternFactory = main.default as Pattern;
@@ -294,11 +313,11 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
   // No renderer is mounted by default. Values run only when a test step
   // explicitly demands them.
 
-  // 4. Get the tests array from pattern output
-  const testsCell = patternResult.key("tests") as Cell<unknown>;
+  // 4. Get the [TESTS] array from pattern output
+  const testsCell = patternResult.key(TESTS) as Cell<unknown>;
   const testsValue = testsCell.get();
   if (!Array.isArray(testsValue)) {
-    throw new Error("Test pattern must return { tests: TestStep[] }");
+    throw new Error("Test pattern must return { [TESTS]: TestStep[] }");
   }
 
   // 5. Process tests in order using discriminated union format
@@ -313,6 +332,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       assertion?: unknown;
       render?: unknown;
       settle?: boolean;
+      label?: string;
+      await?: string;
+      event?: unknown;
+      trustedUi?: { surface: string; action: string };
     };
 
     // Check discriminated union keys
@@ -320,6 +343,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     const isAssertion = "assertion" in stepValue;
     const isRender = "render" in stepValue;
     const isSettle = "settle" in stepValue;
+    // Inert in a single-user run, but still a step the runner knows.
+    const isMarker = "label" in stepValue || "await" in stepValue;
+
+    if (isMarker) continue;
 
     if (!isAction && !isAssertion && !isRender && !isSettle) {
       throw new Error(`Test step at index ${i} has no supported discriminant`);
@@ -330,7 +357,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       actionCount++;
       lastActionIndex = i;
       const actionStream = testsCell.key(i).key("action") as Stream<unknown>;
-      actionStream.send();  // No argument needed for void streams
+      // The step's payload, `undefined` for a plain void action. A
+      // `trustedUi` step wraps it in the DOM provenance a renderer would
+      // attach, so a write guarded by a UI contract sees a trusted gesture.
+      actionStream.send(buildActionEvent(stepValue.event, stepValue.trustedUi));
 
       await Promise.race([
         runtime.idle(),
@@ -364,9 +394,9 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     }
   }
 
-  // 6. Cleanup
-  engine.dispose();
-  await storageManager.close();
+  // 6. Cleanup. `dispose()` also closes the storage manager; a caller that
+  // supplied its own passes `{ closeStorage: false }` and closes it itself.
+  await runtime.dispose();
 
   return { results, path: testPath };
 }
@@ -376,7 +406,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
 
 - **Discriminated union detection:** Check `"action" in step` vs `"assertion" in step`
 - **Cell access via `.key()`:** Access test steps through reactive cell interface
-- **Void stream `.send()`:** No argument required for `Stream<void>`
+- **Action payload:** The step's `event` reaches the stream as authored — an
+  object arrives as an object — and a `trustedUi` step wraps it in the DOM
+  provenance a renderer would attach. A plain void action carries no `event`
+  and sends `undefined`.
 - **Explicit VDOM demand:** A `render` step mounts the worker reconciler only
   for that step; DOM operations are discarded and demand is cleaned up
 
@@ -416,16 +449,16 @@ const action_add_expense = action(() => {
 
 ### Do: Meaningful Assertion Names
 
-Use descriptive computed cell names:
+Use descriptive assertion names:
 
 ```tsx
 // Shown inside a pattern body.
 // ✅ Good - name describes what's being tested
-const assert_total_equals_45 = computed(() => subject.result.total === 45);
-const assert_items_sorted_by_date = computed(() => isSorted(subject.items));
+const assert_total_equals_45 = assert(() => subject.result.total === 45);
+const assert_items_sorted_by_date = assert(() => isSorted(subject.items));
 
 // ❌ Bad - generic names
-const test1 = computed(() => subject.result.total === 45);
+const test1 = assert(() => subject.result.total === 45);
 ```
 
 ### Do: Use Discriminated Union Format
@@ -436,7 +469,7 @@ Wrap actions and assertions in their respective object format:
 // Shown inside a pattern body.
 // ✅ Good - discriminated union format
 return {
-  tests: [
+  [TESTS]: [
     { action: action_add_item },
     { assertion: assert_has_one_item },
     { action: action_remove_item },
@@ -446,7 +479,7 @@ return {
 
 // ❌ Bad - flat array (causes TypeScript declaration emit issues)
 return {
-  tests: [action_add_item, assert_has_one_item, action_remove_item, assert_empty],
+  [TESTS]: [action_add_item, assert_has_one_item, action_remove_item, assert_empty],
 };
 ```
 
@@ -457,7 +490,7 @@ Put actions before the assertions that depend on them:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [
+  [TESTS]: [
     { action: action_add_item },     // First, add an item
     { assertion: assert_has_one_item }, // Then, verify it was added
     { action: action_remove_item },  // Then, remove it
@@ -625,7 +658,7 @@ export default pattern(() => {
   const assert_is_two = assert(() => counter.value === 2);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_at_zero },  // Initial state check
       { action: action_increment },
       { assertion: assert_is_one },          // After 1 increment

@@ -61,7 +61,9 @@ const liftCount = lift((items: unknown[] | undefined) => {
   return Array.isArray(items) ? items.length : 0;
 });
 
-const liftTotal = lift((items: { value: unknown }[] | undefined) => {
+// `value` is read as a number, so it is declared as one: `unknown` is the
+// declaration for a reference nobody reads through.
+const liftTotal = lift((items: { value: number }[] | undefined) => {
   if (!Array.isArray(items)) return 0;
   return items.reduce((sum, entry: any) => {
     const value = typeof entry?.value === "number" ? entry.value : 0;

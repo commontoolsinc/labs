@@ -32,6 +32,12 @@ function functionName(name: string): string {
  * `COMP_WORDBREAKS`, which includes `:` and `=`, so `--space=x` and
  * `http://host:8000` would arrive pre-shredded. The CLI tokenizes instead, and
  * the reply is re-trimmed to the fragment bash believes it is replacing.
+ *
+ * The trailing space is inverted rather than suppressed, because macOS ships
+ * bash 3.2 and `compopt` is bash 4+. Registering `-o nospace` and letting a
+ * candidate carry its own space is the one mechanism that works on both: the
+ * held cursor a cell path needs then costs nothing on the shell this
+ * repository is most often developed against.
  */
 export function bashCompletionScript(
   name: string,
@@ -112,18 +118,28 @@ ${fn}() {
     return
   fi
 
+  # bash replaces only the fragment after the last word-break character, and
+  # \${cur} is the whole word — \`--identity=~/keys/a\` rather than \`~/keys/a\`.
+  # A glob applied to the whole word matches nothing, so file completion is
+  # given the fragment the shell will actually replace.
+  local frag="\${cur}"
+  if [[ "\${cur}" == *[:=]* ]]; then
+    frag="\${cur##*[:=]}"
+  fi
+
   if [[ -n "\${glob}" ]]; then
     if [[ "\${glob}" == ":dirs:" ]]; then
       while IFS= read -r reply; do COMPREPLY+=("\${reply}"); done \\
-        < <(compgen -d -- "\${cur}")
+        < <(compgen -d -- "\${frag}")
     else
       while IFS= read -r reply; do COMPREPLY+=("\${reply}"); done \\
-        < <(compgen -f -X "!\${glob}" -- "\${cur}"; compgen -d -- "\${cur}")
+        < <(compgen -f -X "!\${glob}" -- "\${frag}"; compgen -d -- "\${frag}")
     fi
   fi
 
-  # bash replaces only the fragment after the last word-break character, so
-  # trim each candidate by the same amount or the prefix is duplicated.
+  # Candidates from the CLI carry the whole word, so trim them by the same
+  # amount or the prefix is duplicated. A file candidate is already the
+  # fragment and carries no such prefix, so this leaves it alone.
   if [[ "\${cur}" == *[:=]* ]]; then
     local head="\${cur%[:=]*}"
     local i
@@ -132,14 +148,44 @@ ${fn}() {
     done
   fi
 
-  # \`compopt\` is bash 4+; on bash 3.2 the trailing space is simply not
-  # suppressed, which costs a keystroke but completes correctly.
+  # A word opening with \`#\` is a comment to an interactive bash, which drops
+  # it and everything after it before the command is called: \`wish #profile\`
+  # runs \`wish\` with no target. \`\\#profile\` is one word to the shell and the
+  # bare \`#profile\` to the command, and completing it again reads back the
+  # same target, so the escape is added to the candidate rather than left to
+  # the caller to remember.
+  local j
+  for j in "\${!COMPREPLY[@]}"; do
+    case "\${COMPREPLY[j]}" in
+      '#'*) COMPREPLY[j]="\\\\\${COMPREPLY[j]}" ;;
+    esac
+  done
+
+  # The trailing space is inverted rather than suppressed. \`compopt\` is the
+  # per-completion switch and it is bash 4+, so the ${name} binding is
+  # registered \`-o nospace\` and a candidate that should END the word carries
+  # its own space. bash inserts that space verbatim, which is what makes one
+  # mechanism serve bash 3.2 and bash 4 alike.
+  #
+  # \`\$1\` is the command word the compspec fired for, and it decides: a line
+  # handed back to another completion has to keep that completion's spacing,
+  # so the \`deno\` binding is registered WITHOUT \`-o nospace\` and adds
+  # nothing here.
+  if [[ "\${1##*/}" == "${name}" && \${nospace} -eq 0 ]]; then
+    local k
+    for k in "\${!COMPREPLY[@]}"; do
+      COMPREPLY[k]="\${COMPREPLY[k]} "
+    done
+  fi
+
+  # Still worth setting where it exists: it is what gives the \`deno\` binding
+  # the same held cursor, which the inversion above cannot reach.
   if [[ \${nospace} -eq 1 ]] && type compopt >/dev/null 2>&1; then
     compopt -o nospace
   fi
 }
 ${denoBinding}
-complete -F ${fn} ${name}
+complete -o nospace -F ${fn} ${name}
 `;
 }
 
@@ -214,6 +260,10 @@ ${fn}() {
   fi
 
   if [[ -n "\${glob}" ]]; then
+    # An inline \`--name=value\` word reaches here whole. Moving the flag and
+    # its \`=\` into IPREFIX leaves \`_path_files\` completing the path rather
+    # than looking for a file whose name begins with the flag.
+    compset -P '--[^=]#='
     if [[ "\${glob}" == ":dirs:" ]]; then
       _path_files -/
     else

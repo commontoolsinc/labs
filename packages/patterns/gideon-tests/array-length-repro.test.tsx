@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/array-length-repro.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ArrayLengthRepro from "./array-length-repro.tsx";
 
 export default pattern(() => {
@@ -58,7 +58,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // Initial state - all approaches
       { assertion: assert_initial_length_direct },
       { assertion: assert_initial_length_filter },

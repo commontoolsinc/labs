@@ -29,7 +29,10 @@ reviews:
         transformer pipeline / reactive-graph model (error-swallowing try/catch,
         singletons, async/await in handlers, transformer escape hatches). (3) Coherence — a change to runtime
         semantics must update the docs, comments, and examples it makes stale,
-        so someone searching later is not misled. (4) Test rigor — each touched
+        so someone searching later is not misled; watch too for a doc comment
+        detached from the declaration it documents, most often by a new
+        definition inserted directly beneath it, which leaves the original
+        declaration undocumented. (4) Test rigor — each touched
         test should guard a nameable principle. (5) Bandwidth — separate
         blocking bugs from non-blocking improvements and optional nits.
       file_paths:

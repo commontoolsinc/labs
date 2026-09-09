@@ -48,7 +48,7 @@ Prefer a **generative principle** that produces the right behavior on cases
 nobody enumerated:
 
 - ✅ "A searcher who lands on a doc must not be misled." (generates coverage)
-- ⚠️ "Check try/catch, singletons, async-in-handlers, `cf-disable-transform`."
+- ⚠️ "Check try/catch, singletons, async-in-handlers, schema drift."
   (caps at what was known when written)
 
 Concrete tells _are_ useful — so when you enumerate, mark the list as seed, not

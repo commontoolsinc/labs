@@ -59,9 +59,9 @@ export const radioGroupStyles = `
     cursor: not-allowed;
   }
 
-  /* ========================================
-     Styles for items-based rendering
-     ======================================== */
+  /*
+  ** Styles for items-based rendering
+  */
 
   .radio-item {
     display: flex;

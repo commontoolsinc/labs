@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { CfcConfClause } from "./clause.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives } from "./clause.ts";
@@ -139,7 +139,7 @@ const scanAlternative = (
     if (Array.isArray(value)) {
       return value.some((element) => scanNested(element, contextAtom));
     }
-    if (!isRecord(value)) {
+    if (!isObjectOrArray(value)) {
       return false;
     }
     if (isCfcFieldCommitment(value)) {
@@ -169,7 +169,7 @@ const scanAlternative = (
   if (Array.isArray(alternative)) {
     return alternative.some((element) => scanNested(element, undefined));
   }
-  if (!isRecord(alternative)) {
+  if (!isObjectOrArray(alternative)) {
     // Bare string atoms are type-only tags: their entire content is the
     // public type observation.
     return false;

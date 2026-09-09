@@ -1,12 +1,16 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { entityKey } from "./keys.ts";
+import { entityNameKey } from "./keys.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 
 export interface MaterializerIndexState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
+
   readonly materializersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   getMaterializerWriteEnvelopes(
@@ -18,17 +22,19 @@ export interface MaterializerIndexState {
 export class SchedulerMaterializers implements MaterializerIndexState {
   readonly materializers = new Set<Action>();
   readonly materializersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
-  private readonly writeEnvelopes = new WeakMap<
+  readonly #writeEnvelopes = new WeakMap<
     Action,
     IMemorySpaceAddress[]
   >();
-  private readonly actionEntities = new WeakMap<
+  readonly #actionEntities = new WeakMap<
     Action,
     Set<SpaceScopeAndURI>
   >();
 
   constructor(
     readonly effects: ReadonlySet<Action>,
+    /** Identity entity keys resolve scoped addresses against (keys.ts). */
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity,
   ) {}
 
   register(
@@ -52,11 +58,16 @@ export class SchedulerMaterializers implements MaterializerIndexState {
     if (writes.length === 0) return;
 
     this.materializers.add(action);
-    this.writeEnvelopes.set(action, writes);
+    this.#writeEnvelopes.set(action, writes);
 
     const entities = new Set<SpaceScopeAndURI>();
+    // Reader→writer TOPOLOGY, keyed by scope NAME (server-execution v2
+    // stage A; see entityNameKey): a materializer's envelope covers every
+    // instance of its declared surface, so a reader running as any
+    // principal must find it. Overlap is decided by name (readsOverlapWrites)
+    // as before; only the index key stops resolving an instance.
     for (const write of writes) {
-      const entity = entityKey(write);
+      const entity = entityNameKey(write);
       entities.add(entity);
       let materializers = this.materializersByEntity.get(entity);
       if (!materializers) {
@@ -65,13 +76,13 @@ export class SchedulerMaterializers implements MaterializerIndexState {
       }
       materializers.add(action);
     }
-    this.actionEntities.set(action, entities);
+    this.#actionEntities.set(action, entities);
   }
 
   clearAction(action: Action): void {
     this.materializers.delete(action);
-    this.writeEnvelopes.delete(action);
-    const entities = this.actionEntities.get(action);
+    this.#writeEnvelopes.delete(action);
+    const entities = this.#actionEntities.get(action);
     if (!entities) return;
 
     for (const entity of entities) {
@@ -81,7 +92,7 @@ export class SchedulerMaterializers implements MaterializerIndexState {
         this.materializersByEntity.delete(entity);
       }
     }
-    this.actionEntities.delete(action);
+    this.#actionEntities.delete(action);
   }
 
   isMaterializer(action: Action): boolean {
@@ -91,7 +102,7 @@ export class SchedulerMaterializers implements MaterializerIndexState {
   getMaterializerWriteEnvelopes(
     action: Action,
   ): readonly IMemorySpaceAddress[] | undefined {
-    return this.writeEnvelopes.get(action);
+    return this.#writeEnvelopes.get(action);
   }
 }
 
@@ -103,7 +114,9 @@ export function collectMaterializerWritersForLog(
   const writers = new Set<Action>();
   const reads = [...log.reads, ...log.shallowReads];
   for (const read of reads) {
-    const candidates = state.materializersByEntity.get(entityKey(read));
+    const candidates = state.materializersByEntity.get(
+      entityNameKey(read),
+    );
     if (!candidates) continue;
 
     for (const candidate of candidates) {

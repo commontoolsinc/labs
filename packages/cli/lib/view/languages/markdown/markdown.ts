@@ -1,8 +1,8 @@
 /**
  * A small Markdown highlighter, used when a diff (or a directly-opened file)
- * names a `.md`/`.markdown` file. The pager otherwise colours everything as
+ * names a `.md`/`.markdown` file. The pager otherwise colors everything as
  * TypeScript, which turns prose into a soup of identifiers and operators and
- * paints inline-code backticks as runaway template literals. This colours the
+ * paints inline-code backticks as runaway template literals. This colors the
  * things Markdown actually has — headings, fenced and inline code, block quotes,
  * list markers, rules and links — and leaves prose plain. Headings also become
  * the navigation tree, so `wasd`/Tab step through a document's sections.
@@ -10,6 +10,12 @@
  * It is line-oriented (the only cross-line state is whether a fenced code block
  * is open), so re-highlighting is cheap enough to redo whole on every keystroke.
  */
+
+import { decodeHTMLStrict as decodeEntities } from "entities";
+import { Lexer } from "marked";
+
+import { cpLen } from "../../ansi.ts";
+import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import type {
   Document,
   Line,
@@ -19,12 +25,8 @@ import type {
 } from "../../model.ts";
 import { flattenStructure } from "../../model.ts";
 import type { Highlighter } from "../language.ts";
-import { cpLen } from "../../ansi.ts";
-import { computeLineStarts, lineIndexOf } from "../../lines.ts";
-import { Lexer } from "marked";
-import { decodeHTMLStrict as decodeEntities } from "entities";
 
-/** Colour Markdown text into rendered lines. */
+/** Color Markdown text into rendered lines. */
 export function highlightMarkdownLines(text: string): Line[] {
   const raw = text.split("\n");
   const out: Line[] = [];
@@ -121,7 +123,7 @@ interface RichStyle {
 class RichLine {
   text = "";
   readonly spans: Span[] = [];
-  private sourceHidden = false;
+  #sourceHidden = false;
 
   append(value: string, style: RichStyle): void {
     if (value.length === 0) return;
@@ -147,7 +149,7 @@ class RichLine {
   }
 
   appendLine(line: Line, extra: Partial<RichStyle> = {}): void {
-    if (line.renderedSourceHidden) this.sourceHidden = true;
+    if (line.renderedSourceHidden) this.#sourceHidden = true;
     if (line.spans.length === 0 && line.text.length > 0) {
       this.append(line.text, { ...extra, cls: extra.cls ?? "plain" });
       return;
@@ -164,14 +166,14 @@ class RichLine {
   }
 
   hideSource(): void {
-    this.sourceHidden = true;
+    this.#sourceHidden = true;
   }
 
   line(): Line {
     return {
       text: this.text,
       spans: this.spans,
-      ...(this.sourceHidden ? { renderedSourceHidden: true } : {}),
+      ...(this.#sourceHidden ? { renderedSourceHidden: true } : {}),
     };
   }
 }
@@ -1318,7 +1320,7 @@ function renderTableDivider(widths: readonly number[]): Line {
   return singleStyledLine(text, "punctuation");
 }
 
-/** Colour one non-fenced line by classifying each code point, then run-length
+/** Color one non-fenced line by classifying each code point, then run-length
  * encoding the classes into spans. */
 function renderLine(t: string): Line {
   if (t.length === 0) return { text: "", spans: [] };
@@ -1508,16 +1510,23 @@ export function markdownHeadingNodes(
 
     const endText = rawLines[end] ?? "";
     const startText = rawLines[diffLine] ?? "";
+    const markerWidth = startText.length === 0 ? 0 : 1;
+    const bomWidth = node.startLine === 0 &&
+        startText[markerWidth] === "\uFEFF"
+      ? 1
+      : 0;
+    const codeStart = markerWidth + bomWidth;
     return {
       kind: "section",
       label: node.label,
       name: node.name,
       startLine: diffLine,
       endLine: end,
-      // Past the one-column diff marker.
-      startCol: Math.min(1, cpLen(startText)),
+      // Past the diff marker and any BOM removed before parsing.
+      startCol: Math.min(codeStart, cpLen(startText)),
       endCol: cpLen(endText),
-      startOffset: diffLineStarts[diffLine] + Math.min(1, startText.length),
+      startOffset: diffLineStarts[diffLine] +
+        Math.min(codeStart, startText.length),
       endOffset: diffLineStarts[end] + endText.length,
       depth,
       children: [],

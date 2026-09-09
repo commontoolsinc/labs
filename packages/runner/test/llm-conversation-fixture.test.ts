@@ -6,28 +6,31 @@
  * to read, write, and maintain.
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMTool,
+  JSONSchema,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   clearMockResponses,
   type ConversationFixture,
   loadConversationFixture,
   loadConversationFixtureFile,
 } from "@commonfabric/llm/client";
-import type {
-  BuiltInLLMMessage,
-  BuiltInLLMTool,
-  JSONSchema,
-} from "@commonfabric/api";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
-import { join } from "@std/path";
-import { generateObjectState } from "../src/builder/built-in.ts";
+import { waitForLlmMessages, waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator fixtures");
 const space = signer.did();
@@ -120,7 +123,7 @@ describe("conversation fixtures", () => {
 
     // Turn 1: send greeting
     addMessage.send({ role: "user", content: "Hello" });
-    await waitForMessages(result, 2);
+    await waitForLlmMessages(runtime, result, 2);
 
     // Verify turn 1
     const msgs1 = (await result.key("messages").pull())!;
@@ -129,7 +132,7 @@ describe("conversation fixtures", () => {
 
     // Turn 2: send follow-up
     addMessage.send({ role: "user", content: "How are you?" });
-    await waitForMessages(result, 4);
+    await waitForLlmMessages(runtime, result, 4);
 
     // Verify turn 2
     const msgs2 = (await result.key("messages").pull())!;
@@ -191,7 +194,7 @@ describe("conversation fixtures", () => {
 
     // Turn 1: greeting
     addMessage.send({ role: "user", content: "Hello" });
-    await waitForMessages(result, 2);
+    await waitForLlmMessages(runtime, result, 2);
 
     expect((await result.key("messages").pull())![1].content).toBe(
       "Hi there! How can I help you today?",
@@ -203,7 +206,7 @@ describe("conversation fixtures", () => {
       content: "What's the weather in San Francisco?",
     });
     // user msg + assistant tool-call + tool result + assistant final = 4 new msgs
-    await waitForMessages(result, 6);
+    await waitForLlmMessages(runtime, result, 6);
 
     const msgs = (await result.key("messages").pull())!;
     // Verify tool call was made
@@ -271,7 +274,7 @@ describe("conversation fixtures", () => {
       role: "user",
       content: "What is the meaning of life?",
     });
-    await waitForMessages(result, 2);
+    await waitForLlmMessages(runtime, result, 2);
 
     const msgs = (await result.key("messages").pull())!;
     expect(msgs[1].content).toBe("The answer is 42.");
@@ -315,8 +318,7 @@ describe("conversation fixtures", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await waitForPending(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toEqual({
@@ -325,51 +327,3 @@ describe("conversation fixtures", () => {
     });
   });
 });
-
-function waitForMessages(result: any, expectedCount: number) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(
-        new Error(
-          `Timeout waiting for ${expectedCount} messages and pending=false`,
-        ),
-      );
-    }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
-      if (pending === false && messages?.length === expectedCount) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
-}
-
-function waitForPending(result: any) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Timeout waiting for pending to become false"));
-    }, 5000);
-    cancel = result.asSchema({
-      type: "object",
-      properties: {
-        pending: { type: "boolean" },
-        error: true,
-        result: true,
-      },
-      default: {},
-    }).sink(({ pending, error, result: r }: any = {}) => {
-      if (pending === false && (error !== undefined || r !== undefined)) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel?.();
-  });
-}

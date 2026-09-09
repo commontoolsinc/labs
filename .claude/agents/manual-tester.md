@@ -56,29 +56,40 @@ Default URLs (no offset): Toolshed http://localhost:8000, Shell http://localhost
 
 ### 2. Deploy the Pattern
 
-If no piece ID is provided, deploy the pattern:
+Find every authored `*.test.tsx` entry for the pattern and run it before
+manual verification. Manual CLI and browser checks complement automated pattern
+tests; they do not replace them.
 
 ```bash
-deno task cf piece new {pattern-path}/main.tsx \
-  --identity claude.key \
-  --api-url {api-url} \
-  --space {space-name}
+deno task cf test {pattern-path}/main.test.tsx
 ```
 
-Save the piece ID from the output.
+If no piece ID is provided, deploy the pattern with every test entry attached.
+Repeat `--test` when the pattern has more than one test entry:
+
+```bash
+deno task cf piece new {pattern-path}/main.tsx --test {pattern-path}/main.test.tsx --identity claude.key --api-url {api-url} --space {space-name}
+```
+
+Save the piece ID from the output. If debugging changes the source, update the
+existing piece with `setsrc` and the same complete set of `--test` flags.
+Omitting the flags creates a new source revision without those attached test
+roots.
 
 ### 3. CLI Verification (call -> step -> inspect)
 
-Test each handler via the CLI. **Always run `piece step` after `piece call`** —
+Test each handler via the CLI. **Always run `piece step` after `cf piece call`** —
 without it, computed values remain stale.
 
 ```bash
-# Example: test addCard handler
-deno task cf piece call --piece {ID} addCard '{"columnIndex": 0, "title": "Test"}' \
+# Example: test addCard handler (every target flag before the callable name —
+# after it, flags belong to the callable's own parser)
+deno task cf piece call --cell {ID} \
+  --identity claude.key --api-url {api-url} --space {space-name} \
+  addCard '{"columnIndex": 0, "title": "Test"}'
+deno task cf piece step --cell {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
-deno task cf piece step --piece {ID} \
-  --identity claude.key --api-url {api-url} --space {space-name}
-deno task cf piece inspect --piece {ID} \
+deno task cf piece inspect --cell {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
 ```
 

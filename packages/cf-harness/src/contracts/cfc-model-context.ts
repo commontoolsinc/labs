@@ -1,5 +1,9 @@
-import type { CfcLabelView, IFCLabel } from "@commonfabric/runner/cfc";
-import type { CfcConfClause } from "@commonfabric/runner/cfc";
+import type {
+  CfcConfClause,
+  CfcLabelView,
+  IFCLabel,
+} from "@commonfabric/runner/cfc";
+
 import type { HarnessCfcInvocationInputLabelPath } from "./cfc-invocation-context.ts";
 import type { ToolOutputId } from "./tool-result.ts";
 

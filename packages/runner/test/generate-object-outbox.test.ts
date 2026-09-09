@@ -1,27 +1,31 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { BuiltInGenerateObjectParams } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { LLMClient } from "@commonfabric/llm";
 import {
   addMockObjectResponse,
   addMockResponse,
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
-import { LLMClient } from "@commonfabric/llm";
-import type { BuiltInGenerateObjectParams } from "@commonfabric/api";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForLlmSettled } from "./support/llm-result.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
+
+import { createBuilder } from "../src/builder/factory.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
+import { generateObject as rawGenerateObject } from "../src/builtins/llm.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import { generateObject as rawGenerateObject } from "../src/builtins/llm.ts";
-import { generateObjectState } from "../src/builder/built-in.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test generate-object outbox");
 const space = signer.did();
@@ -300,11 +304,10 @@ describe("generateObject outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("generateObject retry regression");
+      refuseAtCommitBoundary(rejectedTx, "generateObject retry regression");
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       await runtime.idle();
       expect(generateObjectCalls).toEqual([]);
 
@@ -401,11 +404,13 @@ describe("generateObject outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("generateObject tool retry regression");
+      refuseAtCommitBoundary(
+        rejectedTx,
+        "generateObject tool retry regression",
+      );
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 

@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -9,6 +10,7 @@ import {
 } from "../src/piece-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test piece helpers");
 const space = signer.did();
@@ -27,7 +29,14 @@ function makeCell(
       return value;
     },
     key(segment: string | number) {
-      return children[String(segment)] ?? makeCell(undefined);
+      // `Object.hasOwn`, not plain indexing: for a segment named after an
+      // `Object.prototype` member this stub would otherwise hand back the
+      // inherited function instead of "no such child" — the same defect the
+      // code under test has, quietly reproduced in the harness.
+      const name = String(segment);
+      return Object.hasOwn(children, name)
+        ? children[name]
+        : makeCell(undefined);
     },
   };
 }
@@ -42,6 +51,16 @@ describe("parseCellPath", () => {
       "negative",
     ]);
     assertEquals(parseCellPath(""), []);
+  });
+
+  it("converts only the segments that are canonical array indexes", () => {
+    expect(parseCellPath("items/01/1e3/ 1 /4294967295")).toEqual([
+      "items",
+      "01",
+      "1e3",
+      " 1 ",
+      "4294967295",
+    ]);
   });
 });
 
@@ -62,6 +81,36 @@ describe("resolveCellPath", () => {
       Error,
       'property "missing" not found',
     );
+  });
+
+  it("throws for a missing segment named after an Object.prototype member", () => {
+    // `toString` is ordinary data, but membership was tested with `in`, which
+    // walks the prototype chain — so an absent segment with that name looked
+    // present and this returned `undefined` instead of raising. The
+    // `availableKeys` hint in the same error already used `Object.keys`, so
+    // the two disagreed about what the record carries.
+    //
+    // The parent must hold a real object: with a parent of `undefined` the
+    // throw comes from the `resolvedValue === undefined` fall-through instead,
+    // the membership check is never reached, and this passes whichever
+    // operator the source uses.
+    const cell = makeCell({ name: "John" }, { name: makeCell("John") });
+
+    assertThrows(
+      () => resolveCellPath(cell as never, ["toString"]),
+      Error,
+      'property "toString" not found',
+    );
+  });
+
+  it("resolves a segment the record genuinely owns at such a name", () => {
+    // The mirror of the above: narrowing membership must not have made a
+    // stored value at one of these names unreachable.
+    const cell = makeCell({ toString: "stored" }, {
+      toString: makeCell("stored"),
+    });
+
+    assertEquals(resolveCellPath(cell as never, ["toString"]), "stored");
   });
 
   it("throws when traversing through a non-object value", () => {
@@ -233,7 +282,7 @@ describe("getResultCellWithSourceSchema", () => {
       undefined,
       tx,
     );
-    resultCell.setMetaRaw("schema", resultSchema);
+    resultCell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
 
     const titleCell = getResultCellWithSourceSchema(
       resultCell.key("title"),
@@ -265,7 +314,7 @@ describe("getResultCellWithSourceSchema", () => {
       undefined,
       tx,
     );
-    resultCell.setMetaRaw("schema", resultSchema);
+    resultCell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
 
     const explicitCell = resultCell.key("title").asSchema(explicitSchema);
     const annotated = getResultCellWithSourceSchema(explicitCell);

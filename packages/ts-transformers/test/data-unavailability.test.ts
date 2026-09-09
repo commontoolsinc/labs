@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import ts from "typescript";
 
 import { transformSource, validateSource } from "./utils.ts";
@@ -9,7 +9,7 @@ const diagnosticTypes = (
   diagnostics: readonly { readonly type: string }[],
 ): string[] => diagnostics.map((diagnostic) => diagnostic.type);
 
-const commonfabricTypes = await new StaticCacheFS().getText(
+const commonfabricTypes = await StaticCache.fromFileSystem().getText(
   "types/commonfabric.d.ts",
 );
 

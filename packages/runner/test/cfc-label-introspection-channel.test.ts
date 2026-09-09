@@ -1,21 +1,28 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
-import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import type { URI } from "@commonfabric/memory/interface";
+
 import {
   canonicalizePreparedDigestInput,
   preparedDigestFor,
 } from "../src/cfc/canonical.ts";
-import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { inspectStoredConfLabel } from "../src/cfc/label-introspection.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcLabelMetadataObservation } from "../src/cfc/types.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { URI } from "@commonfabric/memory/interface";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-label-introspection-channel",
@@ -59,13 +66,14 @@ const seedLabeledDoc = async (
       { type: "object", properties: { body: { type: "string" } } },
     ).getAsLink(),
   ).id!;
+  writeSeedEnvelopeDoc(seed, space);
   seed.writeOrThrow(
     { space, scope: "space", id: id as URI, path: [] },
     {
       value: { body: "payload" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -96,7 +104,6 @@ const makeRuntime = (options: {
     {
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       ...options,
     } as ConstructorParameters<typeof Runtime>[0],
   );
@@ -197,12 +204,17 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
 
   it("persists the observation's confidentiality onto written docs under flow persist", async () => {
     const { storageManager, runtime } = makeRuntime({
+      // The closing assertion reads a stamp off the written document. The
+      // runtime writes that stamp at this rung.
       cfcFlowLabels: "persist",
     });
     try {
       const tx = runtime.edit();
+      // The stamp this test reads back lands on a document in `space`, and
+      // the observation's atom names the readers of that same space.
+      const observed = cfcAtom.space(space);
       tx.recordCfcLabelMetadataObservation(
-        observationFor("of:introspected", ["secret"]),
+        observationFor("of:introspected", [observed]),
       );
       const out = runtime.getCell(space, "channel-out-persist", undefined, tx);
       out.set({ copied: "derived-from-metadata" });
@@ -220,7 +232,7 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
       // The result of a transaction that observed protected label metadata
       // carries that metadata's population label: result label ⊇ the
       // consumed observation's confidentiality.
-      expect(derived!.label.confidentiality).toContainEqual("secret");
+      expect(derived!.label.confidentiality).toContainEqual(observed);
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -229,6 +241,9 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
 
   it("keeps verifier reads excluded: raw metadata reads consume nothing", async () => {
     const { storageManager, runtime } = makeRuntime({
+      // The closing assertion is that the written document carries no
+      // derived stamp. This is the rung that stamps, so the absence is
+      // evidence about the verifier read.
       cfcFlowLabels: "persist",
     });
     try {
@@ -337,14 +352,20 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
       ).toEqual([space, "did:key:zforeign"]);
       // And end-to-end: two txs with identical activity, recording in
       // opposite orders, prepare to the SAME digest. Both prepare before
-      // either commits so their journals are byte-identical.
+      // either commits so their journals are byte-identical. The document
+      // they write declares a store policy admitting both observed atoms.
+      const canonSchema = {
+        type: "object",
+        properties: { v: { type: "number" } },
+        ifc: { confidentiality: ["secret-a", "secret-b"] },
+      } as JSONSchema;
       const tx1 = runtime.edit();
-      runtime.getCell(space, "channel-canon", undefined, tx1).set({ v: 1 });
+      runtime.getCell(space, "channel-canon", canonSchema, tx1).set({ v: 1 });
       tx1.recordCfcLabelMetadataObservation(a);
       tx1.recordCfcLabelMetadataObservation(b);
       const digest1 = tx1.prepareCfc();
       const tx2 = runtime.edit();
-      runtime.getCell(space, "channel-canon", undefined, tx2).set({ v: 1 });
+      runtime.getCell(space, "channel-canon", canonSchema, tx2).set({ v: 1 });
       tx2.recordCfcLabelMetadataObservation(b);
       tx2.recordCfcLabelMetadataObservation(a);
       const digest2 = tx2.prepareCfc();
@@ -418,6 +439,8 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
 
   it("inspectStoredConfLabel records the observation at the concrete metadata path", async () => {
     const { storageManager, runtime } = makeRuntime({
+      // The introspection step hands back a protected result, and records
+      // the observation the assertions below read, at this rung.
       cfcFlowLabels: "persist",
     });
     try {
@@ -463,6 +486,9 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
 
   it("collapses a metadata read error to the unobservable arm", async () => {
     const { storageManager, runtime } = makeRuntime({
+      // This is the rung where the introspection step reaches its recording
+      // arm, so the empty observation list below is evidence about the
+      // aborted read.
       cfcFlowLabels: "persist",
     });
     try {

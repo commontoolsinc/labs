@@ -8,12 +8,13 @@ import { readOnlyCfcView } from "../src/storage/extended-storage-transaction.ts"
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-state-contracts");
 
-// Contracts of the transaction's CFC control surface that no other suite
-// pins directly: the flow-labels anti-downgrade pin, the write-once sink
-// ceiling, late-activity invalidation of a prepared transaction, and the
-// diagnostics seams. All are part of the audit-S3 posture the read-only
-// state view (#4517) completes.
 describe("CFC tx state contracts", () => {
+  // Contracts of the transaction's CFC control surface that no other suite pins
+  // directly: the flow-labels anti-downgrade pin, the write-once sink ceiling,
+  // late-activity invalidation of a prepared transaction, and the diagnostics
+  // seams. All are part of the audit-S3 posture the read-only state view
+  // (#4517) completes.
+
   const withTx = async (
     fn: (runtime: Runtime, tx: ExtendedStorageTransaction) => Promise<void>,
   ) => {
@@ -21,7 +22,12 @@ describe("CFC tx state contracts", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The strengthen-after-prepare test raises each of these modes a rung
+      // and asserts the prepared digest turns from "prepared" to
+      // "invalidated". That transition needs the transaction to start on a
+      // rung below the top of each ladder.
+      cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
     });
     try {
       await fn(runtime, runtime.edit() as ExtendedStorageTransaction);
@@ -54,7 +60,6 @@ describe("CFC tx state contracts", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
@@ -115,7 +120,7 @@ describe("CFC tx state contracts", () => {
       });
       tx.prepareCfc();
       expect(tx.getCfcState().prepare.status).toBe("prepared");
-      tx.setCfcFlowLabelsMode("off"); // no change from default off → no-op
+      tx.setCfcFlowLabelsMode("off"); // no change from the pinned off → no-op
       expect(tx.getCfcState().prepare.status).toBe("prepared");
       tx.setCfcFlowLabelsMode("observe"); // real change → invalidate
       const flow = tx.getCfcState().prepare;

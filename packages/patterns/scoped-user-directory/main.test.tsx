@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/scoped-user-directory/main.test.tsx
  */
-import { action, assert, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import ScopedUserDirectory, {
   type Directory,
   type UserPointer,
@@ -63,7 +63,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // Initial state
       { assertion: assert_users_empty },
       { assertion: assert_me_undefined },

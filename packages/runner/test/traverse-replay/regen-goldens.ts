@@ -7,6 +7,7 @@
  *   deno run --allow-read --allow-write \
  *     test/traverse-replay/regen-goldens.ts
  */
+
 import { listFixturePaths, writeGolden } from "./goldens.ts";
 import { loadFixture, replayFixture } from "./replay.ts";
 

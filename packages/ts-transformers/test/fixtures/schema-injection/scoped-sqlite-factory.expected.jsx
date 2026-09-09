@@ -60,7 +60,19 @@ export default pattern(() => {
     $defs: {
         SqliteDatabase: {
             type: "object",
-            properties: {}
+            properties: {
+                id: {
+                    type: "string"
+                },
+                tables: {
+                    type: "object",
+                    additionalProperties: true
+                },
+                rev: {
+                    type: "number"
+                }
+            },
+            additionalProperties: true
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);

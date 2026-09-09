@@ -37,8 +37,17 @@ describe("multi-space write transactions", () => {
   it("rejects a write to a second space by default", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow(addr(spaceA, "of:default-a"), { v: 1 });
-    expect(() => tx.writeValueOrThrow(addr(spaceB, "of:default-b"), { v: 2 }))
-      .toThrow();
+    let thrown: unknown;
+    try {
+      tx.writeValueOrThrow(addr(spaceB, "of:default-b"), { v: 2 });
+    } catch (error) {
+      thrown = error;
+    }
+    // Named, not just any throw: the single-space guarantee is what this error
+    // reports, and callers match on the name.
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "StorageTransactionWriteIsolationError",
+    );
   });
 
   it("writes and commits to multiple spaces when opted in", async () => {

@@ -5,10 +5,10 @@ A one-line conditional guard — `if (cond) return …;`, `if (cond) throw …;`
 function runs but the guarded branch is never taken, even though the `cond`
 condition is evaluated on every call.
 
-Most of this is expected. V8 collects coverage at block (byte-range)
-granularity rather than per line: the guard's body (`throw …`, `return …`,
-`continue`) is its own range with its own execution count, and a branch that is
-never taken legitimately has a count of 0. The V8 blog post
+This is expected. V8 collects coverage at block (byte-range) granularity rather
+than per line: the guard's body (`throw …`, `return …`, `continue`) is its own
+range with its own execution count, and a branch that is never taken legitimately
+has a count of 0. The V8 blog post
 ["JavaScript code coverage"](https://v8.dev/blog/javascript-code-coverage)
 describes this directly — "block coverage could detect that the `else` branch …
 is never executed." A whole-line hit count is a projection of those block ranges
@@ -16,13 +16,8 @@ onto lines, and the blog does not specify how that projection should work; it is
 the coverage tool's job. When a single line holds both the executed condition and
 the un-taken body, projecting it to 0 is a defensible choice, not a bug.
 
-One projection behaviour is not defensible, and it is the only part worth
-reporting upstream: a trailing comment on the guard line flips the reported line
-count from 0 to 1, even though a comment changes nothing about what executes. The
-reproduction below isolates it.
-
-This note records the behaviour because several deliberately-unreachable
-invariant guards in the runtime are marked uncovered solely because of it.
+This note records the behavior because several deliberately-unreachable
+invariant guards in the runtime are marked uncovered by it.
 
 ## Where it bites us
 
@@ -50,21 +45,16 @@ These conditions are evaluated on every call, but their branches are not taken
 in single-space, healthy-transaction tests, so deno reports each guard line as
 uncovered.
 
-## Isolating the line-attribution quirk
+## Reproduction
 
 ```ts
 // guard.ts
-function noComment(x: unknown): number {
+function guarded(x: unknown): number {
   if (!x) throw new Error("e");
   return 1;
 }
-function withComment(x: unknown): number {
-  if (!x) throw new Error("e"); // a trailing comment
-  return 1;
-}
 if (import.meta.main) {
-  noComment({}); // truthy argument: the `if (!x)` branch is never taken
-  withComment({});
+  guarded({}); // truthy argument: the `if (!x)` branch is never taken
 }
 ```
 
@@ -73,52 +63,66 @@ deno run --coverage=cov guard.ts
 deno coverage cov --lcov | grep '^DA:'
 ```
 
-Observed on deno 2.8.3:
-
 ```
 DA:2,0   // if (!x) throw new Error("e");
 DA:3,1   // return 1;
-DA:6,1   // if (!x) throw new Error("e"); // a trailing comment
-DA:7,1   // return 1;
 ```
 
-`noComment` and `withComment` contain identical executable code and are each
-called once with a truthy argument. Line 2 (no trailing comment) is reported as
-0 hits; line 6 (the same statement with a trailing comment) is reported as 1
-hit. A comment cannot change what executes, so the difference is purely a
-line-attribution artifact: deno credits the line to whatever byte range ends it
-— the untaken branch statement when nothing follows, the covered trailing
-comment when one does.
-
-## Expected vs actual
-
-The block-level fact — the un-taken `throw` executes 0 times — is correct and
-expected. The defect is only in how that projects onto a line count:
-
-- Expected: two lines containing identical executable code report the same line
-  hit count.
-- Actual: line 2 reports 0 hits while line 6 — the same statement with a
-  trailing comment — reports 1. A comment, which does not execute, decides the
-  count.
-
-## Reporting upstream
-
-Only the trailing-comment line-attribution flip is worth reporting; the un-taken
-branch reporting 0 hits is documented V8 block-granularity behaviour and should
-not be filed as a bug. A search of deno's open issues found no existing report of
-comment-sensitive line coverage or `deno coverage` line attribution. The closest
-match, [denoland/deno#9865](https://github.com/denoland/deno/issues/9865)
-("`deno coverage` line and branch counts are incorrect"), is closed and covers a
-different case — off-by-one line and branch counts around an `if`/`else` block,
-not a comment changing a line's hit count — so a focused report on the
-comment-sensitivity would not duplicate it.
+Line 2 holds both the condition, which is evaluated, and the `throw`, which is
+not reached. The line count reports the un-taken range.
 
 ## Impact and handling
 
-We do not work around this with trailing comments — that would make a comment
-load-bearing for coverage. The affected guards are left as plain one-liners.
-Writing each invariant guard on a single line keeps the artifact to one line per
-guard rather than three (the `if`, the body, and the closing brace of a block
-form). The remaining uncovered guard lines are tracked here rather than chased
-with contrived error-injection tests, since the branches are unreachable by
-construction.
+The affected guards are left as plain one-liners. Writing each invariant guard
+on a single line keeps the artifact to one line per guard rather than three (the
+`if`, the body, and the closing brace of a block form). The uncovered guard
+lines are tracked here rather than chased with contrived error-injection tests,
+since the branches are unreachable by construction.
+
+A guard line is one of two cases where an uncovered line is expected to stay
+uncovered; a block that is never invoked at all is the other, below. Everywhere
+else, a line whose coverage moves between runs or between shard layouts is a
+defect in the tests — see [COVERAGE.md](COVERAGE.md) for what to do about it.
+
+## A block that is never invoked: `deno-coverage-ignore`
+
+A guard line's condition at least runs. A block that is never entered at all is
+a different case, and `deno` has a directive for it. The
+`FabricKeyPair` / `@commonfabric/api` constructor drift guard is the worked
+example: a closure that is built, discarded, and never called, whose body
+exists only so that the compiler checks each construct form the api
+declaration promises.
+
+Four spellings exist — `deno-coverage-ignore`,
+`deno-coverage-ignore-start`, `deno-coverage-ignore-stop`, and
+`deno-coverage-ignore-file`. **The bare form takes only the line that follows
+it**, which is easy to get wrong: applied to the head of a six-line closure it
+removes one line and leaves five. A block wants the `-start` / `-stop` pair.
+
+```ts
+// Shown for illustration only.
+// deno-coverage-ignore-start
+(() => {
+  neverCalled();
+})();
+// deno-coverage-ignore-stop
+```
+
+The directive reaches the lcov report and not merely the terminal one, which
+is what makes it usable here: the ignored lines carry no `DA:` records at all,
+so `LF` falls while `LH` stays put — the lines removed were uncovered ones,
+never counted in `LH` to begin with — and the CI ratchet sees nothing
+uncovered rather than seeing a gap it has been told to forgive.
+
+Measure a "before" figure while the source still lacks the directive. The
+ignore directives are applied when `deno coverage` builds the **report**, not
+when `deno test` writes the profile, so re-running `deno coverage` over a
+profile collected earlier still reports the post-directive numbers.
+
+**What this is not for.** It suppresses a measurement, so it is only honest
+where the measurement is meaningless — code that *cannot* execute, by
+construction, in any test. A branch that is merely hard to reach, expensive to
+set up, or currently untested is a gap, and marking it ignored converts a
+number someone would have chased into silence. The bar is that no test could
+cover the lines without changing what they are: if a test could reach them,
+write the test.

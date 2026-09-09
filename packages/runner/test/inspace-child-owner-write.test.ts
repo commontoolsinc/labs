@@ -4,20 +4,19 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // SCOPE (CT-1754): this guards the verified-binding regression only — an
 // inSpace child's owner-protected list, written by a NON-exported mode-bound
-// handler from a fresh session, was rejected because the warm/cached re-load
-// left `fn.src` non-canonical so the writer identity downgraded to
-// `unsupported`. Both sessions here share ONE compiled PROGRAM, so they share
-// one `moduleIdentity` and this does NOT reproduce the separate two-compile-
-// context moduleIdentity *merge-conflict* ("writeAuthorizedBy must remain
-// stable") that still blocks card-add in the real profile-create → piece-view
-// flow (CT-1740). That divergence needs a faithful two-context harness.
+// handler from a fresh session, must retain its binding authority through the
+// warm/cached reload. Both sessions here share ONE compiled PROGRAM, so they
+// share one `moduleIdentity` and this does NOT reproduce the separate
+// two-compile-context moduleIdentity *merge-conflict* ("writeAuthorizedBy must
+// remain stable") that still blocks card-add in the real profile-create →
+// piece-view flow (CT-1740). That divergence needs a faithful two-context
+// harness.
 const signer = await Identity.fromPassphrase("inspace-child-owner-write");
 const spaceA = signer.did(); // "home" — runs the parent, creates the child
 const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
@@ -27,35 +26,6 @@ const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
 // memory server — the real browser/CLI session split. A single emulate
 // manager's shared replicas would mask the warm/cached re-load on the reader
 // (where this CFC verified-binding regression lives).
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 // The profile-create flow in miniature, exercising the OWNER-PROTECTED WRITE
 // path (CT-1754). The child pattern owns an `elements` list that is written
@@ -66,14 +36,11 @@ const newSharedServer = () =>
 //
 // Standalone (single-context) the write commits fine. The real flow creates
 // the child via `child.inSpace(spaceB)(...)` from the parent, and a FRESH
-// session loads the child from its own space via the warm/cached module path —
-// where `graph.moduleSourceMaps` is empty, so the per-module `//# sourceURL`
-// source frame never registered and `fn.src` resolved to the raw
-// `${evalId}.js:line:col` bundle coordinate instead of the canonical
-// `cf:module/<id>/main.tsx:..` form. That made the function's canonical-source
-// check disagree with its recorded provenance identity, downgrading the writer
-// identity to `unsupported`, and CFC rejected the commit with
-// "writeAuthorizedBy requires a trusted verified binding identity at /".
+// session loads the child from its own space via the warm/cached module path.
+// The assertion below pins the durable security contract: the non-exported
+// handler's content-addressed provenance and `__cfBindVerifiedBinding` authority
+// survive that source-free reload. Debug source metadata is deliberately
+// irrelevant to the decision.
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -169,13 +136,13 @@ const itemListSchema = {
 
 describe("inSpace child owner-protected write (profile elements)", () => {
   let server: MemoryV2Server.Server;
-  let managerA: SharedServerStorageManager;
-  let managerB: SharedServerStorageManager;
+  let managerA: EmulatedStorageManager;
+  let managerB: EmulatedStorageManager;
 
   beforeEach(() => {
     server = newSharedServer();
-    managerA = SharedServerStorageManager.connectTo(server, { as: signer });
-    managerB = SharedServerStorageManager.connectTo(server, { as: signer });
+    managerA = EmulatedStorageManager.connectTo(server, { as: signer });
+    managerB = EmulatedStorageManager.connectTo(server, { as: signer });
   });
 
   afterEach(async () => {
@@ -252,6 +219,10 @@ describe("inSpace child owner-protected write (profile elements)", () => {
       // to `unsupported`.
       const writeTx = rt2.edit();
       childCell.withTx(writeTx).key("add").send({ item: "second" });
+      // A manual test tx prepares the way the runtime's own commit paths do:
+      // an enforcing rung refuses a relevant transaction that arrives
+      // unprepared.
+      rt2.prepareTxForCommit(writeTx);
       const writeCommit = await writeTx.commit();
       expect(writeCommit.error).toBeUndefined();
       await childCell.pull();

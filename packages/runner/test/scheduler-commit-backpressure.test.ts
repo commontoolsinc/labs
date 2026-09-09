@@ -18,6 +18,14 @@
 //   6. Three array appends survive a conflict storm so the durable count reaches
 //      three (the profile-append bug in miniature).
 
+import { defer } from "@commonfabric/utils/defer";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+
+import { resolveLink } from "../src/link-resolution.ts";
+import {
+  computeBackoffDelayMs,
+  resolveCommitBackpressure,
+} from "../src/scheduler/backpressure.ts";
 import {
   afterEach,
   beforeEach,
@@ -37,12 +45,6 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { defer } from "@commonfabric/utils/defer";
-import { resolveLink } from "../src/link-resolution.ts";
-import {
-  computeBackoffDelayMs,
-  resolveCommitBackpressure,
-} from "../src/scheduler/backpressure.ts";
 
 type TransactMessage = { requestId: string };
 type TransactResponse = {
@@ -51,8 +53,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string; precondition?: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 function emulatedServer(
@@ -74,16 +80,18 @@ function rejectServerTransacts(
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
   let rejected = 0;
-  server.transact = (message) => {
+  server.transact = (message, publishVerdict) => {
     if (rejected < count) {
       rejected++;
-      return Promise.resolve({
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error,
-      });
+      };
+      publishVerdict?.(response);
+      return Promise.resolve(response);
     }
-    return original(message);
+    return original(message, publishVerdict);
   };
   return {
     rejected: () => rejected,
@@ -115,6 +123,10 @@ function collectEventCommitMarkers(runtime: Runtime): {
     firstMarker: firstMarker.promise,
     dispose: () => runtime.telemetry.removeEventListener("telemetry", listener),
   };
+}
+
+function schedulerWarningCount(): number {
+  return getLoggerCountsBreakdown().scheduler?.scheduler?.warn ?? 0;
 }
 
 async function waitFor(
@@ -151,13 +163,18 @@ function buildCounterPiece(
   let invocations = 0;
   const recordEvent = handler<
     { value: number },
-    { effects: { total: number } }
+    { effects: Cell<{ total: number }> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { effects: { type: "object", asCell: ["cell"] } },
+    },
     (event, { effects }) => {
       invocations++;
-      effects.total += event.value;
+      const total = effects.key("total");
+      total.set(total.get() + event.value);
     },
-    { proxy: true },
   );
   // Expose the stored effects cell directly so the running total can be read
   // synchronously without pulling a computation (pull-mode computations do not
@@ -214,13 +231,18 @@ function buildListPiece(
   let invocations = 0;
   const appendEvent = handler<
     { value: number },
-    { effects: { list: number[] } }
+    { effects: Cell<{ list: number[] }> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { effects: { type: "object", asCell: ["cell"] } },
+    },
     (event, { effects }) => {
       invocations++;
-      effects.list = [...(effects.list ?? []), event.value];
+      const list = effects.key("list");
+      list.set([...(list.get() ?? []), event.value]);
     },
-    { proxy: true },
   );
   const rootPattern = pattern(() => {
     const effects = cell<{ list: number[] }>({ list: [] });
@@ -316,6 +338,52 @@ describe("committed-write backpressure", () => {
         // The write converged, so no terminal error.
         expect(terminalErrors).toHaveLength(0);
       } finally {
+        injector.restore();
+      }
+    },
+  );
+
+  it(
+    "does not warn when a transient conflict converges on retry",
+    async () => {
+      const piece = buildCounterPiece(runtime, tx, "backpressure-warning-root");
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const warningBaseline = schedulerWarningCount();
+      const injector = rejectServerTransacts(storageManager, 1, {
+        name: "ConflictError",
+        message: "forced transient conflict",
+      });
+      const converged = defer<void>();
+      const listener = (event: Event) => {
+        const marker = (event as CustomEvent<{
+          marker: RuntimeTelemetryMarker;
+        }>).detail.marker;
+        if (
+          marker.type === "scheduler.event.commit" &&
+          marker.error === undefined
+        ) {
+          converged.resolve();
+        }
+      };
+      runtime.telemetry.addEventListener("telemetry", listener);
+
+      try {
+        piece.queueAdd(
+          3,
+          "evt:backpressure-warning:0:backpressure-warning-root",
+        );
+
+        await converged.promise;
+        await runtime.idle();
+
+        expect(piece.total()).toBe(3);
+        expect(injector.rejected()).toBe(1);
+        expect(schedulerWarningCount() - warningBaseline).toBe(0);
+      } finally {
+        runtime.telemetry.removeEventListener("telemetry", listener);
         injector.restore();
       }
     },
@@ -503,6 +571,57 @@ describe("committed-write backpressure", () => {
           ),
         ).toBe(true);
       } finally {
+        injector.restore();
+        commitTelemetry.dispose();
+      }
+    },
+  );
+
+  it(
+    "does not mistake a RowLabel verdict with CFC-like text for a boundary refusal",
+    async () => {
+      // OW54 routes a RowLabel verdict through the proven-no-commit terminal
+      // cover. Keep the older client-side CFC reporting arm keyed to its exact
+      // error name: overlapping prose is not a type discriminator.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-cfc-refusal-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const commitTelemetry = collectEventCommitMarkers(runtime);
+      const injector = rejectServerTransacts(storageManager, Infinity, {
+        name: "RowLabelCommitError",
+        message: "CFC enforcement rejected commit: relevant transaction was " +
+          "not prepared: writer-fit confidentiality misfit",
+      });
+      const reported: unknown[][] = [];
+      const originalConsoleError = console.error;
+      console.error = (...args: unknown[]) => {
+        reported.push(args);
+      };
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-cfc-refusal:0:backpressure-cfc-refusal-root",
+        );
+        await commitTelemetry.firstMarker;
+        await runtime.idle();
+
+        // The refused write did not land, but this is not the client-side CFC
+        // refusal that owns the legacy report.
+        expect(piece.total()).toBe(0);
+        expect(
+          reported.some((args) =>
+            String(args[0]).includes("Owner-protected write dropped")
+          ),
+        ).toBe(false);
+      } finally {
+        console.error = originalConsoleError;
         injector.restore();
         commitTelemetry.dispose();
       }

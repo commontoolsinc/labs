@@ -2,11 +2,13 @@
  * The TypeScript (and TSX/JS) language for the pager. It handles named files in
  * that language family. The selection layer also uses it for filename-free
  * transformed compiler output. Highlighting, structure, incremental editing
- * and the semantic layer all live in the neighbouring {@link ./parse.ts} and
+ * and the semantic layer all live in the neighboring {@link ./parse.ts} and
  * {@link ./semantics.ts}; this module only adapts them to the {@link Language}
  * contract.
  */
+
 import type { Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import { remapStructure } from "../../diffremap.ts";
 import {
   createHighlighter,
@@ -18,6 +20,8 @@ import { createDiffSemantics, createSemantics } from "./semantics.ts";
 
 export const typeScriptLanguage: Language = {
   id: "typescript",
+
+  input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
     extensions: [
@@ -34,6 +38,7 @@ export const typeScriptLanguage: Language = {
     filenamePatterns: [],
     aliases: ["ts", "javascript", "js"],
     interpreters: ["deno", "node", "nodejs", "bun"],
+    sharedExtensions: [],
   },
 
   parseDocument: (text, fileName) => parseDocument(text, fileName),

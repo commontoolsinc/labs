@@ -1,12 +1,14 @@
-import { SourceMap } from "./interface.ts";
-import { MappedPosition, SourceMapConsumer } from "source-map-js";
+import { toIndentedDebugString } from "@commonfabric/data-model";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { MappedPosition, SourceMapConsumer } from "source-map-js";
+
+import { SourceMap } from "./interface.ts";
 
 export type { MappedPosition };
 
-// ---------------------------------------------------------------------------
+//
 // VLQ-level composition (the fast path of `composeBundleSourceMap`)
-// ---------------------------------------------------------------------------
+//
 
 /**
  * A mappings stream the transcoder cannot compose: malformed VLQs, unsorted
@@ -259,20 +261,6 @@ function composeBundleSourceMapTextual(
 }
 
 /**
- * Compose a single bundle source map for the concatenated module bodies
- * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
- * module's generated lines by its starting line in the concatenation.
- *
- * The ESM module-record loader resolves a function's location by `indexOf`-ing
- * its source into the concatenated bundle `script`, then calling
- * `mapPosition(bundleFilename, line, col)`. Without a registered map that stays
- * a raw bundle coordinate (`<loadId>.js:..`), which CFC verified-source identity
- * rejects. Registering this composed map resolves it back to the original
- * authored source (e.g. `/main.tsx:6:2`) — parity with the AMD isolate path.
- *
- * Returns `undefined` if no module contributed a map.
- */
-/**
  * A module's contribution to a composed bundle map. Exactly one of `body` /
  * `bodyLineCount` must describe the module's generated-line extent —
  * composition only ever needs the LINE COUNT of the body, so callers that
@@ -293,12 +281,22 @@ export function getComposeBundleSourceMapCallsForTesting(): number {
   return composeCallsForTesting;
 }
 
+/**
+ * Compose a single bundle source map for the concatenated module bodies
+ * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
+ * module's generated lines by its starting line in the concatenation.
+ *
+ * Runtime stack frames report positions in the concatenated bundle. Registering
+ * this composed map resolves those positions back to the original authored
+ * source (e.g. `/main.tsx:6:2`).
+ *
+ * Returns `undefined` if no module contributed a map.
+ */
 export function composeBundleSourceMap(
   // `source`, when set, overrides the map's recorded source path for ALL of that
-  // module's mappings. The per-module compiler maps record only the basename
-  // (e.g. `main.tsx`), but the CFC verified-source set is keyed by the full
-  // module path (e.g. `/<id>/dir/main.tsx`); overriding makes resolved
-  // coordinates match the set so verified-source identity holds.
+  // module's mappings. The per-module compiler maps can record only the
+  // basename (e.g. `main.tsx`); overriding preserves the full authored module
+  // path in mapped stack frames (e.g. `/<id>/dir/main.tsx`).
   modules: ReadonlyArray<ComposeModuleEntry>,
   bundleFilename: string,
   // Generated-line offset applied to the FIRST module. Use this when the
@@ -319,15 +317,8 @@ export function composeBundleSourceMap(
 /**
  * Build an IDENTITY source map for a compiled body whose authored source map
  * was not retained — every generated line maps to the same line/column of
- * `source`. Used by the warm/cached module-record load path, where the
- * content-addressed cache stores compiled bodies but not their per-module
- * source maps: without a registered frame the ESM loader resolves `fn.src` to
- * the raw bundle coordinate (`<evalId>.js:..`), which the harness cannot
- * canonicalize, and CFC verified-source identity fails closed. An identity map
- * makes `mapPosition(<name>, line, col)` resolve to `<name>:line:col`, which
- * the engine then rewrites to the canonical `cf:module/<id>/<path>` form via
- * its per-module name → canonical table (parity with the source-compile path,
- * which carries a real authored map).
+ * `source`. Used by the warm/cached module-record load path so error stacks
+ * name the module source rather than a raw bundle coordinate.
  *
  * Line/column coordinates are preserved verbatim (the compiled body IS the
  * eval'd text under this load), so no positional information is invented — the
@@ -369,7 +360,7 @@ export function identitySourceMap(
  * `1 + moduleCount` entries that must all stay live until `loadModuleGraph`
  * annotates functions; a small cap (the old value was 50) would evict the bundle
  * map — and early per-module maps — mid-load for larger graphs, regressing
- * `fn.src` to raw bundle coordinates and breaking CFC verified-source identity.
+ * mapped stacks to lose their authored module names.
  * This bound comfortably exceeds realistic per-load module counts while still
  * capping total memory across loads (stale maps from superseded loads evict via
  * LRU; the parser is also fully cleared on runtime dispose).
@@ -381,8 +372,7 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 1024;
 // at doubleOrThrow (recipe-abc.js, <anonymous>:14:15)
 // at Object.eval [as factory] (recipe-abc.js, <anonymous>:4:52)
 // at Object.errorOnLine6 [as default] (known-line.js, <anonymous>:5:15)
-// at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
-// at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)
+// at Loader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
 // at eval (recipe-abc.js, <anonymous>:17:10)
 // at async Scheduler.execute (http://localhost:8000/scripts/worker-runtime.js:241550:11)
 // at GmailClient.googleRequest (somefile.js:24414:23)
@@ -405,28 +395,31 @@ const CF_INTERNAL = `    at <CF_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
 
 export class SourceMapParser {
-  private sourceMaps = new LRUCache<string, SourceMap>({
+  #sourceMaps = new LRUCache<string, SourceMap>({
     capacity: MAX_SOURCE_MAP_CACHE_SIZE,
   });
-  private consumers = new WeakMap<SourceMap, SourceMapConsumer>();
-  // Deferred registrations (CT-1819): the boot path registers a PROVIDER
-  // instead of composing eagerly; the first lookup that needs the filename
-  // materializes it. One-shot — the provider is dropped as soon as it runs,
-  // so its captured inputs are released after first use. LRU-bounded like
-  // `sourceMaps`: a provider whose filename is NEVER looked up (its eval never
-  // errored) would otherwise be retained until dispose — one per eval, an
-  // unbounded leak on long-lived runners — so cap it and evict the oldest.
-  // Evicting an unused provider only means a later error in that (old) eval
-  // goes unmapped, exactly as when the composed-map LRU evicts a stale entry.
-  private pendingProviders = new LRUCache<
+  #consumers = new WeakMap<SourceMap, SourceMapConsumer>();
+
+  /**
+   * Deferred registrations: the boot path registers a _provider_ instead of
+   * composing eagerly; the first lookup that needs the filename materializes
+   * it. One-shot — the provider is dropped as soon as it runs, so its captured
+   * inputs are released after first use. LRU-bounded like `#sourceMaps`: a
+   * provider whose filename is _never_ looked up (its eval never errored)
+   * would otherwise be retained until dispose — one per eval, an unbounded
+   * leak on long-lived runners — so this caps it and evicts the oldest.
+   * Evicting an unused provider only means a later error in that (old) eval
+   * goes unmapped, exactly as when the composed-map LRU evicts a stale entry.
+   */
+  #pendingProviders = new LRUCache<
     string,
     () => SourceMap | undefined
   >({ capacity: MAX_SOURCE_MAP_CACHE_SIZE });
 
   load(filename: string, sourceMap: SourceMap) {
     // An explicit map supersedes any pending provider for the same name.
-    this.pendingProviders.delete(filename);
-    this.sourceMaps.put(filename, sourceMap);
+    this.#pendingProviders.delete(filename);
+    this.#sourceMaps.put(filename, sourceMap);
   }
 
   /**
@@ -435,21 +428,21 @@ export class SourceMapParser {
    * compose) simply leaves the name unmapped, matching eager behavior.
    */
   loadLazy(filename: string, provider: () => SourceMap | undefined) {
-    this.pendingProviders.put(filename, provider);
+    this.#pendingProviders.put(filename, provider);
   }
 
   /** Tests-only: count of still-deferred (not-yet-materialized) providers. */
   pendingProviderCountForTesting(): number {
-    return this.pendingProviders.size;
+    return this.#pendingProviders.size;
   }
 
-  private materialize(filename: string): void {
-    const provider = this.pendingProviders.get(filename);
+  #materialize(filename: string): void {
+    const provider = this.#pendingProviders.get(filename);
     if (provider === undefined) return;
-    this.pendingProviders.delete(filename);
+    this.#pendingProviders.delete(filename);
     const sourceMap = provider();
     if (sourceMap !== undefined) {
-      this.sourceMaps.put(filename, sourceMap);
+      this.#sourceMaps.put(filename, sourceMap);
     }
   }
 
@@ -458,26 +451,28 @@ export class SourceMapParser {
    * Used for cleanup when the runtime is disposed.
    */
   clear(): void {
-    this.sourceMaps.clear();
-    this.pendingProviders.clear();
+    this.#sourceMaps.clear();
+    this.#pendingProviders.clear();
   }
 
-  // Fixes stack traces to use source map from eval. Strangely, both Deno and
-  // Chrome at least only observe `sourceURL` but not the source map, so we can
-  // use the former to find the right source map and then apply this.
+  /**
+   * Fixes stack traces to use source map from eval. Strangely, both Deno and
+   * Chrome at least only observe `sourceURL` but not the source map, so we can
+   * use the former to find the right source map and then apply this.
+   */
   parse(stack: string): string {
     return stack.split("\n").map((line) => {
       const match = line.match(stackTracePattern);
 
       if (match) {
-        return this.mapFrame(match[1], match[2], match[3], match[4], line);
+        return this.#mapFrame(match[1], match[2], match[3], match[4], line);
       }
 
       // V8 eval frames without a function name.
       // Try the nested pattern first (inner position is more precise).
       const nestedMatch = line.match(evalFrameNestedPattern);
       if (nestedMatch) {
-        return this.mapFrame(
+        return this.#mapFrame(
           "",
           nestedMatch[1],
           nestedMatch[2],
@@ -488,7 +483,7 @@ export class SourceMapParser {
 
       const evalMatch = line.match(evalFramePattern);
       if (evalMatch) {
-        return this.mapFrame(
+        return this.#mapFrame(
           "",
           evalMatch[1],
           evalMatch[2],
@@ -501,7 +496,7 @@ export class SourceMapParser {
     }).join("\n");
   }
 
-  private mapFrame(
+  #mapFrame(
     fnName: string,
     filename: string,
     lineStr: string,
@@ -511,15 +506,11 @@ export class SourceMapParser {
     const lineNum = parseInt(lineStr, 10);
     const columnNum = parseInt(colStr, 10);
 
-    this.materialize(filename);
-    const sourceMap = this.sourceMaps.get(filename);
+    this.#materialize(filename);
+    const sourceMap = this.#sourceMaps.get(filename);
     if (!sourceMap) return originalLine;
 
-    if (/AMDLoader/.test(fnName) && lineNum === 1) {
-      return CF_INTERNAL;
-    }
-
-    const consumer = this.getConsumer(sourceMap);
+    const consumer = this.#getConsumer(sourceMap);
     const originalPosition = consumer.originalPositionFor({
       line: lineNum,
       column: columnNum,
@@ -536,28 +527,30 @@ export class SourceMapParser {
     return `    at ${name} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
   }
 
-  // Map a single position to its original source location.
-  // More efficient than parse() when you only need one position.
+  /**
+   * Maps a single position to its original source location. More efficient
+   * than `parse()` when only one position is needed.
+   */
   mapPosition(
     filename: string,
     line: number,
     column: number,
   ): MappedPosition | null {
-    this.materialize(filename);
-    const sourceMap = this.sourceMaps.get(filename);
+    this.#materialize(filename);
+    const sourceMap = this.#sourceMaps.get(filename);
     if (!sourceMap) return null;
-    const consumer = this.getConsumer(sourceMap);
+    const consumer = this.#getConsumer(sourceMap);
     const pos = consumer.originalPositionFor({ line, column });
     return mapIsEmpty(pos) ? null : pos;
   }
 
-  private getConsumer(sourceMap: SourceMap): SourceMapConsumer {
-    let consumer = this.consumers.get(sourceMap);
+  #getConsumer(sourceMap: SourceMap): SourceMapConsumer {
+    let consumer = this.#consumers.get(sourceMap);
     if (consumer) {
       return consumer;
     }
     consumer = new SourceMapConsumer(sourceMap);
-    this.consumers.set(sourceMap, consumer);
+    this.#consumers.set(sourceMap, consumer);
     return consumer;
   }
 }
@@ -587,7 +580,7 @@ export function parseSourceMap(stringMap: string): SourceMap {
   }
   if (!isSourceMap(sourceMap)) {
     throw new Error(
-      `Could not parse source map: ${JSON.stringify(sourceMap, null, 2)}`,
+      `Could not parse source map: ${toIndentedDebugString(sourceMap)}`,
     );
   }
   return sourceMap;

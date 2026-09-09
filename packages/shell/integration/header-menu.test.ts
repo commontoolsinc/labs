@@ -1,9 +1,11 @@
-import { env, waitForCondition } from "@commonfabric/integration";
-import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import { env, waitForCondition } from "@commonfabric/integration";
 import type { Page } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+
 import "../src/globals.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;
@@ -92,11 +94,14 @@ describe("header menu tests", () => {
     const page = shell.page();
     await loginAndGoto();
 
+    // Rendered, not merely present: `deepText` reads the text of an element
+    // laid out at no size just as it reads a visible one, so without this the
+    // check holds under the narrow header layout, which lays out no breadcrumb.
     await waitForCondition(
       page,
       (probe, name) =>
         probe.collect(".header-space").some((el) =>
-          probe.deepText(el).trim() === name
+          probe.isRendered(el) && probe.deepText(el).trim() === name
         ),
       { args: [SPACE_NAME] },
     );
@@ -175,21 +180,26 @@ describe("header menu tests", () => {
     const page = shell.page();
     await loginAndGoto();
 
-    // Wait for the piece trigger to appear in the header breadcrumb
-    await waitForCondition(
-      page,
-      (probe) => probe.collect(".header-piece-trigger").length > 0,
-    );
+    // Wait for the piece trigger to be laid out in the header breadcrumb.
+    // Existence alone is a weaker condition than the click needs: the
+    // breadcrumbs are laid out only in the header's wide layout, and in the
+    // narrow one the trigger is in the DOM with no box to aim a click at.
+    await waitForCondition(page, (probe) => {
+      const triggers = probe.collect(".header-piece-trigger");
+      return triggers.length > 0 &&
+        triggers.every((el) => probe.isRendered(el));
+    });
 
     // Click the piece trigger to open the dropdown
     const trigger = await pierce(page, ".header-piece-trigger");
     await trigger.click();
 
-    // Dropdown should appear
-    await waitForCondition(
-      page,
-      (probe) => probe.collect(".header-piece-dropdown").length > 0,
-    );
+    // Dropdown should appear, laid out rather than merely present
+    await waitForCondition(page, (probe) => {
+      const dropdowns = probe.collect(".header-piece-dropdown");
+      return dropdowns.length > 0 &&
+        dropdowns.every((el) => probe.isRendered(el));
+    });
 
     // Re-query trigger since Lit may have re-rendered
     const updatedTrigger = await pierce(page, ".header-piece-trigger");

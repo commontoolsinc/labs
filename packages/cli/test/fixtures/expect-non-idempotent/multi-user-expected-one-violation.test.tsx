@@ -5,7 +5,15 @@
  * seeing a violation satisfies the expectation — the run must PASS even
  * though bob (also flagged) saw none.
  */
-import { computed, multiUserTest, pattern, Writable } from "commonfabric";
+
+import {
+  assert,
+  computed,
+  multiUserTest,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 
 export const alice = pattern(() => {
   const value = new Writable("alice");
@@ -17,18 +25,18 @@ export const alice = pattern(() => {
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
-  const hasEntries = computed(() => log.get().length > 0);
+  const hasEntries = assert(() => log.get().length > 0);
   return {
-    tests: [{ assertion: hasEntries }],
+    [TESTS]: [{ assertion: hasEntries }],
     expectNonIdempotent: true,
   };
 });
 
 export const bob = pattern(() => {
   const value = new Writable("bob");
-  const ok = computed(() => value.get() === "bob");
+  const ok = assert(() => value.get() === "bob");
   return {
-    tests: [{ assertion: ok }],
+    [TESTS]: [{ assertion: ok }],
     expectNonIdempotent: true,
   };
 });

@@ -323,3 +323,97 @@ export function renderProfileReport(
   }
   return report;
 }
+
+/**
+ * The runtime worker's script URL fragment.
+ *
+ * A property of how the runtime names its worker, not of any one measurement,
+ * which is why it is here rather than restated by each scenario that profiles.
+ */
+export const RUNTIME_WORKER_URL = "worker-runtime";
+
+/**
+ * Connect a profiler to a running browser and wait for its runtime worker.
+ *
+ * Resolves to `undefined` rather than throwing when anything goes wrong, and
+ * closes the half-open connection on the way out. Profiling is instrumentation:
+ * a scenario that cannot be profiled still has a scenario to run, so every seam
+ * here degrades to unprofiled instead of failing the caller.
+ */
+export async function attachWorkerProfiler(
+  wsEndpoint: string,
+  workerUrl = RUNTIME_WORKER_URL,
+): Promise<CdpWorkerProfiler | undefined> {
+  let profiler: CdpWorkerProfiler | undefined;
+  try {
+    profiler = await CdpWorkerProfiler.connect(wsEndpoint);
+    await profiler.waitForWorker(workerUrl);
+    return profiler;
+  } catch (error) {
+    console.warn("Worker CPU profiler setup failed, disabling:", error);
+    profiler?.close();
+    return undefined;
+  }
+}
+
+/**
+ * Start a profile, reporting whether it actually started.
+ *
+ * `context` names the thing being profiled in the warning, so a run that loses
+ * one capture out of many says which. The sampling interval is the caller's:
+ * the profiler's own default suits a single interaction, while a window of
+ * minutes needs a coarser period to stay inside the CDP message limit.
+ */
+export async function startWorkerProfile(
+  profiler: CdpWorkerProfiler,
+  context: string,
+  options: { workerUrl?: string; samplingIntervalUs?: number } = {},
+): Promise<boolean> {
+  try {
+    await profiler.start(
+      options.workerUrl ?? RUNTIME_WORKER_URL,
+      options.samplingIntervalUs ?? 250,
+    );
+    return true;
+  } catch (error) {
+    console.warn(`Worker CPU profile start failed (${context}):`, error);
+    return false;
+  }
+}
+
+/**
+ * Stop a profile and write both artifacts: `<pathPrefix>.cpuprofile`, which
+ * Chrome DevTools and speedscope load, and `<pathPrefix>.report.txt`, the
+ * ranked self-time report.
+ *
+ * `pathPrefix` and `label` carry the scenario's own parameters — the board
+ * size, the iteration, the phase — so they are the caller's to compose. Set
+ * `logReport` to put the ranked report in the run's output, which is what makes
+ * a headless run answer the question without opening a file.
+ */
+export async function writeWorkerProfile(
+  profiler: CdpWorkerProfiler,
+  options: {
+    pathPrefix: string;
+    label: string;
+    context?: string;
+    logReport?: boolean;
+  },
+): Promise<void> {
+  const context = options.context ?? options.label;
+  try {
+    const profile = await profiler.stop();
+    await Deno.writeTextFile(
+      `${options.pathPrefix}.cpuprofile`,
+      JSON.stringify(profile),
+    );
+    const report = renderProfileReport(profile, options.label);
+    await Deno.writeTextFile(`${options.pathPrefix}.report.txt`, report);
+    if (options.logReport) console.log(report);
+    console.log(
+      `Worker CPU profile written: ${options.pathPrefix}.cpuprofile`,
+    );
+  } catch (error) {
+    console.warn(`Worker CPU profile capture failed (${context}):`, error);
+  }
+}

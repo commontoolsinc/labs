@@ -1,7 +1,7 @@
 import type {
   FabricLink as ApiFabricLink,
   FabricLinkConstructor as ApiFabricLinkConstructor,
-} from "@commonfabric/api";
+} from "@/api.ts";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricPlainObject, FabricValue } from "@/interface.ts";
@@ -11,39 +11,40 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   CODEC,
-  type FabricCodec,
-  type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { ProblematicValue } from "./ProblematicValue.ts";
+  type LiveEnvironment,
+  type NonterminalCodec,
+} from "@/codec-interface/interface.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * A link value in the fabric type system: the modern, object-shaped form of a
  * `{ "/": { "link@1": … } }` link reference. It wraps the link's payload — a
- * {@link FabricPlainObject} of addressing fields (`id`, `space`, `scope`, `path`,
- * `overwrite`) plus an optional `schema` — as its sole nested value. The
- * data-model layer does not constrain the field set; that is a consumer concern
- * (e.g. runner's `CellLinkRefPayload`).
+ * {@link FabricPlainObject} of addressing fields (`id`, `space`, `scope`,
+ * `path`, `overwrite`) plus an optional `schema` — as its sole nested value.
+ * The data-model layer does not constrain the field set; that is a consumer
+ * concern (e.g. runner's `CellLinkRefPayload`).
  *
- * It is a {@link FabricInstance} (not a `FabricPrimitive`) precisely because the
- * payload is an **outgoing reference**: a link may carry a `schema`, an arbitrary
- * `FabricValue` that is not leaf data, so a link is a small object graph rather
- * than an immutable scalar. Like every instance, a `FabricLink` is wholeheartedly
- * mutable until frozen and immutable thereafter; the payload it holds is its one
- * nested `FabricValue`, frozen and cloned recursively by the protocol members.
+ * It is a {@link FabricInstance} (not a `FabricPrimitive`) precisely because
+ * the payload is an **outgoing reference**: a link may carry a `schema`, an
+ * arbitrary `FabricValue` that is not leaf data, so a link is a small object
+ * graph rather than an immutable scalar. Like every instance, a `FabricLink` is
+ * wholeheartedly mutable until frozen and immutable thereafter; the payload it
+ * holds is its one nested `FabricValue`, frozen and cloned recursively by the
+ * protocol members.
  */
 export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   /** The wrapped addressing payload (this link's sole outgoing reference). */
   #payload: FabricPlainObject;
 
   /**
-   * Constructs a `FabricLink` wrapping `payload`. The payload must be a plain
+   * Constructs an instance wrapping `payload`. The payload must be a plain
    * object with no prototype-pollution keys; otherwise the constructor throws
    * (death before confusion). The payload is held by reference — like every
    * `FabricInstance`, the instance is mutable until frozen, so the caller must
@@ -75,12 +76,13 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     subFreeze(this.#payload);
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**
    * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
-   * instance is frozen and its payload is recursively deep-frozen. Never throws.
+   * instance is frozen and its payload is recursively deep-frozen. Never
+   * throws.
    */
   [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,
@@ -109,29 +111,35 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   static #codec = Object.freeze(
-    new (class LinkCodec extends BaseFabricCodec {
+    new (class LinkCodec extends BaseNonterminalCodec<FabricPlainObject> {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);
       }
 
       /** @inheritDoc */
-      encode(value: FabricLink): FabricValue {
+      encode(value: FabricLink, _env: LiveEnvironment): FabricPlainObject {
         // The payload IS the encoded state; its nested values are recursively
-        // encoded by the encoding context.
+        // encoded by the engine.
         return value.#payload;
+      }
+
+      /** @inheritDoc */
+      canDecode(state: FabricValue): state is FabricPlainObject {
+        return isPlainObject(state);
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
-        context: ReconstructionContext,
+        state: FabricPlainObject,
+        env: LiveEnvironment,
       ): FabricValue {
-        // The constructor validates the shape and throws on any violation, so
-        // bad state falls into the `catch`.
+        // The constructor validates the payload and throws on any violation,
+        // so bad state falls into the `catch`.
         try {
-          const result = new FabricLink(state as FabricPlainObject);
-          return context.shouldDeepFreeze ? deepFreeze(result) : result;
+          const result = new FabricLink(state);
+          return env.shouldDeepFreeze ? deepFreeze(result) : result;
         } catch (e) {
           return new ProblematicValue(
             typeTag,
@@ -144,7 +152,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
@@ -162,12 +170,17 @@ function assertValidPayload(
   }
   for (const key of Object.keys(payload)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Link payload has a forbidden key: "${key}".`);
+      throw new Error(
+        `Link payload has a forbidden key: \`${key}\`.`,
+      );
     }
   }
 }
 
 // Compile-time check that the exported `FabricLink` constructor matches the
-// `FabricLinkConstructor` declared in `@commonfabric/api`. This catches drift
-// between the public type contract and this implementation.
+// `FabricLinkConstructor` declared in `@/api.ts`. This catches a declared member
+// that is missing here or has the wrong type. It does NOT catch the other
+// direction: `satisfies` is an assignability check, so a public member on this
+// class that the declaration omits passes silently. Members added here need
+// adding there by hand.
 FabricLink satisfies ApiFabricLinkConstructor;

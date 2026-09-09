@@ -8,9 +8,9 @@ import {
   parseBacklinks,
 } from "./backlinks.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Helpers
-// ---------------------------------------------------------------------------
+//
 
 /** Create a headless EditorState with backlink extensions loaded. */
 function createState(doc: string): EditorState {
@@ -25,9 +25,9 @@ function getBacklinks(state: EditorState): BacklinkInfo[] {
   return state.field(backlinkField);
 }
 
-// ---------------------------------------------------------------------------
+//
 // parseBacklinks() - Backlink parsing
-// ---------------------------------------------------------------------------
+//
 
 describe("parseBacklinks", () => {
   it("returns empty array for empty string", () => {
@@ -130,9 +130,9 @@ describe("parseBacklinks", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // backlinkField StateField - Position tracking through edits
-// ---------------------------------------------------------------------------
+//
 
 describe("backlinkField", () => {
   it("parses backlinks from initial document", () => {
@@ -205,9 +205,9 @@ describe("backlinkField", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // backlinkEditFilter - Transaction filter protecting IDs
-// ---------------------------------------------------------------------------
+//
 
 describe("backlinkEditFilter", () => {
   it("allows edits outside any backlink", () => {
@@ -291,9 +291,9 @@ describe("backlinkEditFilter", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Enter keymap conditions
-// ---------------------------------------------------------------------------
+//
 
 describe("Enter keymap conditions", () => {
   it("cursor position determines Enter behavior", () => {

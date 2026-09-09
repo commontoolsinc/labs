@@ -11,6 +11,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { internSchema } from "@commonfabric/data-model-schema";
+import type { FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   FabricError,
@@ -20,15 +22,16 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { SchemaPathSelector } from "@commonfabric/api";
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
 
 import {
   createDefaultTraversalContext,
@@ -55,7 +58,6 @@ const traverserOver = (
     the: type,
     of: entity,
     is: { value },
-    cause: hashOf({ the: type, of: entity }),
     since: 1,
   });
   for (const [linkedUri, value] of Object.entries(linkedValues)) {
@@ -64,7 +66,6 @@ const traverserOver = (
       the: type,
       of: linkedEntity,
       is: { value },
-      cause: hashOf({ the: type, of: linkedEntity }),
       since: 1,
     });
   }
@@ -74,7 +75,7 @@ const traverserOver = (
   const traverser = new SchemaObjectTraverser(
     storeTx,
     selector,
-    createDefaultTraversalContext(includeMeta),
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY, includeMeta),
   );
   const doc: IMemorySpaceValueAttestation = {
     address: {
@@ -86,6 +87,13 @@ const traverserOver = (
     value,
   };
   return { traverser, doc };
+};
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
 };
 
 describe("value-type dispatch: FabricSpecialObject subclasses", () => {
@@ -101,7 +109,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     const blob = new FabricBytes(new Uint8Array([1, 2, 3]));
     const { traverser, doc } = traverserOver(
       "of:dispatch-primitive",
-      { field: blob } as unknown as FabricValue,
+      { field: blob },
       objectSelector,
     );
 
@@ -109,6 +117,38 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     expect((result as Record<string, unknown>).field).toBeInstanceOf(
       FabricBytes,
     );
+  });
+
+  it("matches a FabricPrimitive's anyOf branch by prototype-chain required keys", () => {
+    // The branch prefilter's `required` check tests membership with `in`
+    // for a FabricSpecialObject — accessors like `length` count, the
+    // nominal brand key is satisfied by construction — and an unresolvable
+    // $ref branch passes the prefilter to complain in traversal proper.
+    const blob = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const anyOfSelector: SchemaPathSelector = {
+      path: ["value"],
+      // Interned and at the schema root: the prepared branch prefilter
+      // under test runs only for interned schemas, the identity-stable
+      // form a resolved link's schema arrives in.
+      schema: internSchema({
+        anyOf: [
+          { $ref: "#/$defs/absent" },
+          { type: "object", required: ["missing"] },
+          {
+            type: "object",
+            required: [FABRIC_SPECIAL_OBJECT_BRAND, "length"],
+          },
+        ],
+      })!,
+    };
+    const { traverser, doc } = traverserOver(
+      "of:dispatch-primitive-anyof",
+      blob,
+      anyOfSelector,
+    );
+
+    const { ok: result } = traverser.traverse(doc);
+    expect(result).toBeInstanceOf(FabricBytes);
   });
 
   it("routes a modern FabricLink through pointer traversal", () => {
@@ -135,7 +175,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
         {
           "of:dispatch-link-target": {
             name: "linked",
-          } as FabricValue,
+          },
         },
       );
 
@@ -166,7 +206,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
         {
           "of:unconstrained-link-target": {
             name: "linked",
-          } as FabricValue,
+          },
         },
       );
 
@@ -187,7 +227,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     const failure = FabricError.fromNativeError(new Error("loud"));
     const { traverser, doc } = traverserOver(
       "of:dispatch-instance",
-      { field: failure } as unknown as FabricValue,
+      { field: failure },
       objectSelector,
     );
 
@@ -214,7 +254,7 @@ describe("plain-schema fast path: FabricSpecialObject subclasses", () => {
     const blob = new FabricBytes(new Uint8Array([7, 7]));
     const { traverser, doc } = traverserOver(
       "of:plan-primitive",
-      [blob] as unknown as FabricValue,
+      [blob],
       planSelector,
       false,
     );
@@ -227,7 +267,7 @@ describe("plain-schema fast path: FabricSpecialObject subclasses", () => {
     const failure = FabricError.fromNativeError(new Error("loud"));
     const { traverser, doc } = traverserOver(
       "of:plan-instance",
-      [failure] as unknown as FabricValue,
+      [failure],
       planSelector,
       false,
     );

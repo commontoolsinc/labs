@@ -59,13 +59,21 @@ empty object:
   [05](./05-reactivity.md)). It exists so `reactOn: db` re-runs after a write and
   so concurrent writes serialize; patterns do not read it directly.
 
+That descriptor is what the compiler emits as the schema of a `SqliteDb`
+position (`NativeTypeFormatter`, `packages/schema-generator`), keyed on the
+`SQLITE_DB_BRAND` the handle type carries: the brand's own members describe
+nothing, so a schema derived from them would shape every read of a handle down
+to `{}`. `tables` therefore reads back whole, per-column `ifc` labels included
+— a pattern needs the declared columns to write a query against the database,
+and the disclosure is the same one `describe_handle` makes deliberately.
+
 ```ts
 // Shown at module scope.
-declare const __sqliteDb: unique symbol;
-/** Opaque database handle value (the SqliteDb cell's readable value). Patterns
- *  forward the SqliteDb cell to db.query / db.exec / reactOn; they do not read
- *  the handle fields directly. */
-export type SqliteDatabase = { readonly [__sqliteDb]: true };
+export declare const SQLITE_DB_BRAND: unique symbol;
+/** The SqliteDb cell's readable value: the `{ id, tables, rev }` descriptor
+ *  above, behind a nominal brand. Patterns usually just forward the SqliteDb
+ *  cell to db.query / db.exec / reactOn. */
+export type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 
 /** Imperative write: records a SQLite write onto the current transaction. */
 export interface ISqliteExecutable {
@@ -74,6 +82,16 @@ export interface ISqliteExecutable {
     params?: ReadonlyArray<unknown> | Record<string, unknown>,
   ): void;
 }
+
+export type SqliteEntryRow<Row> = Array<
+  {
+    [Key in Extract<keyof Row, string>]: readonly [Key, Row[Key]];
+  }[Extract<keyof Row, string>]
+>;
+export type SqliteQueryRow<Row> = Extract<
+  keyof Row,
+  "constructor" | "__proto__"
+> extends never ? Row : SqliteEntryRow<Row>;
 
 /** Reactive read: builds a sqliteQuery node. `<Row>` is lowered by the
  *  ts-transformer to an injected `rowSchema`. */
@@ -84,7 +102,11 @@ export interface ISqliteQueryable {
       params?: ReadonlyArray<unknown> | Record<string, unknown>;
       reactOn?: unknown;
     },
-  ): AsyncResult<SqliteQueryResult<Row>>;
+  ): Reactive<{
+    pending: boolean;
+    result?: SqliteQueryRow<Row>[];
+    error?: any;
+  }>;
 }
 
 export type SqliteQueryResult<Row> = {
@@ -99,6 +121,12 @@ export interface SqliteDb<T = SqliteDatabase>
   extends BrandedCell<T, "sqlite">, IAnyCell<T>, IReadable<T>,
     ISqliteExecutable, ISqliteQueryable {}
 ```
+
+The brand symbol is exported. Nothing reads it — it exists to keep
+`SqliteDatabase` nominal — but a pattern that names `SqliteDb` in an exported
+signature emits a declaration that refers to it, and a symbol the pattern's
+module cannot name is one the compiler refuses to emit past. Every brand in the
+pattern API is exported for that reason.
 
 Why a cell variant rather than `Cell<SqliteDatabase>` or an opaque empty value:
 
@@ -197,6 +225,14 @@ older on-disk versions while still erroring by default. (See
 
 ```ts
 // Shown for illustration only.
+type QueryRow<Row> = Extract<
+  keyof Row,
+  "constructor" | "__proto__"
+> extends never ? Row : Array<
+  {
+    [Key in Extract<keyof Row, string>]: readonly [Key, Row[Key]];
+  }[Extract<keyof Row, string>]
+>;
 db.query<Row = Record<string, unknown>>(
   sql: string,
   options?: {
@@ -207,7 +243,7 @@ db.query<Row = Record<string, unknown>>(
      *  See Section 05. */
     reactOn?: unknown;
   },
-): AsyncResult<SqliteQueryResult<Row>>;
+): Reactive<{ pending: boolean; result?: QueryRow<Row>[]; error?: any }>;
 ```
 
 `db.query` is **read-only**. The server rejects any statement that is not a
@@ -217,8 +253,14 @@ A free function is equivalent:
 
 ```ts
 // Shown at module scope.
-import type { AsyncResult, SqliteQueryResult } from "commonfabric";
-
+type QueryRow<Row> = Extract<
+  keyof Row,
+  "constructor" | "__proto__"
+> extends never ? Row : Array<
+  {
+    [Key in Extract<keyof Row, string>]: readonly [Key, Row[Key]];
+  }[Extract<keyof Row, string>]
+>;
 export type SqliteQueryParams = {
   db: Opaque<SqliteDatabase | SqliteDb>;
   sql: string;
@@ -227,7 +269,11 @@ export type SqliteQueryParams = {
 };
 export declare const sqliteQuery: <Row = Record<string, unknown>>(
   params: Opaque<SqliteQueryParams>,
-) => AsyncResult<SqliteQueryResult<Row>>;
+) => Reactive<{
+  pending: boolean;
+  result?: QueryRow<Row>[];
+  error?: any;
+}>;
 ```
 
 `db.query<Row>(sql, opts)` and `sqliteQuery<Row>({ db, sql, ...opts })` lower to
@@ -235,17 +281,29 @@ the same versioned direct-result node; choose whichever reads better. The
 successful `rows` and `withheld` fields are one atomic value, so the audit count
 always describes exactly the accompanying rows.
 
-The **`Row` type argument** carries both the author-facing return type and the
-runtime decode schema. The ts-transformer lowers `<Row>` into an injected
-`rowSchema` property on the call — method-call lowering keyed on the `"sqlite"`
-receiver brand for the `db.query<Row>` form, and the free-function form keyed on
-the `sqliteQuery` export
+SQLite permits result aliases that Fabric records reserve against prototype
+pollution. A reactive query carries a row containing `constructor` or
+`__proto__` as an ordered array of `[column, value]` entries so the result
+remains a valid durable Fabric value. Ordinary rows remain objects.
+`SqliteQueryRow<Row>` exposes that distinction: when `Row` explicitly declares
+either reserved name, the result row is `SqliteEntryRow<Row>`; otherwise it is
+`Row`. Code that intentionally selects one of those aliases must handle the
+entry-list form directly; reconstruct an object only at a native boundary that
+will not write the object back into Fabric state.
+
+The **`Row` type argument** carries the author-facing column types and the
+runtime decode schema. `SqliteQueryRow<Row>` selects the durable container shape
+described above. The ts-transformer lowers `<Row>` into an injected `rowSchema`
+property on the call — method-call lowering keyed on the `"sqlite"` receiver
+brand for the `db.query<Row>` form, and the free-function form keyed on the
+`sqliteQuery` export
 ([`packages/ts-transformers/src/transformers/schema-injection.ts`](../../../packages/ts-transformers/src/transformers/schema-injection.ts);
 brand recognition in
 [`packages/ts-transformers/src/transformers/cell-type.ts`](../../../packages/ts-transformers/src/transformers/cell-type.ts)).
 A `Cell<T>` field in `Row` lowers to `asCell`, which is what drives `_cf_link`
-decode-to-`Cell` (Section [02](./02-cf-link-encoding.md)). Because the return
-type and the runtime schema are the same `Row`, they cannot drift.
+decode-to-`Cell` (Section [02](./02-cf-link-encoding.md)). The column schema and
+the runtime's durable object-or-entry-list representation therefore stay
+aligned.
 
 This handles projections the table schema can't: because `Cell<T>` lowers to
 `asCell`, declaring a result field as `Cell<User>` tells the runtime that column
@@ -341,11 +399,17 @@ records the op through the storage seam `recordSqliteWrite` → `getNativeCommit
 
 ```ts
 // Shown at module scope.
-export type SqliteColumnSpec = string | JSONSchema;
+export interface SqliteColumnSchema {
+  type: JSONSchemaTypes;
+  sqlType?: string;
+  cfLink?: true;
+  [keyword: string]: FabricValue;
+}
+export type SqliteColumnSpec = string | SqliteColumnSchema;
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,
 ) => JSONSchema;
-export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 ```
 
 `table(...)` and `cfLink<T>()` compile to plain JSON Schema; `cfLink<T>()` emits

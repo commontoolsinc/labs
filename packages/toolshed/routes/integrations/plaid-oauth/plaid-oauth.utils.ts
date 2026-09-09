@@ -1,12 +1,13 @@
-import { type SigilLink } from "@commonfabric/runner";
-import { runtime } from "@/index.ts";
 import {
   type JSONSchema,
   type Mutable,
   type Schema,
+  type SigilLink,
 } from "@commonfabric/runner";
 import { Configuration, PlaidApi, PlaidEnvironments } from "plaid";
+
 import env from "@/env.ts";
+import { runtime } from "@/index.ts";
 import {
   custodyIngest,
   durableUpdate,
@@ -76,7 +77,10 @@ export const PlaidAuthSchema = {
   required: ["items"],
 } as const satisfies JSONSchema;
 
+//
 // Types
+//
+
 export type PlaidAuthData = Mutable<Schema<typeof PlaidAuthSchema>>;
 
 export interface PlaidItem {

@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import env from "@/env.ts";
+import { generateObject } from "./generateObject.ts";
 import { findModel, MODELS } from "./models.ts";
 
 if (env.ENV !== "test") {
@@ -18,6 +19,11 @@ describe("generateObject server-side", () => {
       const result = findModel("");
       assertEquals(result, undefined);
     });
+
+    it("returns undefined for the name of an Object.prototype member", () => {
+      assertEquals(findModel("constructor"), undefined);
+      assertEquals(findModel("toString"), undefined);
+    });
   });
 
   describe("model registration", () => {
@@ -29,9 +35,6 @@ describe("generateObject server-side", () => {
 
   describe("generateObject function", () => {
     it("throws when model is not found", async () => {
-      // Import the actual generateObject function
-      const { generateObject } = await import("./generateObject.ts");
-
       await assertRejects(
         () =>
           generateObject({
@@ -47,8 +50,6 @@ describe("generateObject server-side", () => {
     });
 
     it("throws when no model specified and default model not registered", async () => {
-      const { generateObject } = await import("./generateObject.ts");
-
       await assertRejects(
         () =>
           generateObject({
@@ -57,7 +58,7 @@ describe("generateObject server-side", () => {
               properties: { value: { type: "number" } },
             },
             messages: [{ role: "user", content: "give me a number" }],
-            // No model specified — falls back to DEFAULT_GENERATE_OBJECT_MODELS
+            // No model specified — falls back to DEFAULT_GENERATE_OBJECT_MODEL
           }),
         Error,
       );

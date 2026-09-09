@@ -8,6 +8,7 @@
  * scanning every entry) and is the shared home for that concern. A future pass
  * can fold the authorship reader onto these primitives.
  */
+
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type { CfcLabelView };
@@ -31,7 +32,7 @@ const canResolveAsCell = (value: unknown): value is CfcLabelResolvable =>
   typeof (value as { resolveAsCell?: unknown }).resolveAsCell === "function";
 
 /**
- * Egress check (host-embedding seam — see `docs/development/HOST_EMBEDDING.md`
+ * Egress check (host-embedding seam — see `docs/features/host-embedding.md`
  * §4). An embedder that persists profile (or any) data *outside the runtime* —
  * a host-side cache, an LLM prompt assembled from cell fields — has left the CFC
  * enforcement boundary and must fail closed on non-public data. This predicate

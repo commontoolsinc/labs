@@ -21,7 +21,7 @@
  * We restore the genuine intrinsic rather than polyfill it. Captured at module
  * evaluation (before any lockdown), it is a pure predicate over the
  * `[[ErrorData]]` internal slot: no powers to withhold, no realm affinity, and
- * it answers correctly for the tamed constructors' instances because those are
+ * it is correct for the tamed constructors' instances because those are
  * still constructed from the original `Error`.
  *
  * Two consequences to be aware of:
@@ -38,8 +38,12 @@
 /**
  * The real `Error.isError`, captured before lockdown can replace the
  * constructor holding it. `undefined` on a runtime that predates the method,
- * in which case there is nothing to restore. Error classification falls back
- * to the shared prototype hierarchy on those runtimes.
+ * in which case there is nothing to restore -- and error classification, which
+ * calls `Error.isError` directly, throws there rather than answering a weaker
+ * way. That is the intended shape: `instanceof` is not a substitute here, it
+ * is the very test SES's two `Error` constructors defeat, so answering with it
+ * would be answering wrongly. Every runtime this project supports has the
+ * method.
  */
 const FERAL_IS_ERROR: unknown = (Error as { isError?: unknown }).isError;
 

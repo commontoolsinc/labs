@@ -5,10 +5,11 @@
  *
  * Composition is cell-based: each visible content row is built as an array of
  * (char, style) cells so overlays layer with a clear precedence
- * (search match > node selection > schema/closure region tint > token colour),
+ * (search match > node selection > schema/closure region tint > token color),
  * then run-length encoded into ANSI. Horizontal scrolling, the line-number
  * gutter and the structure guide bar are all column maths over that grid.
  */
+
 import { diffContentRowCount, maxPagerTop, maxTop } from "./actions.ts";
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
 import type { Document, Line, StructureNode, ViewMode } from "./model.ts";
@@ -20,7 +21,7 @@ import {
   glyphFor,
 } from "./display.ts";
 import { overlaySpanStyle, spanStyle } from "./highlight.ts";
-import { lineBg, ui } from "./theme.ts";
+import { lineBg, styleFor, ui } from "./theme.ts";
 import {
   buildWrapPlan,
   fitViewLayout,
@@ -60,6 +61,7 @@ export type DiffAnnotationKind =
 export interface DiffAnnotation {
   /** Folded logical line carrying the annotation. */
   readonly line: number;
+
   readonly kind: DiffAnnotationKind;
 }
 
@@ -86,12 +88,71 @@ export function diffAnnotationDecoration(
   };
 }
 
+/** Whole-diff added and removed line totals. */
+export interface DiffTotals {
+  readonly adds: number;
+  readonly dels: number;
+}
+
+/** One right-edge annotation cell: its glyph, and its style when it differs
+ * from the wrap-marker style. */
+interface SuffixCell {
+  readonly ch: string;
+  readonly style?: Style;
+}
+
+function plainSuffix(text: string): SuffixCell[] {
+  return [...text].map((ch) => ({ ch }));
+}
+
+/** The two segments of the corner label for the whole-diff totals, e.g.
+ * `+345 ` and `−12`: the added count and the removed count. */
+function diffTotalsSegments(totals: DiffTotals): [string, string] {
+  return [`+${totals.adds} `, `−${totals.dels}`];
+}
+
+/** The corner label's cells: the added count in the addition color, the
+ * removed count in the removal color. */
+function diffTotalsCells(totals: DiffTotals): SuffixCell[] {
+  const [add, del] = diffTotalsSegments(totals);
+  return [
+    ...[...add].map((ch) => ({ ch, style: styleFor("diffAdd") })),
+    ...[...del].map((ch) => ({ ch, style: styleFor("diffDel") })),
+  ];
+}
+
+/** Columns the whole-diff totals label occupies. */
+export function diffTotalsWidth(totals: DiffTotals): number {
+  const [add, del] = diffTotalsSegments(totals);
+  return cpLen(add) + cpLen(del);
+}
+
+/** Wrapped source widths reserved by the totals label on the first line,
+ * layered over any annotation decoration that line already carries. */
+export function diffTotalsDecoration(
+  labelWidth: number,
+  width: number,
+  annotation?: WrapDecoration,
+): WrapDecoration {
+  const available = Math.max(0, width - 1);
+  return {
+    firstWidth: Math.min(
+      (annotation?.firstWidth ?? 0) + labelWidth,
+      available,
+    ),
+    firstContinuationWidth: annotation?.firstContinuationWidth ??
+      annotation?.continuationWidth ?? 0,
+    continuationWidth: annotation?.continuationWidth ?? 0,
+  };
+}
+
 /** The metadata line that carries the Ctrl-L label in this wrapped layout. */
 export function labeledDiffMetadataLine(
   lines: readonly Line[],
   mode: DisplayMode,
   width: number,
   annotations: readonly DiffAnnotation[],
+  totalsWidth = 0,
 ): number | null {
   const metadata = annotations.find((annotation) =>
     annotation.kind === "diffMetadata"
@@ -103,7 +164,10 @@ export function labeledDiffMetadataLine(
   if (!downward || metadata.line !== downward.line + 1) return metadata.line;
   const line = lines[downward.line];
   if (!line) return metadata.line;
-  const firstWidth = diffAnnotationDecoration("expandDown", width).firstWidth;
+  const decoration = diffAnnotationDecoration("expandDown", width);
+  const firstWidth = downward.line === 0 && totalsWidth > 0
+    ? diffTotalsDecoration(totalsWidth, width, decoration).firstWidth
+    : decoration.firstWidth;
   return displayWidth(line, mode) > Math.max(1, width) - firstWidth
     ? null
     : metadata.line;
@@ -123,65 +187,96 @@ export interface ViewState {
   width: number;
   height: number;
   color: boolean;
+
   /** Whether the source is a diff. */
   isDiff?: boolean;
+
   showLineNumbers: boolean;
+
   /** How long logical lines continue on later screen rows. */
   wrapMode: WrapMode;
+
   /** A precomputed wrapping layout for `doc`, when the session has one. */
   wrapPlan?: WrapPlan | null;
+
   /** The number to show in the gutter on each display row, or null there for a
    * blank gutter. Absent → the legacy 1-based display-row number. Only consulted
    * when `showLineNumbers` is set. */
   lineNumbers?: readonly (number | null)[] | null;
+
   /** How the non-printable characters in the content are shown. */
   displayMode: DisplayMode;
+
   /** The selected structure node (WASD navigation), or null. */
   selected: StructureNode | null;
-  /** All search matches, document-ordered; null when no active search. */
+
+  /** Visible search matches, display-ordered; null when no active search. */
   matches: readonly Match[] | null;
+
   /** Index into `matches` of the focused match. */
   currentMatch: number;
+
   /** Transient status text (e.g. "Pattern not found"). */
   message: string;
+
   /** Command/search input line, e.g. "/token"; null in normal mode. */
   inputLine: string | null;
+
   overlay: OverlayState | null;
-  /** A modal prompt drawn as a centred Turbo Vision dialog (the save, revert and
+
+  /** A modal prompt drawn as a centered Turbo Vision dialog (the save, revert and
    * amend confirmations). Covers the content like an overlay; the two never
    * coexist. */
   dialog?: DialogState | null;
+
   /** The text cursor, in document coordinates (line + display column), when
    * edit mode has it visible. The pager positions the real terminal cursor. */
   cursor?: { line: number; col: number } | null;
+
   /** Edit-mode key hints, shown on the status line in place of the navigation
    * help while the text cursor is active. */
   editHint?: readonly KeyHint[] | null;
+
   /** Whether Ctrl-L can reveal more context here (a diff), so the navigation
    * help advertises it. */
   canExpand?: boolean;
+
   /** Whether this pager can draw diff annotations. */
   expandMargin?: boolean;
+
   /** Per-line annotations drawn against the right edge. */
   diffAnnotations?: readonly DiffAnnotation[];
+
+  /** Whole-diff added/removed totals, drawn at the top right corner of the
+   * first line. */
+  diffTotals?: DiffTotals | null;
+
   /** Absolute display row of the diff edge the next Ctrl-L will expand. */
   expandRow?: number | null;
+
   /** Whether the marked edge expands upward. False means downward. */
   expandUp?: boolean | null;
+
   /** Absolute display rows occupied by metadata adjacent to the expansion edge. */
   diffMetadataRows?: readonly number[];
+
   /** Whether the view is editable, so the navigation help advertises `e`. */
   canEdit?: boolean;
+
   /** Whether this source offers an alternate rendered representation. */
   canRender?: boolean;
+
   /** The representation currently shown. */
   viewMode?: ViewMode;
+
   /** Whether the content holds non-printable characters, so the navigation help
    * advertises the display-mode key `C`. */
   hasNonPrintables?: boolean;
+
   /** Lines shown just above the status/prompt bar (e.g. the list of files an
    * edited diff would save), overwriting the bottom content rows. */
   notice?: readonly string[] | null;
+
   /** The file currently in view — the diff file or source under the viewport, or
    * the file being edited — shown on the right of the status bar. Null when
    * there is none (a bare pipe). */
@@ -269,10 +364,12 @@ export interface OverlayState {
   readonly lines: readonly Line[];
   readonly scroll: number;
   readonly footer: string;
+
   /** Index into `lines` of the selected (highlighted) reference, if any. */
   readonly selectedLine?: number;
+
   /** The overlay shows source code, so it is drawn as a blue editor window
-   * rather than a grey dialog. */
+   * rather than a gray dialog. */
   readonly sourceView?: boolean;
 }
 
@@ -285,14 +382,16 @@ export interface DialogButton {
   readonly kind?: "default" | "cancel" | "normal";
 }
 
-/** A centred modal prompt: a title, one or more body lines, and a button row. */
+/** A centered modal prompt: a title, one or more body lines, and a button row. */
 export interface DialogState {
   readonly title: string;
   readonly body: readonly string[];
   readonly buttons: readonly DialogButton[];
+
   /** Index of the focused button — the one Space and Enter activate, drawn
    * highlighted. When absent, the default button (if any) is highlighted. */
   readonly focus?: number;
+
   /** Index of a button drawn mid-press: shifted one column right with its
    * shadow hidden, for the brief animation after it is activated. */
   readonly pushed?: number;
@@ -341,6 +440,15 @@ function clipConnectorAnnotation(text: string, width: number): string {
   return capacity === 0 ? "" : [...text].slice(-capacity).join("");
 }
 
+/** Keep at least one source cell when a styled suffix meets a narrow view. */
+function clipSuffixCells(
+  cells: readonly SuffixCell[],
+  width: number,
+): SuffixCell[] {
+  const capacity = Math.max(0, width - 1);
+  return capacity === 0 ? [] : cells.slice(-capacity);
+}
+
 const MATCH_BLOCK_SIZE = 64;
 
 /** The contiguous slice of document-ordered matches on one visible line. */
@@ -387,12 +495,14 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       annotation.kind,
     ]),
   );
+  const totalsCells = view.diffTotals ? diffTotalsCells(view.diffTotals) : [];
   const metadataLabelLine = view.wrapMode !== "off"
     ? labeledDiffMetadataLine(
       doc.lines,
       view.displayMode,
       contentWidth,
       view.diffAnnotations ?? [],
+      totalsCells.length,
     )
     : view.diffAnnotations?.find((annotation) =>
       annotation.kind === "diffMetadata"
@@ -405,6 +515,16 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
         kind,
         contentWidth,
         kind !== "diffMetadata" || line === metadataLabelLine,
+      ),
+    );
+  }
+  if (totalsCells.length > 0) {
+    decorations.set(
+      0,
+      diffTotalsDecoration(
+        totalsCells.length,
+        contentWidth,
+        decorations.get(0),
       ),
     );
   }
@@ -456,9 +576,11 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
     const rowIdx = view.top + r;
     const endMark = endRows[rowIdx - endMarkStart] ?? null;
     if (endMark !== null) {
-      const suffix = hasDiffEndConnector && rowIdx === diffEndRow
-        ? diffEndSuffix(view.width)
-        : "";
+      const suffix = plainSuffix(
+        hasDiffEndConnector && rowIdx === diffEndRow
+          ? diffEndSuffix(view.width)
+          : "",
+      );
       rows.push(
         composeContent(
           undefined,
@@ -500,14 +622,17 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       wrapPlan !== null &&
       wrappedRow !== undefined &&
       rowIdx === wrapPlan.firstRow[lineIdx] + 1;
+    // Row 0 reserves the leading cells of its suffix for the totals label, so
+    // the plain block marker only marks a width reserved beyond the label.
+    const reservedTotals = rowIdx === 0 ? totalsCells.length : 0;
     const marginMarker: MarginMarker = firstOfLine && annotation
       ? annotation
-      : wrappedRow && wrappedRow.suffixWidth > 0
+      : wrappedRow && wrappedRow.suffixWidth > reservedTotals
       ? "diffMetadata"
       : hasDiffEndConnector && rowIdx === diffEndRow
       ? "diffEnd"
       : null;
-    const suffix = firstOfLine && annotation === "diffMetadata" &&
+    const annotationSuffix = firstOfLine && annotation === "diffMetadata" &&
         lineIdx === metadataLabelLine
       ? clipAnnotation("^L█", contentWidth)
       : labelsWrappedExpansion
@@ -515,6 +640,12 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       : hasDiffEndConnector && rowIdx === diffEndRow
       ? diffEndSuffix(contentWidth)
       : marginAnnotation(marginMarker, contentWidth);
+    const suffix = reservedTotals > 0
+      ? clipSuffixCells(
+        [...totalsCells, ...plainSuffix(annotationSuffix)],
+        contentWidth,
+      )
+      : plainSuffix(annotationSuffix);
     const sourceWidth = wrappedRow?.sourceWidth ??
       Math.max(1, contentWidth - suffix.length);
     rows.push(
@@ -574,7 +705,7 @@ function renderContentRow(
   guideWidth: number,
   contentWidth: number,
   wrapPlan: WrapPlan | null,
-  suffix: string,
+  suffix: readonly SuffixCell[],
 ): string {
   const line: Line | undefined = doc.lines[lineIdx];
   const inSelRange = !!view.selected &&
@@ -765,11 +896,11 @@ function composeContent(
   display: readonly DisplayCell[] | undefined,
   lineMatches: LineMatches | null,
   endMark: string | null,
-  suffix: string,
+  suffix: readonly SuffixCell[],
 ): string {
   const { color } = view;
   // Every content cell sits on the blue editor background; a diff line carries a
-  // full-row add/removed tint instead. Syntax colours paint on top, and the
+  // full-row add/removed tint instead. Syntax colors paint on top, and the
   // selection background still wins inside its range.
   const rowBg: Style = color
     ? { bg: line?.bg ? lineBg(line.bg) : ui.editorBg }
@@ -815,11 +946,10 @@ function composeContent(
       style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
     };
   }
-  const suffixCells = [...suffix];
   if (endMark !== null) {
     const ornament = [...endMark];
     const centeredStart = Math.floor((width - ornament.length) / 2);
-    const suffixStart = cells.length - suffixCells.length;
+    const suffixStart = cells.length - suffix.length;
     const start = centeredStart + ornament.length <= suffixStart
       ? centeredStart
       : Math.floor((suffixStart - ornament.length) / 2);
@@ -832,12 +962,14 @@ function composeContent(
       }
     }
   }
-  if (suffixCells.length > 0) {
-    const start = cells.length - suffixCells.length;
-    for (let i = 0; i < suffixCells.length; i++) {
+  if (suffix.length > 0) {
+    const start = cells.length - suffix.length;
+    for (let i = 0; i < suffix.length; i++) {
       cells[start + i] = {
-        ch: suffixCells[i],
-        style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
+        ch: suffix[i].ch,
+        style: color
+          ? mergeBg(suffix[i].style ?? ui.wrapMarker, rowBg)
+          : EMPTY_STYLE,
       };
     }
   }
@@ -1065,7 +1197,7 @@ function hintsPlain(hints: readonly KeyHint[]): string {
   return hints.map((h) => `${h.key} ${h.label}`).join("  ");
 }
 
-/** The same, coloured: each key highlighted, the labels plain, on the bar bg. */
+/** The same, colored: each key highlighted, the labels plain, on the bar bg. */
 function hintsAnsi(hints: readonly KeyHint[]): string {
   let out = "";
   hints.forEach((h, i) => {
@@ -1089,7 +1221,9 @@ function lineInfo(
   return `${first}-${last}/${total}  ${where}`;
 }
 
-// --- Overlay (info card / definition peek) ----------------------------------
+//
+// Overlay (info card / definition peek)
+//
 
 export interface OverlayBox {
   x: number;
@@ -1100,7 +1234,7 @@ export interface OverlayBox {
   innerH: number;
 }
 
-/** Geometry of the centred overlay box for the given terminal size. The box is
+/** Geometry of the centered overlay box for the given terminal size. The box is
  * clamped to fit inside the terminal, so on a terminal too small to hold the box
  * the dimensions collapse to the terminal size rather than going negative. Inner
  * dimensions never go below 0, which keeps {@link applyOverlay}'s repeat/slice
@@ -1139,7 +1273,7 @@ function applyOverlay(
   if (boxW < 2 || boxH < 2) return;
 
   // An overlay showing source code is a blue editor window; everything else is
-  // a grey dialog. The border carries the same background as the body, so the
+  // a gray dialog. The border carries the same background as the body, so the
   // panel reads as one solid block rather than a frame over the content behind.
   const source = !!overlay.sourceView;
   const panelBg = source ? ui.editorBg : ui.overlayBg;
@@ -1205,7 +1339,7 @@ function castShadow(
 }
 
 /** Repaint `count` cells at visible column `from` of row `r` in the shadow
- * colour, keeping whatever characters were there. Clamped to the row and the
+ * color, keeping whatever characters were there. Clamped to the row and the
  * terminal width so the fixed row width is preserved. */
 function darkenSpan(
   rows: string[],
@@ -1222,7 +1356,9 @@ function darkenSpan(
   rows[r] = overlayRow(rows[r], from, paint(chars, ui.overlayShadow));
 }
 
-// --- Modal dialog (save / revert / amend prompt) ----------------------------
+//
+// Modal dialog (save / revert / amend prompt)
+//
 
 /** Blank columns between adjacent buttons in a dialog's button row. */
 const BUTTON_GAP = 3;
@@ -1261,7 +1397,7 @@ export interface DialogBox {
   innerH: number;
 }
 
-/** Geometry of the centred dialog box, sized to its content (title, body and
+/** Geometry of the centered dialog box, sized to its content (title, body and
  * button row) and clamped to leave two cells for the drop shadow. */
 export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
@@ -1286,7 +1422,7 @@ export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   };
 }
 
-/** The top border of a dialog: the title centred in the width and filled with
+/** The top border of a dialog: the title centered in the width and filled with
  * the double rule. */
 function titleBar(title: string, width: number): string {
   if (width <= 0) return "";
@@ -1299,7 +1435,7 @@ interface ButtonPos {
   faceW: number;
 }
 
-/** Left-to-right positions of the buttons, as a block centred in `innerW`. */
+/** Left-to-right positions of the buttons, as a block centered in `innerW`. */
 function layoutButtons(
   buttons: readonly DialogButton[],
   innerW: number,
@@ -1372,7 +1508,7 @@ function applyDialog(
   if (view.color) castShadow(rows, view, x, y, boxW, boxH);
 }
 
-/** Write `text` centred in `cells`, one blank margin column inside each edge. */
+/** Write `text` centered in `cells`, one blank margin column inside each edge. */
 function placeCentered(cells: Cell[], text: string, style: Style): void {
   const innerW = cells.length;
   const chars = [...showControls(text)];
@@ -1450,7 +1586,9 @@ function overlayRow(base: string, x: number, insert: string): string {
   return left + RESET + insert + RESET + right;
 }
 
-// --- Cell / style helpers ----------------------------------------------------
+//
+// Cell / style helpers
+//
 
 function cellsToAnsi(cells: Cell[], color: boolean): string {
   if (!color) return cells.map((c) => c.ch).join("");
@@ -1524,7 +1662,9 @@ function kindGlyph(kind: string): string {
   }
 }
 
-// --- Visible-width string ops (ANSI-aware) -----------------------------------
+//
+// Visible-width string ops (ANSI-aware)
+//
 
 // deno-lint-ignore no-control-regex
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;

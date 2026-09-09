@@ -1,6 +1,7 @@
 /**
  * Tests for CFSelect component, including new $value two-way binding functionality
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFSelect, type SelectItem } from "./index.ts";

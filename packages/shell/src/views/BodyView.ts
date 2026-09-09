@@ -1,23 +1,31 @@
+import { Task } from "@lit/task";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { Task } from "@lit/task";
-import { BaseView } from "./BaseView.ts";
+
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { BaseView } from "./BaseView.ts";
+
 import "../components/OmniLayout.ts";
-import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
+
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import type { JSONSchema } from "@commonfabric/runner/shared";
+import { CellHandle, PieceHandle, VNode } from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
+import { openPieceMenu } from "@commonfabric/ui";
 
 type SubPages = {
   sidebarUI?: VNode;
-  fabUI?: VNode;
+};
+
+export type LoadError = {
+  kind: "space" | "piece";
+  error: unknown;
 };
 
 const SubPagesSchema = {
   type: "object",
   properties: {
     sidebarUI: { $ref: "#/$defs/vdomNode" },
-    fabUI: { $ref: "#/$defs/vdomNode" },
   },
   $defs: {
     ...rendererVDOMSchema.$defs,
@@ -68,38 +76,72 @@ export class XBodyView extends BaseView {
       min-height: 0;
     }
 
-    .pattern-error {
+    .load-error {
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 2rem;
-      color: #c00;
-      text-align: center;
+      min-height: 100%;
+      padding: clamp(1rem, 5vw, 3rem);
+      box-sizing: border-box;
     }
 
-    .pattern-error h2 {
-      margin: 0 0 1rem;
+    .load-error cf-alert {
+      width: min(100%, 42rem);
     }
 
-    .pattern-error p {
+    .load-error h2 {
       margin: 0;
-      font-family: monospace;
+      font: inherit;
+      font-weight: 600;
     }
 
-    v-box {
-      flex: 1;
+    .load-error-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+
+    .load-error-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid currentColor;
+      border-radius: 0.375rem;
+      text-align: left;
+    }
+
+    .load-error-details span {
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .load-error-details code {
+      font-family: var(--font-primary, ui-monospace, monospace);
+      font-size: 0.8rem;
+      font-weight: 400;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .runtime-error {
+      flex: none;
+      margin: 1rem 0 0;
     }
   `;
 
   @property({ attribute: false })
   accessor rt: RuntimeInternals | undefined = undefined;
 
+  /** The space being viewed, which the piece menu addresses. */
   @property({ attribute: false })
-  accessor activePattern: PageHandle | undefined = undefined;
+  accessor space: DID | undefined = undefined;
 
   @property({ attribute: false })
-  accessor spaceRootPattern: PageHandle | undefined = undefined;
+  accessor activePattern: PieceHandle | undefined = undefined;
 
   @property()
   accessor showShellPieceListView = false;
@@ -108,44 +150,76 @@ export class XBodyView extends BaseView {
   accessor showSidebar = false;
 
   @property({ attribute: false })
-  accessor patternError: Error | undefined = undefined;
+  accessor loadError: LoadError | undefined = undefined;
+
+  @property({ attribute: false })
+  accessor runtimeError: LoadError | undefined = undefined;
 
   @property({ type: Boolean })
   accessor embedded = false;
 
-  private _subPages = new Task(this, {
-    task: async ([activePattern, spaceRootPattern, embedded]) => {
+  #subPages = new Task(this, {
+    task: async ([activePattern, embedded]) => {
       if (embedded) {
         return {
           sidebarUI: undefined,
-          fabUI: undefined,
         };
       }
-      const [sidebarUI, fabUI] = await Promise.all([
-        getSubPageCell(
-          activePattern?.cell() as CellHandle<SubPages> | undefined,
-          "sidebarUI",
-        ),
-        getSubPageCell(
-          spaceRootPattern?.cell() as CellHandle<SubPages> | undefined,
-          "fabUI",
-        ),
-      ]);
+      const sidebarUI = await getSidebarCell(
+        activePattern?.cell() as CellHandle<SubPages> | undefined,
+      );
       return {
         sidebarUI,
-        fabUI,
       };
     },
-    args: () => [this.activePattern, this.spaceRootPattern, this.embedded],
+    args: () => [this.activePattern, this.embedded],
   });
 
+  /**
+   * Open the piece menu over the surface a piece failed to load into. A right
+   * click reaches `cf-render` everywhere else, and there is no `cf-render`
+   * here, so this stands in for it: the menu is handed the space with no
+   * piece, and offers what it can reach without one. Shift reaches the
+   * browser's own menu, as it does over piece content, which is how the error
+   * text under here is copied.
+   */
+  #onLoadErrorContextMenu = (event: MouseEvent) => {
+    const space = this.space;
+    if (event.shiftKey || !space || !this.rt) return;
+    event.preventDefault();
+    openPieceMenu({
+      space,
+      runtime: this.rt.runtime(),
+      x: event.clientX,
+      y: event.clientY,
+      themeFrom: this,
+    });
+  };
+
   override render() {
-    // Show error if pattern failed to start
-    const mainContent = this.patternError
+    const mainContent = this.loadError
       ? html`
-        <div slot="main" class="pattern-error">
-          <h2>Failed to load piece</h2>
-          <p>${this.patternError.message}</p>
+        <div
+          slot="main"
+          class="load-error"
+          @contextmenu="${this.#onLoadErrorContextMenu}"
+        >
+          <cf-alert status="error">
+            <span slot="icon" class="load-error-icon" aria-hidden="true">
+              !
+            </span>
+            <h2 slot="title">
+              We could not load this ${this.loadError.kind}
+            </h2>
+            <span slot="description">
+              Try reloading the page. If the problem continues, check that the link is
+              correct and that you have access.
+            </span>
+            <div class="load-error-details">
+              <span>Error details</span>
+              <code>${loadErrorMessage(this.loadError.error)}</code>
+            </div>
+          </cf-alert>
         </div>
       `
       : this.activePattern
@@ -158,19 +232,33 @@ export class XBodyView extends BaseView {
 
     const sidebar = this.embedded
       ? undefined
-      : this._subPages?.value?.sidebarUI;
-    const fab = this.embedded ? undefined : this._subPages?.value?.fabUI;
+      : this.#subPages?.value?.sidebarUI;
+    const runtimeError = this.runtimeError
+      ? html`
+        <cf-alert class="runtime-error" status="error">
+          <span slot="icon" class="load-error-icon" aria-hidden="true">!</span>
+          <h2 slot="title">
+            This ${this.runtimeError.kind} encountered an error
+          </h2>
+          <span slot="description">
+            Some content may not be available. Try reloading the page if the problem
+            continues.
+          </span>
+          <div class="load-error-details">
+            <span>Error details</span>
+            <code>${loadErrorMessage(this.runtimeError.error)}</code>
+          </div>
+        </cf-alert>
+      `
+      : null;
 
     return html`
       <div class="content ${this.embedded ? "embedded" : ""}">
+        ${runtimeError}
         <x-omni-layout .sidebarOpen="${!this.embedded && this.showSidebar}">
           ${mainContent} ${sidebar
             ? html`
               <cf-render slot="sidebar" .cell="${sidebar}"></cf-render>
-            `
-            : null} ${fab
-            ? html`
-              <cf-render slot="fab" .cell="${fab}"></cf-render>
             `
             : null}
         </x-omni-layout>
@@ -179,11 +267,30 @@ export class XBodyView extends BaseView {
   }
 }
 
+/** Return the useful detail carried by an unknown thrown value. */
+function loadErrorMessage(error: unknown): string {
+  try {
+    let message: string | undefined;
+    if (error instanceof Error) {
+      message = error.message;
+    } else if (
+      typeof error === "object" && error !== null && "message" in error &&
+      typeof error.message === "string"
+    ) {
+      message = error.message;
+    } else if (error !== undefined && error !== null) {
+      message = String(error);
+    }
+    return message?.trim() || "No additional error details were provided.";
+  } catch {
+    return "No additional error details were provided.";
+  }
+}
+
 globalThis.customElements.define("x-body-view", XBodyView);
 
-async function getSubPageCell(
+async function getSidebarCell(
   cell: CellHandle<SubPages> | undefined,
-  key: "fabUI" | "sidebarUI",
 ): Promise<CellHandle<VNode> | undefined> {
   if (!cell) return undefined;
   const typedCell = cell.asSchema<SubPages>(SubPagesSchema);
@@ -195,7 +302,7 @@ async function getSubPageCell(
       return;
     }
   }
-  if (key in value && value[key]) {
-    return typedCell.key(key).asSchema<VNode>(rendererVDOMSchema);
+  if (value.sidebarUI) {
+    return typedCell.key("sidebarUI").asSchema<VNode>(rendererVDOMSchema);
   }
 }

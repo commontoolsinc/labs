@@ -1,5 +1,5 @@
-import { pattern } from "commonfabric";
+import { pattern, TESTS } from "commonfabric";
 
 export default pattern(() => ({
-  tests: [{ render: {} }],
+  [TESTS]: [{ render: {} }],
 }));

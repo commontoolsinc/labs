@@ -7,10 +7,11 @@ import { Engine } from "../src/harness/engine.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-// The engine's content-addressed implementation index — the single resolution
-// backing for serialized `$implRef`s (identity E5 deleted the legacy
-// string-keyed `implementationRef` index; this is what remains).
 describe("Engine verified implementation index", () => {
+  // The engine's content-addressed implementation index — the single resolution
+  // backing for serialized `$implRef`s (identity E5 deleted the legacy
+  // string-keyed `implementationRef` index; this is what remains).
+
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -30,8 +31,7 @@ describe("Engine verified implementation index", () => {
   });
 
   function getExecutableRegistry() {
-    // deno-lint-ignore no-explicit-any
-    return (engine as any).executableRegistry;
+    return engine.accessForTestingOnly.executableRegistry;
   }
 
   it("admits registered implementations by { identity, symbol }", () => {

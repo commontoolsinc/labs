@@ -1,0 +1,45 @@
+{
+  "outputId": "cfc-audit-fixture:bash:1",
+  "stdout": "attested\n",
+  "stderr": "",
+  "exitCode": 0,
+  "cwd": "/workspace",
+  "cfcResult": {
+    "version": 1,
+    "stdout": {
+      "channel": "stdout",
+      "policy": "observed",
+      "label": {
+        "confidentiality": [
+          "fixture-source"
+        ]
+      },
+      "segments": [
+        {
+          "text": "attested\n",
+          "label": {
+            "confidentiality": [
+              "fixture-source"
+            ]
+          }
+        }
+      ]
+    },
+    "stderr": {
+      "channel": "stderr",
+      "policy": "observed",
+      "label": {},
+      "segments": [
+        {
+          "text": "",
+          "label": {}
+        }
+      ]
+    },
+    "exitCode": {
+      "policy": "observed",
+      "label": {},
+      "value": 0
+    }
+  }
+}

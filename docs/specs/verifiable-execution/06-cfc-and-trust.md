@@ -100,8 +100,8 @@ type CFCLabelMap = {
 
 #### 10.3.4 Label Map Commitments (Future)
 
-This spec uses content-addressed hashes (see `CauseString` in
-`packages/memory/interface.ts`) for commitments.
+This spec uses content-addressed hashes (see `FabricHash` in
+`packages/data-model/src/fabric-primitives/FabricHash.ts`) for commitments.
 
 A label map commitment MUST be domain-separated and deterministic. One simple
 construction is:

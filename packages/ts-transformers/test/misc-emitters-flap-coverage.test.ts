@@ -1,15 +1,16 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
-import { StaticCacheFS } from "@commonfabric/static";
 
+import { StaticCache } from "@commonfabric/static";
+import ts from "typescript";
+
+import { unwrapOpaqueLikeType } from "../src/ast/type-inference.ts";
+import { shouldTransformArrayMethod } from "../src/closures/strategies/array-method-policy.ts";
+import { symbolDeclaresCommonFabricDefault } from "../src/core/common-fabric-symbols.ts";
 import { TransformationContext } from "../src/core/context.ts";
 import { transformCfDirective } from "../src/mod.ts";
-import { shouldTransformArrayMethod } from "../src/closures/strategies/array-method-policy.ts";
-import { findPreferredNestedLowerableExpressionSite } from "../src/transformers/expression-site-policy.ts";
-import { unwrapOpaqueLikeType } from "../src/ast/type-inference.ts";
-import { symbolDeclaresCommonFabricDefault } from "../src/core/common-fabric-symbols.ts";
 import { emitElementAccessExpression } from "../src/transformers/expression-rewrite/emitters/element-access-expression.ts";
 import type { EmitterContext } from "../src/transformers/expression-rewrite/types.ts";
+import { findPreferredNestedLowerableExpressionSite } from "../src/transformers/expression-site-policy.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 // Each branch exercised here otherwise runs only while a pattern compiles cold
@@ -21,7 +22,7 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 // value the branch produces (a decision, a returned node/undefined, a resolved
 // type, or a diagnostic-free classification), not merely that the line ran.
 
-const cache = new StaticCacheFS();
+const cache = StaticCache.fromFileSystem();
 const es2023 = await cache.getText("types/es2023.d.ts");
 const dom = await cache.getText("types/dom.d.ts");
 const jsx = await cache.getText("types/jsx.d.ts");
@@ -119,7 +120,7 @@ function unwrapParens(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-// ===========================================================================
+//
 // closures/strategies/array-method-policy.ts:54-56
 //
 // `isReactiveFallbackLeft` recognizes a `(<reactive> ?? []).map(...)` receiver
@@ -130,7 +131,7 @@ function unwrapParens(expression: ts.Expression): ts.Expression {
 // `isReactiveValueExpression(left)` branch. The array method still does not
 // transform (a compute-context receiver is auto-unwrapped), so the decision is
 // false — but the receiver has been classified as a reactive fallback.
-// ===========================================================================
+//
 
 function fallbackMapDecision(source: string): {
   kind: string;
@@ -180,7 +181,7 @@ export default pattern<Input, Output>(({ tags }) => ({
   assertEquals(result.decision, true);
 });
 
-// ===========================================================================
+//
 // transformers/expression-site-policy.ts:1341-1343
 //
 // `findPreferredNestedLowerableExpressionSite` scans the descendants of an
@@ -189,7 +190,7 @@ export default pattern<Input, Output>(({ tags }) => ({
 // sites inside a nested closure are never chosen. An expression whose only
 // lowerable content sits inside an array-method callback therefore yields no
 // nested site.
-// ===========================================================================
+//
 
 Deno.test("expression-site-policy: the nested-site search does not descend into a nested function, so a site behind a closure boundary is not chosen", () => {
   const { program, sourceFile } = buildProgram(`/// <cts-enable />
@@ -222,14 +223,14 @@ export default pattern<Input, Output>(({ flag, items }) => ({
   assert(ts.isArrowFunction(arrow));
 });
 
-// ===========================================================================
+//
 // ast/type-inference.ts:313
 //
 // `unwrapOpaqueLikeType` guards against cyclic types with a `seen` set: when a
 // type it is already unwrapping reappears (a self-referential branded cell such
 // as `type R = OpaqueCell<R>`), it returns that type unchanged instead of
 // recursing forever.
-// ===========================================================================
+//
 
 Deno.test("type-inference: unwrapping a self-referential branded cell terminates via the seen-set guard", () => {
   const { program, sourceFile } = buildProgram(`
@@ -257,14 +258,14 @@ export const x = r;
   assertEquals(result, recursiveType);
 });
 
-// ===========================================================================
+//
 // core/common-fabric-symbols.ts:159
 //
 // `symbolDeclaresCommonFabricDefault` bails out with `false` when the symbol has
 // no declarations. A synthetic property produced by a mapped type — e.g. the
 // `x` member of `Record<"x", number>` — is exactly such a symbol: it exists on
 // the type but `getDeclarations()` returns undefined.
-// ===========================================================================
+//
 
 Deno.test("common-fabric-symbols: a synthetic mapped-type property with no declarations is not a Common Fabric Default", () => {
   const { program, sourceFile } = buildProgram(`
@@ -291,14 +292,14 @@ export const y = r;
   );
 });
 
-// ===========================================================================
+//
 // transformers/expression-rewrite/emitters/element-access-expression.ts:19
 //
 // `emitElementAccessExpression` declines (returns undefined) when the element
 // access carries no relevant reactive data flows. An index read on a plain,
 // non-reactive local array produces an empty data-flow set, so the emitter emits
 // nothing and leaves the access untouched.
-// ===========================================================================
+//
 
 Deno.test("element-access-expression: an index read with no reactive data flows is left untouched by the emitter", () => {
   const { program, sourceFile } = buildProgram(`/// <cts-enable />

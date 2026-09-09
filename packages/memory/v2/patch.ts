@@ -1,13 +1,14 @@
 import type { FabricValue } from "@commonfabric/api";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
+  deepFreeze,
+  type MutableFabricContainerValueLayer,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-import { isInstance, isObject } from "@commonfabric/utils/types";
-import type { PatchOp } from "../v2.ts";
+} from "@commonfabric/data-model";
+import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
+import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
 type PatchObject = Record<string, FabricValue>;
@@ -21,11 +22,11 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * `structuredClone()` MUST NOT be used here: it silently demotes class
  * instances to plain objects. A demoted `FabricError` then fails the
  * `value instanceof FabricInstance` check in the wire/persistence codec
- * (`jsonFromValue`/`FabricInstanceHandler`), so it is serialized
+ * (`jsonFromFabricValue()`/`FabricInstanceHandler`), so it is serialized
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
- * `cloneIfNecessary()` deep-clones via the fabric value machinery
+ * `cloneIfNecessary()` deep-clones via the `FabricValue` machinery
  * (`FabricInstance.deepClone()` for wrappers), preserving the class.
  * Its default options (`{ frozen: true, deep: true }`) return an
  * already-deep-frozen input by identity, so replayed engine passes over a
@@ -34,6 +35,47 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * at the `applyPatch` boundary regardless.
  */
 const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
+
+/**
+ * A patch that cannot apply to the given base: a path descending through a
+ * non-container, a kind mismatch (append onto a non-array), an invalid
+ * pointer or index, or a root op producing a non-envelope result. Callers
+ * that tolerate inapplicability (the client's pending replay renders such a
+ * layer skipped) filter on THIS class; anything else propagating out of
+ * patch application is an implementation failure and must not be swallowed.
+ */
+export class PatchApplyError extends Error {
+  override name = "PatchApplyError";
+}
+
+/**
+ * The base an absent document's patches replay over. Shared by the
+ * engine's revision reconstruction and the client's pending-layer replay,
+ * so both sides fold a document's very first patches identically.
+ */
+export const emptyEntityDocument = (): EntityDocument => ({});
+
+/**
+ * `applyPatch` over a possibly-absent document: an absent base normalizes
+ * to the empty envelope. The one entry point for "replay these ops over
+ * whatever this document currently is" — server-side reconstruction and
+ * client-side pending replay share it rather than each knowing the
+ * absent-base rule.
+ */
+export const applyPatchToDocument = (
+  base: EntityDocument | undefined,
+  ops: PatchOp[],
+): EntityDocument => {
+  const patched = applyPatch(base ?? emptyEntityDocument(), ops);
+  // A root-level op can produce any FabricValue (replace at "" returns its
+  // value verbatim); the entity envelope must stay a plain object. Reject
+  // rather than type-launder — the client's pending replay treats this as
+  // an unappliable layer, and no caller ever sees an invalid envelope.
+  if (!isEntityDocument(patched)) {
+    throw new PatchApplyError("patched root is not an entity document");
+  }
+  return patched;
+};
 
 /**
  * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
@@ -85,12 +127,12 @@ const thawSpine = (
   options?: { createMissing?: boolean; nextKeyAfterPath?: string },
 ): { root: FabricValue; container: PatchContainer } => {
   let value: FabricValue;
-  let pathValue: FabricValue;
+  let pathValue: MutableFabricContainerValueLayer;
   try {
     ({ value, pathValue } = cloneForMutation(root, thawPath, options));
   } catch (e) {
     if (e instanceof CloneForMutationError) {
-      throw new Error(
+      throw new PatchApplyError(
         e.kind === "missing-segment"
           ? `missing path ${encodePointer(fullPath)}`
           : `path is not traversable at ${encodePointer(fullPath)}`,
@@ -99,7 +141,9 @@ const thawSpine = (
     throw e;
   }
   if (!isContainer(pathValue)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    throw new PatchApplyError(
+      `path is not traversable at ${encodePointer(fullPath)}`,
+    );
   }
   return { root: value, container: pathValue };
 };
@@ -144,7 +188,7 @@ const validateAddSpine = (root: FabricValue, path: string[]): void => {
       // into -- reject it rather than fabricate one. Plain object keys are fine;
       // they get created on the way down.
       if (isArraySegment(segment) || segment === "-") {
-        throw new Error(`missing path ${encodePointer(path)}`);
+        throw new PatchApplyError(`missing path ${encodePointer(path)}`);
       }
       continue;
     }
@@ -157,7 +201,9 @@ const validateAddSpine = (root: FabricValue, path: string[]): void => {
       }
       current = current[segment];
     } else {
-      throw new Error(`path is not traversable at ${encodePointer(path)}`);
+      throw new PatchApplyError(
+        `path is not traversable at ${encodePointer(path)}`,
+      );
     }
   }
 };
@@ -199,7 +245,9 @@ const addAtPath = (
 
 const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
   if (path.length === 0) {
-    throw new Error("root remove must be represented as a delete operation");
+    throw new PatchApplyError(
+      "root remove must be represented as a delete operation",
+    );
   }
   const { root: newRoot, container } = thawSpine(root, path.slice(0, -1), path);
   const key = path[path.length - 1]!;
@@ -207,7 +255,7 @@ const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
     container.splice(requireExistingArrayIndex(container, key, path), 1);
   } else {
     if (!Object.hasOwn(container, key)) {
-      throw new Error(`missing object key at ${encodePointer(path)}`);
+      throw new PatchApplyError(`missing object key at ${encodePointer(path)}`);
     }
     delete container[key];
   }
@@ -220,10 +268,10 @@ const moveValue = (
   path: string[],
 ): FabricValue => {
   if (from.length === 0) {
-    throw new Error("cannot move the root value");
+    throw new PatchApplyError("cannot move the root value");
   }
   if (isStrictPrefixPath(from, path)) {
-    throw new Error("cannot move a value into its own descendant");
+    throw new PatchApplyError("cannot move a value into its own descendant");
   }
 
   const extracted = getAtPath(root, from);
@@ -239,10 +287,12 @@ const spliceAtPath = (
 ): FabricValue => {
   const { root: newRoot, container } = thawSpine(root, path, path);
   if (!Array.isArray(container)) {
-    throw new Error(`splice target is not an array at ${encodePointer(path)}`);
+    throw new PatchApplyError(
+      `splice target is not an array at ${encodePointer(path)}`,
+    );
   }
   if (index < 0 || remove < 0 || index > container.length) {
-    throw new Error(`invalid splice at ${encodePointer(path)}`);
+    throw new PatchApplyError(`invalid splice at ${encodePointer(path)}`);
   }
   container.splice(index, remove, ...add.map((value) => cloneValue(value)));
   return newRoot;
@@ -263,7 +313,9 @@ const appendAtPath = (
     nextKeyAfterPath: "0",
   });
   if (!Array.isArray(container)) {
-    throw new Error(`append target is not an array at ${encodePointer(path)}`);
+    throw new PatchApplyError(
+      `append target is not an array at ${encodePointer(path)}`,
+    );
   }
   container.push(...values.map((value) => cloneValue(value)));
   return newRoot;
@@ -284,7 +336,7 @@ const addUniqueAtPath = (
     nextKeyAfterPath: "0",
   });
   if (!Array.isArray(container)) {
-    throw new Error(
+    throw new PatchApplyError(
       `add-unique target is not an array at ${encodePointer(path)}`,
     );
   }
@@ -355,16 +407,16 @@ const incrementAtPath = (
   by: number,
 ): FabricValue => {
   if (path.length === 0) {
-    throw new Error("increment requires a non-root path");
+    throw new PatchApplyError("increment requires a non-root path");
   }
   if (!Number.isFinite(by) || by === 0) {
-    throw new Error(
+    throw new PatchApplyError(
       `increment requires a finite non-zero amount at ${encodePointer(path)}`,
     );
   }
   const current = readNumberOrAbsent(root, path);
   if (current !== undefined && typeof current !== "number") {
-    throw new Error(
+    throw new PatchApplyError(
       `increment target is not a number at ${encodePointer(path)}`,
     );
   }
@@ -396,7 +448,7 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
     } else if (isPatchObject(current) && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
-      throw new Error(`missing path ${encodePointer(path)}`);
+      throw new PatchApplyError(`missing path ${encodePointer(path)}`);
     }
   }
   return current;
@@ -404,11 +456,11 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
 
 const parseArrayIndex = (segment: string): number => {
   if (!isArraySegment(segment)) {
-    throw new Error(`invalid array index: ${segment}`);
+    throw new PatchApplyError(`invalid array index: ${segment}`);
   }
   const index = Number(segment);
   if (index > MAX_ARRAY_INDEX) {
-    throw new Error(`array index out of bounds: ${segment}`);
+    throw new PatchApplyError(`array index out of bounds: ${segment}`);
   }
   return index;
 };
@@ -416,7 +468,7 @@ const parseArrayIndex = (segment: string): number => {
 const parseArrayInsertIndex = (segment: string, length: number): number => {
   const index = parseArrayIndex(segment);
   if (index > length) {
-    throw new Error(`array index out of bounds: ${segment}`);
+    throw new PatchApplyError(`array index out of bounds: ${segment}`);
   }
   return index;
 };
@@ -428,7 +480,7 @@ const requireExistingArrayIndex = (
 ): number => {
   const index = parseArrayIndex(segment);
   if (!Object.hasOwn(array, index)) {
-    throw new Error(`missing path ${encodePointer(path)}`);
+    throw new PatchApplyError(`missing path ${encodePointer(path)}`);
   }
   return index;
 };
@@ -444,7 +496,7 @@ const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
 const isPatchObject = (value: FabricValue): value is PatchObject =>
-  isObject(value) && !isInstance(value);
+  isObjectNotArray(value) && !isInstance(value);
 
 const isContainer = (value: FabricValue): value is PatchContainer =>
   Array.isArray(value) || isPatchObject(value);

@@ -7,7 +7,7 @@
  */
 
 export { WorkerReconciler } from "./reconciler.ts";
-export { generateChildKeys, generateKey, keysMatch } from "./keying.ts";
+export { generateChildKeys, generateKey } from "./keying.ts";
 export type {
   BindingCellRef,
   ChildNodeState,

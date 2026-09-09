@@ -1,12 +1,17 @@
 /**
- * Builds the Enter "info card": a structured, colourised summary of a structure
+ * Builds the Enter "info card": a structured, colorized summary of a structure
  * node assembled from its extracted {@link NodeMeta}, the navigation tree, and
  * cross-references — i.e. information that is NOT obvious from the raw source.
  * The verbatim source is returned alongside so the overlay can toggle to it.
  *
  * Pure: produces model {@link Line}s (the same shape the renderer already draws)
- * with token classes chosen so the existing theme colours everything coherently.
+ * with token classes chosen so the existing theme colors everything coherently.
  */
+
+import { basename } from "@std/path";
+
+import { cpLen } from "./ansi.ts";
+import type { Semantics } from "./languages/language.ts";
 import type {
   Document,
   Line,
@@ -24,25 +29,29 @@ import {
   findReferences,
   type IdentUse,
 } from "./references.ts";
-import { basename } from "@std/path";
-import { cpLen } from "./ansi.ts";
-import type { Semantics } from "./languages/language.ts";
 
 /** A selectable cross-reference line that jumps the main view when invoked. */
 export interface CardTarget {
   /** Index into the card's `info` lines (for highlight + reveal). */
   readonly cardLine: number;
-  /** Destination line/column in the main document. */
+
+  /** Destination line in the main document. */
   readonly destLine: number;
+
+  /** Destination column on that line. */
   readonly destCol: number;
+
   /** Char offset of the declaration to select, when the target is a definition. */
   readonly defOffset?: number;
+
   /** End offset of that declaration. Diff views clamp nested nodes to the same
    * start offset, so the end disambiguates which node to select. */
   readonly defEndOffset?: number;
+
   /** External file to open, when the definition lives outside the blob; with
    * `destLine` the line within that file. */
   readonly filePath?: string;
+
   /** A "… N more" line: selecting it and pressing Enter rebuilds the card with
    * every truncated list shown in full, rather than navigating anywhere. */
   readonly expand?: boolean;
@@ -177,7 +186,7 @@ export function buildPeekCard(
 }
 
 /** The card title. A generic AST node leads with its AST kind(s) rather than
- * the internal "node" label; a recognised shape keeps its structure kind. */
+ * the internal "node" label; a recognized shape keeps its structure kind. */
 function cardTitle(node: StructureNode): string {
   if (node.kind === "node" || node.kind === "comment") {
     const k = node.astKinds && node.astKinds.length > 0
@@ -188,7 +197,9 @@ function cardTitle(node: StructureNode): string {
   return `${node.kind}  ${node.label}`;
 }
 
-// --- sections ----------------------------------------------------------------
+//
+// sections
+//
 
 function metaLine(node: StructureNode): Line {
   const span = node.endLine - node.startLine + 1;
@@ -407,7 +418,7 @@ function importDetail(
 /**
  * The meaningful descendants for the outline: declarations, builders, control
  * flow and the like, hoisted up through the generic expression/wrapper nodes
- * that now sit between them in the full-AST tree. So the card summarises a
+ * that now sit between them in the full-AST tree. So the card summarizes a
  * node's real sub-structure rather than listing a lone `VariableDeclarationList`
  * or every sub-expression.
  */
@@ -801,17 +812,21 @@ function enclosingNode(
   return best;
 }
 
-// --- schema rendering --------------------------------------------------------
+//
+// schema rendering
+//
 
-// --- schema → TypeScript-like type rendering --------------------------------
+//
+// schema → TypeScript-like type rendering
 //
 // Schemas are shown as a type signature (`{ token: string }`, `string[]`,
 // nested objects) rather than the underlying JSON-schema shape. Optional fields
 // (not in `required`) get a `?`. Rendered inline when it fits, else multi-line.
+//
 
 const INLINE_MAX = 56;
 
-/** A labelled schema: `input  { token: string }` inline, or a heading + block. */
+/** A labeled schema: `input  { token: string }` inline, or a heading + block. */
 function schemaSection(label: string, schema: SchemaMeta): Line[] {
   const inline = inlineSchemaParts(schema);
   const labelPart: Part = [`${label}  `, "comment"];
@@ -900,7 +915,9 @@ function pad(indent: number): string {
   return "  ".repeat(indent);
 }
 
-// --- line/span helpers -------------------------------------------------------
+//
+// line/span helpers
+//
 
 type Part = readonly [string, TokenClass];
 

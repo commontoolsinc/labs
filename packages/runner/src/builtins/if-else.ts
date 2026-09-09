@@ -1,14 +1,16 @@
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import { type RawBuiltinResult } from "../module.ts";
-import { type Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
-import { parseLink } from "../link-utils.ts";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+
+import { type Cell } from "../cell.ts";
+import { resolveLink } from "../link-resolution.ts";
+import { parseLink } from "../link-utils.ts";
+import { type RawBuiltinResult, type RawNodeCause } from "../module.ts";
+import { type Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { readAvailabilityAwareCell } from "../data-unavailability.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { ownedResultCause, resolvedCellScope } from "./scope-policy.ts";
 
 /**
  * Argument schema for ifElse. The action value-reads ONLY `condition`; the
@@ -38,7 +40,7 @@ export function ifElse(
   inputsCell: Cell<[any, any, any]>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  cause: RawNodeCause,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
 ): RawBuiltinResult {
@@ -61,13 +63,17 @@ export function ifElse(
   const action: Action = (tx: IExtendedStorageTransaction) => {
     const { cell: conditionCell, value: condition } = readCondition(tx);
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
-    const baseResult = runtime.getCell<any>(
-      parentCell.space,
-      { ifElse: cause },
-      undefined,
+    // Keyed on the output spot, never on the inputs document: every runtime
+    // sharing the piece must mint this one store, whatever its vintage
+    // serializes the inputs as (see `ownedResultCause`).
+    const result = ownedCell<any>(
+      runtime,
       tx,
+      parentCell,
+      ownedResultCause("ifElse", cause, parentCell),
+      undefined,
+      resultScope,
     );
-    const result = scopedCell(runtime, tx, baseResult, resultScope);
     sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);

@@ -2,7 +2,7 @@ import {
   type FabricValue,
   isFabricPlainObject,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 
 import type {
   IExtendedStorageTransaction,
@@ -18,6 +18,7 @@ import { normalizeCellScope } from "../scope.ts";
 import type {
   CycleReport,
   NonIdempotentReport,
+  RuntimeTelemetry,
   SchedulerActionInfo,
   SchedulerDiagnosisResult,
 } from "../telemetry.ts";
@@ -39,6 +40,9 @@ export type CausalEdge = {
 };
 
 export interface SchedulerDiagnosisControlState {
+  /** The channel the `scheduler.diagnosis.start` marker is emitted on. */
+  readonly telemetry: RuntimeTelemetry;
+
   readonly getDiagnosisEnabled: () => boolean;
   readonly setDiagnosisEnabled: (enabled: boolean) => void;
   readonly getDiagnosisTimeout: () => ReturnType<typeof setTimeout> | null;
@@ -431,6 +435,7 @@ export function startSchedulerDiagnosis(
       stopSchedulerDiagnosis(state);
     }, durationMs),
   );
+  state.telemetry.submit({ type: "scheduler.diagnosis.start", durationMs });
 }
 
 export function stopSchedulerDiagnosis(

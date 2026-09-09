@@ -7,33 +7,35 @@
  * link targets for the same shared cell come from two distinct clients each
  * minting a different id, vs. one client alternating between branches).
  *
- * Values are summarized as a content hash (`vhash`). The hash is the **canonical
- * Fabric value hash** (`@commonfabric/data-model/value-hash`) — the same
- * identity the runtime uses for `valueEqual` — so "same vhash" means "same value
- * by the runtime's own semantics". The parsed memory operations carry hydrated
- * `FabricValue`s (`parseClientMessage` → `decodeMemoryBoundary`), so a JSON
- * round-trip would silently collapse distinct values (Fabric primitives /
- * instances with no enumerable fields, `undefined` object fields, non-finite
- * numbers) into a false match — exactly what would make a write-storm diagnostic
- * lie. To additionally dump raw values (`val=`), set
- * `CF_DEBUG_MEMORY_WRITE_VALUES=1` — AVOID on real data: cell values can contain
- * user content, PII, or secrets. The hash alone tells "same value" from
- * "different value", which is all a divergence investigation needs.
+ * Values are summarized as a content hash (`vhash`). The hash is the
+ * **canonical `FabricValue` hash** (`@commonfabric/data-model`) —
+ * the same identity the runtime uses for `valueEqual` — so "same vhash" means
+ * "same value by the runtime's own semantics". The parsed memory operations
+ * carry hydrated `FabricValue`s (`parseClientMessage` →
+ * `decodeMemoryBoundary`), so a JSON round-trip would silently collapse
+ * distinct values (a `FabricPrimitive` or `FabricInstance` with no enumerable
+ * fields, `undefined` object fields, non-finite numbers) into a false match —
+ * exactly what would make a write-storm diagnostic lie. To additionally dump
+ * raw values (`val=`), set `CF_DEBUG_MEMORY_WRITE_VALUES=1` — AVOID on real
+ * data: cell values can contain user content, PII, or secrets. The hash alone
+ * tells "same value" from "different value", which is all a divergence
+ * investigation needs.
  *
  * This module holds the pure formatting so it is unit-testable; the impure parts
  * (env reads, per-connection counter, message parsing) live in the route.
  */
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
 
 /** A single operation from a parsed memory commit. */
 export interface MemWriteOp {
   op?: string;
   id?: unknown;
   scope?: unknown;
+
   /** Present for `set`/`delete`; absent for `patch` (value lives in `patches`). */
   value?: unknown;
+
   /** JSON-patch entries for `patch` ops, each `{ path, value, ... }`. */
   patches?: unknown;
 }
@@ -59,8 +61,8 @@ const VHASH_DISPLAY_LEN = 12;
 const VALUE_DISPLAY_LEN = 600;
 
 /**
- * Canonical Fabric value hash, truncated for display. Returns a sentinel rather
- * than throwing so a single odd op can never abort the trace.
+ * Canonical `FabricValue` hash, truncated for display. Returns a sentinel
+ * rather than throwing so a single odd op can never abort the trace.
  */
 function displayVhash(value: unknown): string {
   try {
@@ -103,7 +105,7 @@ export function formatMemWriteTrace(
   // Render via the canonical Fabric debug formatter (handles special
   // primitives/instances, bigints, non-finite numbers; never throws).
   const rendered = hasValue
-    ? toCompactDebugString(valueSource, VALUE_DISPLAY_LEN)
+    ? toCompactDebugString(valueSource, { maxLength: VALUE_DISPLAY_LEN })
     : "";
   return `${base} val=${rendered}`;
 }

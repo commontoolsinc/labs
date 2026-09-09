@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the environment
+// is parsed once, as env.ts loads, so the variables this file sets must be set
+// before the router pulls it in.
+
 // Integration tests for the state-inspector remote dump endpoint.
 //
 // env is parsed once at module load, so we set the MEMORY_DUMP_* vars and a
@@ -8,14 +12,15 @@
 // `memoryEngineStoreUrl` the live server uses, so it lands at the exact path the
 // route resolves (directory mode nests one `engine-v3/` deeper than MEMORY_DIR).
 
-import { afterAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
-import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
+import { afterAll, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
+import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
+import { Database } from "@db/sqlite";
 
 const SQLITE_MAGIC = "SQLite format 3\0";
 const DUMP_BASE = "/api/storage/memory/dump";

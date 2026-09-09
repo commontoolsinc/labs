@@ -1,7 +1,8 @@
-// verify-structs.test.ts — Compile and run verify-structs.c to validate
-// that the hardcoded struct offsets in platform-linux.ts are correct.
-//
-// This test only runs on Linux where libfuse3 headers are available.
+/**
+ * Compiles and runs `verify-structs.c` to validate that the hardcoded struct
+ * offsets in `platform-linux.ts` are correct. It runs only on Linux, where
+ * the libfuse3 headers are available.
+ */
 
 Deno.test({
   name: "Linux struct offsets match C headers",
@@ -100,6 +101,9 @@ Deno.test({
     }
 
     // Import the platform-linux values to compare
+    // The Linux bindings cannot load anywhere else, and this test runs only on
+    // Linux.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const linux = await import("./platform-linux.ts");
     const p = linux.default;
 

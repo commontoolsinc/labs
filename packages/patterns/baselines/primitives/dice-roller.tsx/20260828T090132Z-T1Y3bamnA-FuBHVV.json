@@ -1,0 +1,67 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "label": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Roll",
+        "description": "Caption shown under the rolled number.",
+        "type": "string"
+      },
+      "sides": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 6,
+        "description": "How many faces the die has; a roll lands between 1 and this.",
+        "type": "number"
+      },
+      "value": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 1,
+        "description": "The most recent roll. A host passes its own cell to read it back.",
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "primitives/dice-roller.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "roll": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "sides": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "sides": {
+        "type": "number"
+      },
+      "value": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "value",
+      "sides",
+      "roll",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

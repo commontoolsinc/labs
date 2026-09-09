@@ -4,6 +4,7 @@
  * These tests verify that key() correctly handles multiple keys.
  * If the types are incorrect, these tests will fail to compile.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {
@@ -13,9 +14,9 @@ import type {
   Stream,
 } from "../src/builder/types.ts";
 
-// ============================================================================
+//
 // Type-level assertions (compile-time checks)
-// ============================================================================
+//
 
 /**
  * Helper type that asserts two types are equal.
@@ -49,9 +50,10 @@ type User = {
   }>;
 };
 
-// ============================================================================
+//
 // KeyResultType type tests
-// ============================================================================
+//
+
 // Use value assignments to enforce type checks at compile time
 
 // Empty keys should return the original type
@@ -135,9 +137,9 @@ const _test12: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // Nested Cell and Stream type tests
-// ============================================================================
+//
 
 // Type with nested Cell and Stream
 type StateWithNestedCells = {
@@ -181,9 +183,9 @@ const _testNestedStream2: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // Runtime tests (behavior verification)
-// ============================================================================
+//
 
 describe("Cell.key() with multiple keys", () => {
   it("compiles with correct types - this test verifies the type assertions above", () => {

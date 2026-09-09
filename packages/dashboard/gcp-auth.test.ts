@@ -1,6 +1,9 @@
-// Tests for the two GCP auth routes and the BigQuery call that uses them, with
-// fetch stubbed. Nothing here reaches the network: every request the code makes
-// is captured and inspected, and the responses are canned.
+/**
+ * Tests for the two GCP auth routes and the BigQuery call that uses them, with
+ * fetch stubbed. Nothing here reaches the network: every request the code makes
+ * is captured and inspected, and the responses are canned.
+ */
+
 import { assertEquals, assertRejects } from "@std/assert";
 import { bigQuery, METADATA_TOKEN_URL } from "./gcp.ts";
 
@@ -158,7 +161,7 @@ Deno.test("token exchange 200 with no access_token is an error, not an empty bea
       ),
     Error,
   );
-  assertEquals(err.message, "token exchange returned no access_token");
+  assertEquals(err.message, "token exchange returned no access_token string");
 });
 
 Deno.test("metadata server rejects: the status is reported (a 404 here means the wrong path)", async () => {

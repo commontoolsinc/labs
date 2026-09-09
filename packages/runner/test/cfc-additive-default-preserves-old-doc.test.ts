@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
@@ -13,16 +13,17 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 // The cold-start-setup-repair materializes the real home pattern over a home
 // root doc that predates some of home's fields, and CFC schema-merge's
 // additive-required guard ("required field <name> needs a default to preserve
-// old documents") refuses the setup commit. #4933 defaulted the six DATA
-// fields (favorites/journal/spaces/defaultAppUrl/profiles/mru), but that only
-// advanced the rejection to the next required-no-default field: `defaultProfile`
-// (genuinely `… | undefined`, so it should be optional) and then the six
-// exported handler streams — which cannot carry a meaningful `Default<>` and
-// so cannot be healed the #4933 way.
+// old documents") refused the setup commit. #4933 defaulted six data fields,
+// but a result projection can also contain required fields for which a
+// migration default is not the right contract. The relevant distinction is
+// provenance: setup rewrites the complete generated result, while ordinary
+// document paths must still preserve older values.
 //
-// These tests run with CFC enforcement ON (the runtime default,
-// "enforce-explicit"); the piece cold-start harness runs with enforcement
-// disabled, which is why #4926/#4933's tests were blind to this layer.
+// These tests take the CFC enforcement rung the runtime carries. The
+// additive-required guard runs inside schema merge, which every enforcing rung
+// reaches before its own checks, so the setup commit's fate is the same across
+// them. The piece cold-start harness runs with enforcement disabled, which is
+// why #4926/#4933's tests were blind to this layer.
 
 const alice = await Identity.fromPassphrase(
   "cfc-additive-default-preserves-old-doc-alice",
@@ -66,18 +67,23 @@ const compileHomePattern = async (
     "../../patterns/system/home.tsx",
     import.meta.url,
   ).pathname;
-  const program = await runtime.harness.resolve(
-    new FileSystemProgramResolver(sourcePath, repoRoot),
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    { main: sourcePath, root: repoRoot },
   );
   return await runtime.patternManager.compilePattern(program, { space });
 };
 
 describe("CFC additive-required default preserves old documents", () => {
-  // Tight pin on the guard itself: a newly-required STREAM slot must not need
-  // a default (a stream carries no preservable document value), while a plain
-  // newly-required data field still must. This isolates the schema-merge fix
-  // from the full home compile.
-  it("exempts an additive-required stream slot from the default requirement", () => {
+  //
+  // Tight pin on the guard itself
+  //
+  // A generated output does not need a default, while an unclassified document
+  // field still does. This isolates the role-aware schema-merge rule from the
+  // full home compile.
+  //
+
+  it("exempts an additive-required generated output from the default requirement", () => {
     const stored: JSONSchema = {
       type: "object",
       properties: { owner: { type: "string" } },
@@ -97,8 +103,9 @@ describe("CFC additive-required default preserves old documents", () => {
       },
       required: ["owner", "addFavorite"],
     };
-    // Before the fix this threw: "required field addFavorite needs a default".
-    const merged = mergeCfcSchemaEnvelopes(stored, candidate) as JSONSchemaObj;
+    const merged = mergeCfcSchemaEnvelopes(stored, candidate, {
+      generatedOutputPaths: [[]],
+    }) as JSONSchemaObj;
     expect(merged.required).toContain("addFavorite");
   });
 
@@ -121,11 +128,16 @@ describe("CFC additive-required default preserves old documents", () => {
     );
   });
 
-  // Faithful end-to-end: run the real home pattern's setup over a realistic
-  // old home root, with enforcement ON. Before the fix, the setup commit is
-  // rejected (defaultProfile, then the handler streams). After the fix it
-  // commits and the home heals.
+  //
+  // The same rule end to end
+  //
+
   it("materializes the real home pattern over a pre-favorites root under enforcement", async () => {
+    // Faithful end-to-end: run the real home pattern's setup over a realistic
+    // old home root, with enforcement ON. Before the fix, the setup commit is
+    // rejected (defaultProfile, then the handler streams). After the fix it
+    // commits and the home heals.
+
     const storageManager = StorageManager.emulate({ as: alice });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -138,7 +150,6 @@ describe("CFC additive-required default preserves old documents", () => {
       //    favorites and the handlers.
       {
         const tx = runtime.edit();
-        tx.setCfcEnforcementMode("enforce-explicit");
         tx.setCfcTrustSnapshot({
           id: `trust-${space}`,
           actingPrincipal: space,
@@ -175,8 +186,7 @@ describe("CFC additive-required default preserves old documents", () => {
         expect(res.ok).toBeDefined();
       }
 
-      // 2. Materialize the real home pattern over the SAME root cell
-      //    (enforce-explicit is the runtime default).
+      // 2. Materialize the real home pattern over the SAME root cell.
       const homePattern = await compileHomePattern(runtime, space);
       const resultCell = runtime.getCell(space, ROOT);
       const home = await runtime.runSynced(resultCell, homePattern, {});
@@ -198,13 +208,14 @@ describe("CFC additive-required default preserves old documents", () => {
     }
   });
 
-  // The producer→consumer token contract, end to end at the runner layer:
-  // mergeRequired throws CfcSchemaMigrationError → the prepare catch records it
-  // as a TAGGED reason → the COMMIT rejection message carries the framed
-  // `: <token>: ` the piece backstop keys on. The piece tests synthesize this
-  // string; this test proves the runner actually produces it, so the two ends
-  // stay in lockstep if either side's wording drifts.
   it("frames a real additive-required-no-default commit rejection with the migration token", async () => {
+    // The producer→consumer token contract, end to end at the runner layer:
+    // mergeRequired throws CfcSchemaMigrationError → the prepare catch records
+    // it as a TAGGED reason → the COMMIT rejection message carries the framed
+    // `: <token>: ` the piece backstop keys on. The piece tests synthesize this
+    // string; this test proves the runner actually produces it, so the two ends
+    // stay in lockstep if either side's wording drifts.
+
     const storageManager = StorageManager.emulate({ as: alice });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -213,7 +224,6 @@ describe("CFC additive-required default preserves old documents", () => {
     const space = alice.did();
     const ROOT = "legacy-home-root-reject";
     const seedMeta = (tx: ReturnType<typeof runtime.edit>) => {
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({ id: `trust-${space}`, actingPrincipal: space });
       tx.setCfcImplementationIdentity({
         kind: "builtin",

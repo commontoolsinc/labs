@@ -1,6 +1,8 @@
-import type { JSONSchema } from "@commonfabric/api";
 import { isAbsolute, relative } from "@std/path";
 import { normalize as normalizeResourcePath } from "@std/path/posix";
+
+import type { JSONSchema } from "@commonfabric/api";
+
 import type {
   HarnessSkillDiagnostic,
   HarnessSkillRecord,

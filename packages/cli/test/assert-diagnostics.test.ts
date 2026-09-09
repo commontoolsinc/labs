@@ -2,9 +2,9 @@
  * Contract tests for what `cf test` reports when an assertion fails.
  *
  * An `assert(...)` assertion carries the operands recorded while it ran, so a
- * failure names them and their values. A `computed(...)` assertion carries a
- * bare boolean and keeps the older message.
+ * failure names them and their values.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
@@ -85,14 +85,6 @@ describe(
       expect(spread.error ?? "").toBe(
         "Expected true, got false: allPositive(...nums.get())",
       );
-    });
-
-    it("keeps the plain message for a failed computed assertion", async () => {
-      const [computed] = await errorsFor("computed.test.tsx");
-
-      // A computed assertion carries a bare boolean, so there is no source to
-      // lead with and no operands to name.
-      expect(computed).toBe("Expected true, got false");
     });
 
     it("names the failing conjunct and the values behind it", async () => {

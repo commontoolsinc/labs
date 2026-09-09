@@ -4,6 +4,7 @@ import {
   pattern,
   resultOf,
   type Stream,
+  TESTS,
   wish,
   Writable,
 } from "commonfabric";
@@ -51,7 +52,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: startsEmpty },
       { action: sendMissingPiece },
       { assertion: missingPieceIsIgnored },

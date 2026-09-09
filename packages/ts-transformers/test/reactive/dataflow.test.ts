@@ -1,6 +1,7 @@
-import ts from "typescript";
-import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import ts from "typescript";
 
 import {
   classifyArrayMethodResultSinkCall,
@@ -33,6 +34,30 @@ describe("data flow analyzer", () => {
     );
   });
 
+  // A transparent wrapper is analyzed as the expression it wraps, so the hint
+  // the inner analysis produced reaches the caller. A spelling not named there
+  // falls to the generic child walk, which merges through `mergeAnalyses` and
+  // hardcodes `rewriteHint: undefined` — the hint is lost silently.
+  for (
+    const [name, wrap] of Object.entries({
+      parenthesized: (inner: string) => `(${inner})`,
+      "as-cast": (inner: string) => `(${inner}) as never`,
+      satisfies: (inner: string) => `(${inner}) satisfies unknown`,
+      "non-null": (inner: string) => `(${inner})!`,
+    })
+  ) {
+    it(`keeps the ifElse hint through a ${name} wrapper`, () => {
+      const { analysis } = analyzeExpression(
+        wrap("ifElse(state.count > 3, 'hi', 'bye')"),
+      );
+
+      assert(
+        analysis.rewriteHint && analysis.rewriteHint.kind === "call-if-else",
+      );
+      assertEquals(analysis.rewriteHint.predicate.getText(), "state.count > 3");
+    });
+  }
+
   it("identifies array map calls that should skip wrapping", () => {
     const { analysis } = analyzeExpression(
       "state.items.map(item => item + state.count)",
@@ -59,7 +84,7 @@ declare const collection: {
     assertEquals(analysis.rewriteHint, undefined);
   });
 
-  it("recognises ifElse when called via alias", () => {
+  it("recognizes ifElse when called via alias", () => {
     const { analysis } = analyzeExpression(
       "aliasIfElse(state.count > 3, 'hi', 'bye')",
       { prelude: "declare const aliasIfElse: typeof ifElse;" },
@@ -70,7 +95,7 @@ declare const collection: {
     );
   });
 
-  it("recognises builders when called via alias", () => {
+  it("recognizes builders when called via alias", () => {
     const { analysis } = analyzeExpression(
       "aliasPattern(() => state.count)",
       { prelude: "declare const aliasPattern: typeof pattern;" },
@@ -141,7 +166,7 @@ declare const collection: {
     assertEquals(classifyArrayMethodResultSinkCall(call, checker), undefined);
   });
 
-  it("recognises fetchJson as a reactive origin call", () => {
+  it("recognizes a fetchJson call carrying a result argument as a reactive origin call", () => {
     const { call, checker } = getCallExpression(
       'fetchJson({ url: "https://example.com", result: [] })',
       {
@@ -155,7 +180,7 @@ declare const collection: {
   });
 
   for (const name of ["fetchBinary", "fetchText", "fetchJson"]) {
-    it(`recognises ${name} as a reactive origin call`, () => {
+    it(`recognizes ${name} as a reactive origin call`, () => {
       const { call, checker } = getCallExpression(
         `${name}({ url: "https://example.com" })`,
         {

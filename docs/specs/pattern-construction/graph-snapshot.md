@@ -6,9 +6,9 @@
 
 ## Motivation
 
-- `Runner.setupInternal` currently stores pattern, argument, internal, and schema
-  metadata on the result cell. The runtime still lacks a persisted view of the
-  concrete nodes it instantiated.
+- `Runner.#setupInternal()` currently stores pattern, argument, internal, and
+  schema metadata on the result cell. The runtime still lacks a persisted view
+  of the concrete nodes it instantiated.
 - `instantiateNode` performs alias gymnastics through
   `unwrapOneLevelAndBindToDoc` so nested patterns and closures work. A snapshot
   that records the resolved nodes makes this machinery obsolete: future runs can
@@ -127,7 +127,7 @@ type NodeFactoryDescriptor =
 > **Note:** This describes future implementation work after Phase 1 type
 > unification is complete.
 
-1. When `Runner.startWithTx` iterates nodes during lift/handler execution,
+1. When `Runner.#startWithTx()` iterates nodes during lift/handler execution,
    instrument each instantiation to record:
    - The resolved module descriptor, including implementation reference
    - Normalized input links (already resolved since cells have concrete causes
@@ -144,7 +144,7 @@ type NodeFactoryDescriptor =
 
 > **Note:** Deferred to Phase 2 implementation.
 
-- On `Runner.setupInternal`, if a prior snapshot exists, load it before
+- On `Runner.#setupInternal()`, if a prior snapshot exists, load it before
   unpacking defaults. The runtime can:
   - Reattach scheduler subscriptions by walking the nodes, reusing modules whose
     implementation reference matches

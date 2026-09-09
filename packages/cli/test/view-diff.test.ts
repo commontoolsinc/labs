@@ -1,5 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import { looksLikeDiff, parseDiff } from "../lib/view/diff.ts";
 import {
   buildDiffDocument,
@@ -52,7 +54,9 @@ function runGit(root: string, args: string[]): string {
   return new TextDecoder().decode(output.stdout);
 }
 
-// --- fixtures ---------------------------------------------------------------
+//
+// fixtures
+//
 
 const FILE_TEXT = `export function double(n: number): number {
     return n * 2;
@@ -133,7 +137,9 @@ function tempWorkspace(): {
 
 const NO_WS: DiffWorkspace = { resolve: () => null, read: () => null };
 
-// --- detection ----------------------------------------------------------------
+//
+// detection
+//
 
 Deno.test("diff: detection accepts git and plain unified diffs, rejects code", () => {
   assert(looksLikeDiff(DIFF), "git diff detected");
@@ -192,7 +198,9 @@ rename to new.ts
   assert(looksLikeDiff(rename), "a metadata-only git diff is detected");
 });
 
-// --- parsing -------------------------------------------------------------------
+//
+// parsing
+//
 
 Deno.test("diff: parses files, hunks and per-line old/new numbering", () => {
   const model = parseDiff(DIFF)!;
@@ -267,9 +275,11 @@ new file mode 100644
   assertEquals(model.files[1].hunks.length, 0);
 });
 
-// --- document -------------------------------------------------------------------
+//
+// document
+//
 
-Deno.test("diff doc: verbatim text, tints, markers and syntax colour", () => {
+Deno.test("diff doc: verbatim text, tints, markers and syntax color", () => {
   const { ws, done } = tempWorkspace();
   try {
     const model = parseDiff(DIFF)!;
@@ -286,7 +296,7 @@ Deno.test("diff doc: verbatim text, tints, markers and syntax colour", () => {
     // Markers classified.
     assertEquals(doc.lines[9].spans[0].cls, "diffAdd");
     assertEquals(doc.lines[8].spans[0].cls, "diffDel");
-    // Syntax colour under the diff: both complete file parses classify the
+    // Syntax color under the diff: both complete file parses classify the
     // `export` keyword as a storage keyword.
     const cls = (line: number, text: string) =>
       doc.lines[line].spans.find((s) => s.text === text)?.cls;
@@ -484,6 +494,79 @@ Deno.test("diff doc: structure is file → hunk → the workspace file's nodes",
   }
 });
 
+describe("decoded diff input", () => {
+  it("keeps a decoded BOM outside TypeScript structure ranges", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1 +1 @@
+-${bom}const alpha = 0;
++${bom}const alpha = 1;
+`;
+    const ws: DiffWorkspace = {
+      resolve: () => "/m.ts",
+      read: () => "const alpha = 1;\n",
+      hasUtf8Bom: () => true,
+    };
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const alpha = doc.flatStructure.find((node) => node.name === "alpha");
+
+    assert(alpha);
+    expect(alpha.startCol).toBe(2);
+    expect(alpha.startOffset).toBe(diff.indexOf("const alpha = 1;"));
+    assert(diff.slice(alpha.nameOffset!).startsWith("alpha"));
+
+    const fragment = buildDiffDocument(diff, parseDiff(diff)!, NO_WS).doc;
+    const fragmentAlpha = fragment.flatStructure.find((node) =>
+      node.name === "alpha"
+    );
+    assert(fragmentAlpha);
+    expect(fragmentAlpha.startOffset).toBe(diff.indexOf("const alpha = 1;"));
+    assert(diff.slice(fragmentAlpha.nameOffset!).startsWith("alpha"));
+  });
+
+  it("preserves textual hunk bodies for known binary filenames", () => {
+    const diff = `diff --git a/asset.png b/asset.png
+--- a/asset.png
++++ b/asset.png
+@@ -1 +1 @@
+-old bytes
++new bytes
+`;
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, NO_WS);
+
+    expect(doc.lines[4].spans.map((span) => span.text).join("")).toBe(
+      "-old bytes",
+    );
+    expect(doc.lines[5].spans.map((span) => span.text).join("")).toBe(
+      "+new bytes",
+    );
+  });
+
+  it("strips a BOM before parsing a Markdown fragment", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1,2 @@
++${bom}# Heading
++body
+`;
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, NO_WS);
+    const heading = doc.flatStructure.find((node) =>
+      node.label === "# Heading"
+    );
+
+    assert(heading);
+    expect(heading.startCol).toBe(2);
+    expect(heading.startOffset).toBe(diff.indexOf("# Heading"));
+    expect(doc.lines[4].spans.map((span) => span.text).join("")).toBe(
+      `+${bom}# Heading`,
+    );
+  });
+});
+
 Deno.test("diff doc: missing workspace file still highlights and structures via fragments", () => {
   const model = parseDiff(DIFF)!;
   const { doc, maps } = buildDiffDocument(DIFF, model, NO_WS);
@@ -610,7 +693,7 @@ Deno.test("diff doc: a stale diff shifted against the workspace maps nothing", (
 Deno.test("diff doc: a shifted coincidental match cannot answer about the wrong occurrence", () => {
   // The reviewer's repro: function b was inserted above function a after the
   // diff was taken; the added `log(x)` coincides textually with b's body at
-  // the diff's stated line numbers, but neighbouring lines do not match, so
+  // the diff's stated line numbers, but neighboring lines do not match, so
   // the hunk fails verification and maps nothing (instead of answering with
   // function b's types).
   const root = Deno.makeTempDirSync();
@@ -661,7 +744,9 @@ function a() {
   }
 });
 
-// --- semantics ------------------------------------------------------------------
+//
+// semantics
+//
 
 Deno.test("diff semantics: types and definitions answer against the workspace", () => {
   const { root, ws, done } = tempWorkspace();
@@ -728,9 +813,11 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
   }
 });
 
-// --- rendering ------------------------------------------------------------------
+//
+// rendering
+//
 
-Deno.test("diff render: added lines carry the add tint under the syntax colour", () => {
+Deno.test("diff render: added lines carry the add tint under the syntax color", () => {
   const { ws, done } = tempWorkspace();
   try {
     const model = parseDiff(DIFF)!;
@@ -767,7 +854,9 @@ Deno.test("diff render: added lines carry the add tint under the syntax colour",
   }
 });
 
-// --- review fixes -----------------------------------------------------------
+//
+// review fixes
+//
 
 Deno.test("diff doc: a hunk interior to nested code hoists the inner nodes", () => {
   // Both `outer` and `middle` clamp to the same visible range; the fold must
@@ -1462,7 +1551,9 @@ ${removed}
   assert(!text.includes("remaining uses"), `nothing live is deferred: ${text}`);
 });
 
-// --- object-literal properties are navigable in a diff hunk ------------------
+//
+// object-literal properties are navigable in a diff hunk
+//
 
 Deno.test("diff structure: an object literal's properties are each navigable", () => {
   const root = Deno.makeTempDirSync();

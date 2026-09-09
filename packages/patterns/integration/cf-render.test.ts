@@ -16,7 +16,7 @@ import {
 } from "./pieces-controller.ts";
 import { clickNthCfButton, waitForText } from "./cfc-browser-helpers.ts";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { toIndentedDebugString } from "@commonfabric/data-model";
 
 /** The text of every rendered `#counter-result`, for failure reporting. */
 function readCounterTexts(page: Page): Promise<string[]> {
@@ -62,7 +62,7 @@ describe("cf-render integration test", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
@@ -83,7 +83,7 @@ describe("cf-render integration test", () => {
     // change. The sink also drives awaitResultValue: it records the latest
     // committed value and resolves a pending waiter when its target is
     // reached.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink((value) => {
       latestResultValue = (value as { value?: number } | undefined)?.value;
       if (resultWaiter && latestResultValue === resultWaiter.target) {
@@ -196,7 +196,7 @@ describe("cf-render subpath handling", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });

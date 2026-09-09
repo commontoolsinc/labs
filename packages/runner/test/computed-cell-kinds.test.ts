@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Frame, type JSONSchema } from "../src/builder/types.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+
+import {
+  REPLAYABLE_BUILTIN_REFS,
+  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
+} from "../src/builder/builtin-replayability.ts";
 import {
   byRef,
   createNodeFactory,
@@ -9,17 +15,13 @@ import {
 } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive } from "../src/builder/reactive.ts";
-import {
-  REPLAYABLE_BUILTIN_REFS,
-  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
-} from "../src/builder/builtin-replayability.ts";
+import { type Frame, type JSONSchema } from "../src/builder/types.ts";
 import { registerBuiltins } from "../src/builtins/index.ts";
 import { createRef } from "../src/create-ref.ts";
-import { toURI } from "../src/uri-utils.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Identity } from "@commonfabric/identity";
+import { toURI } from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -158,19 +160,21 @@ describe("computed cell kinds", () => {
       expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
     });
 
-    it("disqualifies captures of a schema-less writable-proxy handler", () => {
+    it("tags a capture of a handler whose `$ctx` schema is `true` as computed", () => {
       const double = lift((x: number) => x * 2);
-      const bumpProxy = handler(
+      const bump = handler(
+        true,
+        true,
         (_event: unknown, _ctx: { target: number }) => {},
-        { proxy: true },
       );
       const testPattern = pattern<{ x: number }>(({ x }) => {
         const doubled = double(x);
-        return { doubled, onBump: bumpProxy({ target: doubled }) };
+        return { doubled, onBump: bump({ target: doubled }) };
       });
-      // The legacy writable proxy makes every capture writable — no schema
-      // exists to prove otherwise, so all bound roots disqualify.
-      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+      // A `true` `$ctx` schema grants no `asCell` handle, so the binding
+      // arrives as a read-only view the body cannot write through, and the
+      // root it covers stays eligible.
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
     });
 
     it("disqualifies outputs of unknown builtin refs", () => {
@@ -411,12 +415,13 @@ describe("computed cell kinds", () => {
     });
   });
 
-  // Negative battery for the fail-closed fallbacks: every branch here exists
-  // because under-collection means silently dropped user writes, so each one
-  // must provably disqualify (or, for the read-only-kind check, provably
-  // spare) its roots. Hand-built modules via createNodeFactory reach the
-  // writer/input shapes the trusted builders never emit.
   describe("fail-closed disqualifier battery", () => {
+    // Negative battery for the fail-closed fallbacks: every branch here
+    // exists because under-collection means silently dropped user writes, so
+    // each one must provably disqualify (or, for the read-only-kind check,
+    // provably spare) its roots. Hand-built modules via createNodeFactory
+    // reach the writer/input shapes the trusted builders never emit.
+
     const mkModule = (spec: Record<string, unknown>) =>
       createNodeFactory(spec as never);
 
@@ -445,18 +450,6 @@ describe("computed cell kinds", () => {
       });
       expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
       expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
-    });
-
-    it("writable-proxy modules disqualify as writers", () => {
-      const proxyNode = mkModule({
-        type: "javascript",
-        implementation: () => 0,
-        writableProxy: true,
-      });
-      const testPattern = pattern<{ x: number }>(({ x }) => ({
-        out: proxyNode({ v: x }),
-      }));
-      expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
     });
 
     it("handler-wrapped modules disqualify as writers (hand-built shape)", () => {
@@ -909,6 +902,7 @@ describe("computed cell kinds", () => {
         "sqliteQueryResult",
         "sqliteQuery",
         "inspectConfLabel",
+        "cellFromUrl",
       ]);
 
       // Every registered builtin must be recorded in the replayability

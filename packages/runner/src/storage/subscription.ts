@@ -7,9 +7,7 @@ import {
   StorageNotification,
 } from "./interface.ts";
 
-export const createStorageNotificationRelay = () =>
-  new StorageNotificationRelay();
-export const create = createStorageNotificationRelay;
+export const create = () => new StorageNotificationRelay();
 
 /**
  * Storage subscription that can be used by consumers to subscribe to storage
@@ -49,5 +47,3 @@ export class StorageNotificationRelay
     return { done: false };
   }
 }
-
-export { StorageNotificationRelay as StorageSubscription };

@@ -80,6 +80,16 @@ export interface GmailSearchRegistryOutput {
 // HANDLERS (defined at module scope)
 // ============================================================================
 
+// The registry verbs answer their caller with a plain outcome envelope. The
+// declaration is load-bearing (verb contract WS-C/C2): an undeclared plain
+// return is a transformer error, because without it the value is silently
+// discarded where a caller would have read it.
+type RegistryOutcome = {
+  success: boolean;
+  error?: string;
+  queryId?: string;
+};
+
 // Handler to submit a new query
 const submitQuery = handler<
   {
@@ -88,7 +98,8 @@ const submitQuery = handler<
     description?: string;
     submittedBy?: string;
   },
-  { queries: Writable<SharedQuery[]> }
+  { queries: Writable<SharedQuery[]> },
+  RegistryOutcome
 >((input, state) => {
   const allQueries = state.queries.get() || [];
 
@@ -124,7 +135,8 @@ const submitQuery = handler<
 // Handler to upvote a query
 const upvoteQuery = handler<
   { agentTypeUrl: string; queryId: string },
-  { queries: Writable<SharedQuery[]> }
+  { queries: Writable<SharedQuery[]> },
+  RegistryOutcome
 >((input, state) => {
   const allQueries = state.queries.get() || [];
   const queryIdx = allQueries.findIndex((q: SharedQuery) =>
@@ -150,7 +162,8 @@ const upvoteQuery = handler<
 // Handler to downvote a query
 const downvoteQuery = handler<
   { agentTypeUrl: string; queryId: string },
-  { queries: Writable<SharedQuery[]> }
+  { queries: Writable<SharedQuery[]> },
+  RegistryOutcome
 >((input, state) => {
   const allQueries = state.queries.get() || [];
   const queryIdx = allQueries.findIndex((q: SharedQuery) =>

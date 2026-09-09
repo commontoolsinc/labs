@@ -8,6 +8,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -87,7 +88,7 @@ type FactCheckHostInput = {
 
 export type DisclosureExampleOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   content: string;
   disclaimerText?: string;
   acknowledgedDisclaimer?: string;
@@ -851,7 +852,7 @@ const EXAMPLE_TITLES = [
 export const DISCLAIMER_EXAMPLE_COUNT = 14;
 export const DISCLAIMER_RENDERED_EXAMPLE_COUNT = 14;
 
-export default pattern(() => {
+export default pattern<Record<PropertyKey, never>>(() => {
   const renderedExamples = [
     DisclaimerPromptRoutingAckExample({}),
     DisclaimerAIGeneratedContentAckExample({}),

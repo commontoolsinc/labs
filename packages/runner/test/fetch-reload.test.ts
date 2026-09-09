@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import {
   DataUnavailable,
   FabricError,

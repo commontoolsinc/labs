@@ -1,6 +1,7 @@
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
-import { collectPatternFiles, PATTERNS_DIR } from "./pattern-files.ts";
+import { collectAllPatternFiles } from "./pattern-files.ts";
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -9,9 +10,7 @@ function formatError(error: unknown): string {
 
 // Optional sharding for CI fan-out: CFCHECK_SHARD="i/n" (1-based) checks only
 // the files where (index % n) == (i - 1). Pattern compiles are single-threaded
-// CPU work that doesn't parallelize within one process, so the way to use more
-// cores is more PROCESSES — run n shards as n parallel CI jobs (mirrors the
-// existing "Pattern Tests (1/4..4/4)" fan-out).
+// CPU work, so n shards run as n parallel CI jobs.
 function parseShard(): { index: number; count: number } {
   const raw = Deno.env.get("CFCHECK_SHARD");
   if (!raw) return { index: 0, count: 1 };
@@ -31,7 +30,7 @@ function parseShard(): { index: number; count: number } {
 
 const shard = parseShard();
 
-const allFiles = await collectPatternFiles(PATTERNS_DIR);
+const allFiles = await collectAllPatternFiles();
 const filesToCheck = allFiles.filter((_file, i) =>
   i % shard.count === shard.index
 );
@@ -54,8 +53,9 @@ const programs = [];
 for (const file of filesToCheck) {
   try {
     programs.push(
-      await runtime.harness.resolve(
-        new FileSystemProgramResolver(`${cwd}/${file}`, cwd),
+      await resolveLocalProgram(
+        (resolver) => runtime.harness.resolve(resolver),
+        { main: `${cwd}/${file}`, root: cwd },
       ),
     );
   } catch (error) {
@@ -74,6 +74,25 @@ for (const diagnostic of result.diagnostics) {
     .replace(/^\/fid1:[^/]+\//, "")
     .replace(`${cwd}/`, "") || "(batch)";
   failures.push({ file, error: diagnostic.message });
+}
+
+// One typecheck-kind record per file in this shard, named "cfcheck <file>".
+// The shard stays one batched TypeScript program because the per-program
+// bind dominates its cost, so per-file durations do not exist: every record
+// carries a zero duration and only the outcome is meaningful. A diagnostic
+// attributed to "(batch)" fails the run without belonging to a file record.
+const recordsFragment = FragmentWriter.openForRun();
+if (recordsFragment !== undefined) {
+  const failedFiles = new Set(failures.map((failure) => failure.file));
+  for (const file of filesToCheck) {
+    recordsFragment.append({
+      line: "record",
+      test: { k: "typecheck", s: "repo", n: `cfcheck ${file}` },
+      outcome: failedFiles.has(file) ? "fail" : "pass",
+      durationMs: 0,
+    });
+  }
+  recordsFragment.close();
 }
 
 if (failures.length > 0) {

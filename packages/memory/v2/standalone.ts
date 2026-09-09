@@ -8,14 +8,31 @@
  * without a toolshed process. Used by multi-runtime test harnesses
  * (`cf test` multi-user mode, packages/patterns integration tests).
  *
+ * A runtime addresses far more than storage at the host it is given: the
+ * health probe every client opens with, the patterns route, the
+ * language-model route, the blob routes. The health probe is answered here,
+ * because this server is what occupies the address and so is what can say it
+ * is up. The rest reach `serve`, and whatever the caller does not answer
+ * there is told the one thing that is true of this address: it speaks the
+ * memory websocket protocol, so upgrade. That is what a runtime asking a bare
+ * storage host for a route it does not have hears, and it carries a status
+ * that stops the answer being read as the thing that was asked for.
+ *
  * Deno-only (uses `Deno.serve`); keep this export path out of browser
  * bundles.
  */
 
-import { encodeMemoryBoundary } from "../v2.ts";
+import { Identity } from "@commonfabric/identity";
+
+import { encodeMemoryBoundary, getMemoryProtocolFlags } from "../v2.ts";
+import {
+  encodeMemoryCompressionControlMessage,
+  isMemoryMessageFrame,
+  MemoryMessageCompressionChannel,
+  parseMemoryCompressionControlMessage,
+} from "./message-compression.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
-import { Identity } from "@commonfabric/identity";
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
   "common tools standalone memory audience",
@@ -29,16 +46,65 @@ const authorizeSessionOpen = (
   context: Parameters<typeof verifySessionOpenAuthorization>[1],
 ): Promise<string> => verifySessionOpenAuthorization(message, context);
 
+/** Where a client asks whether the host serving its space is reachable. */
+const HEALTH_ROUTE = "/_health";
+
+/**
+ * The words the `426` below carries, for a reader rather than a parser.
+ *
+ * The citation names the repository before the path. A reader holding this
+ * response has just learned that a path on this host is answered with it, so
+ * a bare path invites the request that produced what they are reading.
+ */
+const UPGRADE_REQUIRED_BODY =
+  `This is a Common Fabric memory endpoint. It speaks the memory protocol
+over a websocket, so connect with an \`Upgrade: websocket\` request.
+Nothing here answers the request you just sent.
+
+The protocol is specified in the source repository, at
+docs/specs/memory-v2/04-protocol.md.
+`;
+
+/**
+ * What a plain HTTP request nothing else answered is told.
+ *
+ * `426` is the status for a server that will not answer over the protocol it
+ * was asked in but would answer over another, and its `Upgrade` header names
+ * that other one. It fits this address exactly: the websocket handshake is
+ * itself a `GET`, so the method was never the problem — the missing `Upgrade`
+ * header was.
+ *
+ * The body says as much in words, for whoever is holding the response rather
+ * than parsing it: a person who reached the address with `curl`, or one
+ * reading a log that printed what a fetch came back with.
+ */
+function upgradeRequired(): Response {
+  return new Response(UPGRADE_REQUIRED_BODY, {
+    status: 426,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      upgrade: "websocket",
+      connection: "Upgrade",
+    },
+  });
+}
+
 let nextConnectionTag = 0;
 
 export class StandaloneMemoryServer {
   #memory: MemoryServer.Server;
   #http: Deno.HttpServer;
+  #channels: Set<MemoryMessageCompressionChannel>;
   readonly url: URL;
 
-  private constructor(memory: MemoryServer.Server, http: Deno.HttpServer) {
+  private constructor(
+    memory: MemoryServer.Server,
+    http: Deno.HttpServer,
+    channels: Set<MemoryMessageCompressionChannel>,
+  ) {
     this.#memory = memory;
     this.#http = http;
+    this.#channels = channels;
     const address = http.addr as Deno.NetAddr;
     this.url = new URL(`http://127.0.0.1:${address.port}/`);
   }
@@ -51,6 +117,12 @@ export class StandaloneMemoryServer {
         mode: MemoryServer.MemoryAclMode;
         serviceDids?: readonly string[];
       };
+
+      /** Answers the non-websocket requests this address receives. Anything
+       *  it declines, by answering `undefined`, is told to upgrade. */
+      serve?: (
+        request: Request,
+      ) => Response | undefined | Promise<Response | undefined>;
     } = {},
   ): StandaloneMemoryServer {
     const memory = new MemoryServer.Server({
@@ -60,43 +132,128 @@ export class StandaloneMemoryServer {
       },
       acl: options.acl,
     });
+    const channels = new Set<MemoryMessageCompressionChannel>();
     const http = Deno.serve({
       hostname: "127.0.0.1",
       port: 0,
       onListen: () => {},
     }, (request) => {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-        return new Response("memory websocket endpoint", { status: 200 });
+        if (new URL(request.url).pathname === HEALTH_ROUTE) {
+          return Response.json({
+            status: "OK",
+            timestamp: Date.now(),
+            gitSha: null,
+          });
+        }
+        return Promise.resolve(options.serve?.(request)).then((response) =>
+          response ?? upgradeRequired()
+        );
       }
       const { socket, response } = Deno.upgradeWebSocket(request);
+      socket.binaryType = "arraybuffer";
       const connectionTag = nextConnectionTag++;
+      let compressionNegotiated = false;
+      let helloReceived = false;
+      let sawFirstMessage = false;
+      let closed = false;
+      const channel = new MemoryMessageCompressionChannel(
+        (frame) => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(frame);
+          }
+        },
+        () => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close(1011, "memory websocket message failure");
+          }
+          closeConnection();
+        },
+      );
+      channels.add(channel);
       const connection = memory.connect((message) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(encodeMemoryBoundary(message));
+        channel.send(encodeMemoryBoundary(message));
+        if (compressionNegotiated && message.type === "hello.ok") {
+          channel.enable();
         }
       });
+      function closeConnection(): void {
+        if (closed) return;
+        closed = true;
+        channel.close();
+        channels.delete(channel);
+        connection.close();
+      }
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {
-        if (typeof event.data !== "string") {
-          socket.close(1003, "memory websocket expects text frames");
-          connection.close();
+        const frame = event.data;
+        if (!isMemoryMessageFrame(frame)) {
+          socket.close(
+            1003,
+            "memory websocket expects text or binary frames",
+          );
+          closeConnection();
           return;
         }
-        if (debugWrites) {
-          logCommitOperations(connectionTag, event.data);
-        }
-        connection.receive(event.data).catch(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1011, "memory websocket receive failure");
+        if (!sawFirstMessage) {
+          if (typeof frame !== "string") {
+            socket.close(
+              1003,
+              "memory websocket expects text before negotiation",
+            );
+            closeConnection();
+            return;
           }
-          connection.close();
+          sawFirstMessage = true;
+          const first = MemoryServer.parseClientMessage(frame);
+          if (first?.type === "hello") {
+            helloReceived = true;
+            compressionNegotiated = first.flags.messageCompressionV1 === true &&
+              getMemoryProtocolFlags().messageCompressionV1;
+          }
+        } else if (!compressionNegotiated && typeof frame !== "string") {
+          socket.close(
+            1003,
+            "memory websocket expects text without compression negotiation",
+          );
+          closeConnection();
+          return;
+        }
+        if (closed) return;
+        channel.receive(frame, async (payload) => {
+          const control = parseMemoryCompressionControlMessage(payload);
+          if (control && helloReceived) {
+            const enabled = compressionNegotiated && control.enabled;
+            channel.setSendCompressionEnabled(enabled);
+            channel.send(encodeMemoryCompressionControlMessage({
+              requestId: control.requestId,
+              enabled,
+            }));
+            return;
+          }
+          await connection.receive(payload);
+          if (debugWrites) {
+            logCommitOperations(connectionTag, payload);
+          }
         });
       });
-      socket.addEventListener("close", () => connection.close());
-      socket.addEventListener("error", () => connection.close());
+      socket.addEventListener("close", closeConnection);
+      socket.addEventListener("error", closeConnection);
       return response;
     });
-    return new StandaloneMemoryServer(memory, http);
+    return new StandaloneMemoryServer(memory, http, channels);
+  }
+
+  /**
+   * Drains received compression work, the underlying memory server, and sent
+   * compression work in that order. Multi-runtime test harnesses call this as
+   * the deterministic "the server has published everything" barrier in place
+   * of a fixed delay.
+   */
+  async idle(): Promise<void> {
+    await Promise.all([...this.#channels].map((channel) => channel.idle()));
+    await this.#memory.idle();
+    await Promise.all([...this.#channels].map((channel) => channel.idle()));
   }
 
   async close(): Promise<void> {

@@ -1,24 +1,26 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import {
-  buildCfcPolicyArtifactManifest,
-  cfcPolicyManifestDocId,
-} from "../src/cfc/policy.ts";
-import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
-import type { Engine } from "../src/harness/engine.ts";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import {
   createTxCfcModulePolicyResolver,
   evaluateExchangeRules,
 } from "../src/cfc/mod.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import {
+  buildCfcPolicyArtifactManifest,
+  cfcPolicyManifestDocId,
+} from "../src/cfc/policy.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { Engine } from "../src/harness/engine.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
@@ -35,7 +37,6 @@ describe("PolicyOf label-time binding", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
   });
 
@@ -100,14 +101,20 @@ describe("PolicyOf label-time binding", () => {
     }]);
   });
 
-  it("fails closed when the destination lacks the manifest", () => {
+  it("fails closed when the destination lacks the manifest", async () => {
     const tx = runtime.edit();
     runtime.getCell(space, "missing-policy", schema, tx).set("secret");
-    expect(() => tx.prepareCfc()).toThrow("is not installed");
-    tx.abort?.();
+    // OW50 (verification-coverage.md): a commit-prep crash no longer escapes
+    // `prepareCfc` as a throw (which killed the scheduler's action without
+    // settling its transaction); it is recorded as an invalidation reason and
+    // the commit rejects with the diagnostic — same fail-closed, observable
+    // failure.
+    expect(tx.prepareCfc()).toBe("");
+    const result = await tx.commit();
+    expect(String(result.error?.message)).toContain("is not installed");
   });
 
-  it("rejects a malformed owning-space PolicyOf marker", () => {
+  it("rejects a malformed owning-space PolicyOf marker", async () => {
     const malformedSchema = {
       type: "string",
       ifc: {
@@ -124,8 +131,12 @@ describe("PolicyOf label-time binding", () => {
     runtime.getCell(space, "malformed-policy", malformedSchema, tx).set(
       "secret",
     );
-    expect(() => tx.prepareCfc()).toThrow("malformed PolicyOf schema marker");
-    tx.abort?.();
+    // OW50: crash -> recorded reason -> rejected commit (see above).
+    expect(tx.prepareCfc()).toBe("");
+    const result = await tx.commit();
+    expect(String(result.error?.message)).toContain(
+      "malformed PolicyOf schema marker",
+    );
   });
 
   it("rejects unprivileged overwrite and deletion of a durable manifest", async () => {
@@ -231,7 +242,7 @@ describe("PolicyOf label-time binding", () => {
     expect((await decision.commit()).error).toBeDefined();
   });
 
-  it("rejects a raw module-policy object in authored schema metadata", () => {
+  it("rejects a raw module-policy object in authored schema metadata", async () => {
     runtime.registerCfcPolicyManifests(space, [artifact]);
     const forgedSchema = {
       ...schema,
@@ -248,8 +259,12 @@ describe("PolicyOf label-time binding", () => {
     } as const;
     const tx = runtime.edit();
     runtime.getCell(space, "forged-policy", forgedSchema, tx).set("secret");
-    expect(() => tx.prepareCfc()).toThrow("compiler-lowered PolicyOf");
-    tx.abort?.();
+    // OW50: crash -> recorded reason -> rejected commit (see above).
+    expect(tx.prepareCfc()).toBe("");
+    const result = await tx.commit();
+    expect(String(result.error?.message)).toContain(
+      "compiler-lowered PolicyOf",
+    );
   });
 
   it("compiles, installs, persists, and reloads a direct authored policy", async () => {
@@ -287,7 +302,7 @@ describe("PolicyOf label-time binding", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const emittedSchema = evaluated.main?.schema as JSONSchema;
 
@@ -345,7 +360,7 @@ describe("PolicyOf label-time binding", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const emittedSchema = evaluated.main?.schema as JSONSchema;
 
@@ -359,7 +374,6 @@ describe("PolicyOf label-time binding", () => {
     const coldRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const coldTx = coldRuntime.edit();
@@ -438,7 +452,6 @@ describe("PolicyOf label-time binding", () => {
     const coldRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = coldRuntime.edit();
@@ -525,7 +538,6 @@ describe("PolicyOf label-time binding", () => {
     const coldRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const coldTx = coldRuntime.edit();
@@ -638,7 +650,9 @@ describe("PolicyOf label-time binding", () => {
     const sinkRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The sink gate resolves module policy manifests against the
+      // destination space in this mode, which is the lookup the rejection
+      // below turns on.
       cfcPolicyEvaluation: "enforce",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
@@ -693,7 +707,9 @@ describe("PolicyOf label-time binding", () => {
     const sinkRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The sink gate binds every consumed manifest origin into the commit in
+      // this mode, which is what the tampering below has to disturb for the
+      // commit to reject.
       cfcPolicyEvaluation: "enforce",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });

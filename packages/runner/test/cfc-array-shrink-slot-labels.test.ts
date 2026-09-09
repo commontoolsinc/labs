@@ -1,7 +1,11 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 
@@ -15,15 +19,16 @@ type StoredEntry = {
   observes?: string;
 };
 
-// An array-diff shrink truncates slots by writing `length` alone; without an
-// explicit delete write per truncated slot, the removed slots' per-slot link
-// entries survive in the labelMap. Any later read/diff of such a slot (e.g. a
-// list growing back) consumes the stale entry as a followRef observation
-// (SC-8) and re-imports the departed member's taint into the reader's flow
-// join — the echo behind the #4525 probe's A3 step. The diff layer now emits
-// the same explicit slot deletes the direct `length`-write path always has,
-// and the flow-clear drops the stale entries like any other covered write.
 describe("CFC: array shrink clears truncated slots' link labels", () => {
+  // An array-diff shrink truncates slots by writing `length` alone; without an
+  // explicit delete write per truncated slot, the removed slots' per-slot link
+  // entries survive in the labelMap. Any later read/diff of such a slot (e.g. a
+  // list growing back) consumes the stale entry as a followRef observation
+  // (SC-8) and re-imports the departed member's taint into the reader's flow
+  // join — the echo behind the #4525 probe's A3 step. The diff layer now emits
+  // the same explicit slot deletes the direct `length`-write path always has,
+  // and the flow-clear drops the stale entries like any other covered write.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -43,6 +48,7 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({
       space,
       scope: "space",
@@ -52,7 +58,7 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
       value,
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -93,7 +99,14 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. This list declares none,
+      // and the closing `length` assertion reads back the label that write
+      // persisted.
       cfcEnforcementMode: "observe",
+      // Persisting flow labels is what puts the per-slot link entries and the
+      // derived `length` entry in the document. Every assertion here reads
+      // one of them.
       cfcFlowLabels: "persist",
     });
 

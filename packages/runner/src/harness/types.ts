@@ -1,17 +1,10 @@
+import type { Program } from "@commonfabric/js-compiler";
 import type {
-  Program,
-  ProgramResolver,
-  Source,
-} from "@commonfabric/js-compiler";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
-import type { PatternCoverageCollector } from "../pattern-coverage.ts";
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
 import type { MemorySpace } from "../runtime.ts";
-import type {
-  CachedCompiledModule,
-  CompiledModuleGraph,
-  HoistRegistrationSink,
-} from "../sandbox/module-record-compiler.ts";
-import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
+import type { HoistRegistrationSink } from "../sandbox/module-record-compiler.ts";
 
 export type HarnessedFunction = (input: any) => void;
 
@@ -19,6 +12,9 @@ export type RuntimeProgram = Program & {
   // The named export from the program's entry file to run.
   // Defaults to "default".
   mainExport?: string;
+
+  /** Source entry points retained and compiled without being executed. */
+  sourceRoots?: string[];
 };
 
 export interface TypeScriptHarnessProcessOptions {
@@ -60,6 +56,7 @@ export interface TypeScriptHarnessProcessOptions {
   // on a miss/partial hit: freshly compiled bodies are always SES-verified.
   // Never set for direct `precompiledModules` injection (untrusted bytes).
   trustedBodies?: boolean;
+
   /**
    * Enables fabric (cf:) imports for this compile: the space whose cell-cache
    * source docs fabric refs are fetched from and verified against. Absent means
@@ -70,6 +67,7 @@ export interface TypeScriptHarnessProcessOptions {
 
 export interface FabricImportOptions {
   space: MemorySpace;
+
   /**
    * Dev-only: resolve unpinned mutable refs by chasing the live pointer.
    * The resulting compile is NOT cacheable — module identity folds the
@@ -93,6 +91,10 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: PatternCoverageSpan[];
+
+  /** Debug-only authored sites, keyed by runtime artifact symbol. */
+  builderSourceSites?: BuilderSourceSitesV1;
+
   /** Compiler-issued policy manifests, transported separately from JS exports. */
   policyManifests?: readonly unknown[];
 }
@@ -105,12 +107,23 @@ export interface CompiledModuleArtifact {
 export interface CacheableModule extends CompiledModuleArtifact {
   /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
   identity: string;
+
   /** Normalized authored module path (no `/<id>` prefix; e.g. `/main.tsx`). */
   filename: string;
+
   /** Resolved TypeScript source whose bytes are folded into `identity`. */
   source: string;
+
   /** Internal import edges: specifier → the dependency module's identity. */
   imports: { specifier: string; targetIdentity: string }[];
+
+  /**
+   * This entry carries data rather than code. A data entry's compiled form is
+   * its own bytes, so `js` repeats `source` and the compiled set carries what a
+   * warm load needs without reading the source set. It is never parsed,
+   * verified as a module body, or built into a record.
+   */
+  isData?: boolean;
 }
 
 export type Exports = Record<string, any>;
@@ -118,6 +131,7 @@ export type Exports = Record<string, any>;
 export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
+
   /**
    * Per-module namespaces keyed by content identity (the prefix-free
    * `cf:module/<identity>` hash). Lets the runner register every module in a
@@ -127,6 +141,17 @@ export interface EvaluateResult {
    * Populated only on the ESM evaluate paths.
    */
   exportsByIdentity?: Map<string, Exports>;
+
+  /**
+   * Module content identity → the authored file it came from.
+   *
+   * A pattern reloaded by identity gets no program attached (that path is
+   * source-free by design), so nothing downstream can say WHICH file a nested
+   * pattern came from. The evaluate loop knows both, so it records the pairing
+   * and `PatternManager` stamps it onto each indexed artifact.
+   */
+  sourcePathByIdentity?: Map<string, string>;
+
   /**
    * Hoist registrations collected during this evaluation (`__cfReg`): module
    * content identity → (symbol → live builder artifact). The PatternManager turns
@@ -134,93 +159,4 @@ export interface EvaluateResult {
    * and indexes it for synchronous by-identity resolution.
    */
   registrationsByIdentity?: HoistRegistrationSink;
-}
-
-// A `Harness` wraps a flow of compiling, bundling, and executing typescript.
-export interface Harness extends EventTarget {
-  // Compile + evaluate a program through the ESM module-record path,
-  // returning the entry exports plus the per-module export map.
-  compileAndEvaluateModules(
-    program: RuntimeProgram,
-    options?: TypeScriptHarnessProcessOptions,
-  ): Promise<EvaluateResult>;
-
-  // Compile a program to a verified ESM record graph, returning the graph plus
-  // the per-module cache descriptors (in content-identity space). Split from
-  // evaluation so a caller can write the descriptors to the content-addressed
-  // cache between compile and evaluate.
-  compileToRecordGraph(
-    program: RuntimeProgram,
-    options?: TypeScriptHarnessProcessOptions,
-  ): Promise<{
-    id: string;
-    graph: CompiledModuleGraph;
-    mainSpecifier: string;
-    entryIdentity: string;
-    modules: CacheableModule[];
-    resolvedPins: ResolvedFabricPin[];
-  }>;
-
-  // Evaluate a verified ESM record graph produced by `compileToRecordGraph`.
-  evaluateRecordGraph(
-    id: string,
-    graph: CompiledModuleGraph,
-    mainSpecifier: string,
-    files: Source[],
-  ): EvaluateResult;
-
-  // Warm load: build + verify + evaluate a pattern directly from cached compiled
-  // modules (by content identity) — no TS source, no resolve, no recompile.
-  evaluateCachedModules(
-    modules: readonly CachedCompiledModule[],
-    entryIdentity: string,
-    options?: {
-      sourceFiles?: Source[];
-      trustedBodies?: boolean;
-      patternCoverage?: PatternCoverageCollector;
-    },
-  ): Promise<EvaluateResult>;
-
-  // Cold recovery: recompile cacheable modules from the stored (already-resolved,
-  // inject-transformed) source set — e.g. after a runtimeVersion bump.
-  compileResolvedToRecordGraph(
-    resolvedFiles: Source[],
-    entryFilename: string,
-    options?: {
-      fabricImports?: FabricImportOptions;
-      patternCoverage?: PatternCoverageCollector;
-    },
-  ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
-
-  // Resolves a `ProgramResolver` into a `Program` using the engine's
-  // configuration.
-  resolve(
-    source: ProgramResolver,
-  ): Promise<Program>;
-
-  invoke(fn: () => any): any;
-
-  getInvocation(source: string): HarnessedFunction;
-
-  // Resolve a verified implementation function by its content-addressed
-  // `{ identity, symbol }` entry ref — the strong (session-lifetime) index
-  // behind serialized `$implRef`s. Unlike the bounded artifact index this
-  // never evicts, so a `$implRef`-only graph stays resolvable for as long as
-  // its module was verified-evaluated in this session.
-  getVerifiedImplementation?(
-    identity: string,
-    symbol: string,
-  ): HarnessedFunction | undefined;
-
-  unsafeTrustHostValue(
-    value: unknown,
-    options: UnsafeHostTrustOptions,
-  ): void;
-
-  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`, as
-  // returned by `mapPosition`) into the reload-stable canonical source
-  // `cf:module/<moduleHash>/<authoredPath>`, keeping the authored path for
-  // debuggability. Returns undefined for built-in / non-program sources, so
-  // callers fall back to the raw value.
-  canonicalModuleSource?(source: string): string | undefined;
 }

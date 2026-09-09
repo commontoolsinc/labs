@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { preserveSourceMapRange } from "../ast/mod.ts";
 import {
   type CapabilityParamDefault,
   TransformationContext,
@@ -89,12 +90,9 @@ export function registerCapabilitySummary(
   interprocedural: boolean,
   defaultsByParamName?: ReadonlyMap<string, readonly CapabilityParamDefault[]>,
 ): void {
-  // No cross-stage state → nowhere to record; skip the analysis work entirely.
-  if (!context.options.state) return;
-
   const summary = analyzeFunctionCapabilities(callback, {
     checker: context.checker,
-    typeRegistry: context.options.state?.typeRegistry,
+    typeRegistry: context.state.typeRegistry,
     interprocedural,
   });
 
@@ -222,19 +220,24 @@ export function transformPatternCallback(
           );
         }
 
-        return factory.createVariableStatement(
-          undefined,
-          factory.createVariableDeclarationList(
-            [
-              factory.createVariableDeclaration(
-                factory.createIdentifier(binding.localName),
-                undefined,
-                undefined,
-                initializer,
-              ),
-            ],
-            ts.NodeFlags.Const,
+        const declaration = preserveSourceMapRange(
+          factory.createVariableDeclaration(
+            factory.createIdentifier(binding.localName),
+            undefined,
+            undefined,
+            initializer,
           ),
+          binding.bindingNode,
+        );
+        return preserveSourceMapRange(
+          factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList(
+              [declaration],
+              ts.NodeFlags.Const,
+            ),
+          ),
+          binding.bindingNode,
         );
       });
       for (const binding of bindings) {

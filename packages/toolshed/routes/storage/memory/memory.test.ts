@@ -1,7 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
-import app from "../../../app.ts";
-import { memoryServer } from "../memory.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
+import { type FabricValue, hashOf } from "@commonfabric/data-model";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -9,12 +10,13 @@ import {
   MEMORY_PROTOCOL,
   type SessionOpenChallenge,
 } from "@commonfabric/memory/v2";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { createSession, Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { resolvedSchema } from "../../../../runner/test/schema-ref-helpers.ts";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
+
+import app from "@/app.ts";
+import { memoryServer } from "@/routes/storage/memory.ts";
 
 const HELLO = {
   type: "hello",
@@ -1145,7 +1147,7 @@ serialTest(
       );
       await aliasCell2.sync();
       await runtime2.storageManager.synced();
-      assertEquals(aliasCell2.schema, schema);
+      assertEquals(resolvedSchema(aliasCell2.schema), schema);
       assertEquals(aliasCell2.key("count").schema, { type: "number" });
       assertEquals(aliasCell2.get(), { count: 42, label: "test" });
 
@@ -1209,7 +1211,7 @@ serialTest(
       );
       await aliasCell2.sync();
       await subscriberRuntime.storageManager.synced();
-      assertEquals(aliasCell2.schema, schema);
+      assertEquals(resolvedSchema(aliasCell2.schema), schema);
       assertEquals(aliasCell2.get(), { count: 1, label: "start" });
 
       const gotUpdate = defer<void>();
@@ -1234,7 +1236,7 @@ serialTest(
       await runtime2.storageManager.synced();
 
       await gotUpdate.promise;
-      assertEquals(aliasCell2.schema, schema);
+      assertEquals(resolvedSchema(aliasCell2.schema), schema);
       assertEquals(aliasCell2.key("count").schema, { type: "number" });
       assertEquals(aliasCell2.get(), { count: 2, label: "after-restart" });
 
@@ -1323,7 +1325,7 @@ serialTest(
       await runtime1.storageManager.synced();
 
       await gotRetarget.promise;
-      assertEquals(aliasCell2.schema, schema);
+      assertEquals(resolvedSchema(aliasCell2.schema), schema);
       assertEquals(aliasCell2.get(), { count: 2, label: "second" });
 
       await subscriberRuntime.dispose();

@@ -1,4 +1,4 @@
-import { assert, handler, pattern, Writable } from "commonfabric";
+import { assert, handler, pattern, TESTS, Writable } from "commonfabric";
 import {
   SAVE_TITLE_ACTION,
   TRUSTED_SAVE_SURFACE,
@@ -53,7 +53,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_saved_empty },
       { action: action_set_first_draft },
       { assertion: assert_first_draft_visible },

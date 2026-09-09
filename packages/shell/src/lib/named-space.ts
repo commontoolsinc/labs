@@ -1,6 +1,7 @@
 import type { DID } from "@commonfabric/identity";
 import type { RuntimeInternals } from "@commonfabric/lib-shell";
-import type { AppState } from "../../shared/mod.ts";
+
+import type { AppState } from "./app-state.ts";
 
 /** Register a legacy named-space bootstrap key inside the worker before use. */
 export async function prepareNamedSpace(

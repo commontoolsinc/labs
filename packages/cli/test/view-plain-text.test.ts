@@ -4,6 +4,7 @@
  * documents, diffs, and live diff edits must preserve the complete input
  * without TypeScript coloring or structure.
  */
+
 import { assertEquals } from "@std/assert";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { parseDiff } from "../lib/view/diff.ts";

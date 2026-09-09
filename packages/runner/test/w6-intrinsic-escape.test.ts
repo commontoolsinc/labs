@@ -1,8 +1,11 @@
-// W6 structural-barrier regression: the gated Date/Math injected into pattern
-// compartments must not be escapable to a real (ungated) clock or entropy via
-// the constructor or prototype chain. Runs a compartment built with the real
-// module globals and NO pattern frame, so every ambient read must be denied and
-// no escape may yield a number (a real clock).
+/**
+ * W6 structural-barrier regression: the gated Date/Math injected into pattern
+ * compartments must not be escapable to a real (ungated) clock or entropy via
+ * the constructor or prototype chain. Runs a compartment built with the real
+ * module globals and NO pattern frame, so every ambient read must be denied and
+ * no escape may yield a number (a real clock).
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

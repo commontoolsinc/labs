@@ -30,6 +30,7 @@ import {
   resultOf,
   TILE_UI,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -387,12 +388,14 @@ interface PatternInput {
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   emails: Email[];
   events: SchoolEvent[];
   urgentEvents: SchoolEvent[];
   upcomingEvents: SchoolEvent[];
   teacherMessages: SchoolEvent[];
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(

@@ -1,9 +1,21 @@
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
 import {
+  FabricInstance,
   FabricPrimitive,
   type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import type { CfcAtom } from "@commonfabric/api/cfc";
+} from "@commonfabric/data-model";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+import {
+  internSchema,
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model-schema";
 import {
   DataUnavailable,
   isDataUnavailable,
@@ -14,6 +26,12 @@ import {
   LLMRequest,
   LLMToolCall,
 } from "@commonfabric/llm";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  isBoolean,
+  isObjectNotArray,
+  isObjectOrArray,
+} from "@commonfabric/utils/types";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
@@ -22,82 +40,25 @@ import type {
   BuiltInLLMToolCallPart,
   JSONSchema,
 } from "commonfabric";
-import type { Schema } from "@commonfabric/api/schema";
-import {
-  isNontrivialSchema,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import {
-  LLMDialogResultSchema,
-  LLMMessageSchema,
-  LLMParamsSchema,
-  LLMToolSchema,
-} from "./llm-schemas.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
-import type { JSONSchemaObj } from "../builder/types.ts";
-import {
-  ARRAY_SUBSCHEMA_KEYS,
-  mapSubschemas,
-  RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
-} from "../schema-walk.ts";
 
-// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
-// Recorded as the schema write-policy input for each model-produced message's
-// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
-// exactly that message — see `pushModelMessages`.
-const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
-  ...LLMMessageSchema,
-  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
-} as JSONSchema);
+import type { JSONSchemaObj } from "../builder/types.ts";
+import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import {
   isCell,
   isStream,
+  markRuntimeInjectedEventKeys,
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
-import { resolveLinkScope } from "../scope.ts";
-import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
-import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
-import { getEntityId } from "../create-ref.ts";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
-import { entityUriSchemePrefix } from "../entity-kind.ts";
-import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
-import { Runtime } from "../runtime.ts";
-import { spaceCellSchema } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
-import { schemaToTypeString } from "../schema-format.ts";
-import { formatTransactionSummary } from "../storage/transaction-summary.ts";
-import {
-  createLLMFriendlyLink,
-  getMetaLink,
-  matchLLMFriendlyLink,
-  type NormalizedFullLink,
-  parseLink,
-  parseLLMFriendlyLink,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
+import { isExternalSchemaRef } from "../schema-decompose.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForCellFailClosed,
 } from "../cfc/label-view.ts";
 import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
-import {
-  CFC_ENFORCING_STRICTNESS,
-  cfcEnforcementStrictness,
-} from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
   type CfcFloorTrustContext,
@@ -108,14 +69,65 @@ import {
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
-import { createTrustResolver } from "../cfc/trust.ts";
-import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
+import { createTrustResolver } from "../cfc/trust.ts";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "../cfc/types.ts";
+import { getEntityId } from "../create-ref.ts";
+import { entityUriSchemePrefix } from "../entity-kind.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import {
+  createLLMFriendlyLink,
+  getMetaLink,
+  matchLLMFriendlyLink,
+  type NormalizedFullLink,
+  parseLink,
+  parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
 import type { RawBuiltinResult } from "../module.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { Runtime, spaceCellSchema } from "../runtime.ts";
+import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
+import { schemaToTypeString } from "../schema-format.ts";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  mapSubschemas,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+} from "../schema-walk.ts";
+import { resolveLinkScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import { formatTransactionSummary } from "../storage/transaction-summary.ts";
+import {
+  LLMDialogResultSchema,
+  LLMMessageSchema,
+  LLMParamsSchema,
+  LLMToolSchema,
+} from "./llm-schemas.ts";
+import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
+import { ownedCell, recordRuntimeOwnedStore } from "./runtime-owned-store.ts";
+
+// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
+// Recorded as the schema write-policy input for each model-produced message's
+// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
+// exactly that message — see `pushModelMessages`.
+const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
+  ...LLMMessageSchema,
+  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
+} as JSONSchema);
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -157,9 +169,9 @@ function stripInjectedResult(
   return copy;
 }
 
-// --------------------
+//
 // Helper types + utils
-// --------------------
+//
 
 type ToolKind = "handler" | "cell" | "pattern";
 type LLMObservationSerializationResult = CfcObservationResult;
@@ -185,7 +197,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
       additionalProperties: inputSchema,
     };
   }
-  if (!isObject(inputSchema)) inputSchema = { type: "object" };
+  if (!isObjectNotArray(inputSchema)) inputSchema = { type: "object" };
   const stripped = stripInjectedResult(inputSchema);
   return prepareSchemaForLLM(stripped);
 }
@@ -273,6 +285,13 @@ function resolveRefsForLLM(
     }
 
     // Recurse into object properties (does not increment refDepth)
+    //
+    // TODO(danfuzz): this rebuild recurses into every object-valued key, so it
+    // also descends into `default`/`examples` VALUES — and a
+    // `FabricSpecialObject` there comes out as `{}` (`Object.entries` sees none
+    // of its state). The sibling `simplifySchemaForContext` carries `default`
+    // by reference via `PRESERVE_KEYS`; this walk wants the same treatment for
+    // value-bearing keys.
     const result: any = {};
     for (const [key, value] of Object.entries(nodeObj)) {
       if (key === "$defs") continue; // strip $defs from output
@@ -309,7 +328,7 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
 }
 
 /**
- * Resolve a piece's result schema similarly to PieceManager.#getResultSchema:
+ * Resolve a piece's result schema:
  * - Prefer a non-empty pattern.resultSchema if pattern is loaded
  * - Otherwise derive a simple object schema from the current value
  */
@@ -400,7 +419,7 @@ function simplifySchemaForContext(
   depth: number = 0,
   maxDepth: number = 3,
 ): JSONSchema {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return schema;
   }
 
@@ -439,7 +458,7 @@ function simplifySchemaForContext(
 
     // Keep properties, dropping $-prefixed ones ($UI, $TYPE, etc. are
     // internal/VDOM); their values are simplified by the walk below
-    if (key === "properties" && isRecord(value)) {
+    if (key === "properties" && isObjectOrArray(value)) {
       simplified[key] = Object.fromEntries(
         Object.entries(value).filter(([name]) => !name.startsWith("$")),
       );
@@ -527,9 +546,6 @@ function observationLinkForValue(
   return undefined;
 }
 
-// TODO(danfuzz): This `isRecord`-gated walk over cell-resolved values has no
-// `FabricSpecialObject` guard; a `FabricPrimitive` is decomposed and a
-// `FabricInstance` is walked by internal slots rather than codec contents.
 function serializeForLLMObservation(
   {
     value,
@@ -604,7 +620,7 @@ function serializeForLLMObservation(
     }
   }
 
-  if (!isRecord(value)) {
+  if (!isObjectOrArray(value)) {
     return {
       value,
       observedConfidentiality: nodeConfidentiality,
@@ -623,7 +639,7 @@ function serializeForLLMObservation(
   // Turn cells into a link, unless they are data: URIs and traverse instead
   if (isCell(value)) {
     const link = value.resolveAsCell().getAsNormalizedFullLink();
-    if (link.id.startsWith("data:")) {
+    if (hasDataUriScheme(link.id)) {
       return serializeForLLMObservation({
         value: value.get(),
         schema,
@@ -640,6 +656,35 @@ function serializeForLLMObservation(
       value: { "@link": createLLMFriendlyLink(link, contextSpace) },
       observedConfidentiality: [],
     };
+  }
+
+  // A `FabricPrimitive` is an atomic value whose state lives in private fields
+  // (zero enumerable own-props), so the `Object.fromEntries(Object.entries(
+  // ...))` rebuild below would hand the model a bare `{}` in place of its
+  // contents. It leaves whole, and it leaves ahead of the `seen` check: being a
+  // leaf it cannot participate in a cycle, and one reachable at two positions
+  // would otherwise trip the already-seen refusal.
+  if (value instanceof FabricPrimitive) {
+    return { value, observedConfidentiality: nodeConfidentiality };
+  }
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // rebuild below would flatten it to `{}` and the model would be shown an
+  // empty record where its contents should be. It refuses instead.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: a `FabricError` is exposed to pattern authors and ungated, so
+  // what keeps this safe is that nothing yet puts one where a model observes
+  // it.
+  //
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if (value instanceof FabricInstance) {
+    refuseFabricInstance(
+      value,
+      "when serializing a value for a language model",
+    );
   }
 
   if (seen.has(value)) {
@@ -664,15 +709,13 @@ function serializeForLLMObservation(
   const nextSeen = new Set(seen);
   nextSeen.add(value);
 
-  const cfc = new ContextualFlowControl();
-
   if (Array.isArray(value)) {
     const observedParts: Array<readonly unknown[] | undefined> = [
       nodeConfidentiality,
     ];
     const serialized = value.map((v, index) => {
       const linkSchema = schema !== undefined
-        ? cfc.schemaAtPath(schema, [index.toString()])
+        ? ContextualFlowControl.schemaAtPath(schema, [index.toString()])
         : undefined;
       let child = serializeForLLMObservation({
         value: v,
@@ -687,10 +730,10 @@ function serializeForLLMObservation(
       });
       observedParts.push(child.observedConfidentiality);
 
-      if (isRecord(child.value) && isCellResultForDereferencing(v)) {
+      if (isObjectOrArray(child.value) && isCellResultForDereferencing(v)) {
         const link = getCellOrThrow(v).resolveAsCell()
           .getAsNormalizedFullLink();
-        if (!link.id.startsWith("data:")) {
+        if (!hasDataUriScheme(link.id)) {
           child = {
             ...child,
             value: {
@@ -719,7 +762,7 @@ function serializeForLLMObservation(
         const child = serializeForLLMObservation({
           value: propValue,
           schema: schema !== undefined
-            ? cfc.schemaAtPath(schema, [key])
+            ? ContextualFlowControl.schemaAtPath(schema, [key])
             : undefined,
           seen: nextSeen,
           contextSpace,
@@ -774,14 +817,6 @@ function traverseAndSerialize(
  * @param space - The space to use to get the cells
  * @param value - The value to traverse and cellify
  * @returns The cellified value
- *
- * TODO(danfuzz): A `FabricPrimitive` is now returned atomically, but the other
- * special-object type, `FabricInstance` (a container), still reaches the
- * `Object.fromEntries(Object.entries(...))` walk and is flattened by its
- * internal slots (zero enumerable own-props) instead of its codec contents.
- * Unlike a primitive it *does* need descending into — but by its actual
- * contents, which this walk won't do correctly. This site will need attention
- * once FabricInstances see real use.
  */
 function traverseAndCellify(
   runtime: Runtime,
@@ -794,7 +829,7 @@ function traverseAndCellify(
       try {
         const parsed = JSON.parse(trimmed);
         if (
-          isRecord(parsed) && typeof parsed["@link"] === "string" &&
+          isObjectOrArray(parsed) && typeof parsed["@link"] === "string" &&
           Object.keys(parsed).length === 1 &&
           matchLLMFriendlyLink.test(parsed["@link"])
         ) {
@@ -811,7 +846,7 @@ function traverseAndCellify(
   // - it's a record with a single key "/"
   // - the value of the "/" key is a string that matches the URI pattern
   if (
-    isRecord(value) && typeof value["@link"] === "string" &&
+    isObjectOrArray(value) && typeof value["@link"] === "string" &&
     Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["@link"])
   ) {
     const link = parseLLMFriendlyLink(value["@link"], space);
@@ -825,7 +860,28 @@ function traverseAndCellify(
   // Object.entries(...))` rebuild below would flatten it to `{}`; leave it
   // intact as an atomic leaf, like any string or number.
   if (value instanceof FabricPrimitive) return value;
-  if (isRecord(value)) {
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // rebuild below would flatten it to `{}` -- and a cell nested in its state
+  // would go unmade, which is the whole of what this walk is for. It refuses
+  // instead.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: what this walks is a model's response, parsed from JSON, and
+  // no class instance survives that. A caller handing over a value assembled
+  // some other way would reach it.
+  //
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if (value instanceof FabricInstance) {
+    refuseFabricInstance(
+      value,
+      "when converting a language model's response to cells",
+    );
+  }
+
+  if (isObjectOrArray(value)) {
     return Object.fromEntries(
       Object.entries(value).map((
         [key, value],
@@ -952,7 +1008,7 @@ function resolveDirectContextCellRef(cell: unknown): Cell<any> | undefined {
     ? getCellOrThrow(cell).resolveAsCell()
     : isCell(cell)
     ? cell.resolveAsCell()
-    : isRecord(cell) && typeof cell.resolveAsCell === "function"
+    : isObjectOrArray(cell) && typeof cell.resolveAsCell === "function"
     ? cell.resolveAsCell()
     : undefined;
 }
@@ -995,12 +1051,15 @@ function readCellValueForObservation(
 
 function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
+  includeBuiltinTools = true,
 ): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const legacy: LegacyToolEntry[] = [];
   const pieces: PieceToolEntry[] = [];
 
   for (const [name, tool] of Object.entries(tools)) {
+    assertToolNameAvailable(name, includeBuiltinTools);
+
     if (tool?.piece?.get?.()) {
       const piece: Cell<any> = tool.piece;
       const pieceValue = piece.get();
@@ -1033,6 +1092,49 @@ const PIN_TOOL_NAME = "pin";
 const UNPIN_TOOL_NAME = "unpin";
 const PRESENT_RESULT_TOOL_NAME = "presentResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
+
+/**
+ * The names the dialog itself answers to when built-in tools are enabled.
+ */
+const BUILTIN_TOOL_NAMES: readonly string[] = [
+  READ_TOOL_NAME,
+  INVOKE_TOOL_NAME,
+  SCHEMA_TOOL_NAME,
+  PIN_TOOL_NAME,
+  UNPIN_TOOL_NAME,
+  UPDATE_ARGUMENT_TOOL_NAME,
+];
+
+/**
+ * Refuses a tool whose name the dialog has already given a meaning.
+ *
+ * A name addresses one tool. Letting a pattern supply a second under a name the
+ * dialog answers to would leave the catalog, the flattened list the UI reads,
+ * the CFC gates, and the system prompt each free to describe a different one,
+ * and the prompt describes the built-ins in prose that no lookup can redirect.
+ * So the name is refused where it is registered rather than resolved somewhere
+ * and quietly wrong everywhere else.
+ *
+ * `builtinTools: false` leaves the six unregistered, and free.
+ * `presentResult` is refused either way: the dialog stores the call carrying
+ * that name as its structured result, matching by name, whatever else is
+ * enabled.
+ */
+function assertToolNameAvailable(
+  name: string,
+  includeBuiltinTools: boolean,
+): void {
+  if (name === PRESENT_RESULT_TOOL_NAME) {
+    throw new Error(
+      `A tool may not be named "${PRESENT_RESULT_TOOL_NAME}": the dialog stores the call carrying that name as its structured result.`,
+    );
+  }
+  if (includeBuiltinTools && BUILTIN_TOOL_NAMES.includes(name)) {
+    throw new Error(
+      `A tool may not be named "${name}": it is a built-in tool of the dialog. Rename it, or pass builtinTools: false to run without the built-ins.`,
+    );
+  }
+}
 
 const READ_INPUT_SCHEMA = internSchema(
   {
@@ -1170,9 +1272,10 @@ type PinnedCell = {
   name: string; // Human-readable name for display
 };
 
-// ============================================================================
+//
 // Path Utility Functions
-// ============================================================================
+//
+
 // These utilities handle the conversion between LLM-facing path format (/of:...)
 // and internal runtime format (of:...). The LLM sees paths with a leading slash
 // to make it clear that strings are links.
@@ -1182,7 +1285,7 @@ function ensureString(
   field: string,
   example: string,
 ): string {
-  if (isRecord(value) && typeof value["@link"] === "string") {
+  if (isObjectOrArray(value) && typeof value["@link"] === "string") {
     return ensureString(value["@link"], field, example);
   }
   if (typeof value === "string") {
@@ -1250,7 +1353,7 @@ function flattenTools(
   }
 > {
   const flattened: Record<string, any> = {};
-  const { legacy } = collectToolEntries(toolsCell);
+  const { legacy } = collectToolEntries(toolsCell, includeBuiltinTools);
 
   for (const entry of legacy) {
     const passThrough: Record<string, unknown> = { ...entry.tool };
@@ -1376,6 +1479,7 @@ function buildToolCatalog(
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
     toolsCell as Cell<Record<string, Schema<typeof LLMToolSchema>>>,
+    includeBuiltinTools,
   );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
@@ -1498,6 +1602,7 @@ function materializeDialogRequestSnapshot(
     | JSONSchema
     | undefined;
   if (userResultSchema) {
+    // collectToolEntries refuses this name, so nothing else holds it.
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
@@ -1532,11 +1637,7 @@ function materializeDialogRequestSnapshot(
   const linkModelDocs = builtinTools
     ? "\n\n# Link and Cell Model\n\nThe system organizes all data and computation into cells. Use links to navigate between related data and compose tool operations."
     : "";
-  const listRecentHint = builtinTools
-    ? "\n\nIf the user's request is unclear or you need context about what they're referring to, call listRecent() to see recently viewed pieces."
-    : "";
-  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
-    listRecentHint;
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs;
 
   const llmParams = {
     system: augmentedSystem,
@@ -1627,7 +1728,7 @@ function buildAvailableCellsDocumentationWithObservation(
         : concreteCell.get() ?? concreteCell.getRaw();
       if (
         value === undefined &&
-        isRecord(schemaInfo) &&
+        isObjectOrArray(schemaInfo) &&
         Object.hasOwn(schemaInfo, "default")
       ) {
         value = (schemaInfo as Record<string, unknown>).default;
@@ -1645,6 +1746,11 @@ function buildAvailableCellsDocumentationWithObservation(
       });
       observedConfidentiality = serialized.observedConfidentiality;
 
+      // TODO(danfuzz): this is an unsafe use of `stringify()`: a
+      // `FabricSpecialObject` in the serialized value renders as `{}` in the
+      // documentation the model reads. It is a second, independent loss
+      // point — `serializeForLLMObservation` above carries its own marker,
+      // and fixing that walk alone still leaves this render.
       let valueJson = JSON.stringify(serialized.value ?? null, null, 2);
 
       const MAX_VALUE_LENGTH = 2000;
@@ -2100,9 +2206,10 @@ function toolAllowsObservedConfidentiality(
   }
 
   const toolSchema = toolCatalog.llmTools[toolName]?.inputSchema;
-  const maxConfidentiality = isRecord(toolSchema) && isRecord(toolSchema.ifc)
-    ? toolSchema.ifc.maxConfidentiality
-    : undefined;
+  const maxConfidentiality =
+    isObjectOrArray(toolSchema) && isObjectOrArray(toolSchema.ifc)
+      ? toolSchema.ifc.maxConfidentiality
+      : undefined;
   // A non-array ceiling means none was declared. A declared (even empty) ceiling
   // is enforced: an empty array is "public only". Delegate to
   // cfcObservationFitsCeiling rather than special-casing empty as allow-all,
@@ -2147,12 +2254,61 @@ function toolInputRequiredIntegrityFailure(
   value: unknown,
   path: string,
   trust: CfcFloorTrustContext,
+  root?: unknown,
+  visited?: Set<unknown>,
 ): string | undefined {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return undefined;
   }
-  const ifc = schema.ifc;
-  if (isRecord(ifc) && Array.isArray(ifc.requiredIntegrity)) {
+  // A reference-form schema resolves before the walk, through the
+  // fail-closed resolver: this is a security gate, so an unresolvable
+  // reference refuses the call — a floor could hide behind it. Deliberately
+  // NOT resolveExternalRootRefForStructure, whose reference-unchanged miss
+  // would read as nothing-to-refuse. A LOCAL reference resolves against the
+  // owning document (`root`) the recursion carries — a member of a recursive
+  // group arrives as a bare pointer with its floor behind it — and following
+  // an external reference makes the resolved document the owning root for
+  // everything under it.
+  let structural = schema;
+  // A schema that declares its own `$defs` opens a scope: local references
+  // under it resolve against IT, not the inherited document. The same
+  // child-root rule the CFC schema walkers apply.
+  let structuralRoot: JSONSchema = cfcSchemaChildRoot(
+    schema as JSONSchema,
+    (root ?? schema) as JSONSchema,
+  );
+  const ref = structural.$ref;
+  if (typeof ref === "string") {
+    try {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        structural,
+        structuralRoot,
+      );
+      if (!isObjectOrArray(resolved)) return undefined;
+      structural = resolved;
+      if (isExternalSchemaRef(ref)) {
+        structuralRoot = resolved;
+      }
+      structuralRoot = cfcSchemaChildRoot(
+        structural as JSONSchema,
+        structuralRoot,
+      );
+    } catch {
+      return `field "${
+        path || "(root)"
+      }" carries a schema reference this session cannot resolve; ` +
+        `refusing the call (fail closed)`;
+    }
+  }
+  // A compound branch recurses on the SAME value, so a self-referential
+  // group could otherwise walk forever. Everything reachable at this value
+  // position is gated the first time its (interned, identity-stable)
+  // resolution appears; a repeat is the cycle closing.
+  const seen = visited ?? new Set<unknown>();
+  if (seen.has(structural)) return undefined;
+  seen.add(structural);
+  const ifc = structural.ifc;
+  if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
@@ -2172,14 +2328,14 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
-  if (isRecord(schema.properties)) {
-    for (const [key, childSchema] of Object.entries(schema.properties)) {
+  if (isObjectOrArray(structural.properties)) {
+    for (const [key, childSchema] of Object.entries(structural.properties)) {
       // Only gate fields the model actually supplied. An absent (e.g. optional)
       // field carries no value to gate; treating it as `undefined` would fail
       // an optional field's floor and over-block the call. A required field the
       // model omitted is a structural error handled by ordinary input
       // validation, not a floor bypass — there is no injected value to gate.
-      if (!isRecord(value) || !Object.hasOwn(value, key)) {
+      if (!isObjectOrArray(value) || !Object.hasOwn(value, key)) {
         continue;
       }
       const failure = toolInputRequiredIntegrityFailure(
@@ -2189,6 +2345,7 @@ function toolInputRequiredIntegrityFailure(
         value[key],
         path ? `${path}.${key}` : key,
         trust,
+        structuralRoot,
       );
       if (failure !== undefined) {
         return failure;
@@ -2202,14 +2359,14 @@ function toolInputRequiredIntegrityFailure(
   // previously went entirely ungated: this walk never descended
   // prefixItems.
   if (Array.isArray(value)) {
-    const prefixItems = Array.isArray(schema.prefixItems)
-      ? schema.prefixItems
+    const prefixItems = Array.isArray(structural.prefixItems)
+      ? structural.prefixItems
       : undefined;
     for (let index = 0; index < value.length; index++) {
       const slotSchema = prefixItems !== undefined && index < prefixItems.length
         ? prefixItems[index]
-        : schema.items;
-      if (!isRecord(slotSchema)) continue;
+        : structural.items;
+      if (!isObjectOrArray(slotSchema)) continue;
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
         space,
@@ -2217,6 +2374,7 @@ function toolInputRequiredIntegrityFailure(
         value[index],
         `${path}[${index}]`,
         trust,
+        structuralRoot,
       );
       if (failure !== undefined) {
         return failure;
@@ -2227,7 +2385,7 @@ function toolInputRequiredIntegrityFailure(
   // branch. For a required-integrity FLOOR, requiring the union across
   // branches is the fail-safe (over-require) direction, matching walkIfcSchema.
   for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-    const branches = schema[key];
+    const branches = structural[key];
     if (Array.isArray(branches)) {
       for (const branch of branches) {
         const failure = toolInputRequiredIntegrityFailure(
@@ -2237,6 +2395,8 @@ function toolInputRequiredIntegrityFailure(
           value,
           path,
           trust,
+          structuralRoot,
+          seen,
         );
         if (failure !== undefined) {
           return failure;
@@ -2471,6 +2631,7 @@ export const llmDialogTestHelpers = {
 export const llmToolExecutionHelpers = {
   PRESENT_RESULT_TOOL_NAME,
   buildToolCatalog,
+  flattenTools,
   executeToolCalls,
   extractToolCallParts,
   buildAssistantMessage,
@@ -2485,6 +2646,7 @@ export const llmToolExecutionHelpers = {
   effectiveObservationCeiling,
   stripFrameworkProvidedFields,
   applyAutoProvidedSandboxId,
+  toolInputRequiredIntegrityFailure,
 };
 
 /**
@@ -2511,6 +2673,12 @@ async function safelyPerformUpdate(
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
     ) {
+      // Marked on the arm that writes (round-2 thread 6): a bail-out
+      // (pending=false or a superseded requestId) writes nothing and
+      // must not commit as a spurious no-op effect-completion for
+      // `llmDialog:<requestId>` on every canceled/superseded turn. The
+      // marker still precedes every write of this arm.
+      markEffectCompletion(tx, `llmDialog:${requestId}`);
       action(tx);
       internal.withTx(tx).key("lastActivity").set(Date.now());
       return true;
@@ -2526,13 +2694,44 @@ async function safelyPerformUpdate(
 }
 
 /**
+ * `editWithRetry` bound to the turn's abort signal (round-2 thread 14):
+ * a stopped or replaced turn must not persist pin/unpin/argument state
+ * from a tool call that was mid-flight when the cancel landed. Checked
+ * before starting AND inside the callback (a retry attempt after the
+ * cancel aborts too — the throw makes editWithRetry abort the tx and
+ * return the error without committing).
+ */
+function editWithRetryUnlessAborted(
+  runtime: Runtime,
+  abortSignal: AbortSignal | undefined,
+  fn: (tx: IExtendedStorageTransaction) => void,
+): ReturnType<Runtime["editWithRetry"]> {
+  if (abortSignal?.aborted) {
+    return Promise.resolve({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "Tool call cancelled",
+        reason: new Error("turn-aborted"),
+      },
+    });
+  }
+  return runtime.editWithRetry((tx) => {
+    if (abortSignal?.aborted) {
+      throw new Error("Tool call cancelled");
+    }
+    fn(tx);
+  });
+}
+
+/**
  * Handles the pin tool call.
  */
-function handlePin(
+async function handlePin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
-): { type: string; value: any } {
+  abortSignal?: AbortSignal,
+): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
 
   // Check if already pinned
@@ -2543,14 +2742,51 @@ function handlePin(
     };
   }
 
-  // Add new pinned cell using a transaction
-  runtime.editWithRetry((tx) => {
+  // Add new pinned cell using a transaction. AWAITED and surfaced (the
+  // stage-G review's Flag 4): fire-and-forget discarded the outcome, so
+  // ON-arm the serving posture's unstamped-seal refusal (serving-loop.md
+  // §3d) vanished as an unhandled rejection while the tool reported
+  // success. Classification (RULED 2026-08-05; IMPLEMENTED with
+  // Phase 3): pin is COMPLETION-CLASS turn-lifecycle state — the mark
+  // routes the commit through the effect-completion path (its own
+  // derived-class commit under the serving posture; a no-op elsewhere).
+  // The lifecycle subkey is deliberately NOT the turn's own effect key:
+  // retiring `llmDialog:<requestId>` mid-turn would tear the turn's
+  // in-flight dedupe entry.
+  // NOTE (review 2026-08-11; T17 pinned 2026-08-14): the completion
+  // path's identity annotations fall back to the WAVE-LEVEL identity
+  // when no outbox carriage is live (space-server.ts's
+  // effect-completion comment) — and these lifecycle subkeys carry no
+  // carriage by construction. Sound while `pinnedCells` is
+  // space-scope. If it is ever SCOPED (per-user/per-session), this
+  // commit would resolve against the serving session's identity, not
+  // the acting user's instance — the T17 lifecycle-carriage pin in
+  // executor-serving-loop.test.ts binds exactly that fallback (scoped
+  // op under the wave key, no attribution) and is the test such a
+  // change must flip. Applies to unpin below identically.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
+    markEffectCompletion(tx, "llmDialog:lifecycle:pin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     pinnedCells.withTx(tx).set([
       ...currentInTx,
       { path: resolved.path, name: resolved.name },
     ]);
   });
+  if (committed.error !== undefined) {
+    logger.warn("pin-commit-failed", () => [
+      `pin of ${resolved.path} failed to commit`,
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Pin failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return { type: "json", value: { success: true } };
 }
@@ -2558,11 +2794,12 @@ function handlePin(
 /**
  * Handles the unpin tool call.
  */
-function handleUnpin(
+async function handleUnpin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
-): { type: string; value: any } {
+  abortSignal?: AbortSignal,
+): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
   const filtered = current.filter((p) => p.path !== resolved.path);
 
@@ -2573,12 +2810,31 @@ function handleUnpin(
     };
   }
 
-  // Remove pinned cell using a transaction
-  runtime.editWithRetry((tx) => {
+  // Remove pinned cell using a transaction. Awaited and surfaced — see
+  // handlePin (Flag 4). Classification (RULED 2026-08-05;
+  // IMPLEMENTED with Phase 3): unpin is COMPLETION-CLASS
+  // turn-lifecycle state.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
+    markEffectCompletion(tx, "llmDialog:lifecycle:unpin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
     pinnedCells.withTx(tx).set(filteredInTx);
   });
+  if (committed.error !== undefined) {
+    logger.warn("unpin-commit-failed", () => [
+      `unpin of ${resolved.path} failed to commit`,
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Unpin failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return { type: "json", value: { success: true } };
 }
@@ -2653,10 +2909,11 @@ async function handleRead(
 /**
  * Handles the update Argument tool call.
  */
-function handleUpdateArgument(
+async function handleUpdateArgument(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
-): { type: string; value: any } {
+  abortSignal?: AbortSignal,
+): Promise<{ type: string; value: any }> {
   const cell = resolved.cellRef;
   const updates = resolved.updates;
 
@@ -2676,10 +2933,32 @@ function handleUpdateArgument(
     updates,
   );
 
-  // Apply updates to argument fields
-  runtime.editWithRetry((tx) => {
+  // Apply updates to argument fields. Awaited and surfaced — see
+  // handlePin (Flag 4): the discarded outcome silently swallowed the
+  // ON-arm unstamped-seal refusal while reporting success.
+  // Classification (RULED 2026-08-05; IMPLEMENTED with Phase 3):
+  // updateArgument is a HANDLER-CLASS consequence — the stamp seals it
+  // into the wave as a non-re-derivable event-handler contribution
+  // (§3d's rebase-don't-drop class). No eventId: the mutation is a
+  // tool-call consequence, not a stream event — a raced rebase that
+  // conflicts semantically rolls it back with nothing to requeue,
+  // which is the class's inherent no-event corner.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
+    runtime.stampServerRun(tx, {
+      // Keyed per TARGET instance (round-2 thread T28): one global id
+      // made the wave's §3b overwrite unit treat CONCURRENT
+      // updateArgument calls against different targets as re-runs of
+      // one action — a later contribution's basis/rebase rows replaced
+      // an earlier unrelated one's as a set. The argument doc id is
+      // durable and retry-stable.
+      actionId:
+        `llm-dialog/update-argument:${argumentCell.getAsNormalizedFullLink().id}`,
+      kind: "event-handler",
+    });
     if (
-      isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
+      isObjectNotArray(cellifiedValue) &&
       !isCell(cellifiedValue)
     ) {
       argumentCell.withTx(tx).update(cellifiedValue);
@@ -2687,6 +2966,19 @@ function handleUpdateArgument(
       argumentCell.withTx(tx).set(cellifiedValue);
     }
   });
+  if (committed.error !== undefined) {
+    logger.warn("update-argument-commit-failed", () => [
+      "updateArgument failed to commit",
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Argument update failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return {
     type: "json",
@@ -2843,14 +3135,39 @@ async function handleInvoke(
     if (pattern) {
       runtime.run(tx, pattern, invocationArgs, result);
     } else if (handler) {
-      handler.withTx(tx).send({
-        ...input,
-        result, // doesn't HAVE to be used, but can be
-      }, (completedTx: IExtendedStorageTransaction) => {
-        const summary = formatTransactionSummary(completedTx, space);
-        const value = result.withTx(completedTx);
-        resolve({ value, summary });
-      });
+      // Inject the result cell only when the caller's input does not carry a
+      // `result` of its own. Overwriting would silently DISCARD caller data
+      // before the closed-world gate could see it — the accepted-and-ignored
+      // failure mode C5 kills — so a caller-supplied `result` flows through
+      // UNMARKED instead: against a closed schema that does not declare it,
+      // the gate refuses the call; against an open or declaring schema it is
+      // the caller's ordinary field. The advertised schema hides `result`
+      // (stripInjectedResult), so a well-behaved caller never sends one and
+      // always gets the injected cell.
+      const injectResult =
+        !(isObjectOrArray(input) && Object.hasOwn(input, "result"));
+      handler.withTx(tx).send(
+        injectResult
+          ? {
+            ...input,
+            result, // doesn't HAVE to be used, but can be
+          }
+          : input,
+        (completedTx: IExtendedStorageTransaction) => {
+          const summary = formatTransactionSummary(completedTx, space);
+          const value = result.withTx(completedTx);
+          resolve({ value, summary });
+        },
+        // Provenance for the closed-world gate: `result` is OUR injection,
+        // named through the mint-gated internal options bag (see
+        // markRuntimeInjectedEventKeys) — never inferable from the payload's
+        // shape, so nothing a caller sends can claim the exemption.
+        injectResult
+          ? {
+            runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
+          }
+          : undefined,
+      );
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
@@ -3008,14 +3325,14 @@ async function invokeToolCall(
   // Handle pinned cell tools
   if (resolved.type === "pin") {
     return {
-      result: handlePin(runtime, resolved, pinnedCells!),
+      result: await handlePin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
 
   if (resolved.type === "unpin") {
     return {
-      result: handleUnpin(runtime, resolved, pinnedCells!),
+      result: await handleUnpin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -3048,7 +3365,7 @@ async function invokeToolCall(
   // Handle run-type tools (external, run with pattern/handler)
   if (resolved.type === "updateArgument") {
     return {
-      result: handleUpdateArgument(runtime, resolved),
+      result: await handleUpdateArgument(runtime, resolved, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -3115,7 +3432,23 @@ export function llmDialog(
     // Abort the request if it's still pending.
     abortController?.abort("Pattern stopped");
 
+    // The cells below are assigned during the first run of this node, and a
+    // pattern can be stopped before that happens -- notably when startup
+    // fails, since the failure path cancels what it already registered. There
+    // is nothing of ours to wind down in that case, and reaching for the cells
+    // would throw from inside cleanup, replacing whatever error caused the
+    // stop.
+    if (!cellsInitialized) return;
+
     const tx = runtime.edit();
+    // Teardown tx on piece stop — no scheduler run stamps it;
+    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+    // serving runtime releases the claim instead of refusing the
+    // unstamped seal. No-op off the serving posture.
+    runtime.stampServerRun(tx, {
+      actionId: `llmDialog/teardown/${parentCell.sourceURI}`,
+      kind: "bookkeeping",
+    });
 
     // If the pending request is ours, set pending to false and clear the requestId.
     if (internal.withTx(tx).key("requestId").get() === requestId) {
@@ -3140,25 +3473,27 @@ export function llmDialog(
       // previously existing results. Note that we might not yet have it loaded
       // and that this function will be called again once the data is loaded
       // (but this if branch will be skipped then).
-      const baseResult = runtime.getCell(
-        parentCell.space,
+      result = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llmDialog: { result: cause } },
         resultSchema,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
       result.sync(); // Kick off sync, no need to await
 
       // Create another cell to store the internal state. This isn't returned to
       // the caller. But again, the predictable cause means all instances tied
       // to the same input cells will coordinate via the same cell.
-      const baseInternal = runtime.getCell(
-        parentCell.space,
+      internal = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llmDialog: { internal: cause } },
         internalSchema,
-        tx,
+        outputScope,
       );
-      internal = scopedCell(runtime, tx, baseInternal, outputScope);
       internal.sync(); // Kick off sync, no need to await
 
       // Create pinnedCells cell to store the internal pinned cells state
@@ -3173,13 +3508,14 @@ export function llmDialog(
           required: ["path", "name"],
         },
       } as const;
-      const basePinnedCells = runtime.getCell(
-        parentCell.space,
+      pinnedCells = ownedCell(
+        runtime,
+        tx,
+        parentCell,
         { llmDialog: { pinnedCells: cause } },
         pinnedCellsSchema,
-        tx,
+        outputScope,
       );
-      pinnedCells = scopedCell(runtime, tx, basePinnedCells, outputScope);
       pinnedCells.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
@@ -3254,22 +3590,55 @@ export function llmDialog(
 
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
-          beginPresentedResultTurn(
+          // Each message becomes its own document, which the LlmDerived
+          // stamping downstream relies on. Pushing a plain message would also
+          // produce one, since `Cell.push` anchors objects in arrays; the
+          // document is made explicitly to control its identity -- a
+          // deliberate cause rather than a frame-relative counter.
+          // TODO(seefeld): Once we have event ids, the cause should be that.
+          //
+          // Space AND scope come from the RESOLVED messages link -- the array
+          // document itself, not the input slot that points at it, which can
+          // sit at a different scope. `push()` resolves the same way before it
+          // writes; a document minted at the slot's scope instead lands in a
+          // partition the array's readers never look in.
+          //
+          // The document is left schema-less: the schema it would carry ends
+          // up inlined in every link written to it, and the array's own items
+          // schema already describes what a reader finds there.
+          const messagesForPush = inputs.key("messages");
+          const messagesBase = resolveLink(
+            runtime,
             tx,
-            result,
-            inputs.withTx(tx).key("resultSchema").get(),
+            messagesForPush.getAsNormalizedFullLink(),
           );
-          inputs.key("messages").withTx(tx).push(
-            {
-              ...event,
-              // Add ID manually, as for built-ins this isn't automated
-              // TODO(seefeld): Once we have event ids, it should be that.
-              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
-              // Cast because we can't yet express ArrayBuffer in JSON Schema
-            } as Schema<
-              typeof LLMMessageSchema
-            >,
+          const messageCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+            messagesBase.space,
+            { llmDialog: { message: cause, id: crypto.randomUUID() } },
+            undefined,
+            tx,
+            messagesBase.scope,
           );
+          // Each message is its own document, minted from this node's cause
+          // and named by nobody's schema. It is filled by the transaction that
+          // mints it, so the marker alone reaches it — enrolling a per-message
+          // store would grow the runtime's set for as long as the piece runs
+          // (`runtime-owned-store.ts`).
+          //
+          // The document is minted in the resolved messages array's space,
+          // which need not be this node's. Where it is not, the marker names
+          // nothing: a store in another space belongs to whoever holds that
+          // space's replicas, so this node's flow join has no business
+          // becoming its declared policy. A labeled write to such a transcript
+          // is refused, as it was before this route existed; admitting it
+          // needs a cross-space release decision, which is not a write-side
+          // fit check's to make.
+          recordRuntimeOwnedStore(tx, result, messageCell);
+          messageCell.withTx(tx).set(
+            // Cast because we can't yet express ArrayBuffer in JSON Schema
+            { ...event } as Schema<typeof LLMMessageSchema>,
+          );
+          messagesForPush.withTx(tx).push(messageCell);
 
           // Set up new request (abort existing ones just in case) by allocating
           // a new request Id and setting up a new abort controller.
@@ -3339,6 +3708,40 @@ export function llmDialog(
                 }),
                 parentCell,
               );
+            },
+            {
+              onRejected: () => {
+                // The turn is not in the conversation: the user's message, the
+                // pending flag and the request id all rode the transaction
+                // that was abandoned, so appending an assistant error message
+                // here would answer a turn no reader can see. What is left to
+                // do is put the announcement back, since it rode that
+                // transaction too, and take the pending flag down so nothing
+                // waits on a turn that will not run. The seam reports the
+                // refusal itself.
+                runtime.trackAsyncWork(
+                  settleAbandonedRequest(
+                    runtime,
+                    "llmDialog",
+                    `llmDialog:${nextRequestId}`,
+                    (settleTx) => {
+                      // The announcement rode the abandoned transaction, so it
+                      // is made again whoever owns the turn now.
+                      sendResult(settleTx, result);
+                      // Decided here rather than when this callback ran: a
+                      // newer turn can start in between, and taking its
+                      // pending flag down would report it as finished.
+                      const claim = internal.withTx(settleTx).key("requestId")
+                        .get();
+                      if (claim !== undefined && claim !== nextRequestId) {
+                        return;
+                      }
+                      pending.withTx(settleTx).set(false);
+                    },
+                  ),
+                  parentCell,
+                );
+              },
             },
           );
         },
@@ -3534,7 +3937,35 @@ async function startRequest(
     const startIndex = (messagesCell.withTx(tx).get() as
       | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
-    messagesCell.withTx(tx).push(...messages);
+    // Each message becomes its own document, which the stamping below reads
+    // back. Pushing plain messages would also produce them, since `Cell.push`
+    // anchors objects in arrays; they are made explicitly to control their
+    // identity -- a deliberate cause rather than a frame-relative counter.
+    // TODO(seefeld): Once we have event ids, the cause should be that.
+    //
+    // Space, scope and schema follow the user-message push: resolved link,
+    // schema-less document.
+    const base = resolveLink(
+      runtime,
+      tx,
+      messagesCell.getAsNormalizedFullLink(),
+    );
+    messagesCell.withTx(tx).push(
+      ...messages.map((message) => {
+        const messageCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+          base.space,
+          { llmDialog: { message: cause, id: crypto.randomUUID() } },
+          undefined,
+          tx,
+          base.scope,
+        );
+        // Per-message store: named for this transaction, not enrolled. See
+        // the sibling in `addMessage` and `runtime-owned-store.ts`.
+        recordRuntimeOwnedStore(tx, result, messageCell);
+        messageCell.withTx(tx).set(message);
+        return messageCell;
+      }),
+    );
     if (runtime.cfcEnforcementMode === "disabled") {
       return;
     }
@@ -3547,15 +3978,14 @@ async function startRequest(
       builtinId: "llmDialog",
     });
     // Record the stamping schema for each pushed message's own entity doc
-    // (every model push carries an [ID] sigil, so each message splits into
-    // its own doc). The messages link carries its own schema, which wins over
+    // (every message is appended as a link to a document of its own, so each
+    // one is separately addressable). The messages link carries its own schema, which wins over
     // an `asSchema` handle inside `push()` (`resolvedLink.schema ?? ...`), so
     // the stamp cannot ride the array handle — instead this mirrors the
     // split-entity idiom in data-updating.ts (`recordRelevantSchemaWrite-
     // PolicyInput` on the child doc), which also marks the transaction
     // CFC-relevant so `prepareTxForCommit` runs the persist pass that mints
     // the labelMap entry.
-    const base = messagesCell.getAsNormalizedFullLink();
     for (let index = 0; index < messages.length; index++) {
       const raw = messagesCell.withTx(tx).key(startIndex + index).getRaw();
       const link = parseLink(raw);
@@ -3606,6 +4036,7 @@ async function startRequest(
 
   // Write to result cell using editWithRetry since we're outside handler tx
   await runtime.editWithRetry((tx) => {
+    markEffectCompletion(tx, `llmDialog:${requestId}`);
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 
@@ -3621,6 +4052,7 @@ async function startRequest(
   const userResultSchema = capturedRequest?.userResultSchema ??
     (inputs.key("resultSchema").get() as JSONSchema | undefined);
   if (userResultSchema && capturedRequest === undefined) {
+    // collectToolEntries refuses this name, so nothing else holds it.
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
@@ -3698,13 +4130,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 **Use links to navigate between related data and compose operations.**`
     : "";
 
-  const listRecentHint = builtinTools
-    ? "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
-      "call listRecent() to see recently viewed pieces."
-    : "";
-
-  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
-    listRecentHint;
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs;
 
   const liveMessages = messagesCell.get() as readonly BuiltInLLMMessage[];
   const visibleMessages = getObservedDialogMessages(
@@ -3766,11 +4192,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           "LLM returned invalid/empty content, adding error message",
         );
         const errorMessage = {
-          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content:
             "I encountered an error generating a response. Please try again.",
-        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+        } satisfies BuiltInLLMMessage;
 
         await safelyPerformUpdate(
           runtime,
@@ -3778,16 +4203,27 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           internal,
           requestId,
           (tx) => {
-            messagesCell.withTx(tx).push(
+            // As above: made explicitly for identity control, in the resolved
+            // messages document's space and scope, schema-less.
+            const errorBase = resolveLink(
+              runtime,
+              tx,
+              messagesCell.getAsNormalizedFullLink(),
+            );
+            const errorCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+              errorBase.space,
+              { llmDialog: { message: cause, id: crypto.randomUUID() } },
+              undefined,
+              tx,
+              errorBase.scope,
+            );
+            // Per-message store: named for this transaction, not enrolled.
+            recordRuntimeOwnedStore(tx, result, errorCell);
+            errorCell.withTx(tx).set(
               errorMessage as Schema<typeof LLMMessageSchema>,
             );
-            failPresentedResultTurn(
-              tx,
-              result,
-              pending,
-              userResultSchema,
-              "The model returned an empty or invalid response.",
-            );
+            messagesCell.withTx(tx).push(errorCell);
+            pending.withTx(tx).set(false);
           },
         );
         return;
@@ -3805,11 +4241,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             llmContent,
             toolCallParts,
           );
-
-          // Add ID to assistant message and publish immediately
-          (assistantMessage as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-            llmDialog: { message: cause, id: crypto.randomUUID() },
-          };
 
           await safelyPerformUpdate(
             runtime,
@@ -3884,10 +4315,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             );
             // Add error message instead of invalid partial results
             const errorMessage = {
-              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
               role: "assistant",
               content: "Some tool calls failed to execute. Please try again.",
-            } satisfies BuiltInLLMMessage & { [ID]: unknown };
+            } satisfies BuiltInLLMMessage;
 
             await safelyPerformUpdate(
               runtime,
@@ -3912,12 +4342,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
           // Create and publish tool result messages
           const toolResultMessages = createToolResultMessages(toolResults);
-
-          toolResultMessages.forEach((message) => {
-            (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-              llmDialog: { message: cause, id: crypto.randomUUID() },
-            };
-          });
 
           const success = await safelyPerformUpdate(
             runtime,
@@ -4028,10 +4452,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
       } else {
         // No tool calls, just add the assistant message
         const assistantMessage = {
-          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content: llmResult.content,
-        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+        } satisfies BuiltInLLMMessage;
 
         // Ignore errors here, it probably means something else took over.
         await safelyPerformUpdate(
@@ -4063,11 +4486,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
         ? error.message
         : String(error);
       const errorMessage = {
-        [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
         role: "assistant",
         content:
           `I encountered an error generating a response: ${errorMessageText}`,
-      } satisfies BuiltInLLMMessage & { [ID]: unknown };
+      } satisfies BuiltInLLMMessage;
 
       safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
         messagesCell.withTx(tx).push(
@@ -4086,7 +4508,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
 function getSchemaTypeString(schema: JSONSchema): string {
   let defs;
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     // Convert schema to TypeScript-like string for readability
     defs = (schema as Record<string, unknown>).$defs as
       | Record<string, JSONSchema>

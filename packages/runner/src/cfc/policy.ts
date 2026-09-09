@@ -1,6 +1,5 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { isRecord } from "@commonfabric/utils/types";
+import { deepFreeze, hashStringOf } from "@commonfabric/data-model";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { type AtomPattern, isAtomVarPlaceholder } from "./atom-pattern.ts";
 
 export const CFC_POLICY_MANIFEST_ID_PREFIX = "of:cfc-policy-manifest:";
@@ -42,8 +41,10 @@ export const cfcPolicyManifestDocId = (
 export type ExchangeRule = {
   /** Stable identifier: diagnostics, canonical evaluation order, digests. */
   readonly id: string;
+
   /** Target pattern selecting the clause alternative this rule rewrites. */
   readonly appliesTo: AtomPattern;
+
   /**
    * Conjunctive guards (spec §4.3.2 preCondition). `confidentiality` are the
    * non-target side conditions; `integrity` match against available
@@ -62,6 +63,7 @@ export type ExchangeRule = {
     readonly boundary?: readonly AtomPattern[];
     readonly policyState?: readonly AtomPattern[];
   };
+
   /**
    * Scope for the non-target confidentiality side conditions. Default
    * `targetClause`: they must match alternatives of the SAME clause as the
@@ -69,6 +71,7 @@ export type ExchangeRule = {
    * label.
    */
   readonly preConfScope?: "targetClause" | "anywhere";
+
   /**
    * Effect when the rule fires on a matched clause alternative. Exactly one
    * of the two forms (validated): `addAlternatives` instantiates patterns
@@ -130,6 +133,7 @@ export type CfcPolicyRecordInput = {
   readonly id: string;
   readonly rules: readonly ExchangeRule[];
   readonly digest?: string;
+
   /** Scope mode (see {@link CfcPolicySelection}); defaults to `ambient`. */
   readonly selection?: CfcPolicySelection;
 };
@@ -245,13 +249,13 @@ const rejectUnknownKeys = (
 };
 
 // A PLAIN object (prototype `Object.prototype` or null) — the shape authored
-// TS literals and parsed JSON produce. `isRecord` alone admits `Map`, `Set`,
+// TS literals and parsed JSON produce. `isObjectOrArray` alone admits `Map`, `Set`,
 // and class instances, whose own-enumerable string keys are usually empty, so
 // the field-by-field validation below would read NO guards and wave through
 // an unguarded rule (cubic P1 on #4562). Config that is not a plain object
 // fails closed here.
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
-  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 };
@@ -295,7 +299,7 @@ const validateTemplatePattern = (
     );
     return;
   }
-  if (!isRecord(value)) return;
+  if (!isObjectOrArray(value)) return;
   if (Object.hasOwn(value, "var")) {
     if (!isAtomVarPlaceholder(value)) {
       throw new Error(`cfcPolicyManifest: malformed variable in ${where}`);
@@ -333,7 +337,7 @@ const collectPatternVariables = (
     value.forEach((entry) => collectPatternVariables(entry, variables));
     return;
   }
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     Object.values(value).forEach((field) =>
       collectPatternVariables(field, variables)
     );

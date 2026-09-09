@@ -1,6 +1,6 @@
 import { walk } from "@std/fs";
 import { fromFileUrl, join, relative } from "@std/path";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { SOURCE_COMPILE_CACHE_RUNTIME_VERSION } from "./compile-cache-version.ts";
 
@@ -97,6 +97,7 @@ const FINGERPRINT_LENGTH = 16;
 interface FingerprintFile {
   /** Path relative to the repo root, with forward slashes. */
   readonly path: string;
+
   /** File contents with line endings normalized to `\n`. */
   readonly content: string;
 }

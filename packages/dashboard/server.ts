@@ -1,34 +1,44 @@
 #!/usr/bin/env -S deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env
-// Fabric wall — modular live dashboard.
-//
-// Each tile lives in tiles/ and is registered once in registry.ts. This file is
-// generic: it schedules every tile's collect() on its own interval, renders the
-// results uniformly, serves the page, pushes SSE updates, and mounts any
-// drill-down routes a tile declares. It knows nothing about individual tiles.
-//
-//   cd <repo root>
-//   deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env \
-//     packages/dashboard/server.ts
-//   open http://localhost:8731
-//
-// Optional env for the token-gated tiles (each grays out cleanly without it):
-//   SIGNOZ_URL, SIGNOZ_API_KEY        production error-rate tile
-//   GCP_BILLING_TABLE                 cloud-spend tile (BigQuery REST; Workload
-//                                     Identity in GKE, or GCP_SA_KEY locally)
-//   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
-//   GH_TOKEN                          GitHub tiles; org Members read also powers
-//                                     the organization-users tile
-//   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
+
+/**
+ * Runs the fabric wall: the live dashboard everything else in this package
+ * feeds. Each tile lives under tiles/ and is registered once in registry.ts,
+ * and this file stays generic about all of them. It schedules every tile's
+ * collect() on that tile's own interval, renders the results uniformly, serves
+ * the page, pushes updates down the event stream, and mounts whatever
+ * drill-down routes a tile declares. It knows nothing about individual tiles.
+ *
+ *   cd <repo root>
+ *   deno run --allow-net --allow-run=deno,git --allow-read --allow-write \
+ *     --allow-env packages/dashboard/server.ts
+ *   open http://localhost:8731
+ *
+ * The token-gated tiles read optional environment variables, and each one
+ * grays out cleanly when its own is unset:
+ *   SIGNOZ_URL, SIGNOZ_API_KEY        production error-rate tile
+ *   GCP_BILLING_TABLE                 cloud-spend tile, over the BigQuery REST
+ *                                     API, authenticating as the workload in
+ *                                     GKE or with GCP_SA_KEY locally
+ *   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
+ *   GH_TOKEN                          GitHub tiles; read access to the
+ *                                     organization's members also powers the
+ *                                     organization-users tile
+ */
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
-import { friendlyError } from "./lib.ts";
+import { friendlyError, githubOperationsInProgress } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell } from "./render.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 import { dashboardVersion } from "./version.ts";
+import {
+  DASHBOARD_MESSAGE_MAX_LENGTH,
+  type DashboardMessage,
+  DashboardMessageStore,
+} from "./dashboard-message.ts";
 
 const ctx = makeCtx();
 const views = new Map<string, TileView>();
@@ -45,6 +55,12 @@ const activeTileUpdates = new Map<string, ActiveTileUpdate>();
 const activeRunSourceUpdates = new Set<string>();
 let lastChange = 0;
 let faviconRedSince: number | null = null;
+const dashboardMessageStore = new DashboardMessageStore();
+let dashboardMessage: DashboardMessage = {
+  text: "",
+  updatedAt: null,
+  revision: 0,
+};
 
 export function nextFaviconRedSince(
   current: number | null,
@@ -74,6 +90,7 @@ interface DashboardUpdate {
   faviconStatus: FaviconStatus;
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
+  message: DashboardMessage;
 }
 
 function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): DashboardUpdate {
@@ -105,15 +122,30 @@ function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): D
     faviconRedAgeMs: faviconRedSince === null
       ? null
       : Math.max(0, now - faviconRedSince),
+    message: { ...dashboardMessage },
   };
+}
+
+async function refreshDashboardMessage(): Promise<boolean> {
+  try {
+    const refreshed = await dashboardMessageStore.refresh();
+    const previous = dashboardMessage;
+    dashboardMessage = refreshed.message;
+    return refreshed.expired ||
+      previous.text !== dashboardMessage.text ||
+      previous.updatedAt !== dashboardMessage.updatedAt ||
+      previous.revision !== dashboardMessage.revision;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return false;
+  }
 }
 
 export const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const enc = new TextEncoder();
 const encodeUpdate = (update: DashboardUpdate) =>
   enc.encode(`event: update\ndata: ${JSON.stringify(update)}\n\n`);
-export const broadcast = (update: DashboardUpdate) => {
-  const event = encodeUpdate(update);
+const send = (event: Uint8Array) => {
   for (const c of clients) {
     try {
       c.enqueue(event);
@@ -122,6 +154,14 @@ export const broadcast = (update: DashboardUpdate) => {
     }
   }
 };
+export const broadcast = (update: DashboardUpdate) => send(encodeUpdate(update));
+// A tick that collects nothing publishes nothing, so a browser cannot read
+// silence as a fault unless the server speaks on its own schedule. The
+// heartbeat is that schedule: a browser that stops hearing it replaces its
+// stream. The SSE data field carries the tick count because an event with no
+// data is not delivered to the page.
+let beats = 0;
+export const heartbeat = () => send(enc.encode(`event: ping\ndata: ${++beats}\n\n`));
 
 const runSourceKey = (source: RunSource): string => `${source.repo} ${source.workflow}`;
 const runSourceTileKey = (source: RunSource, tile: Tile): string => `${runSourceKey(source)} ${tile.id}`;
@@ -153,19 +193,29 @@ const STALE_UPDATE_MS = 60_000;
 const STALE_UPDATE_SUB = "refresh still pending";
 
 function activeTileView(tile: Tile, view: TileView): TileView {
-  return activeTileUpdates.get(tile.id)?.stale
-    ? { ...view, status: "unknown", sub: STALE_UPDATE_SUB }
-    : view;
+  if (!activeTileUpdates.get(tile.id)?.stale) return view;
+  return tile.showOnlyCompletedViews
+    ? { ...view, sub: STALE_UPDATE_SUB }
+    : { ...view, status: "unknown", sub: STALE_UPDATE_SUB };
 }
 
 function grayStaleTileUpdates(now: number): void {
-  let changed = false;
-  for (const active of activeTileUpdates.values()) {
+  const newlyStale: string[] = [];
+  for (const [tileId, active] of activeTileUpdates) {
     if (active.stale || now - active.startedAt < STALE_UPDATE_MS) continue;
     active.stale = true;
-    changed = true;
+    newlyStale.push(`${tileId} (${Math.max(0, now - active.startedAt)} ms)`);
   }
-  if (changed) {
+  if (newlyStale.length) {
+    const sources = [...activeRunSourceUpdates];
+    const github = githubOperationsInProgress(now).map((operation) =>
+      `${operation.id} ${operation.path} (${operation.stage}, ${operation.elapsedMs} ms)`
+    );
+    console.error(
+      `dashboard refresh still pending: tiles ${newlyStale.join(", ")}; ` +
+        `active run sources ${sources.length ? sources.join(", ") : "none"}; ` +
+        `active GitHub operations ${github.length ? github.join(", ") : "none"}`,
+    );
     lastChange = now;
     updateFaviconRedSince(now, false);
     broadcast(dashboardUpdate());
@@ -203,6 +253,18 @@ function snapshotCtx(base: Ctx, snapshots: ReadonlyMap<string, Run[]>): Ctx {
   };
 }
 
+// When the newest run in a snapshot started, for comparing one fetch of a source
+// against the last one that was kept. A snapshot with no readable start times
+// counts as having no runs at all.
+function newestRunAt(runs: readonly Run[] | undefined): number {
+  let newest = -Infinity;
+  for (const run of runs ?? []) {
+    const at = Date.parse(run.created_at);
+    if (Number.isFinite(at) && at > newest) newest = at;
+  }
+  return newest;
+}
+
 function sourceLabel(source: RunSource): string {
   return source.repo.split("/").at(-1) ?? source.repo;
 }
@@ -233,7 +295,7 @@ async function collectView(
     try {
       return await tile.collect(
         collectionCtx,
-        publish
+        publish && !tile.showOnlyCompletedViews
           ? (intermediate) => {
             if (acceptingIntermediate) publish(intermediate);
           }
@@ -334,6 +396,16 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
       }
 
       const key = runSourceKey(group.source);
+      // A repository's newest run on main only ever moves forward. A fetch that
+      // comes back with an older newest run than the one already held read a
+      // stale view of the workflow, and publishing it would age the whole tile
+      // family backwards without saying so. Keep what is held and name the
+      // source stale; the next fetch that reaches a current view clears it.
+      if (runs && newestRunAt(runs) < newestRunAt(runSnapshots.get(key))) {
+        error = "newest run older than the one already collected";
+        console.error(`run source ${key} stale:`, error);
+        runs = undefined;
+      }
       if (runs) {
         runSnapshots.set(key, runs);
         runSourceErrors.delete(key);
@@ -412,6 +484,7 @@ export function page(currentViews: ReadonlyMap<string, TileView> = views): strin
     update.faviconStatus,
     update.faviconRedSince,
     update.faviconRedAgeMs,
+    update.message,
   );
 }
 
@@ -425,7 +498,49 @@ export async function handle(req: Request): Promise<Response> {
       },
     });
   }
+  if (url.pathname === "/message") {
+    if (req.method !== "PUT") {
+      return new Response("Method not allowed", {
+        status: 405,
+        headers: { allow: "PUT" },
+      });
+    }
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return Response.json({ error: "Expected a JSON request body." }, {
+        status: 400,
+      });
+    }
+    if (
+      typeof body !== "object" || body === null || Array.isArray(body) ||
+      typeof (body as { text?: unknown }).text !== "string"
+    ) {
+      return Response.json({ error: "Message text must be a string." }, {
+        status: 400,
+      });
+    }
+    const text = (body as { text: string }).text;
+    if (text.length > DASHBOARD_MESSAGE_MAX_LENGTH) {
+      return Response.json({
+        error:
+          `Messages are limited to ${DASHBOARD_MESSAGE_MAX_LENGTH} characters.`,
+      }, { status: 400 });
+    }
+    try {
+      dashboardMessage = await dashboardMessageStore.set(text);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return Response.json({ error: "Could not save the dashboard message." }, {
+        status: 500,
+      });
+    }
+    broadcast(dashboardUpdate());
+    return Response.json(dashboardMessage);
+  }
   if (url.pathname === "/events") {
+    await refreshDashboardMessage();
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
@@ -444,7 +559,18 @@ export async function handle(req: Request): Promise<Response> {
   for (const r of routes) {
     if (url.pathname === r.path) return await r.handler(req, url);
   }
+  await refreshDashboardMessage();
   return new Response(page(), { headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+// One turn of the server's clock: tell every connected browser the server is
+// still there, then collect whatever tiles are due.
+export async function serveTick(
+  collect: () => void | Promise<void> = tick,
+): Promise<void> {
+  heartbeat();
+  if (await refreshDashboardMessage()) broadcast(dashboardUpdate());
+  await collect();
 }
 
 // The side effects: collect once, keep collecting, and serve. Running the file
@@ -454,12 +580,14 @@ export function start(
   collect: () => void | Promise<void> = tick,
 ) {
   collect();
-  const timer = setInterval(collect, TICK_MS);
+  // Returned so a caller can run one turn of the clock on demand.
+  const onTick = () => serveTick(collect);
+  const timer = setInterval(onTick, TICK_MS);
   const server = serve({
     port: PORT,
     onListen: () => console.log(`\n  Fabric wall LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
   }, handle);
-  return { timer, server };
+  return { timer, server, onTick };
 }
 
 // Running the file boots; importing it (the tests do) boots nothing.

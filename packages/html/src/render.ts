@@ -2,45 +2,17 @@ import {
   $conn,
   type Cancel,
   type CellHandle,
-  isCellHandle,
-  type Props,
-  type RenderNode,
-  UI,
-  useCancelGroup,
   type VNode,
 } from "@commonfabric/runtime-client";
 
-import {
-  cleanEventProp,
-  createCyclePlaceholder,
-  effect,
-  hasVisitedCell,
-  isEventProp,
-  isVNodeish,
-  listen,
-  noop,
-  sanitizeEvent,
-  sanitizeNode,
-  setPropDefault,
-  type SetPropHandler,
-  stringifyText,
-  styleObjectToCssString,
-} from "./render-utils.ts";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import type { SetPropHandler } from "./render-utils.ts";
 import { VDomRenderer } from "./main/renderer.ts";
-import {
-  applyPendingRenderAuthoredAttributeUpdate,
-  setPendingRenderState,
-} from "./pending-render.ts";
-//import { animate } from "./debug-element.ts";
 
 /** Tracks an active rendering for debug inspection. */
 export interface ActiveRender {
   parent: HTMLElement;
-  cell: CellHandle<VNode> | null;
-  renderer: VDomRenderer | null;
-  path: "worker" | "legacy";
+  cell: CellHandle<VNode>;
+  renderer: VDomRenderer;
 }
 
 const activeRenders = new Map<HTMLElement, ActiveRender>();
@@ -53,59 +25,28 @@ export function getActiveRenders(): ReadonlyMap<HTMLElement, ActiveRender> {
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
-  /** Force use of legacy main-thread rendering (default: false) */
-  useLegacyRenderer?: boolean;
+
   /** Optional error handler */
   onError?: (error: Error) => void;
 }
 
-type KeyedChildren = Map<string, VdomChildNode>;
-type PropsValues =
-  | string
-  | number
-  | boolean
-  | object
-  | any[]
-  | CellHandle<any>
-  | null;
-
 /**
- * Render a VNode or CellHandle<VNode> into a parent element.
+ * Render a `CellHandle<VNode>` into a parent element.
  *
- * When given a CellHandle, this function uses worker-side VDOM rendering:
- * - The worker reconciles the VDOM and sends operations over IPC
- * - The main thread applies operations to the DOM
- * - This eliminates IPC latency for reactive updates
- *
- * When given a plain VNode, or when useLegacyRenderer is true, this uses
- * main-thread rendering for backward compatibility.
+ * The worker reconciles the VDOM and sends operations over IPC, and the main
+ * thread applies those operations to the DOM. Reactive updates therefore cost
+ * no IPC round trip, and the worker decides what may be shown: it holds the
+ * cells, so it is the side that can evaluate the confidentiality policy
+ * governing each one.
  */
 export const render = (
   parent: HTMLElement,
-  view: VNode | CellHandle<VNode>,
+  view: CellHandle<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
-  // Use worker-side rendering for CellHandle inputs (unless legacy mode requested)
-  if (isCellHandle(view) && !options.useLegacyRenderer) {
-    return renderViaWorker(parent, view as CellHandle<VNode>, options);
-  }
-
-  // Legacy main-thread rendering
-  return renderLegacy(parent, view, options);
-};
-
-/**
- * Worker-side VDOM rendering via VDomRenderer.
- * The worker does reconciliation and sends VDomOps over IPC.
- */
-function renderViaWorker(
-  parent: HTMLElement,
-  cellHandle: CellHandle<VNode>,
-  options: RenderOptions,
-): Cancel {
-  const runtimeClient = cellHandle.runtime();
+  const runtimeClient = view.runtime();
   const connection = runtimeClient[$conn]();
-  const cellRef = cellHandle.ref();
+  const cellRef = view.ref();
 
   const renderer = new VDomRenderer({
     runtimeClient,
@@ -118,9 +59,8 @@ function renderViaWorker(
   // Register in active renders registry
   const entry: ActiveRender = {
     parent,
-    cell: cellHandle,
+    cell: view,
     renderer,
-    path: "worker",
   };
   activeRenders.set(parent, entry);
 
@@ -170,473 +110,6 @@ function renderViaWorker(
     // Also ensure the render promise doesn't leak unhandled rejections.
     renderPromise.then(() => renderer.dispose().catch(() => {}));
   };
-}
-
-/**
- * Legacy main-thread rendering for backward compatibility.
- */
-function renderLegacy(
-  parent: HTMLElement,
-  view: VNode | CellHandle<VNode>,
-  options: RenderOptions,
-): Cancel {
-  let rootCell: CellHandle<VNode> | undefined;
-
-  if (isCellHandle(view)) {
-    rootCell = view as CellHandle<VNode>;
-    view = view.asSchema(rendererVDOMSchema) as CellHandle<VNode>;
-  }
-
-  // Register in active renders registry
-  const entry: ActiveRender = {
-    parent,
-    cell: rootCell ?? null,
-    renderer: null,
-    path: "legacy",
-  };
-  activeRenders.set(parent, entry);
-
-  const optionsWithCell = rootCell ? { ...options, rootCell } : options;
-
-  let cancelRendered: Cancel | undefined;
-  let renderedRoot: HTMLElement | null = null;
-  const cancelEffect = effect(view as VNode, (value: VNode | undefined) => {
-    if (isDataUnavailable(value)) {
-      if (value.reason === "pending") {
-        setPendingRenderState(renderedRoot, true);
-        return;
-      }
-      setPendingRenderState(renderedRoot, false);
-      cancelRendered?.();
-      cancelRendered = undefined;
-      renderedRoot = null;
-      return;
-    }
-    setPendingRenderState(renderedRoot, false);
-    cancelRendered?.();
-    cancelRendered = undefined;
-    renderedRoot = null;
-    if (!value) return;
-    const visited = new Set<object>();
-    if (rootCell) {
-      visited.add(rootCell);
-    }
-    const rendered = renderImplWithRoot(
-      parent,
-      value,
-      optionsWithCell,
-      visited,
-    );
-    renderedRoot = rendered.root;
-    cancelRendered = rendered.cancel;
-  });
-
-  return () => {
-    // Only remove if we're still the active render for this parent
-    if (activeRenders.get(parent) === entry) {
-      activeRenders.delete(parent);
-    }
-    cancelEffect();
-    cancelRendered?.();
-  };
-}
-
-const renderImplWithRoot = (
-  parent: HTMLElement,
-  view: VNode,
-  options: RenderOptions = {},
-  visited: Set<object> = new Set(),
-): { root: HTMLElement | null; cancel: Cancel } => {
-  const [root, cancel] = renderNode(view, options, visited);
-  if (!root) {
-    return { root, cancel };
-  }
-  parent.append(root);
-  //animate(root, "created");
-  return {
-    root,
-    cancel: () => {
-      root.remove();
-      cancel();
-    },
-  };
 };
-
-export const renderImpl = (
-  parent: HTMLElement,
-  view: VNode,
-  options: RenderOptions = {},
-  visited: Set<object> = new Set(),
-): Cancel => renderImplWithRoot(parent, view, options, visited).cancel;
 
 export default render;
-
-function renderNode(
-  inputNode: VNode,
-  options: RenderOptions,
-  visited: Set<object>,
-): [HTMLElement | null, Cancel] {
-  // Working with user data, it's still possible for this method
-  // to be called with invalid data.
-  if (!inputNode || typeof inputNode !== "object") {
-    return [null, noop];
-  }
-
-  const doc = options.document ?? globalThis.document;
-  const [cancel, addCancel] = useCancelGroup();
-
-  let node = inputNode;
-  // Follow [UI] chain
-  while (node && node[UI]) {
-    if (visited.has(node)) {
-      return [createCyclePlaceholder(doc), cancel];
-    }
-    visited.add(node);
-    node = node[UI];
-  }
-
-  if (isCellHandle(node)) {
-    const wrapper = doc.createElement("cf-internal-fill-element");
-    let cancelRendered: Cancel | undefined;
-    addCancel(
-      effect(node as CellHandle<VNode>, (resolvedNode) => {
-        if (isDataUnavailable(resolvedNode)) {
-          if (resolvedNode.reason === "pending") {
-            setPendingRenderState(wrapper, true);
-            return;
-          }
-          setPendingRenderState(wrapper, false);
-          cancelRendered?.();
-          cancelRendered = undefined;
-          wrapper.innerHTML = "";
-          return;
-        }
-        setPendingRenderState(wrapper, false);
-        cancelRendered?.();
-        cancelRendered = undefined;
-        wrapper.innerHTML = "";
-        if (!resolvedNode) return;
-        const [childElement, childCancel] = renderNode(
-          resolvedNode,
-          options,
-          new Set(visited),
-        );
-        if (childElement) {
-          wrapper.appendChild(childElement);
-          //animate(childElement, "created");
-        }
-        cancelRendered = childCancel;
-      }),
-    );
-    addCancel(() => cancelRendered?.());
-
-    return [wrapper, cancel];
-  }
-
-  if (visited.has(node)) {
-    return [createCyclePlaceholder(doc), cancel];
-  }
-  visited.add(node);
-
-  const sanitizedNode = sanitizeNode(node);
-  if (!sanitizedNode) {
-    return [null, cancel];
-  }
-
-  const element = doc.createElement(sanitizedNode.name);
-
-  addCancel(bindProps(element, sanitizedNode.props, options));
-
-  if (sanitizedNode.children !== undefined) {
-    addCancel(bindChildren(element, sanitizedNode.children, options, visited));
-  }
-
-  return [element, cancel];
-}
-
-const bindChildren = (
-  element: HTMLElement,
-  children: RenderNode,
-  options: RenderOptions = {},
-  visited: Set<object> = new Set(),
-): Cancel => {
-  // Mapping from stable key to its rendered node and cancel function.
-  let keyedChildren: KeyedChildren = new Map();
-
-  // When the children array changes, diff its values against what we previously rendered.
-  const updateChildren = (
-    childrenArr: RenderNode | RenderNode[] | undefined | null,
-  ) => {
-    const newChildren = Array.isArray(childrenArr)
-      ? childrenArr
-      : childrenArr
-      ? [childrenArr]
-      : [];
-    const newKeyOrder: string[] = [];
-    const newMapping: KeyedChildren = new Map();
-    const occurrence = new Map<string, number>();
-
-    for (let i = 0; i < newChildren.length; i++) {
-      const child = newChildren[i];
-      // Try JSON.stringify for stable keys, fall back to index for circular structures
-      let rawKey: string;
-      try {
-        rawKey = JSON.stringify(child);
-      } catch {
-        // Circular structure or other JSON error - use index-based key
-        rawKey = `__circular_${i}`;
-      }
-      const count = occurrence.get(rawKey) ?? 0;
-      occurrence.set(rawKey, count + 1);
-      // Composite key ensures that two structurally identical children get unique keys.
-      const key = rawKey + "-" + count;
-      newKeyOrder.push(key);
-      if (keyedChildren.has(key)) {
-        // Reuse an existing rendered node, but update it with the new child
-        // in case the child contains different Cell references.
-        const existingNode = keyedChildren.get(key)!;
-        existingNode.update(child);
-        newMapping.set(key, existingNode);
-        keyedChildren.delete(key);
-      } else {
-        newMapping.set(
-          key,
-          new VdomChildNode(child, options, visited),
-        );
-      }
-    }
-
-    // Remove any obsolete nodes.
-    for (const [_, node] of keyedChildren.entries()) {
-      node.dispose();
-    }
-
-    // Now update the parent element so that its children appear in newKeyOrder.
-    // We use element.childNodes directly (a live NodeList) instead of a static
-    // snapshot, because insertBefore() mutates the DOM and a static array would
-    // have stale references after the first move.
-    for (let i = 0; i < newKeyOrder.length; i++) {
-      const key = newKeyOrder[i];
-      // element() always returns a valid ChildNode (real element or placeholder)
-      const desiredNode = newMapping.get(key)!.element();
-      // If there's no node at this position, or it's different, insert desiredNode there.
-      if (element.childNodes[i] !== desiredNode) {
-        // Using element.childNodes[i] (which may be undefined) is equivalent to
-        // appending if there's no node at that index.
-        element.insertBefore(desiredNode, element.childNodes[i] ?? null);
-        //animate(element, "moved");
-      }
-    }
-
-    keyedChildren = newMapping;
-  };
-
-  // Set up a reactive effect so that changes to the children array are diffed and applied.
-  const cancelArrayEffect = effect<RenderNode>(
-    children,
-    (childrenVal) => updateChildren(childrenVal),
-  );
-
-  return () => {
-    cancelArrayEffect();
-    for (const node of keyedChildren.values()) {
-      node.dispose();
-    }
-  };
-};
-
-class VdomChildNode {
-  private cancel: Cancel | undefined;
-  private renderedCancel: Cancel | undefined;
-  private _element: ChildNode | null = null;
-  private document: Document;
-  private options: RenderOptions;
-  private visited: Set<object>;
-
-  constructor(
-    child: RenderNode,
-    options: RenderOptions = {},
-    visited: Set<object> = new Set(),
-  ) {
-    this.document = options.document ?? globalThis.document;
-    this.options = options;
-    this.visited = visited;
-
-    this.setupEffect(child);
-  }
-
-  private setupEffect(child: RenderNode) {
-    // Check for cell cycle before setting up effect (using .equals() for comparison)
-    if (isCellHandle(child) && hasVisitedCell(this.visited, child)) {
-      const placeholder = createCyclePlaceholder(this.document);
-      if (this._element) {
-        this._element.replaceWith(placeholder);
-      }
-      this._element = placeholder;
-      this.cancel = undefined;
-      return;
-    }
-    this.cancel = effect<RenderNode>(child, this.onEffect);
-  }
-
-  /**
-   * Update this node with a new child. This is called when the parent
-   * re-renders and produces a new child value that matches this node's key.
-   * We need to cancel the old subscription and set up a new one.
-   */
-  update(newChild: RenderNode) {
-    // Cancel old effect/subscription
-    if (this.cancel) {
-      this.cancel();
-      this.cancel = undefined;
-    }
-
-    // Set up new effect with the new child
-    this.setupEffect(newChild);
-  }
-
-  onEffect = (childValue: RenderNode): Cancel | undefined => {
-    if (isDataUnavailable(childValue)) {
-      if (childValue.reason === "pending") {
-        // A child must always own a DOM position synchronously. The empty text
-        // node is invisible until the first usable value and remains the stable
-        // placeholder if availability changes before then.
-        this._element ??= this.document.createTextNode("") as ChildNode;
-        setPendingRenderState(this._element, true);
-        return;
-      }
-
-      setPendingRenderState(this._element, false);
-      this.renderedCancel?.();
-      this.renderedCancel = undefined;
-      const placeholder = this.document.createTextNode("") as ChildNode;
-      if (this._element) this._element.replaceWith(placeholder);
-      this._element = placeholder;
-      return;
-    }
-    setPendingRenderState(this._element, false);
-    let element;
-    let cancel;
-    if (isCellHandle(childValue)) {
-      throw new Error("child node cell resolved to another cell.");
-    } else if (Array.isArray(childValue)) {
-      // Wrap array in synthetic VNode with display:contents so it's layout-invisible
-      const [childElement, childCancel] = renderNode(
-        {
-          type: "vnode",
-          name: "span",
-          props: { style: "display:contents" },
-          children: childValue,
-        },
-        this.options,
-        new Set(this.visited),
-      );
-      element = childElement;
-      cancel = childCancel;
-    } else if (isVNodeish(childValue)) {
-      // Create a fresh copy of visited for each effect invocation to avoid
-      // false cycle detection when the same VNode structure is re-rendered.
-      // This mirrors the behavior in renderNode when handling CellHandle nodes.
-      const [childElement, childCancel] = renderNode(
-        childValue,
-        this.options,
-        new Set(this.visited),
-      );
-      element = childElement;
-      cancel = childCancel;
-    } else {
-      const text = stringifyText(childValue);
-      element = this.document.createTextNode(text) as ChildNode;
-    }
-
-    this.renderedCancel?.();
-    this.renderedCancel = undefined;
-    if (this._element && element) {
-      this._element.replaceWith(element);
-    } else if (this._element) {
-      this._element.remove();
-    }
-    this._element = element;
-    this.renderedCancel = cancel;
-  };
-
-  element(): ChildNode {
-    // CellHandle.subscribe() always calls the callback synchronously with the
-    // current value, so _element should always be set by the time this is called.
-    if (!this._element) {
-      throw new Error(
-        "VdomChildNode.element() called before element was created. " +
-          "This indicates a bug - subscribe should be synchronous.",
-      );
-    }
-    return this._element;
-  }
-
-  dispose() {
-    if (this.cancel) this.cancel();
-    if (this.renderedCancel) this.renderedCancel();
-    if (this._element) this._element.remove();
-  }
-}
-
-function bindProps(
-  element: HTMLElement,
-  props: Props | CellHandle<Props> | undefined,
-  options: RenderOptions,
-): Cancel {
-  const [cancel, addCancel] = useCancelGroup();
-  const setProp = options.setProp ?? setPropDefault;
-
-  if (isCellHandle(props)) {
-    const propsCell = props as CellHandle<Props>;
-    addCancel(
-      effect(
-        propsCell,
-        (resolved) => bindProps(element, resolved, options),
-      ),
-    );
-    return cancel;
-  }
-
-  if (typeof props !== "object" || !props) {
-    return cancel;
-  }
-
-  for (const [key, value] of Object.entries(props as Props)) {
-    const setProperty = (
-      element: HTMLElement,
-      key: string,
-      value: unknown,
-    ) => {
-      applyPendingRenderAuthoredAttributeUpdate(element, key, () => {
-        key === "style" && value && typeof value === "object"
-          ? setProp(element, key, styleObjectToCssString(value))
-          : setProp(element, key, value);
-      });
-    };
-
-    if (!isCellHandle(value)) {
-      setProperty(element, key, value);
-      continue;
-    }
-
-    if (isEventProp(key)) {
-      const eventName = cleanEventProp(key);
-      if (eventName != null) {
-        addCancel(
-          listen(element, eventName, (event) => {
-            value.send(sanitizeEvent(event));
-          }),
-        );
-      }
-    } else if (key.startsWith("$")) {
-      setProperty(element, key.slice(1), value);
-    } else {
-      addCancel(effect(value, (replacement) => {
-        setProperty(element, key, replacement);
-      }));
-    }
-  }
-
-  return cancel;
-}

@@ -41,8 +41,10 @@ export function backgroundLogFile(): string | undefined {
 export interface LaunchMode {
   /** This process should spawn the server as a child and wait for it. */
   background: boolean;
+
   /** Where the child should write its logs, when the caller named a path. */
   logFile: string | undefined;
+
   /** The arguments the server itself consumes (the port, and so on). */
   serverArgs: string[];
 }
@@ -176,7 +178,7 @@ async function awaitReadyMarker(
 
 /** Spawn the server as a background child and wait until it reports it is
  * listening. On success the child is detached and this process exits 0; if the
- * child exits before signalling readiness, its log is surfaced and this process
+ * child exits before signaling readiness, its log is surfaced and this process
  * exits with the child's code. Never returns in production; it exits. */
 export async function runBackgroundParent(
   opts: {

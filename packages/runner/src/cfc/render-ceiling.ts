@@ -1,18 +1,19 @@
 import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { CfcConfClause } from "./clause.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { clauseAlternatives } from "./clause.ts";
+import {
+  type CfcGrantResolver,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
   type PolicySnapshot,
 } from "./policy.ts";
-import {
-  type CfcGrantResolver,
-  evaluateExchangeRules,
-} from "./exchange-eval.ts";
-import { clauseAlternatives } from "./clause.ts";
-import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
 import type { SpaceMembershipProvider } from "./space-membership.ts";
+import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
 
 /**
  * Display-sink render ceiling resolution (Epic H3b of
@@ -87,6 +88,7 @@ const STANDARD_RENDER_SNAPSHOT: PolicySnapshot = buildCfcPolicySnapshot([{
 export type RenderConfidentialityResolverConfig = {
   /** The display audience — the acting user whose HasRole facts are minted. */
   readonly actingPrincipal?: string;
+
   /**
    * Deployment trust config (B3), for any render rule with a `Concept`-valued
    * integrity guard. The standard SpaceReaderAccess rule uses a plain HasRole
@@ -94,6 +96,7 @@ export type RenderConfidentialityResolverConfig = {
    * sink gate and future concept-guarded render rules.
    */
   readonly trustConfig?: CfcTrustConfig;
+
   /**
    * The acting user's VERIFIED reader spaces (§4.9.3): spaces for which the
    * runtime mints `HasRole(actingPrincipal, space, reader)` membership facts,
@@ -109,6 +112,7 @@ export type RenderConfidentialityResolverConfig = {
    * broader cross-space membership arrives with the §4.9.3 membership lookup.
    */
   readonly memberSpaces?: readonly string[];
+
   /**
    * The §4.9.3 membership lookup: a per-space capability oracle consulted for
    * each `Space(id)` atom in the label being rendered. When it verifies the
@@ -126,6 +130,7 @@ export type RenderConfidentialityResolverConfig = {
    * blocked.
    */
   readonly membershipProvider?: SpaceMembershipProvider;
+
   /**
    * Grant lookup for `policyState`-guarded render rules (§8.12.7 route 2a).
    * The standard SpaceReaderAccess rule carries no policyState guard, so this
@@ -151,7 +156,7 @@ export const spaceAtomIdsInConfidentiality = (
   for (const clause of confidentiality) {
     for (const alternative of clauseAlternatives(clause as CfcConfClause)) {
       if (
-        isRecord(alternative) &&
+        isObjectOrArray(alternative) &&
         (alternative as { type?: unknown }).type === CFC_ATOM_TYPE.Space &&
         typeof (alternative as { id?: unknown }).id === "string"
       ) {

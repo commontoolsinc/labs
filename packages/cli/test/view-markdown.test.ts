@@ -1,10 +1,13 @@
 /**
  * The Markdown highlighter: a `.md` file (opened directly or seen in a diff) is
- * coloured as Markdown — headings, fenced/inline code, lists, quotes, links —
+ * colored as Markdown — headings, fenced/inline code, lists, quotes, links —
  * not parsed as TypeScript, and its headings form the navigation tree.
  */
+
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import {
   highlightMarkdownLines,
   markdownDocument,
@@ -15,7 +18,7 @@ import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
 import { spanStyle } from "../lib/view/highlight.ts";
 
-Deno.test("markdown: language metadata recognises markdown extensions", () => {
+Deno.test("markdown: language metadata recognizes markdown extensions", () => {
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile("/a/b/AGENTS.markdown").id, "markdown");
   assertEquals(languageForFile("notes.MD").id, "markdown");
@@ -24,7 +27,7 @@ Deno.test("markdown: language metadata recognises markdown extensions", () => {
   assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
-Deno.test("markdown: headings, code, lists, quotes and prose get distinct, non-TS colours", () => {
+Deno.test("markdown: headings, code, lists, quotes and prose get distinct, non-TS colors", () => {
   const lines = highlightMarkdownLines(
     `# Title
 
@@ -51,7 +54,7 @@ deno task cf
   );
   assert(
     !list.some((s) => s.cls === "identifier" || s.cls === "operator"),
-    "no TypeScript identifier/operator colours",
+    "no TypeScript identifier/operator colors",
   );
   // The fenced code block: fences are punctuation, content is a string.
   assertEquals(lines[3].spans.map((s) => s.cls), ["punctuation"]); // ```bash
@@ -126,7 +129,7 @@ Deno.test("markdown: languageForFile dispatches on a .md filename", () => {
   );
 });
 
-Deno.test("markdown: editing a line in a markdown diff recolours it as markdown", () => {
+Deno.test("markdown: editing a line in a markdown diff recolors it as markdown", () => {
   const diff = [
     "diff --git a/r.md b/r.md",
     "--- a/r.md",
@@ -138,7 +141,7 @@ Deno.test("markdown: editing a line in a markdown diff recolours it as markdown"
   ].join("\n");
   const hl = createDiffHighlighter(diff);
   const out = hl.update(diff.replace("`code`", "`codex`"));
-  // The edited markdown line colours its inline code as a string (markdown),
+  // The edited markdown line colors its inline code as a string (markdown),
   // not as a TypeScript template that swallows the rest.
   const edited = out[5];
   assert(
@@ -187,6 +190,80 @@ Deno.test("markdown: a diff's nav tree steps through the headings it shows", () 
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+describe("decoded Markdown diff input", () => {
+  it("keeps a BOM outside a heading anchor", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,2 @@
+ ${bom}# Title
+-old
++body
+`;
+    const ws: DiffWorkspace = {
+      resolve: () => "/README.md",
+      read: () => "# Title\nbody\n",
+      hasUtf8Bom: () => true,
+    };
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const heading = doc.flatStructure.find((node) => node.label === "# Title");
+
+    expect(heading).toBeDefined();
+    expect(heading!.startCol).toBe(2);
+    expect(heading!.startOffset).toBe(diff.indexOf("# Title"));
+  });
+
+  it("keeps rendered BOM text and spans aligned", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1 @@
++${bom}plain text
+`;
+    const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+    const { doc } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      ws,
+      new Map(),
+      "rendered",
+    );
+    const line = doc.lines[4];
+
+    expect(line.text).toBe(`+${bom}plain text`);
+    expect(line.spans.map((span) => span.text).join("")).toBe(line.text);
+  });
+
+  it("retains heading syntax when restoring a rendered BOM line", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1 @@
++${bom}# Heading
+`;
+    const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+    const { doc } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      ws,
+      new Map(),
+      "rendered",
+    );
+    const line = doc.lines[4];
+
+    expect(line.text).toBe(`+${bom}# Heading`);
+    expect(line.spans.map((span) => span.text).join("")).toBe(line.text);
+    expect(
+      line.spans.some((span) =>
+        span.cls === "sectionHeader" && span.text === "# Heading"
+      ),
+    ).toBe(true);
+  });
 });
 
 Deno.test("markdown: a deeper-then-shallower diff window keeps a navigable depth tree", () => {
@@ -311,9 +388,9 @@ index 0000000..1111111 100644
     // The heading line, past its diff marker, is a section header.
     assert(
       doc.lines[5].spans.some((s) => s.cls === "sectionHeader"),
-      "the heading is markdown-coloured in the diff",
+      "the heading is markdown-colored in the diff",
     );
-    // The added line keeps its diff marker and colours the inline code green.
+    // The added line keeps its diff marker and colors the inline code green.
     const added = doc.lines[8];
     assertEquals(added.spans[0].cls, "diffAdd", "the + marker");
     assert(

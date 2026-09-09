@@ -45,6 +45,16 @@ describe("unjustifiedDeletions", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("recognizes a retired connector-owned pattern", () => {
+    const offenders = unjustifiedDeletions(
+      [
+        `${BASE}/agent-sessions-debug/main.tsx/20260101T000000Z-a.json`,
+      ],
+      new Set(["packages/connectors/agents/debug-view/main.tsx"]),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("does not let retiring one pattern justify deleting another's baselines", () => {
     const offenders = unjustifiedDeletions(
       [

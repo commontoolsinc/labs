@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { CFC_AUTHORING_MODULES } from "./cfc-policy-authoring.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 export class CfcPolicyOfValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -69,12 +70,9 @@ function isExchangeRulesCall(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  while (
-    ts.isParenthesizedExpression(expression) ||
-    ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression)
-  ) expression = expression.expression;
-  if (!ts.isCallExpression(expression)) return false;
-  const callee = expression.expression;
+  const target = unwrapExpression(expression);
+  if (!ts.isCallExpression(target)) return false;
+  const callee = target.expression;
   if (!ts.isIdentifier(callee)) return false;
   return isImportedCfcAuthoringBinding(callee, "exchangeRules", context);
 }

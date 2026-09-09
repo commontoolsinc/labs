@@ -7,6 +7,7 @@
  * through `compilerStack()`, which throws — loudly, with the fix — when a
  * flow forgot its ensure. Boot-path code must do neither.
  */
+
 import type * as CompilerStackModule from "./compiler-stack.ts";
 
 export type CompilerStack = typeof CompilerStackModule;
@@ -16,6 +17,7 @@ let loading: Promise<CompilerStack> | undefined;
 
 type CompilerStackLoader = () => Promise<CompilerStack>;
 const loadCompilerStack: CompilerStackLoader = () =>
+  // deno-lint-ignore cf-imports/no-inline-module-import
   import("./compiler-stack.ts");
 
 /** A worker-global module-fetch failure that requires a fresh module map. */

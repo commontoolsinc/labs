@@ -16,11 +16,13 @@ function infoText(doc: Document, node: StructureNode, semantics?: Semantics) {
 
 function findByLabel(doc: Document, label: string): StructureNode {
   const node = doc.flatStructure.find((n) => n.label === label);
-  assert(node, `no node labelled "${label}"`);
+  assert(node, `no node labeled "${label}"`);
   return node!;
 }
 
-// --- card title + "merges" line for merged generic AST nodes -----------------
+//
+// card title + "merges" line for merged generic AST nodes
+//
 
 Deno.test("card: a merged generic node names every AST kind it merges", () => {
   // In `a as B`, the type annotation `B` is a TypeReference whose sole child is
@@ -89,9 +91,11 @@ Deno.test("card: a node with no AST kinds falls back to its structure kind", () 
   assertEquals(card.title, "node  mystery");
 });
 
-// --- detail sections by meta kind --------------------------------------------
+//
+// detail sections by meta kind
+//
 
-Deno.test("card: a schema node renders its labelled type", () => {
+Deno.test("card: a schema node renders its labeled type", () => {
   const doc = parseDocument(`// transformed: /app.ts
 const __cfLift_1 = lift({
     type: "object",
@@ -201,7 +205,9 @@ const __cfLift_1 = lift({ type: "object" } as const satisfies __cfHelpers.JSONSc
   assert(text.includes("calls") && text.includes("computed"), text);
 });
 
-// --- outline overflow + glyphs -----------------------------------------------
+//
+// outline overflow + glyphs
+//
 
 Deno.test("card: an outline past the cap shows a trailing 'N more' line", () => {
   let src = "// transformed: /app.ts\n";
@@ -351,7 +357,9 @@ Deno.test("card: the outline glyphs cover pattern/builder/closure/schema/type/im
   assert(text.includes("⏎"), "return glyph");
 });
 
-// --- uses overflow -----------------------------------------------------------
+//
+// uses overflow
+//
 
 Deno.test("card: more than ten uses fold into a 'N more' line", () => {
   let src = "// transformed: /app.ts\nconst target = 1;\n";
@@ -365,7 +373,9 @@ Deno.test("card: more than ten uses fold into a 'N more' line", () => {
   assert(text.includes("3 more"), `uses overflow line: ${text}`);
 });
 
-// --- deps overflow -----------------------------------------------------------
+//
+// deps overflow
+//
 
 Deno.test("card: more than ten dependencies fold into a 'N more' line", () => {
   let src = "// transformed: /app.ts\n";
@@ -380,7 +390,9 @@ Deno.test("card: more than ten dependencies fold into a 'N more' line", () => {
   assert(text.includes("2 more"), `deps overflow line: ${text}`);
 });
 
-// --- dependency jump through the semantic service ----------------------------
+//
+// dependency jump through the semantic service
+//
 
 /** A fake semantic service whose `definitionOf` ignores the query offset and
  * returns a fixed result, so a card can be driven down a chosen resolution
@@ -475,7 +487,7 @@ Deno.test("card: a deferred dependency does not use a same-named local jump", ()
   );
   assert(
     collapsedText.includes("1 possible dependency"),
-    `the syntactic match is labelled as unresolved: ${collapsedText}`,
+    `the syntactic match is labeled as unresolved: ${collapsedText}`,
   );
 
   const expanded = buildPeekCard(doc, consumer, semantics, true);
@@ -604,7 +616,9 @@ function consumer() {
   assertEquals(dep!.defEndOffset, undefined);
 });
 
-// --- external ("defined elsewhere") section ----------------------------------
+//
+// external ("defined elsewhere") section
+//
 
 Deno.test("card: symbols resolving to a file land in 'defined elsewhere'", () => {
   const doc = parseDocument(`// transformed: /app.ts
@@ -659,7 +673,9 @@ Deno.test("card: more than eight external symbols fold into a 'N more' line", ()
   assert(text.includes("3 more"), `external overflow line: ${text}`);
 });
 
-// --- schema rendering: scalar root + deeply nested multiline -----------------
+//
+// schema rendering: scalar root + deeply nested multiline
+//
 
 /** Build a one-line `Line` of identifier spans for a synthetic document. */
 function identLine(text: string): Line {
@@ -704,7 +720,7 @@ Deno.test("card: a short scalar-root schema renders inline", () => {
 });
 
 Deno.test("card: a wide scalar-root schema renders on its own indented line", () => {
-  // A root type long enough to exceed the inline budget pushes the labelled
+  // A root type long enough to exceed the inline budget pushes the labeled
   // schema onto a heading plus a multiline body, whose scalar-root branch
   // emits a single indented type line.
   const longType =

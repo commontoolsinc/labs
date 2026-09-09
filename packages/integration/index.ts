@@ -6,7 +6,14 @@ export type {
   ScreencastFrame,
   SelectorOptions,
 } from "./astral-adapter.ts";
-export { CdpWorkerProfiler, renderProfileReport } from "./cdp-profiler.ts";
+export {
+  attachWorkerProfiler,
+  CdpWorkerProfiler,
+  renderProfileReport,
+  RUNTIME_WORKER_URL,
+  startWorkerProfile,
+  writeWorkerProfile,
+} from "./cdp-profiler.ts";
 export { dismissDialogs, Page, pipeConsole } from "./page.ts";
 export * from "./presentation/mod.ts";
 export * as env from "./env.ts";

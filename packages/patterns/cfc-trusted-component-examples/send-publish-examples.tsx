@@ -5,6 +5,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -25,7 +26,7 @@ const runDecoy = handler<
 
 export type SendExampleOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   conversationTitle?: string;
   audienceInput?: string;
   messageDraft?: string;
@@ -45,7 +46,7 @@ export type SendExampleOutput = {
 
 export type PublishExampleOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   targetAudience?: string;
   publishSubject?: string;
   publishBody?: string;

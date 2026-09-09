@@ -1,5 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
 
 // These tests drive `analyzeFunctionCapabilities` through interprocedural
@@ -346,7 +348,9 @@ Deno.test(
   },
 );
 
-// --- hasUnverifiedCellUse propagation through callee summaries ---
+//
+// hasUnverifiedCellUse propagation through callee summaries
+//
 
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
 

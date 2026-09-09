@@ -1,3 +1,11 @@
+/**
+ * This file covers the one-shot `sha256()` entry point, across every
+ * implementation and over the same fixtures the incremental hasher tests use.
+ * Sharing the corpus is the point: a divergence between the one-shot and
+ * incremental paths, or between two implementations, surfaces as a failing
+ * fixture rather than as a hash nobody can reproduce.
+ */
+
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
@@ -30,9 +38,9 @@ for (const shaFunc of sha256Funcs) {
   describe(`${shaFunc.name}()`, () => {
     let i = 1;
     for (const { bytes, sha256: hashStr } of FIXTURES) {
-      const hashMsg = `${hashStr.slice(0, 8)}...`;
+      const hashMsg = `\`${hashStr.slice(0, 8)}...\``;
       const hashBytes = fromBase64url(hashStr);
-      it(`produces expected byte-array hash #${i++}: \`${hashMsg}...\``, () => {
+      it(`produces the expected byte-array hash #${i++}: ${hashMsg}`, () => {
         const got = shaFunc(bytes);
         expect(got).toEqual(hashBytes);
       });

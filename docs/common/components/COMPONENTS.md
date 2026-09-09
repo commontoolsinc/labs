@@ -137,7 +137,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-hgroup` | Horizontal group with automatic gap management | |
 | `cf-hscroll` | Horizontal scroll container | |
 | `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
-| `cf-iframe` | Iframe for executing arbitrary scripts | |
+| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, or service capabilities | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
 | `cf-input-otp` | One-time-password input with individual digit fields | |
@@ -151,11 +151,10 @@ cell means none confirmed — check the component source before assuming.
 | `cf-loader` | Inline spinner for pending async operations | |
 | `cf-location` | Geolocation capture (single or continuous) | `$location` |
 | `cf-map` | Interactive Leaflet/OpenStreetMap map (see [cf-map](#cf-map)) | `$value`, `$center`, `$zoom`, `$bounds` |
-| `cf-markdown` | Renders markdown with syntax highlighting and copy buttons | `$content` |
+| `cf-markdown` | Renders markdown with syntax highlighting and copy buttons; safe for untrusted content, and raw HTML written into the markdown is not rendered | `$content` |
 | `cf-message-beads` | Compact bead visualization of a message history | `$messages` |
 | `cf-message-input` | Input + send button combo for chat-style item entry; emits a synthetic (untrusted) `cf-send` event, so use `cf-submit-input` when the submit must authorize an owner-protected write | |
 | `cf-modal` | Accessible modal dialog with bottom-sheet presentation mode | `$open` |
-| `cf-modal-provider` | Modal stack manager | |
 | `cf-oauth` | Generic OAuth authentication | `$auth` |
 | `cf-picker` | Carousel selection over cells with `[UI]` | `$items`, `$selectedIndex` |
 | `cf-piece` | Provides piece context to child components | |
@@ -180,7 +179,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-slider` | Range input slider | |
 | `cf-space-link` | Renders a space as a clickable navigation pill | |
 | `cf-submit-input` | Text field + submit button whose real (trusted) click carries the typed text as `event.target.value` with the surface's UI integrity, so it can authorize an owner-protected runtime write; prefer over `cf-message-input` when the submit gesture must be trusted | |
-| `cf-svg` | Renders SVG content from a string | |
+| `cf-svg` | Renders SVG content from a string; safe for untrusted content, and anything that would run script is dropped | |
 | `cf-switch` | Toggle switch for binary on/off state | `$checked` |
 | `cf-tab` | Individual tab button used within `cf-tab-list` | |
 | `cf-tab-bar` | Fixed navigation bar for app-like UIs (with `cf-tab-bar-item`) | `$value` |
@@ -434,22 +433,39 @@ export default pattern(({ title }) => ({
 }));
 ```
 
+`pattern()` types these variant keys at its return position: each is a `VNode`
+or a `JSXElement` (a renderable sub-piece), or a reactive value of one, so a
+value of the wrong shape under `[UI]`, `[CHIP_UI]` or `[TILE_UI]` is a compile
+error at the pattern.
+
 See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
-> Note: `sidebarUI`/`fabUI`/`settingsUI` are shell composition **slots**, a
-> separate concept — not size variants. A vended `uiVariant()` helper for
-> render paths outside `cf-render` is a planned follow-up and does not exist yet.
+> Note: `sidebarUI` is a shell composition **slot**, a separate concept from
+> size variants. Other exported subviews such as `settingsUI` are
+> application-level conventions; the shell does not consume `fabUI`. A vended
+> `uiVariant()` helper for render paths outside `cf-render` is a planned
+> follow-up and does not exist yet.
 
 ### The piece context menu
 
 Right-clicking a rendered piece opens `cf-piece-menu` for it. **View source**
 shows the piece's retained authored files. **Origin and history** shows its
-active origin and recorded source revisions. A followed piece also has **Stop
-following source**, which keeps the exact current source and clears the origin.
-Historical entries can restore their retained source version or resume
-following their earlier origin. The menu warns before applying a structurally
-incompatible historical source. Its confirmation remains bound to the exact
-candidate that produced the warning.
+active origin and recorded source revisions. **Clone fresh piece into new
+space** creates a copy with default input data in a unique named space and opens
+it. **Clone piece and copy data into new space** instead seeds the copy with
+detached snapshots of the selected piece's current input and stateful internal
+data. Computed values are recomputed in the new space. Data linked from another
+space is rejected because it cannot be captured atomically. Both actions show
+their progress and any failure in a dialog. A detached piece becomes the copy's
+origin. A piece that already follows an origin passes that origin to the copy.
+A followed piece also has **Stop following source**, which keeps the exact
+current source and clears the origin. Historical entries can restore
+their retained source version or resume following their earlier origin. Each
+entry links to its exact retained source. A mutable Fabric piece origin links
+to that piece in its own space, and the space fact links to the space's default
+piece. The menu warns before applying a structurally incompatible historical
+source. Its confirmation remains bound to the exact candidate that produced
+the warning.
 
 **Data** shows the piece's argument and result values (both stay live while
 the menu is open; linked cells appear as `{"@cell": …}` stubs), and
@@ -458,13 +474,22 @@ result schemas carry and dispatches an event to one, with an optional JSON
 payload. A handler only appears if the stream is declared in the pattern's
 output (or argument) type — the schema'd read is closed-world, so a handler
 returned at runtime behind an index signature is invisible to it. Dispatches
-from the menu are accepted-for-delivery acknowledgements (the commit is
+from the menu are accepted-for-delivery acknowledgments (the commit is
 asynchronous) and are not renderer-trusted, so a handler gated on UI
 provenance will refuse them.
 
+The piece-specific entries are followed by a divider and **Space access
+rights...**. That dialog lists the space ACL for every reader. A principal with
+`OWNER` access can add identities, change their `READ`, `WRITE`, or `OWNER`
+capability, and remove entries. The memory server validates every change and
+requires the ACL to retain at least one concrete owner.
+
 The menu comes with `cf-render`. Importing the component registers it. It mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
-it.
+it. While the menu or one of its panels is open, the addressed piece carries an
+animated light sweep and soft color glow. The visual layer sits over the piece,
+does not receive pointer events, and does not change its size or layout. The
+menu closes if that renderer disconnects or begins showing another piece.
 
 The innermost rendered piece claims the click, so right-clicking a tile inside a
 piece addresses the tile. Three cases keep the browser's own menu instead: a
@@ -473,7 +498,7 @@ value inside a piece rather than a whole piece.
 
 Before opening, `cf-render` announces the click as `cf-piece-context-menu`; a host
 can cancel that event to show its own menu for the piece instead. The seam is
-written up in [HOST_EMBEDDING.md §3a](../../development/HOST_EMBEDDING.md).
+written up in [host-embedding.md §3a](../../features/host-embedding.md).
 
 ---
 
@@ -840,9 +865,17 @@ and (for the current viewer) a verified seal that user-space cannot forge.
 | --- | --- | --- |
 | **any participant** whose live profile cell you hold — the viewer (via `wish`) or anyone who contributed their cell on join | `cf-profile-badge` bound to that cell | trusted; draws name + avatar + a DID-derived verified seal; cross-space reads resolve for every viewer (CT-1667/1687) |
 | a person you hold **only a snapshot** for — a self-contained piece, or an offline remote profile space | `cf-avatar` + their name | untrusted fallback, safe for any value; needs no profile cell |
+| a row that **may or may not** carry a profile — one written before the space had profiles, beside rows that do | `cf-profile-badge` with `fallback-name` | one binding for both, so nothing has to test a cell-typed field for presence; the name shows only where no profile resolves |
 
 `cf-profile-badge` is the one preferred way to render an identity; `cf-avatar` is
-the explicit fallback for when no live profile cell is available. See
+the explicit fallback for when no live profile cell is available.
+
+`fallback-name` is for the mixed case only, and it is **untrusted**: it renders
+where no profile value resolved, never beside the verification seal, and never
+over a profile that resolved without a name — such a profile reads as unknown
+rather than borrowing the caller's string. A name a caller supplies can never
+acquire the treatment a resolved cell earns, which is what makes the seal worth
+reading. See
 [multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
 for the end-to-end flow (resolve the viewer, store each joiner's profile cell, mark "me").
 

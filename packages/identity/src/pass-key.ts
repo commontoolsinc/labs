@@ -27,21 +27,23 @@ export interface PassKeyGetOptions {
 // A key must first be created for an origin, and then retrieved
 // as a `PassKey` instance. From there, a root key `Identity` can be derived/stored.
 export class PassKey {
-  private credentials: PublicKeyCredential;
+  #credentials: PublicKeyCredential;
   private constructor(credentials: PublicKeyCredential) {
-    this.credentials = credentials;
+    this.#credentials = credentials;
   }
 
   id() {
-    return this.credentials.id;
+    return this.#credentials.id;
   }
 
-  // Generate a root key from a `PassKey`.
-  // A root key identity is deterministically derived from a `PassKey`'s
-  // PRF output, a 32-byte hash, which is used as ed25519 key material.
-  // Note: Root keys can only be created from PassKeys obtained via PassKey.get()
+  /**
+   * Generates a root key from this `PassKey`. A root key identity is
+   * deterministically derived from a `PassKey`'s PRF output, a 32-byte hash,
+   * which is used as ed25519 key material. Root keys can only be created from
+   * a `PassKey` obtained via `PassKey.get()`.
+   */
   async createRootKey(): Promise<Identity> {
-    const seed = this.prf();
+    const seed = this.#prf();
     if (!seed) {
       throw new Error(
         "common-identity: No PRF found. This PassKey appears to have just been created - root keys can only be generated from PassKeys obtained via PassKey.get()",
@@ -51,11 +53,11 @@ export class PassKey {
     return await Identity.fromRaw(seed);
   }
 
-  // Return the secret 32-bytes derived from the passkey's PRF data.
-  private prf(): Uint8Array | null {
+  /** Returns the secret 32 bytes derived from the passkey's PRF data. */
+  #prf(): Uint8Array | null {
     // PRF results are only available when calling `get()`,
     // not during key creation.
-    const extResults = this.getCredentials().getClientExtensionResults();
+    const extResults = this.#getCredentials().getClientExtensionResults();
     const prf = extResults?.prf?.results?.first;
     if (prf) {
       return new Uint8Array(bufferSourceToArrayBuffer(prf));
@@ -64,16 +66,18 @@ export class PassKey {
     }
   }
 
-  // Register a new Passkey with a WebAuthn Authenticator.
-  // In browsers, must be called via a user gesture.
-  //
-  // A passkey may still be created with an authenticator even if the procedure
-  // fails, e.g. the authenticator or browser is missing some needed features that
-  // can only be determined after key creation.
-  //
-  // Different data is available within `PublicKeyCredentials` depending
-  // on whether it was created or retrieved. We need the PRF assertion
-  // only available on "get" requests, so we don't return a `PassKey` here.
+  /**
+   * Registers a new passkey with a WebAuthn authenticator. In browsers, this
+   * must be called via a user gesture.
+   *
+   * A passkey may still be created with an authenticator even if the procedure
+   * fails, e.g. the authenticator or browser is missing some needed features
+   * that can only be determined after key creation.
+   *
+   * Different data is available within `PublicKeyCredentials` depending on
+   * whether it was created or retrieved. We need the PRF assertion only
+   * available on `get` requests, so we don't return a `PassKey` here.
+   */
   static async create(name: string, displayName: string): Promise<PassKey> {
     const challenge = random(32);
     const userId = random(32);
@@ -119,8 +123,10 @@ export class PassKey {
     return new PassKey(result);
   }
 
-  // Retrieve a `PassKey` from a Web Authn authenticator.
-  // In browsers, must be called via a user gesture.
+  /**
+   * Retrieves a `PassKey` from a WebAuthn authenticator. In browsers, this
+   * must be called via a user gesture.
+   */
   static async get({
     userVerification,
     mediation,
@@ -153,7 +159,7 @@ export class PassKey {
     return new PassKey(credential);
   }
 
-  private getCredentials(): PublicKeyCredential {
-    return this.credentials;
+  #getCredentials(): PublicKeyCredential {
+    return this.#credentials;
   }
 }

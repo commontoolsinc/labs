@@ -1,4 +1,5 @@
 // deno-lint-ignore-file no-explicit-any
+
 /**
  * Annotation - A pattern for annotating existing cells/pieces.
  *

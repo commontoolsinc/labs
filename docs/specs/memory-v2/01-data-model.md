@@ -125,9 +125,12 @@ containing a manifest array whose entries have a `partialCause` and a sigil
 uses the separate short-link form `{"/":"<short-id>"}` and resolves to
 `of:<short-id>` in the same space. CFC metadata also uses its own compact stored
 shape and is converted to a CID sigil link during traversal. When the server
-executes a subscription with graph traversal, it MUST follow metadata links such
-as `pattern`, `argument`, and `result`, and it MUST also follow each link listed
-in the `internal` manifest, transitively, to include the full provenance chain.
+executes a subscription with graph traversal, it MUST follow these metadata
+links, and each link listed in the `internal` manifest, transitively, for every
+document the query names as a root and for every document reached through such
+a link, to include the full provenance chain. A document the traversal reaches
+only through a value link is owed none of them; the role-based contract is in
+[`05-queries.md`](05-queries.md), "Metadata / Provenance Resolution".
 
 **Document paths**: Transaction/storage reads and writes operate on full
 document paths. For example, metadata links live at top-level paths like
@@ -482,8 +485,10 @@ current value. Patch operations are inspired by
   segments create arrays; string segments create objects. When a schema is
   available, it guides the choice between array and object.
 - **Custom `splice` operation** for efficient array manipulation.
-- **Future CRDT/OT operations** for collaborative text editing (e.g.,
-  `text-insert`, `text-delete`) are planned as extensions to this set.
+- Collaborative editor operations are a distinct top-level `apply-op` write
+  class rather than `PatchOp` extensions. The server derives an ordinary patch
+  revision from each accepted non-empty batch; see
+  [Collaborative Operations, Views, and Anchors](./07-op-views-and-annotations.md).
 
 ```typescript
 // Shown at module scope.

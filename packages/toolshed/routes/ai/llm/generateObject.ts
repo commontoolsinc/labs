@@ -1,19 +1,36 @@
+import { DEFAULT_GENERATE_OBJECT_MODEL } from "@commonfabric/llm";
 import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
 } from "@commonfabric/llm/types";
-import { findModel } from "./models.ts";
+import { trace } from "@opentelemetry/api";
 import {
   generateObject as generateObjectCore,
   jsonSchema,
   type ModelMessage,
 } from "ai";
 import { Ajv } from "ajv";
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
-import { trace } from "@opentelemetry/api";
-import { normalizeSchemaForProvider } from "./schema.ts";
 
-export async function generateObject(
+import { LLMRequestError } from "./errors.ts";
+import { resolveModel } from "./models.ts";
+import { normalizeSchemaForProvider } from "./schema.ts";
+import { withGatewayOperation } from "@/lib/gateway-provenance.ts";
+
+/**
+ * A gateway-bound request reports the route it came from. The whole call is in
+ * scope, and the response is complete when it returns, so every request it
+ * makes is covered.
+ */
+export function generateObject(
+  params: LLMGenerateObjectRequest,
+): Promise<LLMGenerateObjectResponse> {
+  return withGatewayOperation(
+    "generate-object",
+    () => generateObjectCall(params),
+  );
+}
+
+async function generateObjectCall(
   params: LLMGenerateObjectRequest,
 ): Promise<LLMGenerateObjectResponse> {
   try {
@@ -21,11 +38,25 @@ export async function generateObject(
       string,
       unknown
     >;
-    const modelConfig = findModel(
-      params.model ?? DEFAULT_GENERATE_OBJECT_MODELS,
-    );
+    const modelName = params.model ?? DEFAULT_GENERATE_OBJECT_MODEL;
+    const modelConfig = await resolveModel(modelName);
+    if (!modelConfig) {
+      throw new LLMRequestError(`Unsupported model: ${modelName}`);
+    }
     const ajv = new Ajv({ allErrors: true, strict: false });
-    const validator = ajv.compile(providerSchema);
+    // The schema comes from the caller, and Ajv rejects one it cannot compile:
+    // an unknown type, a reference to nothing, a keyword given the wrong shape.
+    let validator;
+    try {
+      validator = ajv.compile(providerSchema);
+    } catch (error) {
+      throw new LLMRequestError(
+        `Schema cannot be compiled: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
 
     const activeSpan = trace.getActiveSpan();
     const spanId = activeSpan?.spanContext().spanId;
@@ -74,6 +105,10 @@ export async function generateObject(
         },
       }),
       maxOutputTokens: params.maxTokens,
+      // The AI SDK otherwise sleeps and sends the request again twice before
+      // reporting a failure, and reports it wrapped in an error that carries
+      // no status. One attempt leaves the decision to retry with the caller.
+      maxRetries: 0,
       // Registering a telemetry integration turns span collection on for every
       // AI SDK call. This route has never emitted AI SDK spans, so it opts out.
       telemetry: { isEnabled: false },

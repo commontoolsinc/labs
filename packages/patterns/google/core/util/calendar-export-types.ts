@@ -40,6 +40,7 @@ export type DayOfWeek =
 export interface SemesterDates {
   /** Start date in YYYY-MM-DD format */
   startDate: string;
+
   /** End date in YYYY-MM-DD format */
   endDate: string;
 }
@@ -51,12 +52,16 @@ export interface SemesterDates {
 export interface RecurrenceRule {
   /** Frequency of recurrence */
   frequency: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
+
   /** Interval between occurrences (e.g., 2 = every 2 weeks) */
   interval?: number;
+
   /** Days of week for WEEKLY frequency (e.g., "MO", "MO,WE,FR") */
   byDay?: string;
+
   /** End date in YYYY-MM-DD format */
   until?: string;
+
   /** Number of occurrences (alternative to until) */
   count?: number;
 }
@@ -76,12 +81,16 @@ export type ExportTarget = "google" | "apple" | "ics";
 export interface ExportTargetInfo {
   /** Target identifier */
   id: ExportTarget;
+
   /** Display label */
   label: string;
+
   /** Icon (emoji) */
   icon: string;
+
   /** Whether this target is available */
   available: boolean;
+
   /** Reason why unavailable (if applicable) */
   unavailableReason?: string;
 }
@@ -96,8 +105,10 @@ export interface ExportTargetInfo {
 export interface EventTimeSlot {
   /** Day of the week */
   day: DayOfWeek;
+
   /** Start time in HH:MM (24-hour) format */
   startTime: string;
+
   /** End time in HH:MM (24-hour) format */
   endTime: string;
 }
@@ -173,20 +184,28 @@ export interface ExportableEvent {
 export interface CalendarOutboxEvent {
   /** Unique event identifier */
   id: string;
+
   /** Event title */
   title: string;
+
   /** Target calendar name in Apple Calendar */
   calendarName: string;
+
   /** Start date in YYYY-MM-DD format */
   startDate: string;
+
   /** Start time in HH:MM format */
   startTime: string;
+
   /** End time in HH:MM format */
   endTime: string;
+
   /** Event location */
   location?: string;
+
   /** Event notes/description */
   notes?: string;
+
   /** Recurrence rule for repeating events */
   recurrence?: RecurrenceRule;
 }
@@ -198,6 +217,7 @@ export interface CalendarOutboxEvent {
 export interface UserConfirmation {
   /** ISO timestamp when user confirmed */
   timestamp: string;
+
   /** What was displayed in the dialog */
   dialogContent: {
     displayedTitle: string;
@@ -207,6 +227,7 @@ export interface UserConfirmation {
     displayedClasses: string[];
     warningMessage: string;
   };
+
   /** Source pattern information */
   sourcePattern: {
     name: string;
@@ -220,12 +241,16 @@ export interface UserConfirmation {
 export interface ExecutionResult {
   /** Current status */
   status: "pending" | "processing" | "completed" | "failed";
+
   /** When processing started */
   startedAt?: string;
+
   /** When processing completed */
   completedAt?: string;
+
   /** Error message if failed */
   error?: string;
+
   /** IDs of events created in Apple Calendar */
   createdEventIds?: string[];
 }
@@ -236,12 +261,16 @@ export interface ExecutionResult {
 export interface CalendarOutboxEntry {
   /** Unique entry identifier */
   id: string;
+
   /** Events to create */
   events: CalendarOutboxEvent[];
+
   /** User confirmation metadata (audit trail) */
   confirmation: UserConfirmation;
+
   /** Execution status (updated by CLI) */
   execution: ExecutionResult;
+
   /** ISO timestamp when entry was created */
   createdAt: string;
 }
@@ -253,8 +282,10 @@ export interface CalendarOutboxEntry {
 export interface CalendarOutbox {
   /** Outbox entries */
   entries: CalendarOutboxEntry[];
+
   /** ISO timestamp of last update */
   lastUpdated: string;
+
   /** Schema version */
   version: string; // "1.0"
 }
@@ -296,14 +327,19 @@ export interface ExportConfig {
 export interface EventExportResult {
   /** ID of the event */
   eventId: string;
+
   /** Whether export succeeded */
   success: boolean;
+
   /** External ID assigned by target system */
   externalId?: string;
+
   /** Error message if failed */
   error?: string;
+
   /** Whether this was skipped as duplicate */
   skipped?: boolean;
+
   /** Reason for skipping */
   skipReason?: string;
 }
@@ -314,26 +350,37 @@ export interface EventExportResult {
 export interface ExportResult {
   /** Overall success */
   success: boolean;
+
   /** Export target */
   target: ExportTarget;
+
   /** Human-readable message */
   message: string;
+
   /** ISO timestamp when completed */
   timestamp: string;
+
   /** Number of events exported */
   exportedCount: number;
+
   /** Number of events that failed */
   failedCount?: number;
+
   /** Number of duplicates skipped */
   skippedCount?: number;
+
   /** Per-event results (for detailed reporting) */
   eventResults?: EventExportResult[];
+
   /** Whether events were added to outbox (Apple) */
   addedToOutbox?: boolean;
+
   /** Outbox entry ID (Apple) */
   outboxEntryId?: string;
+
   /** ICS content (for download target) */
   icsContent?: string;
+
   /** ICS filename (for download target) */
   icsFilename?: string;
 }
@@ -344,18 +391,25 @@ export interface ExportResult {
 export interface PendingExport {
   /** Export target */
   target: ExportTarget;
+
   /** Events to export */
   events: ExportableEvent[];
+
   /** Export configuration */
   config: ExportConfig;
+
   /** Number of events (excluding duplicates) */
   eventCount: number;
+
   /** Number of duplicates detected */
   duplicateCount: number;
+
   /** Items that will be skipped */
   skippedItems: Array<{ name: string; reason: string }>;
+
   /** Pre-generated ICS content (for Apple fallback) */
   icsContent?: string;
+
   /** Converted outbox events (for Apple) */
   outboxEvents?: CalendarOutboxEvent[];
 }
@@ -370,18 +424,25 @@ export interface PendingExport {
 export interface ExportProgress {
   /** Current phase */
   phase: "preparing" | "exporting" | "completing" | "done" | "error";
+
   /** Total events to export */
   total: number;
+
   /** Events processed so far */
   processed: number;
+
   /** Events successfully exported */
   succeeded: number;
+
   /** Events that failed */
   failed: number;
+
   /** Percentage complete (0-100) */
   percentComplete: number;
+
   /** Current event being processed */
   currentEvent?: string;
+
   /** Error message if phase is "error" */
   error?: string;
 }

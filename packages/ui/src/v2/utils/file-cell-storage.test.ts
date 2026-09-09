@@ -52,7 +52,7 @@ describe("file-cell-storage", () => {
       contentType: "text/plain",
       suffix: "txt",
     });
-    expect((request as { body: Uint8Array }).body).toEqual(
+    expect(new Uint8Array((request as { body: ArrayBuffer }).body)).toEqual(
       new Uint8Array([104, 101, 108, 108, 111]),
     );
     expect(stored).toMatchObject({

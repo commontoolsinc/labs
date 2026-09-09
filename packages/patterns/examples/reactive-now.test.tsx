@@ -1,4 +1,4 @@
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ReactiveNow from "./reactive-now.tsx";
 
 // The time labels derive from the reactive #now clock: they read "…" until #now
@@ -37,7 +37,7 @@ export default pattern(() => {
   const assert_echo = assert(() => demo.echo === "HELLO");
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_loaded_at_is_clock_shaped },
       { assertion: assert_now_is_clock_shaped },
       { assertion: assert_since_load_is_ago_shaped },

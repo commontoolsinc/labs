@@ -1,0 +1,97 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "NamesTableRow": {
+        "properties": {
+          "member": {
+            "description": "The member. `unknown` because it is written as a reference and only\never compared; anything wider would read the member back whole.",
+            "type": "unknown"
+          },
+          "name": {
+            "description": "The member's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member",
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "boardNames": {
+        "asCell": [
+          "readonly"
+        ],
+        "default": [],
+        "description": "The board's names table, one row per named member. The item reads its\nown row out of it and nothing else; absent, the item shows no name.\n\nReadable, not writable: the table is the board's derivation, and an item\nhas no business writing into it.",
+        "items": {
+          "$ref": "#/$defs/NamesTableRow"
+        },
+        "type": "array"
+      },
+      "body": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "The item's body, verbatim Markdown.",
+        "type": "string"
+      },
+      "createdAt": {
+        "default": 0,
+        "description": "When the item was filed (epoch milliseconds), stamped at create.",
+        "type": "number"
+      },
+      "title": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "collection-naming/item.tsx",
+  "resultSchema": {
+    "description": "An item of the exemplar board. The display name stays the title; the\nboard's name for the item rides beside it as `shortName`, and renders as a\nbadge in the header when there is one.",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "body": {
+        "default": "",
+        "type": "string"
+      },
+      "createdAt": {
+        "description": "When the item was filed (epoch milliseconds).",
+        "type": "number"
+      },
+      "shortName": {
+        "description": "The name the board calls this item by, read out of the board's names\ntable; `undefined` for an item no board has named, or one wired to no\nboard.",
+        "type": [
+          "string",
+          "undefined"
+        ]
+      },
+      "title": {
+        "default": "",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "body",
+      "createdAt",
+      "shortName",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

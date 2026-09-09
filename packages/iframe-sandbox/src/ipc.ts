@@ -1,131 +1,142 @@
-import { type JSONSchema } from "@commonfabric/runner";
-import { isObject, isRecord } from "@commonfabric/utils/types";
-
-export const isJSONSchema = (source: unknown): source is JSONSchema => {
-  if (!isRecord(source)) {
-    return false;
-  }
-
-  if (!("type" in source) || !source.type) {
-    return "anyOf" in source && Array.isArray(source.anyOf);
-  }
-
-  switch (source.type) {
-    case "object":
-    case "array":
-    case "string":
-    case "integer":
-    case "number":
-    case "boolean":
-    case "null":
-      return true;
-    default:
-      return false;
-  }
-};
-
 // Types used by the `common-iframe-sandbox` IPC.
 
-// Diagram of the IPC messages between the Host
-// environment, and the intermediary guest iframe.
+import type { FabricValue } from "@commonfabric/data-model";
+
+// Diagram of the messages between the Host environment, the intermediary outer
+// frame, and the guest in the inner frame.
 //
-// ┌──────────────┐              ┌───────────────┐
-// │     Host     │              │     Guest     │
-// └───────┬──────┘              └───────┬───────┘
-//         │                             │
-//         │◄───────────READY────────────┤
-//         │                             │
-//         ├────────────INIT────────────►│
-//    ┌───►│                             │
-//    │    ├────────LOAD-DOCUMENT───────►│
-//    │    │                             │
-//    │    │◄───────────LOAD─────────────┤
-//    │    │                             │◄───┐
-//    │    │◄────────PASSTHROUGH────────►│    │
-//    │    ▼                             ▼    │
-//    └────┘                             └────┘
+// ┌──────────────┐        ┌───────────────┐        ┌───────────────┐
+// │     Host     │        │  Outer frame  │        │     Guest     │
+// └───────┬──────┘        └───────┬───────┘        └───────┬───────┘
+//         │                       │                        │
+//         │◄────────READY─────────┤                        │
+//         │                       │                        │
+//         ├─────LOAD-DOCUMENT────►│                        │
+//         │                       ├────────srcdoc─────────►│
+//         │◄─────────LOAD─────────┤                        │
+//         │                       │                        │
+//         ├──────────────────ORDERED──────────────────────►│
+//         ├──────────────────PORT (transferred)───────────►│
+//         │◄──────FLUSH───────────┤◄───────(unread)────────┤
+//         │◄═════════════════════ port ═══════════════════►│
+//         │                       │                        │
+//         │◄──────ERROR───────────┤◄───────(unread)────────┤
+//
+// The host and the guest hold the two ends of a `MessagePort` and every
+// capability request, response, and event crosses on it. The outer frame
+// carries the CSP and loads documents; it relays nothing that protocol says.
+//
+// The one thing it does pass along is whatever the guest posts to it, which it
+// forwards without reading. A guest has a port for everything it means to say,
+// so a message arriving by that route is a guest reporting that it could not
+// use the port -- a way to raise an alarm, not a second way to talk.
+//
+// The relayed route and the port are separate channels, and nothing orders one
+// against the other. The `ORDERED`/`FLUSH` exchange is the rendezvous that
+// still puts what crossed before the port ahead of what crosses on it: the
+// host posts `ORDERED` ahead of the port to say it answers flush markers, and
+// a guest that heard it posts a `FLUSH` marker up the parent chain on taking
+// the port -- behind everything it posted there before -- and holds its port
+// traffic until the marker's acknowledgement comes back over the port. The
+// host acknowledges a marker only after handling everything the relay carried
+// ahead of it, so by the time any port request lands, every parent post the
+// guest made before taking its port has been handled.
+//
+// A guest that never heard `ORDERED` sends unordered rather than waiting,
+// which is what lets a guest and a host of different vintages pair up. What
+// answers a marker is the element's live set of sessions, so a guest whose
+// marker arrives after the element let go of its session holds its traffic
+// from then on. That guest is one the element has already stopped listening
+// to, on a port it has already closed.
+
+/**
+ * Sent alongside the transferred port, so a guest recognizes the handoff by
+ * what the message says rather than by having to treat every arriving message
+ * as a candidate.
+ */
+export const GUEST_PORT_HANDOFF = "common-iframe-sandbox:port";
+
+/**
+ * Posted to the guest ahead of `GUEST_PORT_HANDOFF` to say the host answers
+ * flush markers. A guest that heard this before its handoff holds its port
+ * traffic behind the marker exchange; one that did not sends unordered, so
+ * neither side of a mixed pairing waits on an answer that cannot come.
+ */
+export const GUEST_PORT_ORDERED = "common-iframe-sandbox:ordered";
+
+/** Length in bytes of the random part of a flush marker's nonce. */
+const FLUSH_NONCE_BYTES = 8;
+
+/**
+ * Returns a nonce for a flush marker. It has to be unique among the markers
+ * one host element hears between teardowns, and `crypto.getRandomValues()` is
+ * available to a guest whether or not its document is a secure context.
+ */
+export function flushNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(FLUSH_NONCE_BYTES));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
 
 export enum IPCHostMessageType {
-  // Host initializing guest with data (namely, ID).
-  Init = "init",
-  // Host instructing guest to load a new document.
+  // Host instructing the outer frame to load a new document.
   LoadDocument = "load-document",
-  // Host instructing guest to pass through a `HostMessage`.
-  Passthrough = "passthrough",
 }
 
-/**
- * Messages from the system to the host. In case of passthrough it is system
- * sending message to the guest through the host.
- */
-export type IPCHostMessage =
-  | { id: number; type: IPCHostMessageType.Init }
-  | { id: number; type: IPCHostMessageType.LoadDocument; data: string }
-  | { id: number; type: IPCHostMessageType.Passthrough; data: HostMessage };
+/** A message from the host to the outer frame. */
+export type IPCHostMessage = {
+  type: IPCHostMessageType.LoadDocument;
+  data: string;
+};
 
 export enum IPCGuestMessageType {
-  // Guest alerting the host that it is ready.
+  // Outer frame alerting the host that it is ready.
   Ready = "ready",
-  // An error occurred in the outer frame.
-  Error = "error",
-  // Guest inner frame has loaded.
+  // Outer frame's inner document has loaded, so there is a guest to hand a
+  // port to.
   Load = "load",
-  // Guest passing a `GuestMessage`.
-  Passthrough = "passthrough",
+  // An error in the outer frame itself.
+  OuterError = "outer-error",
+  // An error the guest raised outside its port.
+  GuestError = "guest-error",
 }
 
-/**
- * Messages from the host to the system and in case of pass through it is guest
- * message routed through the host.
- */
+/** A message from the outer frame to the host. */
 export type IPCGuestMessage =
   | { type: IPCGuestMessageType.Ready }
-  | { id: number; type: IPCGuestMessageType.Load }
-  | { id: number; type: IPCGuestMessageType.Error; data: unknown }
-  | { id: number; type: IPCGuestMessageType.Passthrough; data: GuestMessage };
+  | { type: IPCGuestMessageType.Load }
+  | { type: IPCGuestMessageType.OuterError; data: unknown }
+  | { type: IPCGuestMessageType.GuestError; data: unknown };
 
 export function isIPCGuestMessage(
   message: unknown,
 ): message is IPCGuestMessage {
-  if (typeof message !== "object" || message === null) {
-    return false;
-  }
-  if (!("type" in message)) {
+  if (
+    typeof message !== "object" || message === null || !("type" in message)
+  ) {
     return false;
   }
   switch (message.type) {
-    case IPCGuestMessageType.Ready: {
+    case IPCGuestMessageType.Ready:
+    case IPCGuestMessageType.Load: {
       return true;
     }
-    case IPCGuestMessageType.Error:
-    case IPCGuestMessageType.Passthrough:
-    case IPCGuestMessageType.Load: {
-      if (
-        message.type !== IPCGuestMessageType.Load &&
-        (!("data" in message) || message.data == null)
-      ) {
-        return false;
-      }
-      if (
-        message.type === IPCGuestMessageType.Passthrough &&
-        "data" in message &&
-        !isGuestMessage(message.data)
-      ) {
-        return false;
-      }
-      return ("id" in message) && message.id != null;
+    case IPCGuestMessageType.OuterError:
+    case IPCGuestMessageType.GuestError: {
+      return "data" in message && message.data != null;
     }
   }
   return false;
 }
 
-export interface GuestError {
+export type GuestError = {
   description: string;
   source: string;
   lineno: number;
   colno: number;
   stacktrace: string;
-}
+};
 
 export function isGuestError(e: object): e is GuestError {
   return typeof e === "object" &&
@@ -137,145 +148,231 @@ export function isGuestError(e: object): e is GuestError {
     "stacktrace" in e && typeof e.stacktrace === "string";
 }
 
-export const isTaskPerform = (source: unknown): source is TaskPerform =>
-  isRecord(source) &&
-  "intent" in source && typeof source.intent === "string" &&
-  "description" in source && typeof source.description === "string" &&
-  "input" in source && isObject(source.input) &&
-  "output" in source && isJSONSchema(source.output);
-
-export enum HostMessageType {
-  Ping = "ping",
-  Update = "update",
-  LLMResponse = "llm-response",
-  ReadWebpageResponse = "readwebpage-response",
-  Effect = "command-effect",
-}
-
-export type HostMessage =
-  | { type: HostMessageType.Ping; data: string }
-  | { type: HostMessageType.Update; data: [string, unknown] }
-  | {
-    type: HostMessageType.LLMResponse;
-    request: string;
-    data: object | null;
-    error: unknown;
-  }
-  | {
-    type: HostMessageType.ReadWebpageResponse;
-    request: string;
-    data: object | null;
-    error: unknown;
-  }
-  | Effect;
-
-export type Effect = {
-  type: HostMessageType.Effect;
-  /**
-   * ID of the corresponding GuestCommand.
-   */
-  id: string;
-
-  /**
-   * Result of performing the GuestCommand. It MUST match the `output` schema
-   * provided by the command. It is expected that system will ensure schema
-   * conformance but there is no way for us to ensure this on wire.
-   */
-  result: { ok: object; error?: void } | { error: Error; ok?: void };
-};
-
-export enum GuestMessageType {
-  Error = "error",
-  Subscribe = "subscribe",
-  Unsubscribe = "unsubscribe",
-  Write = "write",
-  Read = "read",
-  LLMRequest = "llm-request",
-  WebpageRequest = "readwebpage-request",
-  Perform = "perform",
-  Pong = "pong",
-}
-
-export type GuestMessage =
-  | { type: GuestMessageType.Error; data: GuestError }
-  | { type: GuestMessageType.Subscribe; data: string | string[] }
-  | { type: GuestMessageType.Unsubscribe; data: string | string[] }
-  | { type: GuestMessageType.Read; data: string }
-  | { type: GuestMessageType.Write; data: [string, unknown] }
-  | { type: GuestMessageType.LLMRequest; data: string }
-  | { type: GuestMessageType.WebpageRequest; data: string }
-  | { type: GuestMessageType.Perform; data: TaskPerform }
-  | { type: GuestMessageType.Pong; data: string };
+export const BRIDGE_PROTOCOL = "common-fabric-bridge";
 
 /**
- * Message asking a host to perform certain task.
+ * Exact encoding revision. An additive operation stays within this revision
+ * only when a current guest negotiates it through describe() before sending
+ * it, so an older host can reject the unsupported capability without hanging.
+ * The flush exchange is negotiated the same way through `GUEST_PORT_ORDERED`:
+ * a guest waits on an acknowledgement only from a host that announced it
+ * sends one.
  */
-export interface TaskPerform {
-  /**
-   * Intent is a semantic identifier that describes the task guest wishes
-   * to be performed.
-   */
-  intent: string;
+export const BRIDGE_VERSION = 2;
 
-  /**
-   * Description of the expected effect performing this command should have.
-   */
-  description: string;
+export type BridgeError = {
+  code: string;
+  message: string;
+  resource?: string;
+};
 
-  /**
-   * Parameters of the command.
-   */
-  input: object;
+export type BridgeResourceDescriptor = {
+  name: string;
+  kind: "cell" | "stream" | "sqlite" | "service";
+  operations: string[];
+  methods: string[];
+  schema?: FabricValue;
+  description?: string;
+};
 
-  /**
-   * A schema of the result produced by this effect.
-   */
-  output: JSONSchema;
+export type BridgeManifest = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  resources: BridgeResourceDescriptor[];
+};
 
-  /**
-   * Unique identifier for this command. It is used by the host to send
-   * corresponding effect message.
-   */
+export type BridgeOperation =
+  | "describe"
+  | "disconnect"
+  | "pull"
+  | "initialize"
+  | "set"
+  | "push"
+  | "resolve"
+  | "call"
+  | "sink"
+  | "unsink";
+
+/** A path beneath a granted or previously resolved cell capability. */
+export type BridgeCellPath = Array<string | number>;
+
+/** Stable identity metadata returned with an opaque resolved capability. */
+export type BridgeCellIdentity = {
+  /** Stored document ID, shared by every instance of a scoped Cell. */
   id: string;
+
+  /** Opaque identity for this space-, user-, or session-scoped instance. */
+  instanceId?: string;
+
+  /** Space holding the Cell. */
+  space?: string;
+
+  /** Scope which selects the Cell instance. */
+  scope?: "space" | "user" | "session";
+
+  /** Path within the stored document. */
+  path: BridgeCellPath;
+};
+
+/** Guest-visible descriptor for a host-minted stable cell capability. */
+export type BridgeResolvedCell = {
+  handle: string;
+  hasValue: true;
+
+  /** Operations the host authorizes on this resolved capability. */
+  operations?: string[];
+
+  identity?: BridgeCellIdentity;
+  value?: FabricValue;
+};
+
+export type BridgeRequest = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "request";
+  id: number;
+  operation: BridgeOperation;
+  resource?: string;
+  handle?: string;
+  path?: BridgeCellPath;
+  method?: string;
+  subscription?: string;
+  value?: FabricValue;
+  values?: FabricValue[];
+};
+
+export type BridgeResponse = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "response";
+  id: number;
+  ok: true;
+  value?: FabricValue;
+} | {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "response";
+  id: number;
+  ok: false;
+  error: BridgeError;
+};
+
+export type BridgeEvent = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "event";
+  subscription: string;
+  value?: FabricValue;
+};
+
+/**
+ * Acknowledges a flush marker, echoing its nonce. Sent over the port once the
+ * host has handled everything the parent-chain relay carried ahead of the
+ * marker; the guest holding that nonce releases its port traffic on it.
+ */
+export type BridgeFlushAck = {
+  protocol: typeof BRIDGE_PROTOCOL;
+  version: typeof BRIDGE_VERSION;
+  type: "flush";
+  nonce: string;
+};
+
+export type BridgeHostMessage = BridgeResponse | BridgeEvent | BridgeFlushAck;
+
+const hasBridgeHeader = (
+  message: unknown,
+): message is Record<string, unknown> =>
+  typeof message === "object" && message !== null &&
+  (message as Record<string, unknown>).protocol === BRIDGE_PROTOCOL &&
+  (message as Record<string, unknown>).version === BRIDGE_VERSION;
+
+export function isBridgeRequest(message: unknown): message is BridgeRequest {
+  if (!hasBridgeHeader(message)) return false;
+  if (
+    message.type !== "request" || !Number.isSafeInteger(message.id) ||
+    typeof message.operation !== "string"
+  ) return false;
+  switch (message.operation) {
+    case "describe":
+    case "disconnect":
+      return true;
+    case "pull":
+    case "set":
+    case "resolve":
+      return hasCellTarget(message) && hasCellPath(message);
+    case "initialize":
+      return hasCellTarget(message) && hasCellPath(message) &&
+        Object.hasOwn(message, "value") && message.value !== undefined;
+    case "push":
+      return hasCellTarget(message) && hasCellPath(message) &&
+        Array.isArray(message.values);
+    case "call":
+      return typeof message.resource === "string" &&
+        typeof message.method === "string";
+    case "sink":
+    case "unsink":
+      return hasCellTarget(message) &&
+        hasCellPath(message) && typeof message.subscription === "string";
+    default:
+      return false;
+  }
 }
 
-export function isGuestMessage(message: unknown): message is GuestMessage {
+function hasCellTarget(message: Record<string, unknown>): boolean {
+  return (typeof message.resource === "string") !==
+    (typeof message.handle === "string");
+}
+
+function hasCellPath(message: Record<string, unknown>): boolean {
+  return message.path === undefined ||
+    Array.isArray(message.path) &&
+      message.path.every((part) =>
+        typeof part === "string" ||
+        typeof part === "number" && Number.isSafeInteger(part)
+      );
+}
+
+export function isBridgeHostMessage(
+  message: unknown,
+): message is BridgeHostMessage {
+  if (!hasBridgeHeader(message)) return false;
+  if (message.type === "event") {
+    return typeof message.subscription === "string";
+  }
+  if (message.type === "flush") {
+    return typeof message.nonce === "string";
+  }
   if (
-    typeof message !== "object" ||
-    message === null ||
-    !("type" in message) ||
-    typeof message.type !== "string" ||
-    !("data" in message) ||
-    message.data == null
-  ) {
-    return false;
-  }
+    message.type !== "response" || !Number.isSafeInteger(message.id) ||
+    typeof message.ok !== "boolean"
+  ) return false;
+  if (message.ok) return true;
+  return typeof message.error === "object" && message.error !== null &&
+    typeof (message.error as BridgeError).code === "string" &&
+    typeof (message.error as BridgeError).message === "string" &&
+    (!("resource" in message.error) ||
+      typeof (message.error as BridgeError).resource === "string");
+}
 
-  switch (message.type) {
-    case GuestMessageType.Error: {
-      return isGuestError(message.data);
-    }
-    case GuestMessageType.LLMRequest:
-    case GuestMessageType.WebpageRequest:
-    case GuestMessageType.Read:
-    case GuestMessageType.Pong: {
-      return typeof message.data === "string";
-    }
-    case GuestMessageType.Subscribe:
-    case GuestMessageType.Unsubscribe: {
-      return typeof message.data === "string" ||
-        (Array.isArray(message.data) &&
-          message.data.every((key: unknown) => typeof key === "string"));
-    }
-    case GuestMessageType.Write: {
-      return Array.isArray(message.data) &&
-        message.data.length === 2 &&
-        typeof message.data[0] === "string";
-    }
-    case GuestMessageType.Perform: {
-      return isTaskPerform(message.data);
-    }
-  }
+export type GuestAlarm = { type: "error"; data: GuestError };
 
-  return false;
+export function isGuestAlarm(message: unknown): message is GuestAlarm {
+  return typeof message === "object" && message !== null &&
+    (message as { type?: unknown }).type === "error" &&
+    "data" in message && isGuestError(message.data as object);
+}
+
+/**
+ * Flush marker a guest posts up the parent chain on taking its port, behind
+ * everything it posted there before. The nonce is the guest's own token: the
+ * acknowledgement echoes it, and only the guest that minted it acts on the
+ * echo, so an acknowledgement broadcast wider than one session -- or answering
+ * an earlier document's marker -- releases nobody else's traffic.
+ */
+export type GuestFlush = { type: "flush"; nonce: string };
+
+export function isGuestFlush(message: unknown): message is GuestFlush {
+  return typeof message === "object" && message !== null &&
+    (message as { type?: unknown }).type === "flush" &&
+    typeof (message as { nonce?: unknown }).nonce === "string";
 }

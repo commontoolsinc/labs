@@ -1,7 +1,8 @@
-import { createRouter } from "@/lib/create-app.ts";
+import { cors } from "@hono/hono/cors";
+
 import * as handlers from "./llm.handlers.ts";
 import * as routes from "./llm.routes.ts";
-import { cors } from "@hono/hono/cors";
+import { createRouter } from "@/lib/create-app.ts";
 
 const router = createRouter();
 
@@ -20,7 +21,6 @@ router.use(
 router
   .openapi(routes.getModels, handlers.getModels)
   .openapi(routes.generateText, handlers.generateText)
-  .openapi(routes.feedback, handlers.submitFeedback)
   .openapi(routes.generateObject, handlers.generateObject);
 
 export default router;

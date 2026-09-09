@@ -2,7 +2,7 @@ import { Summary, TestResult, TestResultError } from "./interface.ts";
 
 export class Reporter {
   static Styles = {
-    deemphasize: `color: grey`,
+    deemphasize: `color: gray`,
     success: `color: green`,
     error: `color: red`,
     errorBold: `color: red; font-weight: bold`,

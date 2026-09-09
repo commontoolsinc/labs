@@ -1,12 +1,10 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import type { EventHandler } from "../src/scheduler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ID } from "../src/builder/types.ts";
+
 import {
   markRendererTrustedEvent,
   recordTrustedEventPolicyInputs,
@@ -14,7 +12,11 @@ import {
   uiContractFromSchema,
   uiContractsFromSchema,
 } from "../src/cfc/ui-contract.ts";
+import { Runtime } from "../src/runtime.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
+import type { EventHandler } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-ui-contract");
 const space = signer.did();
@@ -359,7 +361,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -424,7 +425,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const sourceStream = runtime.getCell(
@@ -633,11 +633,13 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
-  // The one deliberate `data:` cell URI example: an event delivered as a
-  // sigil link to a data-URI envelope is the exceptional shape we verify is still
-  // decoded and handled. Other event-context tests use the plain in-memory
-  // envelope so they don't imply the input is always a data-URI link.
   it("records trusted event policy inputs from linked handler event envelopes", () => {
+    // The one deliberate `data:` cell URI example: an event delivered as a
+    // sigil link to a data-URI envelope is the exceptional shape we verify is
+    // still decoded and handled. Other event-context tests use the plain
+    // in-memory envelope so they don't imply the input is always a data-URI
+    // link.
+
     const writePolicyInputs: Array<
       ReturnType<
         IExtendedStorageTransaction["getCfcState"]
@@ -1272,7 +1274,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -1339,7 +1340,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -1404,7 +1404,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -1485,7 +1484,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-1",
         actingPrincipal: signer.did(),
@@ -1554,7 +1552,6 @@ describe("CFC trusted UI event enforcement", () => {
           bindingPath: ["commitTrustedMessageSend"],
         });
         messages.withTx(tx).push({
-          [ID]: "trusted-sent-1",
           origin: "sent",
           body: "accepted",
         } as any);
@@ -1569,7 +1566,6 @@ describe("CFC trusted UI event enforcement", () => {
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         messages.withTx(tx).push({
-          [ID]: "fake-sent-1",
           origin: "sent",
           body: "rejected",
         } as any);
@@ -1584,7 +1580,6 @@ describe("CFC trusted UI event enforcement", () => {
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         messages.withTx(tx).push({
-          [ID]: "imported-1",
           origin: "imported",
           body: "allowed",
         } as any);
@@ -1699,7 +1694,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-1",
         actingPrincipal: signer.did(),
@@ -1776,7 +1770,6 @@ describe("CFC trusted UI event enforcement", () => {
           bindingPath: ["commitTrustedMessageSend"],
         });
         state.withTx(tx).key("messages").push({
-          [ID]: "trusted-sent-1",
           origin: "sent",
           body: "accepted",
         } as any);
@@ -1791,7 +1784,6 @@ describe("CFC trusted UI event enforcement", () => {
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         state.withTx(tx).key("messages").push({
-          [ID]: "fake-sent-1",
           origin: "sent",
           body: "rejected",
         } as any);
@@ -1806,7 +1798,6 @@ describe("CFC trusted UI event enforcement", () => {
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         state.withTx(tx).key("messages").push({
-          [ID]: "imported-1",
           origin: "imported",
           body: "allowed",
         } as any);
@@ -1921,7 +1912,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -1987,7 +1977,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -2065,7 +2054,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -2114,7 +2102,10 @@ describe("CFC trusted UI event enforcement", () => {
     });
 
     expect(
-      holder.key("messages").resolveAsCell().getAsNormalizedFullLink().schema,
+      resolvedSchema(
+        holder.key("messages").resolveAsCell().getAsNormalizedFullLink()
+          .schema,
+      ),
     ).toEqual(protectedMessagesSchema);
 
     const handler = Object.assign(
@@ -2165,7 +2156,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -2242,7 +2232,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -2317,7 +2306,6 @@ describe("CFC trusted UI event enforcement", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     const stream = runtime.getCell(
@@ -2398,23 +2386,25 @@ describe("CFC trusted UI event enforcement", () => {
   });
 });
 
-// Host-embedding contract seam 6 (docs/development/HOST_EMBEDDING.md §6): the
-// trusted-event mark certifies that an event flow ORIGINATED FROM THE RENDERED
-// SURFACE — an anti-confused-deputy defense against in-runtime pattern code
-// exercising delegated authority it wasn't handed through the real UI. What it
-// certifies is *surface origin*, not *human intent*: it cannot distinguish a
-// human from a key-holding CLI or an agent-driven browser (CDP-synthesized DOM
-// events are `isTrusted === true`). Consequence: first-class headless issuance
-// for key-holding principals is consistent with the threat model, and the
-// in-runtime surface-origin defense must NOT be weakened to accommodate it.
-//
-// The load-bearing code fact is that `trustedEventMatchesUiContract` checks the
-// renderer mark (a WeakSet membership set only on the trusted render path)
-// BEFORE it inspects provenance. So pattern code that assembles a perfect
-// lookalike `provenance` object — but never went through the render path — fails
-// the contract. This test pins that ordering; weakening the mark check to accept
-// unmarked events turns it red.
 describe("host embedding contract: trusted-mark threat model", () => {
+  // Host-embedding contract seam 6 (docs/features/host-embedding.md §6): the
+  // trusted-event mark certifies that an event flow ORIGINATED FROM THE
+  // RENDERED SURFACE — an anti-confused-deputy defense against in-runtime
+  // pattern code exercising delegated authority it wasn't handed through the
+  // real UI. What it certifies is *surface origin*, not *human intent*: it
+  // cannot distinguish a human from a key-holding CLI or an agent-driven
+  // browser (CDP-synthesized DOM events are `isTrusted === true`). Consequence:
+  // first-class headless issuance for key-holding principals is consistent with
+  // the threat model, and the in-runtime surface-origin defense must NOT be
+  // weakened to accommodate it.
+  //
+  // The load-bearing code fact is that `trustedEventMatchesUiContract` checks
+  // the renderer mark (a WeakSet membership set only on the trusted render
+  // path) BEFORE it inspects provenance. So pattern code that assembles a
+  // perfect lookalike `provenance` object — but never went through the render
+  // path — fails the contract. This test pins that ordering; weakening the mark
+  // check to accept unmarked events turns it red.
+
   const contract = uiContractFromSchema({ ...uiActionSchema });
 
   const lookalikeProvenance = {

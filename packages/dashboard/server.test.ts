@@ -1,8 +1,11 @@
-// Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
-// the page. Importing server.ts neither serves nor collects, so nothing here
-// binds a port or reaches a source; the tiles are stand-ins with a canned
-// collect(), registered under the ids the real registry uses so their views
-// reach the page.
+/**
+ * Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
+ * the page. Importing server.ts neither serves nor collects, so nothing here
+ * binds a port or reaches a source; the tiles are stand-ins with a canned
+ * collect(), registered under the ids the real registry uses so their views
+ * reach the page.
+ */
+
 import {
   assert,
   assertEquals,
@@ -10,12 +13,15 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
+import { expect } from "@std/expect";
 import {
   broadcast,
   clients,
   handle,
+  heartbeat,
   nextFaviconRedSince,
   page,
+  serveTick,
   start,
   tick,
 } from "./server.ts";
@@ -28,7 +34,10 @@ import {
 } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { labsCi } from "./tiles/main-build.ts";
+import { github } from "./lib.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
+import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
+import { dashboardCacheFile } from "./history-files.ts";
 
 const req = (path: string) => new Request(`http://localhost${path}`);
 
@@ -46,6 +55,7 @@ function sourceRun(id: number, title: string): Run {
     event: "push",
     head_sha: `sha-${id}`,
     display_title: title,
+    created_at: new Date(Date.now() - id * 60_000).toISOString(),
     run_started_at: new Date(Date.now() - id * 60_000).toISOString(),
     updated_at: new Date().toISOString(),
     html_url: "",
@@ -97,6 +107,7 @@ interface TestUpdate {
   faviconStatus: "good" | "warn" | "bad";
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
+  message: { text: string; updatedAt: number | null; revision: number };
 }
 
 function updateFromEvent(event: string): TestUpdate {
@@ -109,7 +120,7 @@ function updateFromEvent(event: string): TestUpdate {
 function tileHtml(label: string, html = page()): string {
   const parts = html.split(`<div class="tile `);
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
-  assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
+  assertEquals(hit.length, 1, `expected exactly one tile labeled "${label}"`);
   return hit[0];
 }
 
@@ -313,7 +324,7 @@ Deno.test("a tile stays wide through failures and keeps its last good view", asy
   const firstFailure = tileHtml("recent-runs");
   assert(firstFailure.startsWith(`unknown wide" data-tile-id="recent-runs">`));
   assertStringIncludes(firstFailure, `<p class="big unknown">—</p>`);
-  assertStringIncludes(firstFailure, `<p class="sub">not found</p>`);
+  assertStringIncludes(firstFailure, `<p class="sub" title="not found">not found</p>`);
 
   const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs" };
   await tick([fake("recent-runs", () => good)]);
@@ -324,8 +335,14 @@ Deno.test("a tile stays wide through failures and keeps its last good view", asy
   })]);
   const html = tileHtml("recent main runs");
   assert(html.startsWith(`unknown wide" data-tile-id="recent-runs">`));
-  assertStringIncludes(html, `<p class="big unknown">passing</p>`);
-  assertStringIncludes(html, `<p class="sub">source unreachable</p>`);
+  assertStringIncludes(
+    html,
+    `<p class="big unknown">passing</p>`,
+  );
+  assertStringIncludes(
+    html,
+    `<p class="sub" title="source unreachable">source unreachable</p>`,
+  );
 });
 
 Deno.test("the ticker leaves a tile alone until its interval has elapsed", async () => {
@@ -348,6 +365,9 @@ Deno.test("the ticker leaves a tile alone until its interval has elapsed", async
 
 Deno.test("an update still running after one minute stays gray until it completes", async () => {
   const realNow = Date.now;
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) => errors.push(parts.map(String).join(" "));
   const startedAt = realNow() + 10_000;
   let now = startedAt;
   Date.now = () => now;
@@ -401,6 +421,10 @@ Deno.test("an update still running after one minute stays gray until it complete
     assertStringIncludes(stale, "refresh still pending");
     assertStringIncludes(stale, "last chart");
     assertEquals(messages.length, 1, "the stale transition is published");
+    assertEquals(errors, [
+      "dashboard refresh still pending: tiles model-spend (60000 ms); " +
+      "active run sources none; active GitHub operations none",
+    ]);
 
     now += 15_000;
     await tick([tile]);
@@ -425,6 +449,143 @@ Deno.test("an update still running after one minute stays gray until it complete
     assert(fresh.startsWith(`good" data-tile-id="model-spend">`));
     assertStringIncludes(fresh, "fresh value");
     assertStringIncludes(fresh, "fresh detail");
+  } finally {
+    clients.delete(client);
+    final.resolve(finalView);
+    try {
+      await collection;
+    } finally {
+      Date.now = realNow;
+      console.error = realError;
+    }
+  }
+});
+
+Deno.test("a stale source log names its active GitHub operation", async () => {
+  const realNow = Date.now;
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  const realWarn = console.warn;
+  const realToken = Deno.env.get("GH_TOKEN");
+  let now = realNow();
+  Date.now = () => now;
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  console.error = (...parts: unknown[]) => errors.push(parts.map(String).join(" "));
+  console.warn = (...parts: unknown[]) => warnings.push(parts.map(String).join(" "));
+  const response = deferred<Response>();
+  const requested = deferred<void>();
+  globalThis.fetch = () => {
+    requested.resolve();
+    return response.promise;
+  };
+  Deno.env.set("GH_TOKEN", "test-token");
+  const source = { repo: "test/github-diagnostic", workflow: "ci.yml" };
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source.repo, source.workflow),
+    async runsFor() {
+      const body = await github<{ workflow_runs: Run[] }>(
+        "repos/test/github-diagnostic/actions/runs?branch=main",
+      );
+      return body.workflow_runs;
+    },
+    env: () => undefined,
+  };
+  const tile = sourceTile("github-diagnostic", "GitHub diagnostic", [source]);
+  let refresh: Promise<void> | undefined;
+  try {
+    refresh = tick([tile], sourceCtx);
+    await requested.promise;
+    now += 60_000;
+    await tick([tile], sourceCtx);
+    assertEquals(errors.length, 1);
+    assertStringIncludes(errors[0], "tiles github-diagnostic (60000 ms)");
+    assertStringIncludes(errors[0], "active run sources test/github-diagnostic ci.yml");
+    assertStringIncludes(
+      errors[0],
+      "repos/test/github-diagnostic/actions/runs?branch=main (requesting GitHub, 60000 ms)",
+    );
+  } finally {
+    response.resolve(Response.json({ workflow_runs: [] }));
+    try {
+      await refresh;
+      assertEquals(warnings.length, 1);
+      assertStringIncludes(
+        warnings[0],
+        "for repos/test/github-diagnostic/actions/runs?branch=main completed slowly after 60000 ms",
+      );
+    } finally {
+      Date.now = realNow;
+      globalThis.fetch = realFetch;
+      console.error = realError;
+      console.warn = realWarn;
+      if (realToken === undefined) Deno.env.delete("GH_TOKEN");
+      else Deno.env.set("GH_TOKEN", realToken);
+    }
+  }
+});
+
+Deno.test("a completed-views-only tile suppresses intermediate views and keeps its settled color", async () => {
+  const realNow = Date.now;
+  const startedAt = realNow() - 61_000;
+  let now = startedAt;
+  Date.now = () => now;
+  const lastView: TileView = {
+    label: "settled benchmark",
+    status: "bad",
+    value: "failed",
+    sub: "last completed result",
+  };
+  const finalView: TileView = {
+    label: "settled benchmark",
+    status: "warn",
+    value: "slower",
+    sub: "new completed result",
+  };
+  const final = deferred<TileView>();
+  let receivedPublisher = false;
+  const tile: Tile = {
+    id: "benchmark",
+    intervalMs: 0,
+    showOnlyCompletedViews: true,
+    async collect(_ctx, publish) {
+      receivedPublisher = publish !== undefined;
+      return await final.promise;
+    },
+  };
+  const messages: string[] = [];
+  const client = {
+    enqueue(value: Uint8Array) {
+      messages.push(dec.decode(value));
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  let collection: Promise<void> | undefined;
+  try {
+    await tick([fake("benchmark", () => lastView)]);
+    clients.add(client);
+    now++;
+    collection = tick([tile]);
+
+    expect(receivedPublisher).toBe(false);
+    expect(tileHtml("settled benchmark")).toContain(
+      `bad\" data-tile-id=\"benchmark\">`,
+    );
+    expect(messages).toEqual([]);
+
+    now += 60_000;
+    await tick([tile]);
+    expect(tileHtml("settled benchmark")).toContain(
+      `bad\" data-tile-id=\"benchmark\">`,
+    );
+    expect(tileHtml("settled benchmark")).toContain("refresh still pending");
+    expect(messages).toHaveLength(1);
+
+    final.resolve(finalView);
+    await collection;
+    expect(tileHtml("settled benchmark")).toContain(
+      `warn\" data-tile-id=\"benchmark\">`,
+    );
+    expect(messages).toHaveLength(2);
   } finally {
     clients.delete(client);
     final.resolve(finalView);
@@ -972,6 +1133,37 @@ Deno.test("a failed run source keeps its last good snapshot", async () => {
   assertStringIncludes(stale, "stale-source source unreachable");
 });
 
+Deno.test("a run source that reads backwards in time keeps its last good snapshot", async () => {
+  const source = { repo: "test/backwards-source", workflow: "ci.yml" };
+  // sourceRun times a run from its id, so run 5000 is weeks behind run 3. A
+  // fetch answering with the older one read a stale view of the workflow.
+  let stale = false;
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source.repo, source.workflow),
+    runsFor: () =>
+      Promise.resolve([sourceRun(stale ? 5000 : 3, stale ? "weeks-old run" : "current run")]),
+    env: () => undefined,
+  };
+  const tile = sourceTile("labs-ci", "backwards source", [source]);
+
+  await tick([tile], sourceCtx);
+  assertStringIncludes(tileHtml("backwards source"), "current run");
+
+  stale = true;
+  await tick([tile], sourceCtx);
+  const held = tileHtml("backwards source");
+  assert(held.startsWith(`unknown" data-tile-id="labs-ci">`));
+  assertStringIncludes(held, "current run");
+  assert(!held.includes("weeks-old run"), held);
+  assertStringIncludes(held, "backwards-source");
+
+  stale = false;
+  await tick([tile], sourceCtx);
+  const recovered = tileHtml("backwards source");
+  assert(recovered.startsWith(`good" data-tile-id="labs-ci">`));
+  assertStringIncludes(recovered, "current run");
+});
+
 Deno.test("a tile can publish cached data while its collection is still running", async () => {
   const messages: string[] = [];
   const client = {
@@ -1088,7 +1280,13 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
   const initial = updateFromEvent(await chunk(reader));
-  assertMatch(initial.shellVersion, /^[0-9a-f]{40}$/);
+  // The page reloads itself when these two disagree, so the version the stream
+  // reports has to be the one the page it is feeding was built with.
+  const page = await (await handle(req("/"))).text();
+  assertStringIncludes(
+    page,
+    `const SHELL_VERSION = ${JSON.stringify(initial.shellVersion)};`,
+  );
   assert(initial.ageSeconds >= 0);
   assert(["good", "warn", "bad"].includes(initial.faviconStatus));
   assert(Object.hasOwn(initial, "faviconRedSince"));
@@ -1108,6 +1306,196 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
 });
 
+Deno.test("message: an edit is saved and sent to every connected dashboard", async () => {
+  const events = await handle(req("/events"));
+  const reader = events.body!.getReader();
+  await chunk(reader);
+  await chunk(reader);
+  try {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "  Deploying <main>  " }),
+    }));
+    assertEquals(response.status, 200);
+    const saved = await response.json();
+    assertEquals(saved.text, "Deploying <main>");
+    assertEquals(typeof saved.updatedAt, "number");
+    assertEquals(typeof saved.revision, "number");
+
+    const update = updateFromEvent(await chunk(reader));
+    assertEquals(update.message, saved);
+    const html = await (await handle(req("/"))).text();
+    assertStringIncludes(html, `value="Deploying &lt;main&gt;"`);
+  } finally {
+    await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    }));
+    await reader.cancel();
+  }
+});
+
+Deno.test("message: malformed edits are rejected without changing the message", async () => {
+  const malformedJson = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: "{",
+  }));
+  assertEquals(malformedJson.status, 400);
+  assertEquals(await malformedJson.json(), {
+    error: "Expected a JSON request body.",
+  });
+
+  const missingText = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "wrong field" }),
+  }));
+  assertEquals(missingText.status, 400);
+
+  for (const body of ["null", "42", "[]"]) {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+    assertEquals(response.status, 400);
+  }
+
+  const tooLong = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "x".repeat(501) }),
+  }));
+  assertEquals(tooLong.status, 400);
+  assertEquals(await tooLong.json(), {
+    error: "Messages are limited to 500 characters.",
+  });
+
+  const wrongMethod = await handle(req("/message"));
+  assertEquals(wrongMethod.status, 405);
+  assertEquals(wrongMethod.headers.get("allow"), "PUT");
+});
+
+Deno.test("message: a persistence failure returns an error", async () => {
+  const temporary = `${dashboardCacheFile("fabric-wall-message.json")}.tmp`;
+  await Deno.mkdir(temporary);
+  try {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Cannot persist" }),
+    }));
+    assertEquals(response.status, 500);
+    assertEquals(await response.json(), {
+      error: "Could not save the dashboard message.",
+    });
+  } finally {
+    await Deno.remove(temporary);
+  }
+});
+
+Deno.test("message: a failed expiry write retains the saved text", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  const temporary = `${dashboardCacheFile("fabric-wall-message.json")}.tmp`;
+  try {
+    const saved = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Still visible" }),
+    }));
+    assertEquals(saved.status, 200);
+    await Deno.mkdir(temporary);
+    now += DASHBOARD_MESSAGE_LIFETIME_MS;
+
+    await serveTick(() => {});
+    assertStringIncludes(
+      await (await handle(req("/"))).text(),
+      `value="Still visible"`,
+    );
+  } finally {
+    Date.now = realNow;
+    await Deno.remove(temporary);
+    await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    }));
+  }
+});
+
+Deno.test("message: the serving clock clears text after its fade completes", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  const events = await handle(req("/events"));
+  const reader = events.body!.getReader();
+  await chunk(reader);
+  await chunk(reader);
+  try {
+    const saved = await (await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Fading announcement" }),
+    }))).json();
+    assertEquals(updateFromEvent(await chunk(reader)).message.text, "Fading announcement");
+
+    now += DASHBOARD_MESSAGE_LIFETIME_MS;
+    await serveTick(() => {});
+    assertStringIncludes(await chunk(reader), "event: ping\n");
+    assertEquals(updateFromEvent(await chunk(reader)).message, {
+      text: "",
+      updatedAt: null,
+      revision: saved.revision + 1,
+    });
+  } finally {
+    Date.now = realNow;
+    await reader.cancel();
+  }
+});
+
+Deno.test("sse: every serving tick sends a heartbeat, so silence means a broken stream", async () => {
+  const res = await handle(req("/events"));
+  const reader = res.body!.getReader();
+  await chunk(reader); // ": connected"
+  await chunk(reader); // the snapshot every connection opens with
+
+  let collections = 0;
+  await serveTick(() => {
+    collections++;
+  });
+  assertEquals(collections, 1, "the tick still collects what is due");
+  const beat = await chunk(reader);
+  assertStringIncludes(beat, "event: ping\n");
+  // An event with no data is never delivered to the page, so the heartbeat
+  // carries its count.
+  assertMatch(beat, /^data: \d+$/m);
+
+  await serveTick(() => {});
+  const next = await chunk(reader);
+  assertStringIncludes(next, "event: ping\n");
+  assert(
+    Number(next.match(/^data: (\d+)$/m)![1]) >
+      Number(beat.match(/^data: (\d+)$/m)![1]),
+    "each heartbeat differs from the last",
+  );
+
+  await reader.cancel();
+});
+
+Deno.test("heartbeat: a client whose stream is gone is dropped rather than throwing", async () => {
+  const res = await handle(req("/events"));
+  const dead = [...clients].at(-1)!;
+  await res.body!.cancel();
+  clients.add(dead);
+  heartbeat();
+  assertEquals(clients.size, 0);
+});
+
 Deno.test("broadcast: a client whose stream is gone is dropped rather than throwing", async () => {
   const res = await handle(req("/events"));
   const dead = [...clients].at(-1)!;
@@ -1121,6 +1509,7 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
     faviconStatus: "good",
     faviconRedSince: null,
     faviconRedAgeMs: null,
+    message: { text: "", updatedAt: null, revision: 0 },
   });
   assertEquals(clients.size, 0);
 });
@@ -1157,7 +1546,7 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   let collections = 0;
   const log = console.log;
   console.log = (m: string) => logged.push(m);
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   try {
     timer = start(((opts: Deno.ServeTcpOptions, handler: unknown) => {
       served.push({ opts, handler });
@@ -1176,4 +1565,40 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   assertStringIncludes(logged[0], `http://localhost:${PORT}`);
   assertStringIncludes(logged[0], `${TILES.length} tiles registered`);
   assertEquals(collections, 1, "startup collects immediately");
+});
+
+Deno.test("start: the work it schedules on its clock both heartbeats and collects", async () => {
+  const res = await handle(req("/events"));
+  const reader = res.body!.getReader();
+  await chunk(reader); // ": connected"
+  await chunk(reader); // the snapshot every connection opens with
+
+  const log = console.log;
+  console.log = () => {};
+  let collections = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let onTick = () => Promise.resolve();
+  try {
+    ({ timer, onTick } = start(
+      ((opts: Deno.ServeTcpOptions) => {
+        opts.onListen?.({ transport: "tcp", hostname: "localhost", port: PORT });
+        return undefined;
+      }) as unknown as typeof Deno.serve,
+      () => {
+        collections++;
+      },
+    ));
+  } finally {
+    clearInterval(timer);
+    console.log = log;
+  }
+  assertEquals(collections, 1, "the startup collection does not go through the clock");
+
+  // Without this, a browser hears nothing between tile changes and replaces a
+  // healthy stream once a minute forever.
+  await onTick();
+  assertStringIncludes(await chunk(reader), "event: ping\n");
+  assertEquals(collections, 2);
+
+  await reader.cancel();
 });

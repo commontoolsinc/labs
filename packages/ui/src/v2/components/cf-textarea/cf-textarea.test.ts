@@ -3,12 +3,12 @@ import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import { CFTextarea } from "./index.ts";
 
-// NOTE: Full DOM interaction tests (input events, Cell two-way binding,
-// auto-resize, timing strategy integration) require Lit's rendering
-// pipeline and shadow DOM. Tests below cover property defaults, Cell
-// property acceptance, and basic configuration.
-
 describe("CFTextarea", () => {
+  // NOTE: Full DOM interaction tests (input events, Cell two-way binding,
+  // auto-resize, timing strategy integration) require Lit's rendering
+  // pipeline and shadow DOM. Tests below cover property defaults, Cell
+  // property acceptance, and basic configuration.
+
   it("should be defined", () => {
     expect(CFTextarea).toBeDefined();
   });

@@ -10,6 +10,7 @@
  * core isolates caller-owned values on write, so pre-freezing inputs is no
  * longer a faithful simulation of post-commit frozen storage state.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -105,7 +106,6 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
       tx,
       sourceLink,
       0,
-      false,
     );
 
     // With the fix, the proxy should resolve the link and return 42.
@@ -154,7 +154,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     // The proxy should be an object and property access should work through
@@ -176,7 +175,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     expect(proxy.constructor).toBe(Object);
@@ -214,7 +212,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       outerLink,
       0,
-      false,
     );
 
     expect(String(proxy.level1.level2.link)).toBe("found it");
@@ -255,7 +252,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       arrLink,
       0,
-      false,
     );
 
     // Iterate via for...of (uses Symbol.iterator).
@@ -285,7 +281,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     expect(Array.isArray(proxy)).toBe(true);
@@ -303,14 +298,12 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
     const proxy2 = createQueryResultProxy<{ x: number }>(
       runtime,
       tx,
       link,
       0,
-      false,
     );
 
     // Cache should return the same proxy object.
@@ -330,7 +323,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     const keys = Object.keys(proxy);
@@ -351,7 +343,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     expect("present" in proxy).toBe(true);
@@ -371,7 +362,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     const spread = { ...proxy };
@@ -395,7 +385,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     const spread = [...proxy];
@@ -448,7 +437,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       tx,
       link,
       0,
-      false,
     );
 
     // "kept" sibling is still frozen; its link should resolve.
@@ -503,7 +491,6 @@ describe("frozen proxy target: v2 committed reads", () => {
       tx,
       sourceLink,
       0,
-      false,
     );
 
     expect(proxy.ref).toBe(42);
@@ -522,7 +509,6 @@ describe("frozen proxy target: v2 committed reads", () => {
       tx,
       link,
       0,
-      false,
     );
 
     expect(Array.isArray(proxy)).toBe(true);
@@ -567,7 +553,6 @@ describe("frozen proxy target: committed reads", () => {
       tx,
       link,
       0,
-      false,
     );
 
     expect(Number(result.a)).toBe(1);

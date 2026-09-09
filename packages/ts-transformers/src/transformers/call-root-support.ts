@@ -57,6 +57,43 @@ function hasOpaquePathTerminalReceiverChain(
     !!classifyOpaquePathTerminalCall(callee.expression);
 }
 
+/**
+ * True when `expression` is `<receiver>.get()` on a real cell or stream — the
+ * receivers for which `.get()` is a value read. Every other receiver either
+ * exposes its value directly (`opaque-get:invalid-call` covers those) or has no
+ * `.get()` at all, so a read through one is never a site worth lowering.
+ *
+ * The computed spelling `<receiver>["get"]()` is the same read, and
+ * {@link classifyOpaquePathTerminalCall} already reports it as one, so both
+ * callee forms are accepted.
+ */
+export function isCellReadTerminalCall(
+  expression: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  if (classifyOpaquePathTerminalCall(expression) !== "get") {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  try {
+    const cellKind = getCellKind(
+      context.checker.getTypeAtLocation(callee.expression),
+      context.checker,
+    );
+    return cellKind === "cell" || cellKind === "stream";
+  } catch {
+    return false;
+  }
+}
+
 export function classifyCallRootPolicy(
   expression: ts.Expression,
   siteInfo: CallRootPolicySiteInfo,
@@ -67,24 +104,14 @@ export function classifyCallRootPolicy(
   }
 
   if (classifyOpaquePathTerminalCall(expression) === "get") {
-    if (siteInfo.helperBoundaryKind) {
-      const callee = expression.expression;
-      if (ts.isPropertyAccessExpression(callee)) {
-        try {
-          const receiverType = context.checker.getTypeAtLocation(
-            callee.expression,
-          );
-          const cellKind = getCellKind(receiverType, context.checker);
-          if (cellKind === "cell" || cellKind === "stream") {
-            return {
-              kind: "supported",
-              supportedKind: "helper-owned-explicit-read",
-            };
-          }
-        } catch {
-          // Fall through to the shared unsupported decision below.
-        }
-      }
+    if (
+      siteInfo.helperBoundaryKind &&
+      isCellReadTerminalCall(expression, context)
+    ) {
+      return {
+        kind: "supported",
+        supportedKind: "helper-owned-explicit-read",
+      };
     }
 
     if (siteInfo.reactiveContext.kind === "pattern") {

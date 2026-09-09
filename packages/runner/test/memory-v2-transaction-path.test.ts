@@ -14,7 +14,10 @@ import {
   fixtureDocKey,
   TraverseCaptureRecorder,
 } from "../src/traverse-recorder.ts";
-import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
+import {
+  getDirectTransactionNativeCommit,
+  getTransactionWriteDetails,
+} from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-transaction-path");
 const space = signer.did();
@@ -104,6 +107,51 @@ describe("memory v2 transaction path semantics", () => {
     expect(missingParent.error?.name).toBe("NotFoundError");
 
     await tx.commit();
+  });
+
+  it("reports a nested read of an absent document as NotFoundError naming the document", () => {
+    const tx = runtime.edit();
+
+    const result = tx.read({
+      space,
+      scope: "space",
+      id: "of:path-read-absent-doc",
+      path: ["value", "anything"],
+    });
+    expect(result.error?.name).toBe("NotFoundError");
+    // An absent document is reported by id, distinct from the
+    // path-does-not-exist wording used inside a document that does exist.
+    expect(result.error?.message).toBe(
+      "Document not found: of:path-read-absent-doc",
+    );
+
+    tx.abort();
+  });
+
+  it("read through a primitive intermediate fails with a TypeMismatchError", () => {
+    const tx = runtime.edit();
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-read-typemismatch",
+      path: [],
+    }, { name: "Ada" });
+
+    const result = tx.read({
+      space,
+      scope: "space",
+      id: "of:path-read-typemismatch",
+      path: ["value", "name", "deeper"],
+    });
+    const error = result.error;
+    // Reading through a string is a type mismatch, not a missing path and not
+    // a plain `undefined`: the slot can never exist while `name` is a string.
+    expect(error?.name).toBe("TypeMismatchError");
+    expect(
+      error?.name === "TypeMismatchError" ? error.actualType : undefined,
+    ).toBe("string");
+
+    tx.abort();
   });
 
   it("batches already-loaded read tracking without changing dependencies", async () => {
@@ -439,6 +487,35 @@ describe("memory v2 transaction path semantics", () => {
     tx.abort();
   });
 
+  it("does not elide a root rewrite of `0` with `-0`", async () => {
+    // `0` and `-0` are distinct stored values -- `valueEqual` and the content
+    // hash both tell them apart -- so the no-op elision above must not swallow
+    // a `-0` written over a stored `0`.
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:path-negative-zero" as const,
+      path: [] as string[],
+    };
+
+    const seed = runtime.edit();
+    seed.writeValueOrThrow(address, 0);
+    expect((await seed.commit()).error).toBeUndefined();
+
+    const tx = runtime.edit();
+    tx.writeValueOrThrow(address, -0);
+
+    expect(Object.is(tx.readValueOrThrow(address), -0)).toBe(true);
+
+    const commit = getDirectTransactionNativeCommit(tx, space);
+    expect(commit?.operations.length).toBe(1);
+    const written = (commit?.operations[0] as { value?: { value?: unknown } })
+      .value?.value;
+    expect(Object.is(written, -0)).toBe(true);
+
+    tx.abort();
+  });
+
   it("write through a primitive intermediate fails with a TypeMismatchError on the offending path", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow({
@@ -458,7 +535,13 @@ describe("memory v2 transaction path semantics", () => {
       id: "of:path-typemismatch",
       path: ["value", "name", "deeper"],
     }, "should fail");
-    expect(result.error?.name).toBe("TypeMismatchError");
+    const error = result.error;
+    expect(error?.name).toBe("TypeMismatchError");
+    // The error names the non-container intermediate (`name`, a string), not
+    // the leaf the write was aimed at.
+    expect(
+      error?.name === "TypeMismatchError" ? error.address.path : undefined,
+    ).toEqual(["value", "name"]);
 
     // The doc should be unchanged.
     expect(

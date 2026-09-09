@@ -92,12 +92,20 @@ describe("idle consults head-event park with a wake timer armed", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { cell, handler, pattern } = commonfabric;
     let invocations = 0;
-    const bump = handler<{ value: number }, { effects: { total: number } }>(
+    const bump = handler<
+      { value: number },
+      { effects: Cell<{ total: number }> }
+    >(
+      true,
+      {
+        type: "object",
+        properties: { effects: { type: "object", asCell: ["cell"] } },
+      },
       (event, { effects }) => {
         invocations++;
-        effects.total += event.value;
+        const total = effects.key("total");
+        total.set(total.get() + event.value);
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       const effects = cell({ total: 0 });
@@ -119,20 +127,21 @@ describe("idle consults head-event park with a wake timer armed", () => {
 
     // Invalidate the debounced computation: it has run once, so this arms the
     // shared wake timer and parks the re-run for the debounce window rather than
-    // running it now.
+    // running it now. Drain the commit round trip with the clock held —
+    // awaiting the commit under auto-advance would fire the armed wake (a
+    // nominal delay is not a hold there), un-arming the very state under test.
+    // The parked re-run is a pull computation that nothing demands, so
+    // draining does not run it.
     source.withTx(tx).send(5);
-    await tx.commit();
+    const invalidationCommit = tx.commit();
     tx = runtime.edit();
-    // Let the invalidation settle. idle() does not flush a pull computation that
-    // nothing demands, so it returns with the debounce wake still armed.
-    await runtime.idle();
+    await clock.settle();
+    await invalidationCommit;
 
     // Guard the coverage intent: the head-event park branch is only reached with
     // a wake timer pending, so fail loudly if the debounce did not arm one
     // rather than pass while silently skipping the branch under test.
-    const gates = (runtime.scheduler as unknown as {
-      gates: { hasWakeTimer(): boolean };
-    }).gates;
+    const gates = runtime.scheduler.accessForTestingOnly.gates;
     expect(gates.hasWakeTimer()).toBe(true);
 
     // Queue the event (now in the queue) and, in the same synchronous turn, ask

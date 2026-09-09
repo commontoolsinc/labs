@@ -1,10 +1,15 @@
+/**
+ * Shell components log when a runtime operation fails. When the failure is a
+ * disposal race (logout, runtime swap) the operation was canceled, not a
+ * genuine failure, so the log is suppressed via `this.rt?.signal.aborted`.
+ * These tests drive the debugger view's handlers against both cases.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { XDebuggerView } from "../src/views/DebuggerView.ts";
 
-// Shell components log when a runtime operation fails. When the failure is a
-// disposal race (logout, runtime swap) the operation was cancelled, not a
-// genuine failure, so the log is suppressed via `this.rt?.signal.aborted`.
+import type { DebuggerController } from "../src/lib/debugger-controller.ts";
+import { XDebuggerView } from "../src/views/DebuggerView.ts";
 
 function captureConsoleError(): { calls: unknown[][]; restore(): void } {
   const calls: unknown[][] = [];
@@ -16,10 +21,10 @@ function captureConsoleError(): { calls: unknown[][]; restore(): void } {
 describe("DebuggerView worker-logger disposal handling", () => {
   // These handlers run fire-and-forget from @click; a disposal-raced rejection
   // must neither log nor escape as an unhandled rejection.
-  function debuggerThis(
+  function debuggerView(
     aborted: boolean,
     rejecting: () => Promise<void>,
-  ): Record<string, unknown> {
+  ): XDebuggerView {
     const rt = {
       signal: { aborted },
       resetLoggerBaselines: rejecting,
@@ -27,36 +32,39 @@ describe("DebuggerView worker-logger disposal handling", () => {
       setLoggerLevel: rejecting,
       getLoggerCounts: rejecting,
     };
-    return {
-      loggerBaseline: null,
-      workerLoggerMetadata: { worker: { enabled: false } },
-      getLoggerRegistry: () => ({}),
-      debuggerController: { getRuntime: () => ({ runtime: () => rt }) },
-      sampleLoggerCounts: () => Promise.resolve(),
+    const view = new XDebuggerView();
+    // The controller stand-in offers only the runtime lookup, which is all
+    // the three handlers read from it. Naming `worker` in the metadata is
+    // what sends the toggle and level handlers down the worker path.
+    view.debuggerController = {
+      getRuntime: () => ({ runtime: () => rt }),
+    } as unknown as DebuggerController;
+    view.accessForTestingOnly.workerLoggerMetadata = {
+      worker: { enabled: false, level: "info" },
     };
+    return view;
   }
 
   const reject = () =>
     Promise.reject(new DOMException("aborted", "AbortError"));
 
-  function method(name: string) {
-    return (XDebuggerView.prototype as unknown as Record<
-      string,
-      (this: unknown, ...args: unknown[]) => Promise<void>
-    >)[name];
-  }
+  const handlers: Array<[string, (view: XDebuggerView) => Promise<void>]> = [
+    ["resetBaseline", (view) => view.accessForTestingOnly.resetBaseline()],
+    [
+      "toggleLogger",
+      (view) => view.accessForTestingOnly.toggleLogger("worker"),
+    ],
+    [
+      "setLoggerLevel",
+      (view) => view.accessForTestingOnly.setLoggerLevel("worker", "info"),
+    ],
+  ];
 
-  for (
-    const [label, name, args] of [
-      ["resetBaseline", "resetBaseline", []],
-      ["toggleLogger", "toggleLogger", ["worker"]],
-      ["setLoggerLevel", "setLoggerLevel", ["worker", "info"]],
-    ] as Array<[string, string, unknown[]]>
-  ) {
+  for (const [label, call] of handlers) {
     it(`${label} logs a failure while the runtime is alive`, async () => {
       const spy = captureConsoleError();
       try {
-        await method(name).call(debuggerThis(false, reject), ...args);
+        await call(debuggerView(false, reject));
       } finally {
         spy.restore();
       }
@@ -66,7 +74,7 @@ describe("DebuggerView worker-logger disposal handling", () => {
     it(`${label} stays silent when the runtime is disposed`, async () => {
       const spy = captureConsoleError();
       try {
-        await method(name).call(debuggerThis(true, reject), ...args);
+        await call(debuggerView(true, reject));
       } finally {
         spy.restore();
       }

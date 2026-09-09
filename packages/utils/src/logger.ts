@@ -1,5 +1,5 @@
 /**
- * Minimal logging library for both Deno and browser environments
+ * Minimal logging library for both Deno and browser environments.
  *
  * @module
  * This module provides a flexible logging system with:
@@ -28,7 +28,8 @@
  * // Global logger instance - no module tag
  * // First parameter is always a string key for tracking
  * log.info("app-started", "Application started");
- * log.debug("debug-info", "Debug info"); // Won't show unless log.level = "debug"
+ * // Won't show unless `log.level` is `"debug"`.
+ * log.debug("debug-info", "Debug info");
  *
  * // Change global log level
  * log.level = "debug";
@@ -43,7 +44,7 @@
  *
  * // First parameter is the message key for metrics tracking
  * // Logs will show: [INFO][user-service::HH:MM:SS.mmm] key message
- * logger.log("processing-started", "Processing started");     // Same as logger.info()
+ * logger.log("processing-started", "Processing started"); // Same as info().
  * logger.info("processing-user", "Processing user data");
  * logger.debug("cache-hit", "Cache hit for user", userId);
  * logger.warn("rate-limit", "API rate limit approaching");
@@ -55,7 +56,10 @@
  * const logger = getLogger("data-processor");
  *
  * // Function is only called if debug level is active
- * logger.debug("computed-value", () => `Computed value: ${expensiveComputation()}`);
+ * logger.debug(
+ *   "computed-value",
+ *   () => `Computed value: ${expensiveComputation()}`,
+ * );
  *
  * // Works with arrays that get flattened
  * logger.info("processing-items", () => ["Processing", count, "items"]);
@@ -142,7 +146,8 @@
  *
  * // Access individual logger counts by key
  * globalThis.commonfabric.logger["module-name"].countsByKey
- * // Returns: { "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 }, ... }
+ * // Returns:
+ * // { "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 } }
  *
  * // Reset specific logger
  * globalThis.commonfabric.logger["module-name"].resetCounts()
@@ -152,7 +157,9 @@
  * ```typescript
  * // By default, logs a debug message every 100 calls
  * const logger = getLogger("my-module");
- * // After 100 calls: [DEBUG][my-module::HH:MM:SS.mmm] my-module: 100 log calls made (debug: 20, info: 50, warn: 25, error: 5)
+ * // After 100 calls:
+ * //   [DEBUG][my-module::HH:MM:SS.mmm] my-module: 100 log calls made
+ * //   (debug: 20, info: 50, warn: 25, error: 5)
  *
  * // Customize the threshold
  * const customLogger = getLogger("custom-module", { logCountEvery: 50 });
@@ -167,8 +174,12 @@
  * ```
  */
 
-import { isDeno } from "@commonfabric/utils/env";
+import { isDeno } from "./env.ts";
 
+/**
+ * A message argument: either the value to log, or a function returning it,
+ * which is called only when the message is actually going to be emitted.
+ */
 export type LogMessage = unknown | (() => unknown);
 
 /** Active log levels used for actual log messages. */
@@ -177,32 +188,58 @@ export type ActiveLogLevel = "debug" | "info" | "warn" | "error";
 /** All log levels including "silent" which suppresses all output. */
 export type LogLevel = ActiveLogLevel | "silent";
 
-/**
- * Point in a CDF (Cumulative Distribution Function)
- */
+/** Point in a CDF (cumulative distribution function). */
 export interface CDFPoint {
-  x: number; // Latency in ms
-  y: number; // Cumulative probability (0-1)
+  /** Latency, in milliseconds. */
+  x: number;
+
+  /** Cumulative probability, from `0` to `1`. */
+  y: number;
 }
 
-/**
- * Statistics for timing measurements
- */
+/** Statistics for timing measurements. */
 export interface TimingStats {
-  count: number; // Total measurements
-  min: number; // Minimum time (ms)
-  max: number; // Maximum time (ms)
-  totalTime: number; // Sum for average calculation
-  average: number; // totalTime / count
-  countSinceBaseline: number; // Measurements since most recent baseline reset
-  totalTimeSinceBaseline: number; // Sum of measurements since baseline reset
-  averageSinceBaseline: number; // totalTimeSinceBaseline / countSinceBaseline
-  p50: number; // Median (50th percentile)
-  p95: number; // 95th percentile
-  lastTime: number; // Most recent measurement
-  lastTimestamp: number; // When last recorded
-  cdf: CDFPoint[]; // CDF of all samples since start
-  cdfSinceBaseline: CDFPoint[] | null; // CDF of samples since baseline reset
+  /** Total number of measurements. */
+  count: number;
+
+  /** Shortest measurement, in milliseconds. */
+  min: number;
+
+  /** Longest measurement, in milliseconds. */
+  max: number;
+
+  /** Sum of all measurements, from which `average` is computed. */
+  totalTime: number;
+
+  /** `totalTime` divided by `count`. */
+  average: number;
+
+  /** Number of measurements since the most recent baseline reset. */
+  countSinceBaseline: number;
+
+  /** Sum of the measurements since the most recent baseline reset. */
+  totalTimeSinceBaseline: number;
+
+  /** `totalTimeSinceBaseline` divided by `countSinceBaseline`. */
+  averageSinceBaseline: number;
+
+  /** Median measurement, that is, the 50th percentile. */
+  p50: number;
+
+  /** 95th percentile measurement. */
+  p95: number;
+
+  /** Most recent measurement. */
+  lastTime: number;
+
+  /** When the most recent measurement was recorded. */
+  lastTimestamp: number;
+
+  /** CDF over every sample taken. */
+  cdf: CDFPoint[];
+
+  /** CDF over the samples since the most recent baseline reset. */
+  cdfSinceBaseline: CDFPoint[] | null;
 }
 
 /**
@@ -217,73 +254,71 @@ const TIMING_RESERVOIR_SIZE = 1000;
  * with O(1) memory regardless of measurement count.
  */
 class TimingDataStore {
-  private count = 0;
-  private min = Infinity;
-  private max = -Infinity;
-  private totalTime = 0;
-  private lastTime = 0;
-  private lastTimestamp = 0;
-  private samples: number[] = [];
-  private hasBaseline = false;
-  private baselineCount = 0;
-  private baselineTotalTime = 0;
-  private deltaSamples: number[] = []; // Reservoir for samples since baseline
-  private deltaCount = 0; // Count of samples since baseline
+  #count = 0;
+  #min = Infinity;
+  #max = -Infinity;
+  #totalTime = 0;
+  #lastTime = 0;
+  #lastTimestamp = 0;
+  #samples: number[] = [];
+  #hasBaseline = false;
+  #baselineCount = 0;
+  #baselineTotalTime = 0;
+  #deltaSamples: number[] = []; // Reservoir for samples since baseline
+  #deltaCount = 0; // Count of samples since baseline
 
   /**
-   * Record a timing measurement.
+   * Records a timing measurement.
    * @param elapsed - The elapsed time in milliseconds
    */
   record(elapsed: number): void {
-    this.count++;
-    this.totalTime += elapsed;
-    this.lastTime = elapsed;
-    this.lastTimestamp = performance.now();
+    this.#count++;
+    this.#totalTime += elapsed;
+    this.#lastTime = elapsed;
+    this.#lastTimestamp = performance.now();
 
-    if (elapsed < this.min) this.min = elapsed;
-    if (elapsed > this.max) this.max = elapsed;
+    if (elapsed < this.#min) this.#min = elapsed;
+    if (elapsed > this.#max) this.#max = elapsed;
 
     // Reservoir sampling (Algorithm R) for full history
-    if (this.samples.length < TIMING_RESERVOIR_SIZE) {
-      this.samples.push(elapsed);
+    if (this.#samples.length < TIMING_RESERVOIR_SIZE) {
+      this.#samples.push(elapsed);
     } else {
-      const j = Math.floor(Math.random() * this.count);
+      const j = Math.floor(Math.random() * this.#count);
       if (j < TIMING_RESERVOIR_SIZE) {
-        this.samples[j] = elapsed;
+        this.#samples[j] = elapsed;
       }
     }
 
     // Also record to delta reservoir if baseline is set
-    if (this.hasBaseline) {
-      this.deltaCount++;
-      if (this.deltaSamples.length < TIMING_RESERVOIR_SIZE) {
-        this.deltaSamples.push(elapsed);
+    if (this.#hasBaseline) {
+      this.#deltaCount++;
+      if (this.#deltaSamples.length < TIMING_RESERVOIR_SIZE) {
+        this.#deltaSamples.push(elapsed);
       } else {
-        const j = Math.floor(Math.random() * this.deltaCount);
+        const j = Math.floor(Math.random() * this.#deltaCount);
         if (j < TIMING_RESERVOIR_SIZE) {
-          this.deltaSamples[j] = elapsed;
+          this.#deltaSamples[j] = elapsed;
         }
       }
     }
   }
 
   /**
-   * Set baseline for delta tracking.
+   * Sets the baseline for delta tracking.
    * After calling this, new samples will be tracked separately for delta CDF.
    */
   setBaseline(): void {
-    this.hasBaseline = true;
-    this.baselineCount = this.count;
-    this.baselineTotalTime = this.totalTime;
-    this.deltaSamples = [];
-    this.deltaCount = 0;
+    this.#hasBaseline = true;
+    this.#baselineCount = this.#count;
+    this.#baselineTotalTime = this.#totalTime;
+    this.#deltaSamples = [];
+    this.#deltaCount = 0;
   }
 
-  /**
-   * Get computed statistics from the recorded data.
-   */
+  /** Returns computed statistics over the recorded data. */
   getStats(): TimingStats {
-    if (this.count === 0) {
+    if (this.#count === 0) {
       return {
         count: 0,
         min: 0,
@@ -303,54 +338,66 @@ class TimingDataStore {
     }
 
     // Sort samples for percentile calculation
-    const sorted = [...this.samples].sort((a, b) => a - b);
+    const sorted = [...this.#samples].sort((a, b) => a - b);
     const p50Index = Math.floor(sorted.length * 0.5);
     const p95Index = Math.floor(sorted.length * 0.95);
     const median = sorted[p50Index] ?? 0;
 
     // Calculate CDF of all samples
-    const cdf = this.calculateCDF(sorted);
+    const cdf = this.#calculateCDF(sorted);
 
     // Calculate CDF of samples since baseline (if baseline exists and has data)
     let cdfSinceBaseline: CDFPoint[] | null = null;
-    if (this.deltaCount > 0 && this.deltaSamples.length > 0) {
-      const deltaSorted = [...this.deltaSamples].sort((a, b) => a - b);
-      cdfSinceBaseline = this.calculateCDF(deltaSorted);
+    if (this.#deltaCount > 0 && this.#deltaSamples.length > 0) {
+      const deltaSorted = [...this.#deltaSamples].sort((a, b) => a - b);
+      cdfSinceBaseline = this.#calculateCDF(deltaSorted);
     }
 
-    const countSinceBaseline = this.hasBaseline
-      ? this.count - this.baselineCount
+    const countSinceBaseline = this.#hasBaseline
+      ? this.#count - this.#baselineCount
       : 0;
-    const totalTimeSinceBaseline = this.hasBaseline
-      ? this.totalTime - this.baselineTotalTime
+    const totalTimeSinceBaseline = this.#hasBaseline
+      ? this.#totalTime - this.#baselineTotalTime
       : 0;
     const averageSinceBaseline = countSinceBaseline > 0
       ? totalTimeSinceBaseline / countSinceBaseline
       : 0;
 
     return {
-      count: this.count,
-      min: this.min,
-      max: this.max,
-      totalTime: this.totalTime,
-      average: this.totalTime / this.count,
+      count: this.#count,
+      min: this.#min,
+      max: this.#max,
+      totalTime: this.#totalTime,
+      average: this.#totalTime / this.#count,
       countSinceBaseline,
       totalTimeSinceBaseline,
       averageSinceBaseline,
       p50: median,
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
-      lastTime: this.lastTime,
-      lastTimestamp: this.lastTimestamp,
+      lastTime: this.#lastTime,
+      lastTimestamp: this.#lastTimestamp,
       cdf,
       cdfSinceBaseline,
     };
   }
 
+  /** Resets all timing data. */
+  reset(): void {
+    this.#count = 0;
+    this.#min = Infinity;
+    this.#max = -Infinity;
+    this.#totalTime = 0;
+    this.#lastTime = 0;
+    this.#lastTimestamp = 0;
+    this.#samples = [];
+  }
+
   /**
-   * Calculate CDF (Cumulative Distribution Function) from sorted samples.
-   * Returns array of points where each point (x, y) means "y fraction of samples <= x ms"
+   * Returns the CDF (cumulative distribution function) of `sorted`, as
+   * points where `(x, y)` means that a `y` fraction of the samples are at
+   * most `x` milliseconds.
    */
-  private calculateCDF(sorted: number[]): CDFPoint[] {
+  #calculateCDF(sorted: number[]): CDFPoint[] {
     if (sorted.length === 0) return [];
 
     return sorted.map((x, i) => ({
@@ -358,37 +405,9 @@ class TimingDataStore {
       y: (i + 1) / sorted.length,
     }));
   }
-
-  /**
-   * Reset all timing data.
-   */
-  reset(): void {
-    this.count = 0;
-    this.min = Infinity;
-    this.max = -Infinity;
-    this.totalTime = 0;
-    this.lastTime = 0;
-    this.lastTimestamp = 0;
-    this.samples = [];
-  }
 }
 
-/**
- * Build all hierarchical key paths from an array of key segments.
- * @example _buildKeyPaths(["cell", "get", "user"]) => ["cell", "cell/get", "cell/get/user"]
- * Currently unused but kept for potential future hierarchical rollup.
- */
-function _buildKeyPaths(keys: string[]): string[] {
-  const paths: string[] = [];
-  for (let i = 1; i <= keys.length; i++) {
-    paths.push(keys.slice(0, i).join("/"));
-  }
-  return paths;
-}
-
-/**
- * Numeric values for log levels to enable comparison
- */
+/** Numeric values for log levels, so that they can be compared. */
 const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
@@ -397,9 +416,7 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   silent: 4,
 };
 
-/**
- * Colors for each log level
- */
+/** Colors for each log level. */
 export const LOG_COLORS = {
   debug: "color: #6b7280",
   info: "color: #6b7280",
@@ -414,29 +431,29 @@ export const LOG_COLORS = {
 
 /**
  * Global log level floor. When set, `shouldLog()` uses the more restrictive
- * of (floor, per-logger level). This allows suppressing all logging by default
- * (e.g. in CLI mode) while still letting individual loggers be more restrictive.
+ * of (floor, per-logger level). This allows suppressing all logging by
+ * default (e.g. in CLI mode) while still letting individual loggers be more
+ * restrictive.
  */
 let _globalLevelFloor: LogLevel | undefined;
 
 /**
- * Set (or clear) the global log-level floor.
- * Pass `undefined` to remove the floor entirely.
+ * Sets the global log-level floor. Pass `undefined` to remove the floor
+ * entirely.
  */
 export function setGlobalLogFloor(level: LogLevel | undefined): void {
   _globalLevelFloor = level;
 }
 
-/**
- * Get the current global log-level floor.
- */
+/** Returns the current global log-level floor. */
 export function getGlobalLogFloor(): LogLevel | undefined {
   return _globalLevelFloor;
 }
 
 /**
- * Read `CF_LOG_LEVEL` from the environment (Deno only).
- * Returns undefined when not set or not a valid level.
+ * Returns the log level named by the `CF_LOG_LEVEL` environment variable, or
+ * `undefined` when it is unset, is not a valid level, or cannot be read.
+ * Always `undefined` outside Deno.
  */
 function getEnvFloor(): LogLevel | undefined {
   if (isDeno()) {
@@ -452,9 +469,246 @@ function getEnvFloor(): LogLevel | undefined {
 _globalLevelFloor = getEnvFloor();
 
 /**
- * Check if a message at the given level should be logged.
- * Respects the global floor when set — the effective threshold is the
- * more restrictive of (floor, per-logger level).
+ * Whether every recorded time span also emits a `performance.measure`.
+ *
+ * Off unless asked for, because these are for a tool rather than for a person.
+ * A run emits hundreds of thousands of them — a topics pattern test produces
+ * over 800,000 — and a human opening the timeline wants to see the handful of
+ * phases someone named, not every span the runtime recorded. Emission is turned
+ * on for the length of an investigation and read by something that aggregates.
+ *
+ * The cost is real but secondary: a measure runs about three and a half times
+ * what recording the span into the statistics does, which is worth knowing for
+ * a hot path and is not what decides the default.
+ *
+ * Turned on, every span already carried by a logger becomes an entry on the
+ * timeline of the process that ran it — which is the whole point, because a
+ * sampling profile knows nothing about phases and marks only reach the profile
+ * taken in their own process.
+ */
+let _emitTimingMeasures = false;
+
+/**
+ * How many measures may be emitted before emission stops.
+ *
+ * Entries are retained until something clears them, so an unbounded run would
+ * grow the buffer without limit and eventually distort the measurement it was
+ * turned on to take. Emission stops at the cap and says so once, rather than
+ * silently continuing to grow or silently dropping.
+ */
+let _timingMeasureCap = 200_000;
+
+let _timingMeasuresEmitted = 0;
+let _timingMeasureCapReported = false;
+
+/** A monotonic suffix, so two spans on one key stay distinguishable. */
+let _timingMeasureSequence = 0;
+
+/**
+ * Whether the next span would actually reach the timeline.
+ *
+ * Emission being on is not the same as a measure being emitted: once the cap is
+ * reached nothing more is written, and a caller that pays to build a detail
+ * should stop paying at the same moment — which is precisely the longest run,
+ * where it would otherwise cost the most.
+ */
+export function willEmitTimingMeasure(): boolean {
+  return _emitTimingMeasures && _timingMeasuresEmitted < _timingMeasureCap;
+}
+
+/**
+ * What marks a measure as this logger's.
+ *
+ * The performance timeline is shared with whatever else the host instruments,
+ * so emitted entries carry a prefix for two reasons: clearing can then remove
+ * only what this emitted rather than destroying a page's own measures, and a
+ * human scanning a timeline can tell logger spans from application ones.
+ */
+export const TIMING_MEASURE_PREFIX = "cf:";
+
+/**
+ * What separates a span's key from the detail naming that one instance.
+ *
+ * A detail identifies which of many spans on a key this one was — which action
+ * ran, which document was read — and it belongs to the emitted measure alone.
+ * Putting it in the key instead would multiply the statistics by every value it
+ * takes, which is the cost the keys are deliberately shaped to avoid: a key is
+ * a place in the code, not an occurrence.
+ */
+export const TIMING_MEASURE_DETAIL = "|";
+
+/**
+ * Make a key or a detail safe to put in a measure name.
+ *
+ * Reversibly, because both are arbitrary strings a caller chose: substituting
+ * the separators away would map `a|b` and `a/b` onto one name, and two actions
+ * that differ only there would then report as one row. Percent-encoding is the
+ * cheapest thing that survives a round trip, and `%` goes first so decoding
+ * cannot mistake an encoded byte for one the caller wrote.
+ */
+export function encodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%", "%25")
+    .replaceAll(TIMING_MEASURE_DETAIL, "%7C")
+    .replaceAll("#", "%23");
+}
+
+/** The inverse of {@link encodeMeasureField}. */
+export function decodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%23", "#")
+    .replaceAll("%7C", TIMING_MEASURE_DETAIL)
+    .replaceAll("%25", "%");
+}
+
+/** The detail carried by an emitted measure, if it has one. */
+export function detailOfMeasure(name: string): string | undefined {
+  const body = name.startsWith(TIMING_MEASURE_PREFIX)
+    ? name.slice(TIMING_MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf(TIMING_MEASURE_DETAIL);
+  return bar === -1
+    ? undefined
+    : decodeMeasureField(withoutSequence.slice(bar + 1));
+}
+
+function getEnvMeasuresEnabled(): boolean {
+  if (isDeno()) {
+    try {
+      const raw = Deno.env.get("CF_TIMING_MEASURES");
+      return raw !== undefined && raw !== "" && raw !== "0";
+    } catch { /* ignore permission errors */ }
+  }
+  return false;
+}
+
+/**
+ * What `CF_TIMING_MEASURES_CAP` means, separated from reading it.
+ *
+ * Separate because the decision is the part with a rule in it — anything that
+ * does not name a positive integer is ignored rather than applied, since a cap
+ * of zero or `NaN` would disable the guard from outside the process. Reading an
+ * environment variable needs a permission this package's test suite
+ * deliberately does not grant, and the rule should be testable without one.
+ */
+export function parseTimingMeasureCap(
+  raw: string | undefined,
+): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/**
+ * The cap named by `CF_TIMING_MEASURES_CAP`, when it names a positive integer.
+ *
+ * Separate from the on/off variable because a run that hits the cap stops
+ * emitting partway through, which leaves an early-run prefix rather than a
+ * sample — and a reader who does not know that will attribute a whole run from
+ * its setup. Raising it has to be reachable from wherever emission is.
+ */
+function getEnvMeasureCap(): number | undefined {
+  if (isDeno()) {
+    try {
+      return parseTimingMeasureCap(Deno.env.get("CF_TIMING_MEASURES_CAP"));
+    } catch { /* ignore permission errors */ }
+  }
+  return undefined;
+}
+
+_emitTimingMeasures = getEnvMeasuresEnabled();
+_timingMeasureCap = getEnvMeasureCap() ?? _timingMeasureCap;
+
+/**
+ * Turn `performance.measure` emission on or off for every logger.
+ *
+ * The environment variable `CF_TIMING_MEASURES` sets the initial value in Deno;
+ * this is how a browser or worker, which has no environment to read, asks for
+ * the same thing. Passing a `cap` resets the budget along with it.
+ */
+export function setTimingMeasuresEnabled(
+  enabled: boolean,
+  options?: { cap?: number },
+): void {
+  // Validated before anything is assigned, so a rejected call leaves the
+  // switch exactly as it found it rather than half-applied.
+  if (
+    options?.cap !== undefined && (!Number.isInteger(options.cap) ||
+      options.cap <= 0)
+  ) {
+    // A cap of `NaN`, `Infinity`, or zero would disable the guard rather than
+    // configure it, and the guard is the only thing bounding retention.
+    throw new RangeError(
+      `Timing measure cap must be a positive integer: ${options.cap}`,
+    );
+  }
+  _emitTimingMeasures = enabled;
+  if (options?.cap !== undefined) {
+    _timingMeasureCap = options.cap;
+  } else {
+    // Coalesced rather than branched: an environment that names no usable cap
+    // leaves the current one alone, and there is nothing here that only some
+    // runs execute.
+    _timingMeasureCap = getEnvMeasureCap() ?? _timingMeasureCap;
+  }
+  // The budget deliberately survives this. It counts entries that are still on
+  // the timeline, so returning it without draining them would let a caller
+  // toggling emission retain another whole cap's worth — the growth the cap
+  // exists to bound. `clearTimingMeasures()` is what gives it back.
+}
+
+/** Whether measure emission is currently on, and what it has spent. */
+export function getTimingMeasuresState(): {
+  enabled: boolean;
+  emitted: number;
+  cap: number;
+} {
+  return {
+    enabled: _emitTimingMeasures,
+    emitted: _timingMeasuresEmitted,
+    cap: _timingMeasureCap,
+  };
+}
+
+/**
+ * Drop every emitted measure and give the budget back.
+ *
+ * A consumer that has read the entries should call this: the entries are the
+ * only copy, so draining is what keeps a long run from growing without bound.
+ */
+export function clearTimingMeasures(): void {
+  try {
+    // By name rather than wholesale: the timeline belongs to the host, and a
+    // page or worker that instruments itself would otherwise lose its own
+    // measures to a call that claims only to drain this feature's.
+    for (const entry of performance.getEntriesByType("measure")) {
+      if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
+        performance.clearMeasures(entry.name);
+      }
+    }
+  } catch { /* not every host implements it */ }
+  resetTimingMeasureBudget();
+}
+
+/**
+ * Give the budget back without touching the timeline.
+ *
+ * Something other than this feature may clear the timeline — a test runner
+ * resetting between files does — and the count of what has been emitted has to
+ * follow, or emission stays stopped against a cap it no longer owes anything
+ * to.
+ */
+export function resetTimingMeasureBudget(): void {
+  _timingMeasuresEmitted = 0;
+  _timingMeasureCapReported = false;
+}
+
+/**
+ * Indicates whether a message at the given level should be logged. Respects
+ * the global floor when set — the effective threshold is the more restrictive
+ * of (floor, per-logger level).
  */
 function shouldLog(level: LogLevel, loggerLevel?: LogLevel): boolean {
   const effectiveLevel = loggerLevel ?? "info";
@@ -467,207 +721,112 @@ function shouldLog(level: LogLevel, loggerLevel?: LogLevel): boolean {
   return LOG_LEVELS[level] >= LOG_LEVELS[effectiveLevel];
 }
 
-/**
- * Get current time in HH:MM:SS.mmm format
- */
+/** Returns the current time, in `HH:MM:SS.mmm` format. */
 function getTimeStamp(): string {
   return new Date().toISOString().slice(11, 23);
 }
 
-/**
- * Resolves log messages, evaluating functions if needed
- */
+/** Resolves log messages, evaluating functions where given. */
 function resolveMessages(messages: LogMessage[]): unknown[] {
   return messages.flatMap((msg) => {
     const resolved = typeof msg === "function" ? msg() : msg;
-    // flatMap expects arrays - it will flatten array results and wrap non-arrays
+    // `flatMap()` flattens an array result and wraps a non-array one, so hand
+    // it an array either way.
     return Array.isArray(resolved) ? resolved : [resolved];
   });
 }
 
-/**
- * Options for creating a logger
- */
+/** Options for creating a logger. */
 export interface GetLoggerOptions {
-  /**
-   * Whether this logger should be enabled
-   * If not specified (undefined), follows default behavior
-   */
+  /** Whether this logger should be enabled. Defaults to `true`. */
   enabled?: boolean;
+
   /**
-   * The minimum log level for this logger
-   * If not specified, uses the global log level
+   * Minimum log level for this logger. Defaults to the level named by the
+   * environment, or `info` when it names none.
    */
   level?: LogLevel;
+
   /**
-   * Log a debug message every N total calls showing count breakdown.
-   * Set to 0 to disable. Defaults to 100.
+   * How many total calls to go between debug messages summarizing the
+   * counts. `0` disables the summaries entirely. Defaults to `100`.
    */
   logCountEvery?: number;
 }
 
-/**
- * Optional timing-output bridge for exporting selected logger timings to
- * Performance entries and/or console output.
- *
- * Matching is prefix-based against:
- * - the timing key path, e.g. "scheduler/execute"
- * - the logger module name, e.g. "scheduler"
- * - the combined form "<module>:<keyPath>", e.g. "scheduler:scheduler/execute"
- *
- * Use ["*"] to match every timed span.
- */
-export interface TimingOutputConfig {
-  include: string[];
-  measure?: boolean;
-  console?: boolean;
-  minMs?: number;
-}
-
-/**
- * Call counts for each log level
- */
+/** Call counts for each log level. */
 export interface LogCounts {
+  /** Number of debug-level calls. */
   debug: number;
+
+  /** Number of info-level calls. */
   info: number;
+
+  /** Number of warn-level calls. */
   warn: number;
+
+  /** Number of error-level calls. */
   error: number;
+
+  /** Number of calls at any level. */
   readonly total: number;
 }
 
-let _globalTimingOutputConfig: TimingOutputConfig | undefined =
-  getEnvTimingOutputConfig();
-
-function parseBooleanEnv(value: string | undefined): boolean | undefined {
-  if (value === undefined) return undefined;
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return undefined;
-}
-
-function parseTimingInclude(source: string | undefined): string[] {
-  if (!source) return [];
-  return source
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-}
-
-function getEnvTimingOutputConfig(): TimingOutputConfig | undefined {
-  if (!isDeno()) return undefined;
-
-  try {
-    const include = parseTimingInclude(Deno.env.get("CF_LOG_TIMING"));
-    if (include.length === 0) return undefined;
-
-    const consoleEnabled = parseBooleanEnv(
-      Deno.env.get("CF_LOG_TIMING_CONSOLE"),
-    ) ?? false;
-    const measureEnabled = parseBooleanEnv(
-      Deno.env.get("CF_LOG_TIMING_MEASURE"),
-    ) ?? true;
-    const minMsRaw = Deno.env.get("CF_LOG_TIMING_MIN_MS");
-    const minMs = minMsRaw !== undefined ? Number(minMsRaw) : undefined;
-
-    const config: TimingOutputConfig = {
-      include,
-      console: consoleEnabled,
-      measure: measureEnabled,
-    };
-    if (typeof minMs === "number" && Number.isFinite(minMs)) {
-      config.minMs = minMs;
-    }
-    return config;
-  } catch {
-    return undefined;
-  }
-}
-
-export function setGlobalTimingOutputConfig(
-  config: TimingOutputConfig | undefined,
-): void {
-  _globalTimingOutputConfig = config ?? getEnvTimingOutputConfig();
-}
-
-export function getGlobalTimingOutputConfig():
-  | TimingOutputConfig
-  | undefined {
-  return _globalTimingOutputConfig
-    ? {
-      ..._globalTimingOutputConfig,
-      include: [..._globalTimingOutputConfig.include],
-    }
-    : undefined;
-}
-
-function matchesTimingOutputConfig(
-  config: TimingOutputConfig,
-  moduleName: string | undefined,
-  keyPath: string,
-): boolean {
-  if (config.include.length === 0) return false;
-  if (config.include.includes("*")) return true;
-
-  const combined = moduleName ? `${moduleName}:${keyPath}` : keyPath;
-  return config.include.some((pattern) =>
-    combined.startsWith(pattern) ||
-    keyPath.startsWith(pattern) ||
-    (moduleName?.startsWith(pattern) ?? false)
-  );
-}
-
-/**
- * Breakdown of counts by message key for a single logger
- */
+/** Breakdown of counts by message key, for a single logger. */
 export type LoggerBreakdown = {
+  /** Counts for one message key. */
   [messageKey: string]: LogCounts;
 } & {
+  /** Number of calls across every message key. */
   total: number;
 };
 
-/**
- * Logger class that handles both basic and tagged logging
- */
+/** Logger, which handles both basic and tagged logging. */
 export class Logger {
-  private _disabled: boolean;
-  public level?: LogLevel;
-  private _counts: { debug: number; info: number; warn: number; error: number };
-  private _countsByKey: Record<
+  #moduleName: string | undefined;
+  #disabled: boolean;
+  #level: LogLevel | undefined;
+  #counts: { debug: number; info: number; warn: number; error: number };
+  #countsByKey: Record<
     string,
     { debug: number; info: number; warn: number; error: number }
   >;
-  private _logCountEvery: number;
-  private _lastLoggedAt: number;
-  private _timingsByKey: Map<string, TimingDataStore> = new Map();
-  private _activeTimers: Map<string, number> = new Map();
-  private _timingBaselineActive = false;
-  private _countBaseline: {
+  #logCountEvery: number;
+  #lastLoggedAt: number;
+  #timingsByKey: Map<string, TimingDataStore> = new Map();
+  #activeTimers: Map<string, number> = new Map();
+  #timingBaselineActive = false;
+  #countBaseline: {
     debug: number;
     info: number;
     warn: number;
     error: number;
   } | null = null;
-  private _flags: Map<string, Map<string, Record<string, unknown> | true>> =
-    new Map();
+  #flags: Map<string, Map<string, Record<string, unknown> | true>> = new Map();
 
-  constructor(private moduleName?: string, options?: GetLoggerOptions) {
+  /**
+   * Constructs an instance which tags its output with `moduleName`, if given,
+   * and which is configured per `options`.
+   */
+  constructor(moduleName?: string, options?: GetLoggerOptions) {
+    this.#moduleName = moduleName;
+
     // Set initial disabled state from options
     // Default to false (enabled) if not specified
-    this._disabled = options?.enabled === undefined ? false : !options.enabled;
+    this.#disabled = options?.enabled === undefined ? false : !options.enabled;
 
-    // Set logger-specific level if provided; default to "info" when unset.
-    // This keeps behavior consistent and avoids assigning undefined with
-    // exactOptionalPropertyTypes enabled.
-    this.level = options?.level ?? getEnvLevel() ?? "info";
+    // Set logger-specific level if provided, falling back to the environment
+    // and then to "info", so that every instance reports a level rather than
+    // leaving callers to interpret its absence.
+    this.#level = options?.level ?? getEnvLevel() ?? "info";
 
     // Initialize call counts
-    this._counts = { debug: 0, info: 0, warn: 0, error: 0 };
-    this._countsByKey = {};
+    this.#counts = { debug: 0, info: 0, warn: 0, error: 0 };
+    this.#countsByKey = {};
 
     // Set logCountEvery threshold (default to 100, 0 to disable)
-    this._logCountEvery = options?.logCountEvery ?? 100;
-    this._lastLoggedAt = 0;
+    this.#logCountEvery = options?.logCountEvery ?? 100;
+    this.#lastLoggedAt = 0;
   }
 
   /**
@@ -676,183 +835,108 @@ export class Logger {
    * - false: Logger is enabled, logs are shown based on level (default)
    */
   get disabled(): boolean {
-    return this._disabled;
+    return this.#disabled;
   }
 
+  /** @inheritDoc */
   set disabled(value: boolean) {
-    this._disabled = value;
+    this.#disabled = value;
   }
 
   /**
-   * Get the call counts for each log level, including a computed total.
+   * Minimum level at which this logger emits. A message below it is counted
+   * but not printed.
+   */
+  get level(): LogLevel | undefined {
+    return this.#level;
+  }
+
+  /** @inheritDoc */
+  set level(value: LogLevel | undefined) {
+    this.#level = value;
+  }
+
+  /**
+   * Call counts for each log level, including a computed total.
    * Counts are incremented even when the logger is disabled or the log level
    * filters out the message.
    */
   get counts(): LogCounts {
-    return {
-      debug: this._counts.debug,
-      info: this._counts.info,
-      warn: this._counts.warn,
-      error: this._counts.error,
-      get total(): number {
-        return this.debug + this.info + this.warn + this.error;
-      },
-    };
+    const { debug, info, warn, error } = this.#counts;
+    return { debug, info, warn, error, total: debug + info + warn + error };
   }
 
   /**
-   * Get the call counts broken down by message key.
-   * Each key contains counts for debug, info, warn, error, and a computed total.
+   * Call counts broken down by message key. Each key holds counts for
+   * `debug`, `info`, `warn`, and `error`, plus a computed total.
    */
   get countsByKey(): Record<string, LogCounts> {
     const result: Record<string, LogCounts> = {};
-    for (const [key, counts] of Object.entries(this._countsByKey)) {
+    for (const [key, counts] of Object.entries(this.#countsByKey)) {
+      const { debug, info, warn, error } = counts;
       result[key] = {
-        debug: counts.debug,
-        info: counts.info,
-        warn: counts.warn,
-        error: counts.error,
-        get total(): number {
-          return this.debug + this.info + this.warn + this.error;
-        },
+        debug,
+        info,
+        warn,
+        error,
+        total: debug + info + warn + error,
       };
     }
     return result;
   }
 
   /**
-   * Reset all call counts to zero (both overall and by-key counts)
+   * Returns all timing statistics for this logger.
+   * Returns a flat map with "/" joined keys.
    */
+  get timeStats(): Record<string, TimingStats> {
+    const result: Record<string, TimingStats> = {};
+    for (const [key, store] of this.#timingsByKey) {
+      result[key] = store.getStats();
+    }
+    return result;
+  }
+
+  /**
+   * All active flags, as a record from flag name to a record from id to
+   * metadata. The metadata is whatever was passed to `flag()`, or `null` when
+   * none was. A flag name with no active id is omitted entirely.
+   */
+  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
+    const result: Record<
+      string,
+      Record<string, Record<string, unknown> | null>
+    > = {};
+    for (const [name, group] of this.#flags) {
+      if (group.size > 0) {
+        const entries: Record<string, Record<string, unknown> | null> = {};
+        for (const [id, value] of group) {
+          entries[id] = value === true ? null : value;
+        }
+        result[name] = entries;
+      }
+    }
+    return result;
+  }
+
+  /** Resets all call counts to zero, both the overall and the by-key ones. */
   resetCounts(): void {
-    this._counts.debug = 0;
-    this._counts.info = 0;
-    this._counts.warn = 0;
-    this._counts.error = 0;
-    this._countsByKey = {};
-    this._lastLoggedAt = 0;
+    this.#counts.debug = 0;
+    this.#counts.info = 0;
+    this.#counts.warn = 0;
+    this.#counts.error = 0;
+    this.#countsByKey = {};
+    this.#lastLoggedAt = 0;
   }
 
-  /**
-   * Increment the count for a specific message key and log level
-   */
-  private incrementKeyCount(key: string, level: ActiveLogLevel): void {
-    // Skip reserved key name "total" to prevent corruption of breakdown totals
-    if (key === "total") {
-      console.warn(
-        `[Logger] Message key "total" is reserved and cannot be used. Please use a different key.`,
-      );
-      return;
-    }
-    if (!this._countsByKey[key]) {
-      this._countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
-    }
-    this._countsByKey[key][level]++;
-  }
-
-  private emitTimingOutputs(
-    keyPath: string,
-    startTime: number,
-    endTime: number,
-    elapsed: number,
-  ): void {
-    const config = _globalTimingOutputConfig;
-    if (
-      !config || !matchesTimingOutputConfig(config, this.moduleName, keyPath)
-    ) {
-      return;
-    }
-    if (config.minMs !== undefined && elapsed < config.minMs) {
-      return;
-    }
-
-    const measureName = this.moduleName
-      ? `logger:${this.moduleName}:${keyPath}`
-      : `logger:${keyPath}`;
-
-    if (config.measure !== false) {
-      try {
-        performance.measure(measureName, {
-          start: startTime,
-          end: endTime,
-        });
-      } catch {
-        // Ignore measure failures in runtimes with partial support.
-      }
-    }
-
-    if (config.console) {
-      const prefix = this.moduleName
-        ? `%c[TIMING][${this.moduleName}::${getTimeStamp()}]`
-        : `%c[TIMING][${getTimeStamp()}]`;
-      const duration = `${elapsed.toFixed(3)}ms`;
-      if (shouldLogToStderr()) {
-        logToStderr(prefix.replace("%c", ""), keyPath, duration);
-      } else {
-        console.log(prefix, LOG_COLORS.debug, keyPath, duration);
-      }
-    }
-  }
-
-  /**
-   * Check if we should log the count summary and do so if needed.
-   * This is called after incrementing the counter.
-   */
-  private maybeLogCountSummary(): void {
-    // Skip if disabled or logCountEvery is 0
-    if (this._logCountEvery === 0) return;
-
-    const total = this.counts.total;
-    const threshold = Math.floor(total / this._logCountEvery);
-
-    // Check if we've crossed a new threshold
-    if (threshold > this._lastLoggedAt) {
-      this._lastLoggedAt = threshold;
-
-      // Only log if debug level is enabled
-      if (shouldLog("debug", this.level)) {
-        const { prefix, color } = this.getLogFormat("debug");
-        const moduleName = this.moduleName || "logger";
-        const message =
-          `${moduleName}: ${total} log calls made (debug: ${this._counts.debug}, info: ${this._counts.info}, warn: ${this._counts.warn}, error: ${this._counts.error})`;
-        console.debug(prefix, color, message);
-      }
-    }
-  }
-
-  /**
-   * Get the prefix and color for a log level
-   */
-  private getLogFormat(
-    level: ActiveLogLevel,
-  ): { prefix: string; color: string } {
-    const levelUpper = level.toUpperCase();
-    const timestamp = getTimeStamp();
-
-    if (this.moduleName) {
-      const prefix = `%c[${levelUpper}][${this.moduleName}::${timestamp}]`;
-      const color = LOG_COLORS[
-        `tagged${
-          levelUpper.charAt(0) + level.slice(1)
-        }` as keyof typeof LOG_COLORS
-      ];
-      return { prefix, color };
-    } else {
-      const prefix = `%c[${levelUpper}][${timestamp}]`;
-      const color = LOG_COLORS[level];
-      return { prefix, color };
-    }
-  }
-
-  /**
-   * Log a debug message
-   */
+  /** Logs a debug message. */
   debug(key: string, ...messages: LogMessage[]): void {
-    this._counts.debug++;
-    this.incrementKeyCount(key, "debug");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("debug", this.level)) {
-      const { prefix, color } = this.getLogFormat("debug");
+    this.#counts.debug++;
+    this.#incrementKeyCount(key, "debug");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("debug", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("debug");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -865,23 +949,19 @@ export class Logger {
     }
   }
 
-  /**
-   * Log a message at info level (default logging method)
-   */
+  /** Logs a message at info level, this being the default method. */
   log(key: string, ...messages: LogMessage[]): void {
     this.info(key, ...messages);
   }
 
-  /**
-   * Log an info message
-   */
+  /** Logs an info message. */
   info(key: string, ...messages: LogMessage[]): void {
-    this._counts.info++;
-    this.incrementKeyCount(key, "info");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("info", this.level)) {
-      const { prefix, color } = this.getLogFormat("info");
+    this.#counts.info++;
+    this.#incrementKeyCount(key, "info");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("info", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("info");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -894,16 +974,14 @@ export class Logger {
     }
   }
 
-  /**
-   * Log a warning message
-   */
+  /** Logs a warning message. */
   warn(key: string, ...messages: LogMessage[]): void {
-    this._counts.warn++;
-    this.incrementKeyCount(key, "warn");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("warn", this.level)) {
-      const { prefix, color } = this.getLogFormat("warn");
+    this.#counts.warn++;
+    this.#incrementKeyCount(key, "warn");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("warn", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("warn");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -916,16 +994,14 @@ export class Logger {
     }
   }
 
-  /**
-   * Log an error message
-   */
+  /** Logs an error message. */
   error(key: string, ...messages: LogMessage[]): void {
-    this._counts.error++;
-    this.incrementKeyCount(key, "error");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("error", this.level)) {
-      const { prefix, color } = this.getLogFormat("error");
+    this.#counts.error++;
+    this.#incrementKeyCount(key, "error");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("error", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("error");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -938,50 +1014,78 @@ export class Logger {
     }
   }
 
-  // ============================================================
-  // Timing Methods
-  // ============================================================
+  //
+  // Timing methods
+  //
 
   /**
-   * Start a timer for the given key path.
-   * Hierarchical keys are supported - passing multiple segments will record
-   * stats at each level when timeEnd is called.
+   * Starts a timer for the given key path. Multiple segments name one path,
+   * joined with `/`; they are not a hierarchy that gets rolled up, so
+   * `timeEnd()` records against that single joined path and against nothing
+   * shorter.
    *
    * @example
    * logger.timeStart("cell", "get", "user-data");
    * // ... operation ...
    * logger.timeEnd("cell", "get", "user-data");
-   * // Records to: "cell", "cell/get", "cell/get/user-data"
+   * // Records to `cell/get/user-data`, and not to `cell` or `cell/get`.
    */
   timeStart(...keys: string[]): void {
     const keyPath = keys.join("/");
-    this._activeTimers.set(keyPath, performance.now());
+    this.#activeTimers.set(keyPath, performance.now());
   }
 
   /**
-   * End a timer and record the elapsed time.
-   * Returns the elapsed time in milliseconds, or undefined if no matching timer exists.
-   *
-   * Stats are recorded to all levels of the hierarchical key path.
+   * Ends a timer and records the elapsed time, returning it in milliseconds,
+   * or `undefined` if there is no matching timer. The time is recorded against
+   * the full joined key path only; see `timeStart()`.
    */
   timeEnd(...keys: string[]): number | undefined {
     const keyPath = keys.join("/");
-    const startTime = this._activeTimers.get(keyPath);
+    const startTime = this.#activeTimers.get(keyPath);
     if (startTime === undefined) {
       return undefined;
     }
-    this._activeTimers.delete(keyPath);
+    this.#activeTimers.delete(keyPath);
 
     const endTime = performance.now();
     const elapsed = endTime - startTime;
-    this._recordTime(elapsed, keys);
-    this.emitTimingOutputs(keyPath, startTime, endTime, elapsed);
+    this.#recordTime(elapsed, keys, startTime);
     return elapsed;
   }
 
   /**
-   * Record a timing measurement directly.
-   * Useful for measuring IPC latency or other cases where you have explicit timestamps.
+   * Ends a timer as `timeEnd()` does, and names this one span on the timeline.
+   *
+   * The detail reaches the emitted measure and nothing else: the statistics
+   * stay keyed by the path alone, so a caller can identify an occurrence
+   * without multiplying the rows by every value the detail takes.
+   */
+  timeEndDetailed(
+    detail: string | (() => string),
+    ...keys: string[]
+  ): number | undefined {
+    const keyPath = keys.join("/");
+    const startTime = this.#activeTimers.get(keyPath);
+    if (startTime === undefined) return undefined;
+    this.#activeTimers.delete(keyPath);
+    const elapsed = performance.now() - startTime;
+    // Resolved only when it will be used. A caller whose detail costs anything
+    // to produce passes a function, and pays nothing on the ordinary path
+    // where emission is off — which is every production run — nor once the cap
+    // has stopped emission partway through one.
+    const resolved = !willEmitTimingMeasure()
+      ? undefined
+      : typeof detail === "function"
+      ? detail()
+      : detail;
+    this.#recordTime(elapsed, keys, startTime, resolved);
+    return elapsed;
+  }
+
+  /**
+   * Records a timing measurement directly. Useful for measuring IPC latency,
+   * or any other case where the timestamps are already in hand.
    *
    * Overloads:
    * - time(startTime, ...keys) - end time defaults to performance.now()
@@ -1011,31 +1115,13 @@ export class Logger {
 
     const elapsed = endTime - startTime;
     if (keys.length > 0) {
-      const keyPath = keys.join("/");
-      this._recordTime(elapsed, keys);
-      this.emitTimingOutputs(keyPath, startTime, endTime, elapsed);
+      this.#recordTime(elapsed, keys, startTime);
     }
     return elapsed;
   }
 
   /**
-   * Internal method to record timing to the full key path only (no hierarchical rollup).
-   */
-  private _recordTime(elapsed: number, keys: string[]): void {
-    const path = keys.join("/");
-    let store = this._timingsByKey.get(path);
-    if (!store) {
-      store = new TimingDataStore();
-      if (this._timingBaselineActive) {
-        store.setBaseline();
-      }
-      this._timingsByKey.set(path, store);
-    }
-    store.record(elapsed);
-  }
-
-  /**
-   * Get timing statistics for a specific key path.
+   * Returns timing statistics for a specific key path.
    * Accepts either separate key segments or a single "/" joined path.
    *
    * @example
@@ -1044,56 +1130,42 @@ export class Logger {
    */
   getTimeStats(...keys: string[]): TimingStats | undefined {
     const keyPath = keys.join("/");
-    const store = this._timingsByKey.get(keyPath);
+    const store = this.#timingsByKey.get(keyPath);
     return store?.getStats();
   }
 
-  /**
-   * Get all timing statistics for this logger.
-   * Returns a flat map with "/" joined keys.
-   */
-  get timeStats(): Record<string, TimingStats> {
-    const result: Record<string, TimingStats> = {};
-    for (const [key, store] of this._timingsByKey) {
-      result[key] = store.getStats();
-    }
-    return result;
-  }
-
-  /**
-   * Reset all timing statistics for this logger.
-   */
+  /** Resets all timing statistics for this logger. */
   resetTimeStats(): void {
-    this._timingsByKey.clear();
-    this._activeTimers.clear();
-    this._timingBaselineActive = false;
+    this.#timingsByKey.clear();
+    this.#activeTimers.clear();
+    this.#timingBaselineActive = false;
   }
 
-  // ============================================================
-  // Baseline Methods
-  // ============================================================
+  //
+  // Baseline methods
+  //
 
   /**
-   * Reset the count baseline to current count values.
-   * After calling this, getCountDeltas() will return counts relative to this baseline.
+   * Resets the count baseline to the current counts, so that
+   * `getCountDeltas()` reports relative to them.
    */
   resetCountBaseline(): void {
-    this._countBaseline = { ...this._counts };
+    this.#countBaseline = { ...this.#counts };
   }
 
   /**
-   * Reset the timing baseline to current timing values.
-   * After calling this, CDF delta curves will show samples since this baseline.
+   * Resets the timing baseline to the current timings, so that CDF delta
+   * curves show the samples taken since.
    */
   resetTimingBaseline(): void {
-    this._timingBaselineActive = true;
-    for (const store of this._timingsByKey.values()) {
+    this.#timingBaselineActive = true;
+    for (const store of this.#timingsByKey.values()) {
       store.setBaseline();
     }
   }
 
   /**
-   * Get count deltas since the baseline was set.
+   * Returns count deltas since the baseline was set.
    * If no baseline exists, returns the current counts.
    */
   getCountDeltas(): {
@@ -1103,31 +1175,32 @@ export class Logger {
     error: number;
     total: number;
   } {
-    if (!this._countBaseline) {
-      return { ...this._counts, total: this.getTotal() };
+    if (!this.#countBaseline) {
+      return { ...this.#counts, total: this.#getTotal() };
     }
     return {
-      debug: this._counts.debug - this._countBaseline.debug,
-      info: this._counts.info - this._countBaseline.info,
-      warn: this._counts.warn - this._countBaseline.warn,
-      error: this._counts.error - this._countBaseline.error,
-      total: this.getTotal() - (
-        this._countBaseline.debug + this._countBaseline.info +
-        this._countBaseline.warn + this._countBaseline.error
+      debug: this.#counts.debug - this.#countBaseline.debug,
+      info: this.#counts.info - this.#countBaseline.info,
+      warn: this.#counts.warn - this.#countBaseline.warn,
+      error: this.#counts.error - this.#countBaseline.error,
+      total: this.#getTotal() - (
+        this.#countBaseline.debug + this.#countBaseline.info +
+        this.#countBaseline.warn + this.#countBaseline.error
       ),
     };
   }
 
-  // ============================================================
-  // Flag Methods
-  // ============================================================
+  //
+  // Flag methods
+  //
 
   /**
-   * Set or clear a named boolean flag for a specific ID, with optional metadata.
-   * Flags track named boolean state per ID (e.g. "action invalid input" for "action:myModule").
-   * When value=true and metadata is provided, the metadata is stored with the flag.
-   * When value=true without metadata, stores `true`.
-   * When value=false, the entry is deleted so active flags = present entries.
+   * Sets or clears the flag `name` for `id`. A flag is named boolean state
+   * held per id, such as `action invalid input` for `action:myModule`.
+   *
+   * A `value` of `true` stores `metadata` when given and `true` otherwise; a
+   * `value` of `false` deletes the entry, so that the active flags are exactly
+   * the present entries.
    */
   flag(
     name: string,
@@ -1135,10 +1208,10 @@ export class Logger {
     value: boolean,
     metadata?: Record<string, unknown>,
   ): void {
-    let group = this._flags.get(name);
+    let group = this.#flags.get(name);
     if (!group) {
       group = new Map();
-      this._flags.set(name, group);
+      this.#flags.set(name, group);
     }
     if (value) {
       group.set(id, metadata ?? true);
@@ -1147,51 +1220,168 @@ export class Logger {
     }
   }
 
+  /** Resets all flags for this logger. */
+  resetFlags(): void {
+    this.#flags.clear();
+  }
+
+  //
+  // Private helpers
+  //
+
+  /** Increments the count for a specific message key and log level. */
+  #incrementKeyCount(key: string, level: ActiveLogLevel): void {
+    // Skip reserved key name "total" to prevent corruption of breakdown totals
+    if (key === "total") {
+      console.warn(
+        `[Logger] Message key \`total\` is reserved and cannot be used. ` +
+          `Please use a different key.`,
+      );
+      return;
+    }
+    if (!this.#countsByKey[key]) {
+      this.#countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
+    }
+    this.#countsByKey[key][level]++;
+  }
+
   /**
-   * Get all active flags as a record of flag name -> { id -> metadata | null }.
-   * Metadata is the object passed to flag() or null if no metadata was provided.
-   * Only includes groups with at least one active flag.
+   * Logs the count summary, if incrementing the counter has just carried the
+   * total past another multiple of the configured threshold.
    */
-  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
-    const result: Record<
-      string,
-      Record<string, Record<string, unknown> | null>
-    > = {};
-    for (const [name, group] of this._flags) {
-      if (group.size > 0) {
-        const entries: Record<string, Record<string, unknown> | null> = {};
-        for (const [id, value] of group) {
-          entries[id] = value === true ? null : value;
-        }
-        result[name] = entries;
+  #maybeLogCountSummary(): void {
+    // Skip if disabled or logCountEvery is 0
+    if (this.#logCountEvery === 0) return;
+
+    const total = this.counts.total;
+    const threshold = Math.floor(total / this.#logCountEvery);
+
+    // Check if we've crossed a new threshold
+    if (threshold > this.#lastLoggedAt) {
+      this.#lastLoggedAt = threshold;
+
+      // Only log if debug level is enabled
+      if (shouldLog("debug", this.#level)) {
+        const { prefix, color } = this.#getLogFormat("debug");
+        const moduleName = this.#moduleName || "logger";
+        const message =
+          `${moduleName}: ${total} log calls made (debug: ${this.#counts.debug}, info: ${this.#counts.info}, warn: ${this.#counts.warn}, error: ${this.#counts.error})`;
+        console.debug(prefix, color, message);
       }
     }
-    return result;
+  }
+
+  /** Returns the prefix and color for a log level. */
+  #getLogFormat(
+    level: ActiveLogLevel,
+  ): { prefix: string; color: string } {
+    const levelUpper = level.toUpperCase();
+    const timestamp = getTimeStamp();
+
+    if (this.#moduleName) {
+      const prefix = `%c[${levelUpper}][${this.#moduleName}::${timestamp}]`;
+      const color = LOG_COLORS[
+        `tagged${
+          levelUpper.charAt(0) + level.slice(1)
+        }` as keyof typeof LOG_COLORS
+      ];
+      return { prefix, color };
+    } else {
+      const prefix = `%c[${levelUpper}][${timestamp}]`;
+      const color = LOG_COLORS[level];
+      return { prefix, color };
+    }
   }
 
   /**
-   * Reset all flags for this logger.
+   * Records timing against the full key path only, with no rollup to the
+   * shorter paths.
    */
-  resetFlags(): void {
-    this._flags.clear();
+  #recordTime(
+    elapsed: number,
+    keys: string[],
+    startTime?: number,
+    detail?: string,
+  ): void {
+    const path = keys.join("/");
+    let store = this.#timingsByKey.get(path);
+    if (!store) {
+      store = new TimingDataStore();
+      if (this.#timingBaselineActive) {
+        store.setBaseline();
+      }
+      this.#timingsByKey.set(path, store);
+    }
+    store.record(elapsed);
+    if (_emitTimingMeasures && startTime !== undefined) {
+      this.#emitMeasure(path, startTime, elapsed, detail);
+    }
   }
 
   /**
-   * Get the total count of all log calls (debug + info + warn + error).
+   * Put this span on the timeline as well as into the statistics.
+   *
+   * Named `<path>#<n>`, because two spans on one key are two different events
+   * and a shared name would leave a reader unable to tell them apart. The
+   * suffix is what an aggregating consumer strips to recover the key.
+   *
+   * The timestamp form is deliberate: the caller already holds the start, so
+   * there is nothing to gain from marking the boundaries and looking them up
+   * again — the mark-based spelling costs several times as much.
    */
-  private getTotal(): number {
-    return this._counts.debug + this._counts.info + this._counts.warn +
-      this._counts.error;
+  #emitMeasure(
+    path: string,
+    startTime: number,
+    elapsed: number,
+    detail?: string,
+  ): void {
+    if (_timingMeasuresEmitted >= _timingMeasureCap) {
+      if (!_timingMeasureCapReported) {
+        _timingMeasureCapReported = true;
+        console.warn(
+          `[logger] timing measures stopped at the cap of ` +
+            `${_timingMeasureCap}; call clearTimingMeasures() after reading ` +
+            `them, or raise the cap with setTimingMeasuresEnabled().`,
+        );
+      }
+      return;
+    }
+    try {
+      // Both fields are encoded, not just the detail: a key is a caller's
+      // string as much as a detail is, and one containing a separator would
+      // otherwise be parsed back as a key and a detail that were never there.
+      const named = detail === undefined
+        ? encodeMeasureField(path)
+        : `${encodeMeasureField(path)}${TIMING_MEASURE_DETAIL}${
+          encodeMeasureField(detail)
+        }`;
+      performance.measure(
+        `${TIMING_MEASURE_PREFIX}${named}#${++_timingMeasureSequence}`,
+        {
+          start: startTime,
+          end: startTime + elapsed,
+        },
+      );
+      _timingMeasuresEmitted++;
+    } catch {
+      // Instrumentation never fails the thing it is measuring.
+    }
+  }
+
+  /** Returns the total count of all log calls, over all four levels. */
+  #getTotal(): number {
+    return this.#counts.debug + this.#counts.info + this.#counts.warn +
+      this.#counts.error;
   }
 }
 
-/**
- * Global logger instance for basic logging
- */
+/** Global logger instance, for basic logging. */
 export const log = new Logger();
 
 /**
- * We may want to initialize log level from environment variable if available
+ * Returns the log level named by the `LOG_LEVEL` environment variable, or
+ * `undefined` when it is unset, is `silent`, is not a valid level, or cannot
+ * be read. Always `undefined` outside Deno.
  */
 function getEnvLevel() {
   if (isDeno()) {
@@ -1208,9 +1398,9 @@ function getEnvLevel() {
 }
 
 /**
- * Check if LOG_TO_STDERR environment variable is set.
- * When set, all log output goes to stderr to avoid polluting stdout
- * (useful for CLI tools where stdout is used for machine-readable output).
+ * Indicates whether the `LOG_TO_STDERR` environment variable is set. When it
+ * is, all log output goes to stderr, so that stdout stays clean for a CLI
+ * tool whose real output a caller is parsing.
  */
 function shouldLogToStderr(): boolean {
   if (isDeno()) {
@@ -1224,8 +1414,8 @@ function shouldLogToStderr(): boolean {
 }
 
 /**
- * Log to stderr using Deno.stderr.writeSync.
- * Falls back to console.error if not in Deno or if write fails.
+ * Logs to stderr, via `Deno.stderr.writeSync()`. Falls back to
+ * `console.error()` outside Deno, or if the write fails.
  */
 function logToStderr(...args: unknown[]): void {
   if (isDeno()) {
@@ -1245,11 +1435,9 @@ function logToStderr(...args: unknown[]): void {
 }
 
 /**
- * Create a logger tagged with the specified module name.
- * If a logger with the same module name already exists, returns the existing instance.
- * @param moduleName - The name of the module (will appear in log messages)
- * @param options - Options for configuring the logger (only used if creating a new logger)
- * @returns A logger that prefixes all messages with [moduleName]
+ * Returns the logger tagged with `moduleName`, creating and registering it if
+ * there is not already one. `options` therefore takes effect only on the call
+ * that creates the logger.
  */
 export function getLogger(
   moduleName: string,
@@ -1278,10 +1466,7 @@ export function getLogger(
   return logger;
 }
 
-/**
- * Reset call counts for all registered loggers.
- * Iterates through all loggers in globalThis.commonfabric.logger and resets their counts.
- */
+/** Resets call counts for every registered logger. */
 export function resetAllLoggerCounts(): void {
   const global = globalThis as unknown as {
     commonfabric?: { logger?: Record<string, Logger> };
@@ -1294,8 +1479,8 @@ export function resetAllLoggerCounts(): void {
 }
 
 /**
- * Get the total count of all log calls across all registered loggers.
- * @returns The sum of all log calls (debug + info + warn + error) across all loggers
+ * Returns the sum of all log calls, over all four levels and over every
+ * registered logger.
  */
 export function getTotalLoggerCounts(): number {
   const global = globalThis as unknown as {
@@ -1309,8 +1494,8 @@ export function getTotalLoggerCounts(): number {
 }
 
 /**
- * Get a breakdown of log counts by logger name and message key, plus totals.
- * @returns Object with nested counts per logger/key and a total property
+ * Returns a breakdown of log counts by logger name and message key, with a
+ * `total` alongside each level of nesting.
  */
 export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   total: number;
@@ -1326,7 +1511,8 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
     for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const loggerBreakdown = { total: 0 } as LoggerBreakdown;
 
-      // Add counts by key (skip "total" to avoid overwriting the reserved property)
+      // Add counts by key, skipping `total` so that the reserved property is
+      // not overwritten.
       for (const [key, counts] of Object.entries(logger.countsByKey)) {
         if (key === "total") {
           continue; // Skip reserved property name
@@ -1345,27 +1531,28 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   };
 }
 
-/**
- * Breakdown of timing stats by logger name
- */
+/** Breakdown of timing stats by logger name. */
 export type TimingStatsBreakdown = {
+  /** Stats for one logger, by key path. */
   [loggerName: string]: Record<string, TimingStats>;
 };
 
 /**
- * Get a breakdown of timing statistics by logger name and key.
- * @returns Object with nested timing stats per logger and key
+ * Returns a breakdown of timing statistics by logger name and key.
  *
  * @example
  * getTimingStatsBreakdown()
  * // {
  * //   "runtime-client": {
- * //     "ipc": { count: 2415, min: 0.1, max: 45.2, average: 1.9, p50: 1.5, p95: 6.8, ... },
- * //     "ipc/CellGet": { count: 1523, min: 0.1, max: 45.2, average: 2.3, p50: 1.8, p95: 8.4, ... }
+ * //     "ipc":
+ * //       { count: 2415, min: 0.1, max: 45.2, average: 1.9, p50: 1.5, ... },
+ * //     "ipc/CellGet":
+ * //       { count: 1523, min: 0.1, max: 45.2, average: 2.3, p50: 1.8, ... }
  * //   },
  * //   "runner": {
  * //     "cell": { count: 500, min: 0.1, p50: 2.0, p95: 8.5, max: 45.0, ... },
- * //     "cell/get": { count: 450, min: 0.1, p50: 2.1, p95: 8.7, max: 45.0, ... }
+ * //     "cell/get":
+ * //       { count: 450, min: 0.1, p50: 2.1, p95: 8.7, max: 45.0, ... }
  * //   }
  * // }
  */
@@ -1389,8 +1576,8 @@ export function getTimingStatsBreakdown(): TimingStatsBreakdown {
 }
 
 /**
- * Breakdown of flags by logger name.
- * Structure: { loggerName: { flagName: { id: metadata | null } } }
+ * Breakdown of flags by logger name, shaped as
+ * `{ loggerName: { flagName: { id: metadata | null } } }`.
  */
 export type LoggerFlagsBreakdown = Record<
   string,
@@ -1398,8 +1585,8 @@ export type LoggerFlagsBreakdown = Record<
 >;
 
 /**
- * Get a breakdown of active flags by logger name and flag name.
- * @returns Object with nested flag data per logger: { "runner": { "action invalid input": { "action:myModule": { schema: ..., raw: ... } } } }
+ * Returns a breakdown of active flags by logger name and flag name, e.g.
+ * `{ runner: { "action invalid input": { "action:myModule": {...} } } }`.
  */
 export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
   const global = globalThis as unknown as {
@@ -1420,10 +1607,7 @@ export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
   return breakdown;
 }
 
-/**
- * Reset timing statistics for all registered loggers.
- * Iterates through all loggers in globalThis.commonfabric.logger and resets their timing stats.
- */
+/** Resets timing statistics for every registered logger. */
 export function resetAllTimingStats(): void {
   const global = globalThis as unknown as {
     commonfabric?: { logger?: Record<string, Logger> };
@@ -1436,8 +1620,8 @@ export function resetAllTimingStats(): void {
 }
 
 /**
- * Reset count baseline for all registered loggers.
- * After calling this, each logger's getCountDeltas() will return counts relative to this baseline.
+ * Resets the count baseline for every registered logger, so that each
+ * logger's `getCountDeltas()` reports relative to its current counts.
  */
 export function resetAllCountBaselines(): void {
   const global = globalThis as unknown as {
@@ -1451,8 +1635,9 @@ export function resetAllCountBaselines(): void {
 }
 
 /**
- * Reset timing baseline for all registered loggers.
- * After calling this, each logger's getTimingDeltas() will return timing relative to this baseline.
+ * Resets the timing baseline for every registered logger, so that each
+ * logger's `getTimeStats()` reports its `*SinceBaseline` figures relative to
+ * its current timings.
  */
 export function resetAllTimingBaselines(): void {
   const global = globalThis as unknown as {
@@ -1480,8 +1665,6 @@ if (typeof globalThis !== "undefined") {
       resetAllTimingBaselines?: typeof resetAllTimingBaselines;
       setGlobalLogFloor?: typeof setGlobalLogFloor;
       getGlobalLogFloor?: typeof getGlobalLogFloor;
-      setGlobalTimingOutputConfig?: typeof setGlobalTimingOutputConfig;
-      getGlobalTimingOutputConfig?: typeof getGlobalTimingOutputConfig;
     };
   };
   if (!global.commonfabric) {
@@ -1497,6 +1680,4 @@ if (typeof globalThis !== "undefined") {
   global.commonfabric.resetAllTimingBaselines = resetAllTimingBaselines;
   global.commonfabric.setGlobalLogFloor = setGlobalLogFloor;
   global.commonfabric.getGlobalLogFloor = getGlobalLogFloor;
-  global.commonfabric.setGlobalTimingOutputConfig = setGlobalTimingOutputConfig;
-  global.commonfabric.getGlobalTimingOutputConfig = getGlobalTimingOutputConfig;
 }

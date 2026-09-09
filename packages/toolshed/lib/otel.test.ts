@@ -13,12 +13,13 @@ import {
   shutdownOpenTelemetry,
 } from "@/lib/otel.ts";
 
-// The provider takes the configured resource as given, so the service
-// attributes and the SDK's own defaults have to be merged before it is handed
-// over. Both halves are read off a span the real provider produced, since a
-// span carries the resource the exporter will stamp on it. The span is left
-// unended so nothing is queued for export.
 Deno.test("spans carry both the service attributes and the SDK defaults", () => {
+  // The provider takes the configured resource as given, so the service
+  // attributes and the SDK's own defaults have to be merged before it is handed
+  // over. Both halves are read off a span the real provider produced, since a
+  // span carries the resource the exporter will stamp on it. The span is left
+  // unended so nothing is queued for export.
+
   const span = provider.getTracer("otel-test").startSpan(
     "resource-probe",
   ) as unknown as ReadableSpan;
@@ -37,12 +38,18 @@ Deno.test("spans carry both the service attributes and the SDK defaults", () => 
   );
 });
 
+//
+// Which copy of the tracer SDK is in use
+//
 // `OpenInferenceBatchSpanProcessor` subclasses `BatchSpanProcessor`, but
 // @arizeai/openinference-vercel imports @opentelemetry/sdk-trace-base without
 // declaring it as a dependency, and the range it names in its development
 // dependencies stops below the major this workspace resolves. Which copy it
 // subclasses is therefore decided by the workspace import map rather than by
-// anything the package states, and the span export above depends on the answer.
+// anything the package states, and the span export in this section depends on
+// the answer.
+//
+
 Deno.test("the OpenInference processor extends the tracer SDK in use", () => {
   assert(
     OpenInferenceBatchSpanProcessor.prototype instanceof BatchSpanProcessor,
@@ -72,10 +79,19 @@ Deno.test("spans pass through the OpenInference processor to the exporter", asyn
   }
 });
 
-// The `ai` package collects no spans until a telemetry integration is
-// registered, and it reports nothing when none is: the LLM spans simply stop
-// being produced. Importing this module is what registers ours.
+//
+// The module's telemetry lifecycle
+//
+// The module registers an AI SDK telemetry integration on import, and
+// `shutdownOpenTelemetry()` behaves differently before `initOpenTelemetry()`
+// has run and after.
+//
+
 Deno.test("importing the module registers an AI SDK telemetry integration", () => {
+  // The `ai` package collects no spans until a telemetry integration is
+  // registered, and it reports nothing when none is: the LLM spans simply stop
+  // being produced. Importing this module is what registers ours.
+
   assert(
     (globalThis.AI_SDK_TELEMETRY_INTEGRATIONS?.length ?? 0) > 0,
     "no AI SDK telemetry integration registered; LLM spans would not be collected",

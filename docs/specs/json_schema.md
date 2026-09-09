@@ -33,6 +33,14 @@ The authoritative field inventory is the `JSONSchema` type in
   data.)
 - **`scope`**: storage-partition selector emitted for `PerSpace<T>` /
   `PerUser<T>` / `PerSession<T>` wrappers.
+- **`tier`**: verb listing mark on stream properties. `tier: "wrapper"` names
+  a UI affordance outside the headless contract, inferred at compile time
+  from session-scoped handler bindings plus a void event
+  (ts-transformers current-behavior spec §12.1). `cf piece verbs` hides
+  marked verbs by default; everything stays callable, and `cf piece call`
+  never consults the mark. Annotation-class in the piece compat checker
+  (adds and removes freely). Standard `deprecated: true` is the companion
+  mark on the other axis, produced from `@deprecated` JSDoc.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
 
 ### IFC
@@ -125,28 +133,37 @@ Result: We include the queried node plus cell2, but exclude cell3.
 
 ## Combining Schemas
 
-When traversal follows a link, the schema from the current query is combined
-with the schema embedded in the link. The result is a pseudo-intersection: both
-schemas constrain the linked value. For object schemas, properties and
-`required` fields from either side survive, while properties defined by both
-sides are combined recursively.
+When traversal follows a link, the schema from the current query takes
+precedence over the schema embedded in the link (`combineSchemaForLink`,
+gated by the `readerSchemaPrecedence` experimental flag, default on). The
+reader's schema is used as it stands, and the link's schema is adopted only
+where the reader is agnostic: a true or empty reader schema adopts it under
+the reader's own `asCell` wrapper, and a false reader schema stays false. A
+link routinely describes — and requires — more of its target than the
+reader asked for, and none of that reaches the combined schema: a property
+or `required` entry declared only by the link does not survive a shaped
+reader, and a `false` link schema blocks only readers that brought no shape
+of their own.
 
-The three `additionalProperties` states above remain distinct during this
-operation. In particular, an absent `additionalProperties` does not prohibit a
-property declared only by the other schema. That property survives the
-combination because neither schema explicitly rejects it. An explicit
-`additionalProperties: false` does reject such one-sided properties, while
-`true` permits them.
+`default` is the exception: a value's default is inherited from the last
+crossed schema that declares one, so a link's top-level `default` overrides
+earlier links' and the reader's own, and the reader's stands where no link
+declares one.
 
-For example, combining an object schema that declares and requires `a` with one
-that declares and requires `b` produces a schema containing both properties and
-requiring both. This differs from traversing either schema by itself, where an
-absent `additionalProperties` follows only that schema's explicitly declared
-properties.
+The strict pseudo-intersection (`combineSchema`) remains in use for merging
+a compound schema's base keywords with its own `anyOf`/`oneOf` branches.
+There, properties and `required` fields from either side survive, shared
+properties combine recursively, and the three `additionalProperties` states
+above stay distinct: an absent `additionalProperties` does not prohibit a
+property declared only by the other side, an explicit
+`additionalProperties: false` rejects such one-sided properties, and `true`
+permits them.
 
-See [Schema Narrowing in the Memory v2 query specification](memory-v2/05-queries.md#534-schema-narrowing)
-for the complete combination algorithm, including type intersections, array
-items, metadata precedence, and false schemas.
+See [Link-schema precedence](link-schema-precedence.md) for the
+consolidated specification, and
+[Schema Narrowing in the Memory v2 query specification](memory-v2/05-queries.md#534-schema-narrowing)
+for the rules in the query pipeline's context, including the rollback flag
+and the cfc-relevance marking that stays independent of the combination.
 
 ## Unsupported Features
 
@@ -184,15 +201,44 @@ anything and will not be accessed.
 
 ### Non-standard `type` values
 
-Two deliberate extensions beyond the 2020-12 vocabulary appear in generated
-schemas:
+Deliberate extensions beyond the 2020-12 vocabulary:
 
 - `{ "type": "unknown" }` — emitted for TypeScript `unknown` and for
   unresolved/degraded generics. Distinct from `true` (which is what `any`
-  becomes): `unknown` means "shape not expressible", `any` means "accept
-  anything".
+  becomes): `unknown` declares a REFERENCE, `any` means "accept anything". A
+  read stops at an `unknown` position rather than descending: it yields
+  something truthy that compares by identity and writes back as a link, and
+  that carries none of what it names. A concrete type declared beside it, as in
+  `{ "type": ["unknown", "string"] }`, is a reader asking for the value and
+  gets it.
 - `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
   `string | undefined`) so optionality survives schema round-trips.
+- `FabricPrimitive` types — `"FabricBytes"`, `"FabricEpochDay"`,
+  `"FabricEpochNsec"`, `"FabricHash"`, `"FabricKeyPair"`, `"FabricRegExp"` —
+  each naming a
+  concrete `FabricPrimitive` class from the data-model. A value matches by
+  prototype (`instanceof`), not by structure: these values are opaque leaves
+  with no enumerable properties, and they are never property-walked.
+  Each `FabricPrimitive` type is a subtype of `"object"` (the way `"integer"`
+  is a subtype of `"number"`): a `FabricBytes` value satisfies both
+  `{ "type": "FabricBytes" }` and `{ "type": "object" }`, while a plain
+  object satisfies only the latter. One structural keyword gates the subtype
+  match: an object-typed schema's `required` keys must exist on the
+  primitive, where class accessors count (`FabricBytes` satisfies
+  `required: ["length"]` but not `required: ["x"]`) — mirroring the
+  TypeScript structural rule that a `FabricBytes` is assignable to
+  `{length: number}`. The nominal brand key
+  (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/data-model/src/api.ts`), which
+  schemas from pre-vocabulary compilations name in `required` (current
+  generator emissions omit it everywhere), has no runtime existence and
+  counts as present on any `FabricSpecialObject`. Property sub-schemas are
+  still not walked against a primitive: presence is checked, shapes are not, so
+  `{ "type": "object", "properties": { "source": { "type": "number" } } }`
+  matches a `FabricRegExp` even though its `source` is a string. Schemas
+  generated from the real class types cannot express such a mismatch; only
+  hand-written schemas can, and they get no shape enforcement on opaque
+  leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
+  `packages/api/index.ts`.
 
 Generated schemas also hoist named types into `$defs` and reference them via
 `#/$defs/...`. The full TypeScript→schema mapping is specified in the

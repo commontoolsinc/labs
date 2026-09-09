@@ -9,6 +9,7 @@
  * doctored `Document` so the natural card/structure machinery lands in the
  * defensive state being exercised.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
@@ -21,7 +22,9 @@ import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
 
-// --- key helpers ------------------------------------------------------------
+//
+// key helpers
+//
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {
@@ -48,15 +51,16 @@ function selectByLabel(s: Session, label: string): void {
   throw new Error(`node not reached: ${label}`);
 }
 
-// ===========================================================================
+//
 // 663 — Enter on an in-blob reference that resolves to no node.
-// ===========================================================================
-// A "use" reference carries a destination line but no definition offset. When
-// that line falls outside every structure node's range, both findTargetIndex
-// (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
-// returns null and Enter reports there is nothing to open.
+//
 
 Deno.test("session: Enter on a reference whose line is in no node reports nothing to open", () => {
+  // A "use" reference carries a destination line but no definition offset. When
+  // that line falls outside every structure node's range, both findTargetIndex
+  // (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
+  // returns null and Enter reports there is nothing to open.
+
   // Real card with real targets, but the structure tree is trimmed to just the
   // subject node — placed so the use site sits below its range, outside every
   // node — so following the use reference resolves to no node.
@@ -100,14 +104,16 @@ const useB = base;`;
   assert(s.view().overlay, "the card stays open");
 });
 
-// ===========================================================================
-// Behavioural anchor near revealMatch (580).
-// ===========================================================================
-// revealMatch reads matches[currentMatch] and guards `!m`. Every public caller
-// (runSearch, refreshSearchMatches, stepMatch) checks for an empty match set
-// before reaching it, so the no-match return is unreachable from the public
-// API; this test asserts the surrounding reveal behaviour stays correct.
+//
+// Behavioral anchor near revealMatch (580).
+//
+
 Deno.test("session: a committed search reveals its single match", () => {
+  // revealMatch reads matches[currentMatch] and guards `!m`. Every public
+  // caller (runSearch, refreshSearchMatches, stepMatch) checks for an empty
+  // match set before reaching it, so the no-match return is unreachable from
+  // the public API; this test asserts the surrounding reveal behavior stays
+  // correct.
   const doc = parseDocument("// transformed: /m.ts\nconst tokenz = 1;");
   const s = new Session(
     doc,
@@ -121,15 +127,16 @@ Deno.test("session: a committed search reveals its single match", () => {
   assertEquals(s.view().currentMatch, 0, "the only match is focused");
 });
 
-// ===========================================================================
-// 1152 / 1156 — adjustHunkCounts walks above a hunk it cannot find or parse.
-// ===========================================================================
-// adjustHunkCounts climbs from the edited row to the nearest "@@ " header. If
-// it reaches the top of the buffer with no header and no diff/---/+++ marker,
-// `h < 0` returns (1152). If it stops on a line that begins "@@ " but does not
-// match the full hunk-header pattern, the regex match is null and it returns
-// (1156). Both are reached with a hand-built diff source whose body the policy
-// treats as editable, but whose header is absent or malformed.
+//
+// adjustHunkCounts over a hunk it cannot find or parse
+//
+
+// adjustHunkCounts takes the header row of the parsed hunk holding the edited
+// row. With no such hunk it returns without a rewrite; with a header row that
+// begins "@@ " but does not match the full hunk-header pattern, the match is
+// null and it returns the same way. Both are reached with a hand-built diff
+// source whose body the policy treats as editable, but whose header is absent
+// or malformed.
 
 const EXPAND_FILE = "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\n";
 
@@ -163,9 +170,11 @@ index 0000000..1111111 100644
  epsilon
 `;
 
-/** A diff session whose policy/source are real (so editing is gated like a
- * diff) but whose document lines are swapped for `lines`, so adjustHunkCounts
- * climbs through a buffer we control. */
+/**
+ * A diff session whose policy and source are real, so editing is gated like a
+ * diff, but whose document lines are swapped for `lines`, so adjustHunkCounts
+ * reads a buffer we control.
+ */
 function doctoredDiffSession(
   bufferLines: string[],
   cursorRow: number,
@@ -208,10 +217,10 @@ function doctoredDiffSession(
   return { s, done };
 }
 
-Deno.test("diffcov2: pressing Enter on a body line with no hunk header above is a no-op on the counts (h < 0)", () => {
-  // A buffer with an added ("+") line but no "@@" header and no diff/---/+++
-  // markers above it: pressing Enter splits the added line and calls
-  // adjustHunkCounts, which climbs to h < 0 (no header found) and returns.
+Deno.test("diffcov2: pressing Enter on a body line in no parsed hunk leaves the counts alone", () => {
+  // A buffer with an added ("+") line but no "@@" header, so the text parses
+  // to no hunk containing the row: pressing Enter splits the added line and
+  // calls adjustHunkCounts, which finds no hunk for the row and returns.
   const lines = [
     " context one",
     " context two",
@@ -223,7 +232,7 @@ Deno.test("diffcov2: pressing Enter on a body line with no hunk header above is 
     assertEquals(s.view().cursor?.line, 2, "cursor on the added line");
     press(s, "end");
     const before = s.doc.text;
-    press(s, "enter"); // splits the added line -> adjustHunkCounts climbs off top
+    press(s, "enter"); // splits the added line; adjustHunkCounts finds no hunk
     assert(s.doc.text !== before, "the Enter inserted a new added line");
     // No "@@" header exists, so none was rewritten.
     assert(
@@ -244,20 +253,13 @@ Deno.test("diffcov2: adjustHunkCounts rejects a malformed explicit hunk header",
   ];
   const { s, done } = doctoredDiffSession(lines, 2); // on the added line
   try {
-    const internals = s as unknown as {
-      buffer: { lines: string[] };
-      adjustHunkCounts(
-        oldDelta: number,
-        newDelta: number,
-        hunkHeader?: number | null,
-      ): boolean;
-    };
-    const headerBefore = internals.buffer.lines[0];
+    const internals = s.accessForTestingOnly;
+    const headerBefore = internals.buffer!.lines[0];
     assert(headerBefore.startsWith("@@ "), headerBefore);
     const adjusted = internals.adjustHunkCounts(0, 1, 0);
     assertEquals(adjusted, false, "the malformed header was rejected");
     assertEquals(
-      internals.buffer.lines[0],
+      internals.buffer!.lines[0],
       headerBefore,
       "the malformed header was not rewritten",
     );
@@ -266,9 +268,10 @@ Deno.test("diffcov2: adjustHunkCounts rejects a malformed explicit hunk header",
   }
 });
 
-// ===========================================================================
+//
 // 1705 — ensurePickerVisible clamps a negative overlay scroll back to zero.
-// ===========================================================================
+//
+
 // When the picker selection moves up to an entry above the current scroll,
 // ensurePickerVisible sets the scroll to the selection's index. A selection of
 // 0 with a stale negative scroll would be clamped by the final guard. We reach
@@ -340,11 +343,14 @@ Deno.test("filepickercov2: paging the picker up to the top keeps the scroll non-
   assertEquals(s.view().overlay!.scroll, 0, "scroll reset to the top");
 });
 
-// ===========================================================================
-// Behavioural anchors for the reachable structure-tree edges near 288/377/380.
-// ===========================================================================
+//
+// Behavioral anchors for the reachable structure-tree edges near 288/377/380.
+//
+
+//
 // These do not force the unreachable defensive returns, but assert the
-// surrounding navigation/card behaviour stays correct from a real session.
+// surrounding navigation/card behavior stays correct from a real session.
+//
 
 Deno.test("session: card down then up across a multi-target card stays consistent", () => {
   const doc = parseDocument(SAMPLE);

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("Schema: CFC authoring aliases", () => {
@@ -18,7 +18,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.conjunctive as any).ifc?.confidentiality)
@@ -57,7 +57,7 @@ describe("Schema: CFC authoring aliases", () => {
       "SchemaRoot",
     );
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.policy as any).ifc?.confidentiality).toEqual([{
@@ -96,7 +96,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const secret = schema.properties?.secret as any;
@@ -141,7 +141,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const secret = schema.properties?.secret as any;
@@ -156,27 +156,28 @@ describe("Schema: CFC authoring aliases", () => {
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
 
       interface SchemaRoot {
-        labelled: Writable<Confidential<string, readonly ["prompt-influence"]>>;
+        labeled: Writable<Confidential<string, readonly ["prompt-influence"]>>;
       }
     `;
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
-    const labelled = schema.properties?.labelled as any;
-    expect(labelled.type).toBe("string");
-    expect(labelled.asCell).toEqual(["cell"]);
-    expect(labelled.ifc?.confidentiality).toEqual(["prompt-influence"]);
+    const labeled = schema.properties?.labeled as any;
+    expect(labeled.type).toBe("string");
+    expect(labeled.asCell).toEqual(["cell"]);
+    expect(labeled.ifc?.confidentiality).toEqual(["prompt-influence"]);
   });
 
-  // The collection/opaque aliases below are NOT canonical (the helpers were
-  // removed from @commonfabric/api/cfc because the runner rejects those ifc
-  // keys fail-closed) — with explicit type arguments they resolve through
-  // the Cfc carrier as plain payload passthrough, which is the structural
-  // mechanism this test covers alongside the remaining canonical aliases.
   it("lowers the remaining canonical metadata aliases and merges nested Cfc metadata", async () => {
+    // The collection/opaque aliases below are NOT canonical (the helpers were
+    // removed from @commonfabric/api/cfc because the runner rejects those ifc
+    // keys fail-closed) — with explicit type arguments they resolve through
+    // the Cfc carrier as plain payload passthrough, which is the structural
+    // mechanism this test covers alongside the remaining canonical aliases.
+
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
@@ -213,7 +214,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.confidential as any).ifc?.confidentiality)
@@ -289,7 +290,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.message as any).ifc?.integrity).toEqual([{
@@ -314,7 +315,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.body as any).ifc?.confidentiality).toEqual([{
@@ -342,7 +343,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.body as any).ifc?.confidentiality).toEqual([{
@@ -373,7 +374,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const body = schema.properties?.body as any;
@@ -438,7 +439,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const savedTitle = schema.properties?.savedTitle as any;
@@ -519,7 +520,7 @@ describe("Schema: CFC authoring aliases", () => {
     );
     const seenWriterSources: string[] = [];
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(
+      new SchemaGenerator().generateSchema(
         type,
         checker,
         undefined,
@@ -576,7 +577,7 @@ describe("Schema: CFC authoring aliases", () => {
 
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const value = schema.properties?.value as any;

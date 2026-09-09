@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/extractor-building-blocks.test.tsx --root packages/patterns/google --verbose
  */
-import { assert, pattern, resultOf, wish, Writable } from "commonfabric";
+import { assert, pattern, resultOf, TESTS, wish, Writable } from "commonfabric";
 import BillExtractor, { processBills } from "./bill-extractor/index.tsx";
 import { createBillKey } from "./bill-extractor/helpers.ts";
 import GmailExtractor, {
@@ -235,7 +235,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_gmail_extractor_starts_disconnected },
       { assertion: assert_gmail_extractor_ui_bundle_exists },
       { assertion: assert_bill_extractor_starts_empty },

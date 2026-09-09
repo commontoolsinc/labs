@@ -8,13 +8,14 @@ import {
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
-// Regression guard for sink-release reject observability (audit W3.23).
-//
-// A post-commit sink release that fails verification is fail-closed (the effect
-// is skipped), but it was only console.warn'd — invisible to CFC stats and
-// diagnostics. The reject must now be surfaced to the transaction so the runtime
-// can count it. The effect is still not sent.
 describe("CFC sink-release reject surfacing", () => {
+  // Regression guard for sink-release reject observability (audit W3.23).
+  //
+  // A post-commit sink release that fails verification is fail-closed (the
+  // effect is skipped), but it was only console.warn'd — invisible to CFC stats
+  // and diagnostics. The reject must now be surfaced to the transaction so the
+  // runtime can count it. The effect is still not sent.
+
   it("notes a release reject on the transaction and skips the send", async () => {
     const request = createFrozenRequestSnapshot({
       url: "https://example.com/release-reject",

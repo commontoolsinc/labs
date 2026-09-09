@@ -235,12 +235,28 @@ Practical guidance:
 - keep the client watch view incrementally ordered instead of rebuilding and
   sorting the full entity set on every emit
 
-Before returning a `ConflictError`, flush any already-committed relevant sync so
-the client can retry on fresh watched state.
+Return transact verdicts inline before the independently batched fan-out — N
+commits share one watch-union recompute. Use one publication lock per space for
+transactions, direct writes, and fan-out. Send a transaction's verdict while it
+holds the lock, complete its post-commit scheduler bookkeeping, and release the
+lock before fan-out evaluates the live space state. A transaction arriving
+during same-space fan-out waits for that turn; locks for other spaces remain
+independent. Stage a catch-up obligation for accepts and conflict rejections so
+the next batched frame to the committing session carries `caughtUpLocalSeq`; the
+client parks each accept's state application until that marker covers it, and
+the read-repair gate holds conflict drops the same way (04-protocol.md section
+4.11.2, CT-1927). Other rejection kinds carry no marker obligation and apply
+immediately.
 
 ## 11. Query / Traversal Reuse
 
-Keep using the shared traversal code from `packages/runner/src/traverse.ts`.
+Keep using the shared traversal code, reached through
+`@commonfabric/runner/graph-query`. That module holds the query driver:
+`GraphQueryWalk` over an `ObjectStorageManager` the storage side implements,
+and `schemaTrackerKey` for the key a walk records under. It is the whole of
+what storage code should import from the runtime for this purpose;
+[schema graph queries](../../features/schema-graph-queries.md) describes the
+exchange and what it costs.
 
 The server and client must continue to agree on entity reachability and graph
 membership. Reuse traversal logic rather than reimplementing a separate graph

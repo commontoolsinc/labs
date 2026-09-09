@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Complex defaults", () => {
@@ -16,7 +16,7 @@ describe("Schema: Complex defaults", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "WithArrayDefaults");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     // Validate root schema required fields
@@ -60,7 +60,7 @@ describe("Schema: Complex defaults", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "WithObjectDefaults");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     // Validate root schema required fields
@@ -98,7 +98,7 @@ describe("Schema: Complex defaults", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "WithNullDefaults");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     // Validate root schema required fields
@@ -137,7 +137,7 @@ describe("Schema: Complex defaults", () => {
       "WithBooleanSchemas",
     );
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     // Validate root schema required fields

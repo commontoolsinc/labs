@@ -1,8 +1,10 @@
-// Shared interfaces for the tile registry.
-//
-// To add a tile: create a file in tiles/ that exports a `Tile`, then add it to
-// the array in registry.ts (the single registration point). To remove one:
-// delete its line from registry.ts. Nothing else needs to change.
+/**
+ * Declares the contract a tile and the dashboard core hold each other to: the
+ * statuses a tile may report, the render-ready view its `collect()` returns,
+ * the shared context it is handed to gather that view, and the drill-down
+ * routes it may claim. A file under tiles/ becomes a tile by exporting a
+ * `Tile`.
+ */
 
 export type Status = "good" | "warn" | "bad" | "unknown";
 
@@ -11,9 +13,11 @@ export interface TileView {
   label: string; // header label (plain text; escaped by the renderer)
   status: Status; // good / warn / bad / unknown -> green / orange / red / gray
   value?: string; // big headline (TRUSTED html — escape in the tile if it holds data)
+  valueLabel?: string; // plain-text headline shown when CSS truncates value
   sub?: string; // sub line (plain text; escaped by the renderer)
   extra?: string; // trusted inline html under sub (sparkline / strip / list)
   duration?: number; // a span in ms; rendered (humanSpan) in the chart's bottom-left corner
+  alignChartBottom?: boolean; // keep the chart at the tile bottom when its grid row grows taller
   aside?: string; // trusted inline html minor header facet (e.g. an MTD or "running" badge)
   href?: string; // if set, the whole tile becomes a link (external opens a new tab)
   hint?: string; // small drill affordance text, e.g. "commits ↗"
@@ -34,6 +38,8 @@ export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
   intervalMs: number; // how often collect() runs, per source when runSources is set
   wide?: boolean; // render full-width below the grid, including before collection
+  // Keep the last completed status and values while ignoring intermediate views.
+  showOnlyCompletedViews?: boolean;
   // GitHub workflow snapshots that drive this tile. The scheduler refreshes
   // each source independently and publishes its due dependent tiles together.
   runSources?: readonly RunSource[];
@@ -60,6 +66,7 @@ export interface Run {
   event: string;
   head_sha: string;
   display_title: string;
+  created_at: string;
   run_started_at: string;
   updated_at: string;
   html_url: string;

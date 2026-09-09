@@ -1,13 +1,18 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import { describe, it } from "@std/testing/bdd";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { CfcWriteFloorMode } from "../src/cfc/mod.ts";
+import type { CfcWriteFloorMode, IFCLabel } from "../src/cfc/mod.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-write-floor");
 
@@ -15,7 +20,8 @@ const signer = await Identity.fromPassphrase("runner-cfc-write-floor");
 // read-side gate (verifyInputRequirements) quantifies over consumed reads; the
 // floor tests the WRITTEN VALUE's integrity — schema `addIntegrity` mints,
 // carried link-view integrity, the flow hereditary meet — against the declared
-// floor. Dial `cfcWriteFloor: off | observe | enforce`, default off.
+// floor. Dial `cfcWriteFloor: off | observe | enforce`. Each case names the
+// rung it drives, so the arm under test is the one that decides it.
 const ADMIN_ATOM = "admin-approved";
 const LLM_DERIVED_ATOM = {
   type: "https://commonfabric.org/cfc/atom/LlmDerived",
@@ -53,7 +59,6 @@ const makeRuntime = (opts: {
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     ...(opts.cfcWriteFloor !== undefined
       ? { cfcWriteFloor: opts.cfcWriteFloor }
       : {}),
@@ -74,6 +79,7 @@ const seedLabeledDoc = async (
   const seed = runtime.edit();
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
+  writeSeedEnvelopeDoc(seed, signer.did());
   seed.writeOrThrow({
     space: signer.did(),
     id: docId,
@@ -83,7 +89,7 @@ const seedLabeledDoc = async (
     value,
     cfc: {
       version: 1,
-      schemaHash: `seed-${id}`,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: { version: 1, entries: [{ path, label }] },
     },
   });
@@ -145,9 +151,9 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("dial off (the default): the same write commits — byte-compat", async () => {
+  it("dial off: the same write commits — byte-compat", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = makeRuntime({ storageManager });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "off" });
     try {
       const tx = runtime.edit();
       const sink = runtime.getCell(
@@ -211,6 +217,66 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("a mint on an array's items does not satisfy a floor on the array path", async () => {
+    // The shape a pattern reaches for when a list of endorsed entries is
+    // stored behind a floor: each entry mints the atom, the list path
+    // declares it. The floor is checked at the path it is declared on, and
+    // the items' mints sit below that path, so the list write is unendorsed
+    // until the list path mints too. Both halves run here — the item-only
+    // shape rejects, the same shape with a path mint commits.
+    const items = {
+      type: "object",
+      properties: {
+        subject: { type: "string" },
+        displayName: { type: "string" },
+      },
+      required: ["subject", "displayName"],
+      ifc: { addIntegrity: [ADMIN_ATOM] },
+    } as const;
+    const itemMintOnly = {
+      type: "object",
+      properties: {
+        admins: {
+          type: "array",
+          items,
+          ifc: { requiredIntegrity: [ADMIN_ATOM] },
+        },
+      },
+      required: ["admins"],
+    } as const satisfies JSONSchema;
+    const alsoPathMint = {
+      type: "object",
+      properties: {
+        admins: {
+          type: "array",
+          items,
+          ifc: { requiredIntegrity: [ADMIN_ATOM], addIntegrity: [ADMIN_ATOM] },
+        },
+      },
+      required: ["admins"],
+    } as const satisfies JSONSchema;
+
+    const writeAdmins = async (schema: JSONSchema, id: string) => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+      try {
+        const tx = runtime.edit();
+        const sink = runtime.getCell(signer.did(), id, schema, tx);
+        sink.set({ admins: [{ subject: "alice", displayName: "Alice" }] });
+        tx.prepareCfc();
+        return String((await tx.commit()).error?.message ?? "");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    };
+
+    expect(await writeAdmins(itemMintOnly, "wf-item-mint-sink")).toContain(
+      "write floor failed",
+    );
+    expect(await writeAdmins(alsoPathMint, "wf-path-mint-sink")).toBe("");
   });
 
   it("the floor is a minimum: extra minted integrity is fine", async () => {

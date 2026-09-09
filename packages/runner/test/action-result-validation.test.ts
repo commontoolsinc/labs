@@ -12,7 +12,7 @@ import { isReactiveMarker } from "../src/builder/types.ts";
 import { normalizeSandboxResult } from "../src/sandbox/result-normalization.ts";
 
 describe("normalizeSandboxResult", () => {
-  it("canonicalizes native leaves into Fabric values", () => {
+  it("canonicalizes native leaves into `FabricValue`s", () => {
     const input = {
       bytes: new Uint8Array([1, 2, 3]),
       date: new Date(1_234),
@@ -34,34 +34,6 @@ describe("normalizeSandboxResult", () => {
     expect((value.regexp as FabricRegExp).flags).toBe("gi");
     expect(value.error).toBeInstanceOf(FabricError);
     expect((value.error as FabricError).type).toBe("TypeError");
-  });
-
-  it("canonicalizes errors when `Error.isError` is unavailable", async () => {
-    const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
-    Object.defineProperty(Error, "isError", {
-      value: undefined,
-      writable: true,
-      configurable: true,
-    });
-
-    try {
-      const {
-        normalizeSandboxResult: normalizeWithoutNativeErrorCheck,
-      } = await import(
-        "../src/sandbox/result-normalization.ts?error-is-error-unavailable"
-      );
-      const normalized = normalizeWithoutNativeErrorCheck(
-        new TypeError("fabric"),
-      );
-      expect(normalized.value).toBeInstanceOf(FabricError);
-      expect((normalized.value as FabricError).type).toBe("TypeError");
-    } finally {
-      if (descriptor) {
-        Object.defineProperty(Error, "isError", descriptor);
-      } else {
-        delete (Error as { isError?: unknown }).isError;
-      }
-    }
   });
 
   it("preserves opaque leaves while normalizing their siblings", () => {
@@ -92,6 +64,27 @@ describe("normalizeSandboxResult", () => {
     const value = normalized.value as Record<string, unknown>;
     expect(value.first).toBe(value.second);
     expect(value.first).not.toBe(shared);
+  });
+
+  it("re-roots a bare null-prototype record, nested included", () => {
+    // `Object.create(null)` is an ordinary way to build a dictionary, and a
+    // pattern may return one. This boundary is a canonicalizing copy, so it
+    // leaves in the one shape a `FabricPlainObject` has, rather than being
+    // carried across intact and refused later by the conversion functions.
+    const inner = Object.create(null) as Record<string, unknown>;
+    inner.v = 42;
+    const outer = Object.create(null) as Record<string, unknown>;
+    outer.child = inner;
+    outer.a = 1;
+
+    const normalized = normalizeSandboxResult(outer);
+    const value = normalized.value as Record<string, unknown>;
+
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(value.a).toBe(1);
+    const child = value.child as Record<string, unknown>;
+    expect(Object.getPrototypeOf(child)).toBe(Object.prototype);
+    expect(child.v).toBe(42);
   });
 
   it("rejects custom instances with null-rooted prototypes", () => {
@@ -251,7 +244,7 @@ describe("validateAndCheckReactives", () => {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       expect(() => validateAndCheckReactives(circular)).toThrow(
-        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Cannot store circular reference/,
+        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Conversion refuses a circular reference/,
       );
     });
 

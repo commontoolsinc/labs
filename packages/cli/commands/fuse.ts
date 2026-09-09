@@ -1,10 +1,14 @@
-import { Command } from "@cliffy/command";
 import { basename, resolve } from "@std/path";
+
+import { Command } from "@cliffy/command";
 import ports from "@commonfabric/ports" with { type: "json" };
+
+import { parseAttrcacheTimeoutSeconds } from "../../fuse/mount-options.ts";
+import { cliText } from "../lib/cli-name.ts";
 import {
   buildBackgroundSupervisorDenoArgs,
-  buildDenoArgs,
   buildFuseBinaryArgs,
+  buildFuseChildDenoArgs,
   defaultStateDir,
   ensureExecShim,
   fuseMod,
@@ -19,8 +23,6 @@ import {
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
-import { parseAttrcacheTimeoutSeconds } from "../../fuse/mount-options.ts";
-import { cliText } from "../lib/cli-name.ts";
 
 export function isFuseProcessCommand(command: string): boolean {
   return command.includes("packages/fuse/mod.ts") ||
@@ -251,10 +253,13 @@ export const fuse = new Command()
   .name("fuse")
   .description(fuseDescription)
   .default("help")
-  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
+  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric server instance.", {
     prefix: "CF_",
   })
-  .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
+  .globalOption(
+    "-a,--api-url <url:string>",
+    "URL of the fabric server instance.",
+  )
   .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
     prefix: "CF_",
   })
@@ -399,7 +404,7 @@ export const fuse = new Command()
       });
     } else {
       spawnCmd = "deno";
-      spawnArgs = buildDenoArgs({
+      spawnArgs = buildFuseChildDenoArgs({
         modPath: fuseMod(import.meta.url),
         ...mountFlags,
       });

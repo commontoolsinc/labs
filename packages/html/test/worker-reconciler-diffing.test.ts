@@ -10,16 +10,17 @@
  */
 
 import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { VDomOp } from "../src/vdom-ops.ts";
-import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 // Import the actual Cell implementation to create test cells
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import type { IExtendedStorageTransaction } from "../../runner/src/storage/interface.ts";
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 const signer = await Identity.fromPassphrase("test reconciler diffing");
 const space = signer.did();

@@ -2,23 +2,24 @@
 // to record events that can be subscribed to in other
 // contexts to visualize or log events inside the runtime.
 
+import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
+import type { FabricValue } from "@commonfabric/data-model";
+
 import { IMemoryChange } from "./storage/interface.ts";
-import { StorageTelemetry } from "./storage/telemetry.ts";
-import type * as Inspector from "./storage/inspector.ts";
 
 /**
  * Statistics tracked for each action's execution performance.
  */
-export interface ActionStats {
+export type ActionStats = {
   runCount: number;
   totalTime: number;
   averageTime: number;
   lastRunTime: number;
   lastRunTimestamp: number; // When the action last ran (performance.now())
-}
+};
 
 // Types for scheduler graph visualization
-export interface SchedulerGraphNode {
+export type SchedulerGraphNode = {
   id: string; // actionId or "input:space/entity" for inputs
   type: "effect" | "computation" | "input" | "inactive"; // inactive = has stats but no longer registered
   stats?: ActionStats;
@@ -35,6 +36,13 @@ export interface SchedulerGraphNode {
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
   preview?: string; // First ~200 chars of function body for hover tooltips
+  // Where the action's implementation was authored, as
+  // `cf:module/<identity>/<path>:<line>:<col>`. The transformer records the
+  // line and column of each hoisted builder call, so this names the `lift`,
+  // `computed` or `handler` site itself rather than the module. Present for an
+  // implementation the engine verified; absent for the builtins and for host
+  // and dynamic builders, which have no authored site.
+  src?: string;
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
   shallowReads?: string[]; // non-recursive reads used for structural invalidation
@@ -47,29 +55,29 @@ export interface SchedulerGraphNode {
   // retirement). `identity` is a module content hash; `symbol` distinguishes
   // co-located patterns of one module (the export vs hoisted sub-patterns).
   patternIdentity?: { identity: string; symbol: string };
-}
+};
 
-export interface SchedulerGraphEdge {
+export type SchedulerGraphEdge = {
   from: string; // actionId of source
   to: string; // actionId of target
   cells: string[]; // Cell IDs creating this dependency
   edgeType?: "data" | "parent"; // data = dependency, parent = parent-child relationship
-}
+};
 
-export interface SchedulerGraphSnapshot {
+export type SchedulerGraphSnapshot = {
   nodes: SchedulerGraphNode[];
   edges: SchedulerGraphEdge[];
   timestamp: number;
-}
+};
 
-export interface SchedulerActionInfo {
+export type SchedulerActionInfo = {
   patternName?: string;
   moduleName?: string;
   reads?: string[];
   writes?: string[];
-}
+};
 
-export interface SchedulerEventPreflightStats {
+export type SchedulerEventPreflightStats = {
   visitCount: number;
   dirtyInputCount: number;
   resultTrueCount: number;
@@ -84,9 +92,9 @@ export interface SchedulerEventPreflightStats {
   hotActions?: SchedulerEventPreflightActionSummary[];
   hotFanoutActions?: SchedulerEventPreflightActionSummary[];
   rootDirectWriters?: SchedulerEventPreflightActionSummary[];
-}
+};
 
-export interface SchedulerEventPreflightActionSummary {
+export type SchedulerEventPreflightActionSummary = {
   actionId: string;
   actionType: "effect" | "computation" | "unknown";
   visitCount: number;
@@ -99,45 +107,45 @@ export interface SchedulerEventPreflightActionSummary {
   readCount: number;
   shallowReadCount: number;
   writeCount: number;
-}
+};
 
-// ============================================================
+//
 // Diagnosis types for non-settling / non-idempotent detection
-// ============================================================
+//
 
 /**
  * Report for a single action detected as non-idempotent.
  * Same inputs (reads) produced different outputs (writes) across runs.
  */
-export interface NonIdempotentReport {
+export type NonIdempotentReport = {
   actionId: string;
   actionInfo?: SchedulerActionInfo;
   runs: {
     timestamp: number;
-    reads: Record<string, unknown>;
-    writes: Record<string, unknown>;
+    reads: Record<string, FabricValue>;
+    writes: Record<string, FabricValue>;
   }[];
   differingWriteKeys: string[];
-}
+};
 
 /**
  * A cycle found in the causal chain of action triggers.
  * e.g. A writes cell X -> triggers B, B writes cell Y -> triggers A.
  */
-export interface CycleReport {
+export type CycleReport = {
   cycle: { actionId: string; writesCell: string }[];
   timestamp: number;
-}
+};
 
 /**
  * Aggregated result from a diagnosis run.
  */
-export interface SchedulerDiagnosisResult {
+export type SchedulerDiagnosisResult = {
   nonIdempotent: NonIdempotentReport[];
   cycles: CycleReport[];
   duration: number;
   busyTime: number;
-}
+};
 
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {
@@ -154,6 +162,80 @@ export type RuntimeTelemetryMarker = {
   actionInfo?: SchedulerActionInfo;
   durationMs: number;
   error?: string;
+} | {
+  // Emitted as the runner begins installing a piece's registration under
+  // `key`, BEFORE the registration is set: a listener reads the registry as
+  // it stood when the install began.
+  type: "runner.piece.install";
+  key: string;
+} | {
+  // Emitted as a commit-gated start for the result under `key` enters the
+  // runner's pending index, where a stop arriving before the commit finds it.
+  // One marker per entry into the index: a key can hold several attempts at
+  // once, and an attempt that recovers from a refused commit re-enters.
+  type: "runner.deferred-start.pending";
+  key: string;
+} | {
+  // Emitted as a pending commit-gated start leaves the index: `installed`
+  // once the attempt has installed its registration, which happens before
+  // its own transaction commits, and `cancelled` when the attempt ended
+  // before installing one. Pairs one-to-one with
+  // `runner.deferred-start.pending` for the same entry.
+  type: "runner.deferred-start.settled";
+  key: string;
+  outcome: "installed" | "cancelled";
+} | {
+  // Emitted as the runner memoizes which pattern the result doc under `key`
+  // holds for the scope instance `scopeKey`, the memo that lets the next run
+  // of the same computation skip materializing its child again.
+  type: "runner.result-pattern.memoize";
+  key: string;
+  scopeKey: string;
+} | {
+  // Emitted as a result-pattern memo leaves the runner: for every instance of
+  // the doc under `key` when a storage notification names that doc or resets
+  // the space holding it (no `scopeKey`), and for one instance when the
+  // commit that wrote its child is rejected. The sweep in `stopAll()` drops
+  // the whole memo without one.
+  type: "runner.result-pattern.evict";
+  key: string;
+  scopeKey?: string;
+} | {
+  // Emitted as the engine records a verified module's implementation under
+  // its content-addressed `{ identity, symbol }`, with the binding path of
+  // the module-scope declaration it was bound to when the transformer
+  // annotated one. A host-trusted value registers without one.
+  type: "harness.implementation.register";
+  identity: string;
+  symbol: string;
+  bindingPath?: string[];
+} | {
+  // Emitted as the pattern manager begins a tracked compile-cache write-back
+  // into `space` for the closure rooted at `entryIdentity`: a closure
+  // persistence or a source write-back, the writes replication waits on
+  // before reading its origin space.
+  type: "pattern.cache-write-back.start";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted as a tracked compile-cache write-back settles, whichever way it
+  // settled. Pairs one-to-one with `pattern.cache-write-back.start`.
+  type: "pattern.cache-write-back.complete";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted each time the scheduler decides an action's materializer
+  // registration, on subscribe and on resubscribe. `writes` are the compacted
+  // write envelopes the action is registered under, as `space/id/path`
+  // strings; an action registered under none is not a materializer.
+  type: "scheduler.materializer.register";
+  actionId: string;
+  writes: string[];
+} | {
+  // Emitted as diagnosis mode switches on, whether by an explicit run or by
+  // the non-settling auto-trigger, with the window it will capture for.
+  type: "scheduler.diagnosis.start";
+  durationMs: number;
 } | {
   // Emitted once per settle pass, unconditionally (unlike SettleStats, which
   // is opt-in): the user-facing "event → stable graph" number.
@@ -183,10 +265,13 @@ export type RuntimeTelemetryMarker = {
   writesTruncated?: boolean;
   error?: string;
   permanentRejection?: "origin-committed" | "receipt-exists";
+
   /** Backpressure attempt count (1-based) for a transient-conflict retry. */
   retryAttempt?: number;
+
   /** Backoff delay applied before the next retry, in milliseconds. */
   backoffMs?: number;
+
   /**
    * Set when the commit reached a terminal outcome: `permanent` for a
    * never-retried precondition failure, `convergence` for a transient conflict
@@ -253,19 +338,6 @@ export type RuntimeTelemetryMarker = {
   id: string;
   error: string;
 } | {
-  type: "storage.connection.update";
-  status: "pending" | "ok" | "error";
-  attempt: number;
-  error?: string;
-} | {
-  type: "storage.subscription.add";
-  id: string;
-  error?: string;
-} | {
-  type: "storage.subscription.remove";
-  id: string;
-  error?: string;
-} | {
   type: "scheduler.graph.snapshot";
   graph: SchedulerGraphSnapshot;
 } | {
@@ -278,10 +350,49 @@ export type RuntimeTelemetryMarker = {
   reads: string[]; // cell paths this action reads
   writes: string[]; // cell paths this action writes
 } | {
+  // Emitted for every settle episode whose convergence budget deferred work,
+  // and for a busy window that crosses the wall-clock heuristic. The deferred
+  // fields are present on the convergence-budget path and describe the
+  // actions the pass held back. A wave that converges over several passes
+  // exhausts a budget too, so a marker reports a bounded pass rather than a
+  // graph that will never settle.
   type: "scheduler.non-settling";
   busyTime: number;
   windowDuration: number;
   busyRatio: number;
+  deferredActions?: NonSettlingDeferredAction[];
+  deferredActionCount?: number;
+} | {
+  // Emitted every time CFC prepare refuses a transaction, BEFORE the commit
+  // boundary decides what that refusal is worth. That ordering is the point:
+  // a refusal is terminal — and reaches the scheduler's error channel — only
+  // when every reason is a verdict (cfc/verdict-reason.ts), so a refusal
+  // mixing a verdict with an unevaluable input is retried instead, and the
+  // only trace it leaves upstream is a graph that stops converging. This
+  // marker is the trace it leaves either way, so a host can name the cause of
+  // a non-settling episode rather than guess at a reactive cycle.
+  //
+  // It reports; it decides nothing. `terminal` says which arm the commit
+  // boundary will take, so a consumer can tell the refusal that will also
+  // arrive on the error channel from the one that will not.
+  type: "cfc.prepare-reject";
+  reasons: string[];
+  refusals: CfcRefusalDetail[];
+  terminal: boolean;
+};
+
+/**
+ * One deferred action in a non-settling marker. `label` is the action's
+ * display identity — `cf:module/<identity>:<symbol>:<key>` for pattern
+ * actions, `raw:<builtin>:<key>` for builtins, which names no piece.
+ * `pieceId`/`space` carry the action's scheduler observation identity when it
+ * has one: the id of the result cell whose piece the action serves, which is
+ * the attribution a builtin's label cannot provide.
+ */
+export type NonSettlingDeferredAction = {
+  label: string;
+  pieceId?: string;
+  space?: string;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {
@@ -303,18 +414,7 @@ export class RuntimeTelemetryEvent
 }
 
 export class RuntimeTelemetry extends EventTarget {
-  #storageTelemetry: StorageTelemetry;
-
-  constructor() {
-    super();
-    this.#storageTelemetry = new StorageTelemetry(this);
-  }
-
   submit(marker: RuntimeTelemetryMarker) {
     this.dispatchEvent(new RuntimeTelemetryEvent(marker));
-  }
-
-  processInspectorCommand(command: Inspector.BroadcastCommand) {
-    this.#storageTelemetry.processCommand(command);
   }
 }

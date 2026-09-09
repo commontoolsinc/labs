@@ -1,3 +1,7 @@
+import { encodeHex } from "@std/encoding/hex";
+
+import { sha256 } from "@commonfabric/content-hash";
+
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
@@ -6,8 +10,10 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
-import { sha256 } from "@commonfabric/content-hash";
-import { encodeHex } from "@std/encoding/hex";
+import {
+  describeProviderError,
+  providerErrorFromPayload,
+} from "./provider-error.ts";
 
 /**
  * Shared OpenAI Responses API wire mapping.
@@ -42,6 +48,17 @@ export const providerRunAffinityKey = (runId: string): string => {
   return `${runId.slice(0, prefixLength)}-${digest}`;
 };
 
+export const assertPromptCacheModeSupported = (
+  model: string,
+  mode: "implicit" | "explicit" | undefined,
+): void => {
+  if (mode !== undefined && !model.startsWith("gpt-5.6")) {
+    throw new Error(
+      `prompt cache mode ${mode} requires a GPT-5.6 model; received ${model}`,
+    );
+  }
+};
+
 /**
  * What to do when a stored continuation was produced by a different model.
  *
@@ -53,11 +70,37 @@ export const providerRunAffinityKey = (runId: string): string => {
  */
 export type ContinuationModelMismatch = "throw" | "drop";
 
+/**
+ * Opaque items the provider returns for replay on later turns.
+ *
+ * `reasoning` carries the model's thinking for the turn that produced it.
+ * `compaction` carries *everything before it* — server-side compaction folds
+ * the prior context into one encrypted item — which is why a compaction item
+ * lets the transcript ahead of it be dropped.
+ */
+const REPLAYABLE_ITEM_TYPES = ["reasoning", "compaction"] as const;
+
+const isReplayableItem = (item: unknown): item is ResponsesInputItem => {
+  if (typeof item !== "object" || item === null) return false;
+  const record = item as Record<string, unknown>;
+  return (REPLAYABLE_ITEM_TYPES as readonly string[]).includes(
+    record.type as string,
+  ) && typeof record.id === "string" &&
+    typeof record.encrypted_content === "string";
+};
+
+const isCompactionItem = (item: unknown): boolean =>
+  isReplayableItem(item) &&
+  (item as Record<string, unknown>).type === "compaction";
+
 export const continuationOutput = (
   continuation: HarnessProviderContinuation | undefined,
   model: string,
   providerId: string,
   onModelMismatch: ContinuationModelMismatch = "throw",
+  // Compaction items are emitted once at the pruning boundary, so replaying
+  // them again with their own message would duplicate them.
+  include: "all" | "reasoning-only" = "all",
 ): ResponsesInputItem[] => {
   if (continuation?.providerId !== providerId) return [];
   const state = continuation.state;
@@ -77,13 +120,26 @@ export const continuationOutput = (
   const output = record.output;
   if (!Array.isArray(output)) return [];
   return output.flatMap((item) =>
-    typeof item === "object" && item !== null &&
-      (item as Record<string, unknown>).type === "reasoning" &&
-      typeof (item as Record<string, unknown>).id === "string" &&
-      typeof (item as Record<string, unknown>).encrypted_content === "string"
-      ? [structuredClone(item as ResponsesInputItem)]
+    isReplayableItem(item) &&
+      !(include === "reasoning-only" && isCompactionItem(item))
+      ? [structuredClone(item)]
       : []
   );
+};
+
+/**
+ * Compaction items recorded on an assistant message, if any.
+ *
+ * Used to find the pruning boundary: the newest assistant turn whose
+ * continuation carries compaction supersedes everything before it.
+ */
+export const continuationCompaction = (
+  continuation: HarnessProviderContinuation | undefined,
+  model: string,
+  providerId: string,
+): ResponsesInputItem[] => {
+  const items = continuationOutput(continuation, model, providerId, "drop");
+  return items.filter(isCompactionItem);
 };
 
 export const continuationFunctionCallItemId = (
@@ -144,11 +200,34 @@ export const toResponsesInput = async (
 ): Promise<
   { instructions: string | undefined; input: ResponsesInputItem[] }
 > => {
+  // Instructions always come from the whole transcript: pruning drops earlier
+  // turns from `input`, and the system prompt must survive that.
   const systemText = transcript.filter((message) => message.role === "system")
     .map((message) => message.content).join("\n\n");
   const instructions = systemText.length > 0 ? systemText : defaultInstructions;
-  const input: ResponsesInputItem[] = [];
+
+  // Prune at the newest assistant turn carrying compaction: that item already
+  // encodes everything before it. Starting at an assistant message keeps
+  // `function_call`/`function_call_output` pairs intact — slicing anywhere
+  // else could orphan a tool result from the call that produced it.
+  let boundary = 0;
+  let carried: ResponsesInputItem[] = [];
   for (const [index, message] of transcript.entries()) {
+    if (message.role !== "assistant") continue;
+    const compaction = continuationCompaction(
+      message.providerContinuation,
+      model,
+      providerId,
+    );
+    if (compaction.length > 0) {
+      boundary = index;
+      carried = compaction;
+    }
+  }
+
+  const input: ResponsesInputItem[] = [...carried];
+  for (const [index, message] of transcript.entries()) {
+    if (index < boundary) continue;
     switch (message.role) {
       case "system":
         break;
@@ -164,6 +243,7 @@ export const toResponsesInput = async (
             model,
             providerId,
             onModelMismatch,
+            index === boundary && carried.length > 0 ? "reasoning-only" : "all",
           ),
         );
         if (message.content.length > 0) {
@@ -220,18 +300,76 @@ export const toResponsesTools = (
     strict: null,
   }));
 
+/**
+ * Marks the first user-message prefix as the stable explicit cache boundary.
+ *
+ * The initial user message is immutable as the harness appends assistant and
+ * tool messages, so later model turns can reuse this prefix without creating a
+ * new cache write for every growing transcript.
+ */
+export const addFirstUserPromptCacheBreakpoint = (
+  input: readonly ResponsesInputItem[],
+  providerLabel: string,
+): ResponsesInputItem[] => {
+  const copied = [...input];
+  for (let itemIndex = 0; itemIndex < input.length; itemIndex += 1) {
+    const item = input[itemIndex];
+    if (item.role !== "user" || !Array.isArray(item.content)) continue;
+    const content = item.content;
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+      const block = content[index];
+      if (typeof block !== "object" || block === null) continue;
+      if (
+        !("type" in block) ||
+        (block.type !== "input_text" && block.type !== "input_image" &&
+          block.type !== "input_file")
+      ) continue;
+      const copiedContent = [...content];
+      copiedContent[index] = {
+        ...block,
+        prompt_cache_breakpoint: { mode: "explicit" },
+      };
+      copied[itemIndex] = { ...item, content: copiedContent };
+      return copied;
+    }
+  }
+  throw new Error(
+    `${providerLabel} explicit prompt caching requires a cacheable user content block`,
+  );
+};
+
+/**
+ * The message for a terminal response whose status says the provider did not
+ * finish — `failed`, `incomplete`, or `cancelled` — carrying the provider's
+ * stated reason when the response has one, or `undefined` for any other
+ * status.
+ */
+export const describeTerminalFailure = (
+  response: Record<string, unknown>,
+  label: string,
+): string | undefined => {
+  const status = response.status;
+  if (
+    status !== "incomplete" && status !== "failed" && status !== "cancelled"
+  ) {
+    return undefined;
+  }
+  const providerError = providerErrorFromPayload(response);
+  return `${label} ended with status ${status}` +
+    (providerError === undefined
+      ? ""
+      : `: ${describeProviderError(providerError)}`);
+};
+
 export const normalizeTerminalResponse = (
   response: Record<string, unknown>,
   sourceModel: string,
   providerId: string,
   label: string,
 ): HarnessAssistantTranscriptMessage => {
+  const failure = describeTerminalFailure(response, label);
+  if (failure !== undefined) throw new Error(failure);
   const status = response.status;
-  if (
-    status === "incomplete" || status === "failed" || status === "cancelled"
-  ) {
-    throw new Error(`${label} ended with status ${String(status)}`);
-  }
   if (status !== "completed") {
     throw new Error(`${label} terminal event has an unknown status`);
   }
@@ -289,10 +427,10 @@ export const normalizeTerminalResponse = (
       }
       toolCallById.set(call.id, call);
       toolCalls.push(call);
-    } else if (
-      item.type === "reasoning" && typeof item.id === "string" &&
-      typeof item.encrypted_content === "string"
-    ) {
+    } else if (isReplayableItem(item)) {
+      // Both reasoning and compaction items are retained: dropping a
+      // compaction item would mean paying to produce it and then discarding
+      // the only thing that lets the transcript ahead of it be pruned.
       continuation.push(structuredClone(item));
     }
   }

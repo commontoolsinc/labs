@@ -1,5 +1,6 @@
 import type { DID } from "@commonfabric/identity";
 import {
+  type Cell,
   createBuilder,
   isCell,
   isStream,
@@ -7,7 +8,12 @@ import {
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
-import { loadManager, type SpaceConfig } from "./piece.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  deriveSelectedValue,
+} from "./cell-selection.ts";
+import { loadPieces, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 /**
@@ -27,20 +33,29 @@ import { throwOnSpaceAuthorizationError } from "./utils.ts";
 export interface WishReadConfig extends SpaceConfig {
   /** Wish target, e.g. "#profile" or "#profileName". */
   query: string;
+
   /** Extra path segments appended to the resolved target cell. */
   path?: string[];
+
   /** Optional result JSON schema (shapes/labels the projected value). */
   schema?: JSONSchema;
+
   /**
    * Search scope for hashtag queries: "~" (favorites/home), "." (mentionables /
    * current space), "profile" (profile elements), or arbitrary space DIDs.
    */
   scope?: (DID | "~" | "." | "profile")[];
+
+  /** `--filter`/`--select`/`--schema`: the shape the caller asked the resolved
+   * target to arrive in, read through the same step every other arrival reads
+   * through. See {@link WishSpec.selection} for where it applies. */
+  selection?: CellSelection;
 }
 
 export interface WishReadResult {
   /** The resolved value (dereferenced), or null when the wish produced none. */
   result: unknown;
+
   /** The error message a failed wish surfaced, if any (e.g. no profile yet). */
   error?: string;
 }
@@ -51,6 +66,18 @@ export interface WishSpec {
   path?: string[];
   schema?: JSONSchema;
   scope?: (DID | "~" | "." | "profile")[];
+
+  /**
+   * The caller's `--filter`/`--select`/`--schema`, applied to the cell the
+   * wish resolved to.
+   *
+   * It is answered against that live cell, which is what puts it BEFORE
+   * {@link projectWishValue}: an address marker reads its answer off a cell,
+   * and the walk that strips handles leaves nothing to read one from. The two
+   * are not alternatives — the selection decides what comes back, the walk
+   * decides how what remains is written down.
+   */
+  selection?: CellSelection;
 }
 
 /**
@@ -118,21 +145,69 @@ export async function resolveWish(
 
   const outCell = result.key("out");
   const error: unknown = outCell.key("error").get();
-  const value: unknown = outCell.key("result").get();
-  const errorMessage = typeof error === "string" && error.length > 0
-    ? error
-    : undefined;
+  const resolved = outCell.key("result");
+  // Whether the wish matched is read where the wish WROTE it, not inferred
+  // from what the target holds. A matched target whose value nothing has set
+  // dereferences to `undefined` exactly as an unmatched wish does, and only
+  // one of the two is an absent result: the matched one still has an address,
+  // which is the whole of what a marked position asks for.
+  const matched = resolved.getRaw() !== undefined;
+  const value: unknown = resolved.get();
 
   return {
-    // The runner exposes unavailable states explicitly, but this headless CLI
-    // boundary predates AsyncResult and promises callers null on failure. The
-    // wish error field is its stable failure signal across the cell boundary.
-    result: value === undefined || errorMessage !== undefined ? null : value,
-    error: errorMessage,
+    // `?? null` covers the matched-but-unset target a caller selected nothing
+    // over: there is an address to shape but no value to render, and a wish
+    // answers absence as JSON null. A selection never lands here undefined —
+    // `selectWishValue` refuses that rather than returning it.
+    result: matched
+      ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
+      : null,
+    error: typeof error === "string" && error.length > 0 ? error : undefined,
   };
 }
 
-/** What {@link readWish} needs from a connected manager. */
+/**
+ * Helper for {@link resolveWish}: `value` shaped the way the caller asked, or
+ * `value` itself where they asked for nothing.
+ *
+ * The selection is answered against `resolved` — the live cell the wish landed
+ * on — rather than against `value`, which is what lets an address marker
+ * answer at all and what puts the whole step ahead of
+ * {@link projectWishValue}.
+ *
+ * A wish that matched nothing has no cell to shape and never reaches here: an
+ * absent target is an ordinary outcome of a query, and a selection must not
+ * turn it into an error. A selection that materializes nothing over a target
+ * that DID resolve is refused rather than reported as an absent target, on the
+ * same grounds `cf cell get` and `cf piece call` refuse it — "the wish
+ * matched nothing" and "your projection kept nothing" are different facts.
+ */
+async function selectWishValue(
+  runtime: Runtime,
+  space: MemorySpace,
+  resolved: Cell<unknown>,
+  value: unknown,
+  spec: WishSpec,
+): Promise<unknown> {
+  if (spec.selection === undefined) return value;
+  const selected = await deriveSelectedValue(
+    runtime,
+    space,
+    resolved,
+    spec.selection,
+  );
+  if (selected === undefined) {
+    throw new CellSelectionError(
+      `Cannot shape the result of wish "${spec.query}": the filter/schema ` +
+        "expression did not materialize a JSON-renderable value. This is " +
+        "not JSON null, and it is not the empty result of a wish that " +
+        "matched nothing — inspect the target and the selection.",
+    );
+  }
+  return selected;
+}
+
+/** What {@link readWish} needs from a connected pieces controller. */
 export interface WishRuntimeHost {
   runtime: Runtime;
   getSpace(): MemorySpace;
@@ -140,23 +215,24 @@ export interface WishRuntimeHost {
 
 /** Injectable connection dep, mirroring lib/piece.ts's `RootPatternDeps`. */
 export interface ReadWishDeps {
-  loadManager?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
+  loadPieces?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
 }
 
 /**
  * The blessed, headless read: connect a real identity/session-backed runtime via
- * {@link loadManager}, then {@link resolveWish}. See {@link WishReadConfig}.
+ * {@link loadPieces}, then {@link resolveWish}. See {@link WishReadConfig}.
  */
 export async function readWish(
   config: WishReadConfig,
   deps: ReadWishDeps = {},
 ): Promise<WishReadResult> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  return await resolveWish(manager.runtime, manager.getSpace(), {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  return await resolveWish(pieces.runtime, pieces.getSpace(), {
     query: config.query,
     path: config.path,
     schema: config.schema,
     scope: config.scope,
+    selection: config.selection,
   });
 }
 
@@ -209,6 +285,13 @@ function projectNode(
   }
   if (value === null || typeof value !== "object") return value;
 
+  // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so the
+  // `Object.entries` rebuild below renders one — a `FabricBytes` in a
+  // materialized wish result, which the binary fetch builtin mints today —
+  // as `{}` in the projected output. Wants a `FabricSpecialObject` test
+  // returning the value whole, plus a fabric-aware rendering in the
+  // downstream `render()`/`safeStringify` step, whose own marker in
+  // `render.ts` predates this traffic and calls the path latent.
   const cached = memo.get(value);
   if (cached === IN_PROGRESS) {
     // A genuine cycle: this node is an ancestor of itself. Break it so the walk

@@ -1,63 +1,72 @@
-import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-
+import { resolveGitSha } from "@/lib/build-info.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type {
-  DashRoute,
-  IndexRoute,
-  LLMRoute,
-  StatsRoute,
-} from "./health.routes.ts";
-import { checkLLMHealth } from "./llm-health.service.ts";
-import { getSlowQueries } from "@commonfabric/memory/v2/server";
+import type { DashRoute, IndexRoute, StatsRoute } from "./health.routes.ts";
+import {
+  getDocumentCachesDiagnostics,
+  getPushPriorityStats,
+  getSlowQueries,
+} from "@commonfabric/memory/v2/server";
+import { getServingLoopStats } from "@commonfabric/runner/executor/stats";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
-
+import * as HttpStatusCodes from "stoker/http-status-codes";
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),
   timestamp: z.number(),
+  // The commit this server runs (same resolution as /api/meta). Rides the
+  // health response so clients can detect version skew without an extra
+  // request; null when unknown.
+  gitSha: z.string().nullable(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
-export const LLMHealthResponseSchema = z.object({
-  status: z.enum(["healthy", "degraded", "unhealthy"]),
-  timestamp: z.number(),
-  summary: z.object({
-    total: z.number(),
-    healthy: z.number(),
-    failed: z.number(),
-  }),
-  models: z.record(
-    z.string(),
-    z.object({
-      status: z.enum(["healthy", "failed"]),
-      latencyMs: z.number().nullable(),
-      error: z.string().optional(),
-    }),
-  ),
-  alertSent: z.boolean(),
-});
-export type LLMHealthResponse = z.infer<typeof LLMHealthResponseSchema>;
+const GIT_SHA = resolveGitSha();
+
+/** Header carrying the same commit as the body's `gitSha`. Clients that only
+ * need liveness + version (the cf CLI) read this instead of the body, so
+ * their health probe completes at headers-arrival — a stalled or truncated
+ * body cannot delay them. */
+export const GIT_SHA_HEADER = "x-cf-git-sha";
 
 export const index: AppRouteHandler<IndexRoute> = (c) => {
   const response: HealthResponse = {
     status: "OK",
     timestamp: Date.now(),
+    gitSha: GIT_SHA,
   };
+  if (GIT_SHA !== null) c.header(GIT_SHA_HEADER, GIT_SHA);
   return c.json(response, HttpStatusCodes.OK);
 };
 
 const serverStartTimestamp = Date.now();
 
 export const stats: AppRouteHandler<StatsRoute> = (c) => {
+  // The serving loop's §7 counters
+  // (docs/specs/server-side-execution/serving-loop.md §7): present only
+  // when an ExecutorHost runs in this process (the ON arm); the OFF-arm
+  // response is byte-identical to today. Phase 6 nests the memory
+  // server's push-priority counters (protocol.md §3) under the same
+  // ON-arm-only block — all-zero OFF by construction, but the block's
+  // very presence stays flag-gated so the OFF response never changes.
+  const servingLoop = getServingLoopStats();
+  const push = getPushPriorityStats();
+  // The memory server's decoded-document caches, one per open space:
+  // whether a corpus's working set stays resident between the walks that
+  // read it. Present whenever a memory server is co-hosted.
+  const documentCaches = getDocumentCachesDiagnostics();
   return c.json({
     timestamp: Date.now(),
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
+    ...(documentCaches === undefined ? {} : { documentCaches }),
+    ...(servingLoop === undefined ? {} : {
+      servingLoop: { ...servingLoop, ...(push === undefined ? {} : { push }) },
+    }),
   }, HttpStatusCodes.OK);
 };
 
@@ -553,23 +562,4 @@ setInterval(refresh, 5000);
 </html>`;
 
   return c.html(html);
-};
-
-export const llm: AppRouteHandler<LLMRoute> = async (c) => {
-  const { verbose, alert, models: modelFilter, forceAlert } = c.req.query();
-
-  // Call the service to perform the health check
-  const result = await checkLLMHealth({
-    modelFilter,
-    isVerbose: verbose === "true",
-    shouldAlert: alert === "true",
-    shouldForceAlert: forceAlert === "true",
-  });
-
-  // Return appropriate status code based on health status
-  const statusCode = result.status === "unhealthy"
-    ? HttpStatusCodes.SERVICE_UNAVAILABLE
-    : HttpStatusCodes.OK;
-
-  return c.json(result, statusCode);
 };

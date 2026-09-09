@@ -1,8 +1,12 @@
-import { describe, it } from "@std/testing/bdd";
-import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import {
+  type CfcConfClause,
+  clauseAlternatives,
+  isOrClause,
+} from "../src/cfc/clause.ts";
 import { mergeCfcLabelViews, mergeLabel } from "../src/cfc/label-view-core.ts";
-import { clauseAlternatives, isOrClause } from "../src/cfc/clause.ts";
 
 // Epic A3 (docs/history/plans/cfc-future-work-implementation.md): the confidentiality
 // join is clause CONCATENATION with normalize-on-ingest. It upholds the

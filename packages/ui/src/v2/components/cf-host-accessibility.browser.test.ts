@@ -8,10 +8,6 @@ const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 Deno.test("cf-button and cf-input can be created by document.createElement", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const button = document.createElement("cf-button") as CFButton;
   const input = document.createElement("cf-input") as CFInput;
 
@@ -31,10 +27,6 @@ Deno.test("cf-button and cf-input can be created by document.createElement", asy
 });
 
 Deno.test("form control host focus forwards to native shadow controls", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const input = document.createElement("cf-input") as CFInput;
   const textarea = document.createElement("cf-textarea") as CFTextarea;
   const select = document.createElement("cf-select") as CFSelect;
@@ -76,10 +68,6 @@ Deno.test("form control host focus forwards to native shadow controls", async ()
 });
 
 Deno.test("cf-input preserves early programmatic focus before first render", async () => {
-  if (typeof document === "undefined") {
-    return;
-  }
-
   const input = document.createElement("cf-input") as CFInput;
   document.body.append(input);
 

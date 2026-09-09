@@ -1,5 +1,7 @@
+import type { CellHandle } from "@commonfabric/runtime-client";
 import { css, html, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
+
 import { BaseElement } from "../../core/base-element.ts";
 import {
   createDragPreview,
@@ -7,7 +9,6 @@ import {
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
-import type { CellHandle } from "@commonfabric/runtime-client";
 
 /**
  * CFDragSource - Wraps draggable content and initiates drag operations
@@ -188,7 +189,8 @@ export class CFDragSource extends BaseElement {
     }
 
     // Create preview element
-    this._preview = createDragPreview(cell);
+    const { preview, cleanup } = createDragPreview(cell);
+    this._preview = preview;
     document.body.appendChild(this._preview);
 
     // Position preview near cursor
@@ -201,6 +203,7 @@ export class CFDragSource extends BaseElement {
       type: this.type,
       sourceElement: this,
       preview: this._preview,
+      previewCleanup: cleanup,
       pointerX: e.clientX,
       pointerY: e.clientY,
     });

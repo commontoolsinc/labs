@@ -8,12 +8,12 @@
  * exercises the imperative `db.exec` write folded into a handler commit against
  * the real server.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
 import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-
-const TIMEOUT_MS = 180000;
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(
@@ -21,6 +21,15 @@ async function runTest(base: URL) {
   );
   const runtime = new Runtime({
     apiUrl: base,
+    // Server-execution v2 posture (testing.md §2): this test serves
+    // toolshed's `app.ts` IN-PROCESS (`Deno.serve` below) with NO
+    // ExecutorHost, so it is a single-process harness — client and memory
+    // server in one process, nothing serving — and its client is OFF BY
+    // CONSTRUCTION, whatever EXPERIMENTAL_SERVER_EXECUTION says (a flag-ON
+    // client here would divert its derivations to a server that does not
+    // exist and wedge). The CI ON lane's env does not reach this file;
+    // only the tests that talk to the lane's toolshed (API_URL) declare
+    // the posture from the env (P7 review finding 7).
     storageManager: StorageManager.open({
       as: account,
       memoryHost: new URL(base),
@@ -30,7 +39,7 @@ async function runTest(base: URL) {
 
   try {
     const patternSource = await Deno.readTextFile(
-      new URL("./sqlite-db-query-decode.test.tsx", import.meta.url),
+      new URL("./sqlite-db-query-decode.tsx", import.meta.url),
     );
     const pattern = await runtime.patternManager.compilePattern(patternSource, {
       space,
@@ -120,17 +129,9 @@ Deno.test({
     const base = new URL(
       `http://${server.addr.hostname}:${server.addr.port}`,
     );
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`)),
-        TIMEOUT_MS,
-      );
-    });
     try {
-      await Promise.race([runTest(base), timeoutPromise]);
+      await runTest(base);
     } finally {
-      clearTimeout(timeoutHandle!);
       await server.shutdown();
     }
   },

@@ -1,21 +1,24 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  clearMockResponses,
-  loadConversationFixture,
-} from "@commonfabric/llm/client";
+import { describe, it } from "@std/testing/bdd";
+
 import type {
   BuiltInLLMMessage,
   BuiltInLLMTool,
   JSONSchema,
 } from "@commonfabric/api";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
-import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
+import {
+  clearMockResponses,
+  loadConversationFixture,
+} from "@commonfabric/llm/client";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc agent prompt injection demo drive",
@@ -156,7 +159,6 @@ async function setupDemoAgent(
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
   });
 
   // Play the agent kernel binding the direct user command BEFORE the agent
@@ -365,29 +367,7 @@ async function setupDemoAgent(
     await storageManager.close();
   };
 
-  return { result, recipientHandle, linkPath, dispose };
-}
-
-function waitForMessages(result: any, expectedCount: number) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(
-        new Error(
-          `Timeout waiting for ${expectedCount} messages and pending=false`,
-        ),
-      );
-    }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
-      if (pending === false && messages?.length === expectedCount) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
+  return { runtime, result, recipientHandle, linkPath, dispose };
 }
 
 describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
@@ -450,7 +430,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       const addMessage = await t.result.key("addMessage").pull();
       addMessage.send({ role: "user", content: DEMO_PROMPT });
       // user + assistant(read) + tool + assistant(send) + tool + final = 6
-      await waitForMessages(t.result, 6);
+      await waitForLlmMessages(t.runtime, t.result, 6);
 
       // The central invariant: the injected recipient was never mailed.
       const emails =
@@ -546,7 +526,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       const addMessage = await t.result.key("addMessage").pull();
       addMessage.send({ role: "user", content: DEMO_PROMPT });
       // user + 3×(assistant tool-call + tool result) + final = 8
-      await waitForMessages(t.result, 8);
+      await waitForLlmMessages(t.runtime, t.result, 8);
 
       // The end-to-end by-reference contract: the reference the model passed
       // to sendMail was handed to it INSIDE the conversation — the

@@ -374,7 +374,7 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       isPending(observedPickerUI) || hasError(observedPickerUI) ||
         isSyncing(observedPickerUI) || hasSchemaMismatch(observedPickerUI)
         ? <></>
-        : observedPickerUI
+        : observedPickerUI ?? <></>
     );
     const authState = deriveAuthState({
       descriptor,

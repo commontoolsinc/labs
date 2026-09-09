@@ -65,10 +65,8 @@ describe("CompilationError message flattening", () => {
   });
 
   it("applies a message transformer over the flattened text", () => {
-    const transformer: DiagnosticMessageTransformer = {
-      transform: (message) =>
-        message.includes("assignable") ? `friendly: ${message}` : null,
-    };
+    const transformer: DiagnosticMessageTransformer = (message) =>
+      message.includes("assignable") ? `friendly: ${message}` : null;
     const chain: DiagnosticMessageChain = {
       messageText: "Type 'A' is not assignable to type 'B'.",
       category: ts.DiagnosticCategory.Error,
@@ -131,11 +129,12 @@ function programFor(files: Record<string, string>): ts.Program {
   }, host);
 }
 
-// The compile pipeline steps through checkableSources()/collect* one file at a
-// time (compileToModulesSteps); typeCheck()/declarationCheck() remain the
-// whole-program one-call contract with no other production caller, so they are
-// pinned directly here.
 describe("Checker", () => {
+  // The compile pipeline steps through checkableSources()/collect* one file at
+  // a time (compileToModulesSteps); typeCheck()/declarationCheck() remain the
+  // whole-program one-call contract with no other production caller, so they
+  // are pinned directly here.
+
   it("checkableSources excludes the virtual type libs", () => {
     const checker = new Checker(
       programFor({ "/ok.ts": "export const x: number = 1;" }),
@@ -227,10 +226,8 @@ describe("Checker", () => {
     const checker = new Checker(
       programFor({ "/ok.ts": "export const x: number = 1;" }),
       {
-        messageTransformer: {
-          transform: (message) =>
-            message.includes("manufactured") ? `clearer: ${message}` : null,
-        },
+        messageTransformer: (message) =>
+          message.includes("manufactured") ? `clearer: ${message}` : null,
       },
     );
     expect(() => checker.check([chainDiagnostic("manufactured emit failure")]))

@@ -1,4 +1,4 @@
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import Dice from "./dice.tsx";
 
 // The roll handler draws from Math.random(), which the capability gate allows in
@@ -36,7 +36,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_roll_default },
       { assertion: assert_default_roll_is_a_d6 },
       { action: action_roll_d20 },

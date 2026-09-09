@@ -1,5 +1,8 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 import * as path from "@std/path";
+import { hasExecutableCode } from "./executable-source.ts";
+import { type LcovFileCoverage, parseLcovReports } from "./lcov.ts";
+import { readUnlaunchedMembers } from "./unlaunched-members.ts";
 import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
@@ -44,6 +47,14 @@ export interface CoverageDebtMetricsOptions {
 export interface CoverageDebtMetricsFromLcovOptions {
   rootDir: string;
   lcov: string;
+
+  /**
+   * Workspace members that no run of this measurement launched, as the root
+   * manifest lists them. Every metric group holding one goes unscored, and so
+   * does the workspace total; see
+   * {@link collectCoverageDebtMetricsFromLcov}.
+   */
+  unlaunchedMembers?: Iterable<string>;
 }
 
 export interface CoverageDebtMetric {
@@ -58,10 +69,11 @@ interface SourceFile {
   trackedLineCount: number;
 }
 
-interface LcovFileCoverage {
-  lineHits: Map<number, number>;
-}
-
+/**
+ * The debt metrics for a coverage profile directory, which is scored against
+ * the record of unlaunched members the directory carries when the run that
+ * wrote it stopped before launching everything it selected.
+ */
 export async function collectCoverageDebtMetrics(
   options: CoverageDebtMetricsOptions,
 ): Promise<CoverageDebtMetric[]> {
@@ -69,13 +81,50 @@ export async function collectCoverageDebtMetrics(
   return await collectCoverageDebtMetricsFromLcov({
     rootDir: options.rootDir,
     lcov,
+    unlaunchedMembers: await readUnlaunchedMembers(options.coverageProfileDir),
   });
 }
 
+/**
+ * The metric groups a measurement cannot speak for, given the workspace
+ * members it never launched. A member is named the way the root manifest names
+ * it, `./packages/shell` or `./tasks`, and the group it falls in is the one a
+ * source file under it would be counted toward.
+ *
+ * A group is unscorable whole. One member of it going unlaunched leaves the
+ * group's count short by whatever that member's own tests would have covered,
+ * and nothing in the report says by how much, so the other members of the
+ * group are no more scorable than the missing one.
+ */
+export function unscoredMetricGroups(
+  unlaunchedMembers: Iterable<string>,
+): Set<string> {
+  return new Set(
+    [...unlaunchedMembers].map((member) =>
+      metricGroupFor(toPosix(member).replace(/^\.\//, ""))
+    ),
+  );
+}
+
+/**
+ * The debt metrics for one joined LCOV report: the uncovered line count of
+ * every metric group the report speaks for, and their total.
+ *
+ * A file the report has no record for is charged by
+ * `debtWithoutCoverageRecord()`, which reads the absence as a file no test
+ * loaded. That reading holds only where every package ran, so a group named by
+ * `options.unlaunchedMembers` is left out of the result rather than counted,
+ * and so is the workspace total, which no longer totals the workspace. A
+ * consumer of these metrics gates what it is given; a group it is not given a
+ * count for is one this run cannot report on.
+ */
 export async function collectCoverageDebtMetricsFromLcov(
   options: CoverageDebtMetricsFromLcovOptions,
 ): Promise<CoverageDebtMetric[]> {
-  const sourceFiles = await collectSourceFiles(options.rootDir);
+  const unscored = unscoredMetricGroups(options.unlaunchedMembers ?? []);
+  const sourceFiles = (await collectSourceFiles(options.rootDir)).filter(
+    (source) => !unscored.has(source.metricGroup),
+  );
   const lcovCoverage = parseLcov(options.lcov);
 
   let workspaceUncovered = 0;
@@ -84,11 +133,9 @@ export async function collectCoverageDebtMetricsFromLcov(
 
   for (const source of sourceFiles) {
     const coverage = lcovCoverage.get(source.absolutePath);
-    // A file the tests never loaded has no coverage record; every tracked
-    // line counts as uncovered, matching how the debt metric scores it.
     const uncovered = coverage
       ? countUncoveredProfileLines(coverage)
-      : source.trackedLineCount;
+      : await debtWithoutCoverageRecord(source);
 
     workspaceUncovered += uncovered;
     groupUncovered.set(
@@ -97,12 +144,13 @@ export async function collectCoverageDebtMetricsFromLcov(
     );
   }
 
-  const metrics: CoverageDebtMetric[] = [
-    {
+  const metrics: CoverageDebtMetric[] = [];
+  if (unscored.size === 0) {
+    metrics.push({
       name: `${COVERAGE_METRIC_PREFIX} workspace uncovered lines`,
       uncoveredLines: workspaceUncovered,
-    },
-  ];
+    });
+  }
 
   for (const group of [...groupNames].sort()) {
     metrics.push({
@@ -112,6 +160,47 @@ export async function collectCoverageDebtMetricsFromLcov(
   }
 
   return metrics;
+}
+
+/**
+ * Helper for `collectCoverageDebtMetricsFromLcov()`, which returns the debt
+ * charged to a file the report has no record for. Three different things
+ * produce a missing record, and they owe different amounts.
+ *
+ * A file no test ever loaded owes every tracked line: that is the case this
+ * rule exists to catch.
+ *
+ * A file that opted out of coverage owes nothing. Deno leaves such a file out
+ * of the report whether or not a test loaded it, so its absence says nothing
+ * about what ran; see `isCoverageIgnoredFile()`.
+ *
+ * A file that compiles to no executable code — one holding only interfaces,
+ * type aliases, or other declarations — owes nothing. It has no statement a
+ * test could run, so loading it leaves the report exactly as not loading it
+ * does, and no test could ever pay the debt down.
+ *
+ * The compile happens here, so only files the report leaves out pay for it.
+ */
+async function debtWithoutCoverageRecord(source: SourceFile): Promise<number> {
+  const content = await Deno.readTextFile(source.absolutePath);
+  if (isCoverageIgnoredFile(content)) return 0;
+  return hasExecutableCode(content, source.absolutePath)
+    ? source.trackedLineCount
+    : 0;
+}
+
+/**
+ * Returns whether `content` opts its file out of coverage, which a
+ * `// deno-coverage-ignore-file` line comment does when it is the file's first
+ * line, or the line after a shebang. Those are the lines Deno reads it from:
+ * the same comment anywhere later leaves the file in the report, and so
+ * leaves it charged here. Text may follow the directive after whitespace, as
+ * in `// deno-coverage-ignore-file -- runs only in a browser`.
+ */
+export function isCoverageIgnoredFile(content: string): boolean {
+  const lines = content.split(/\r?\n/, 2);
+  const line = lines[0].startsWith("#!") ? lines[1] ?? "" : lines[0];
+  return /^\s*\/\/\s*deno-coverage-ignore-file(?:\s|$)/.test(line);
 }
 
 /**
@@ -141,8 +230,10 @@ export async function collectUncoveredLinesForFiles(
     if (coverage) {
       uncoveredLines = uncoveredProfileLineNumbers(coverage);
     } else {
-      // No coverage record: the file was never loaded by any test, so every
-      // tracked line is uncovered.
+      // No coverage record: either no test loaded the file, in which case every
+      // tracked line is uncovered, or it opted out of coverage or compiles to
+      // no executable code, in which case none of its lines counts (see
+      // debtWithoutCoverageRecord).
       let content: string;
       try {
         content = await Deno.readTextFile(absolutePath);
@@ -153,13 +244,96 @@ export async function collectUncoveredLinesForFiles(
         if (error instanceof Deno.errors.NotFound) continue;
         throw error;
       }
-      uncoveredLines = trackedSourceLineNumbers(content);
+      uncoveredLines = !isCoverageIgnoredFile(content) &&
+          hasExecutableCode(content, absolutePath)
+        ? trackedSourceLineNumbers(content)
+        : [];
     }
 
     if (uncoveredLines.length > 0) result.set(relativePath, uncoveredLines);
   }
 
   return result;
+}
+
+/** One file's lines that this run leaves uncovered and an earlier run covered. */
+export interface RegressedSourceLines {
+  relativePath: string;
+  metricGroup: string;
+  lines: number[];
+}
+
+export interface RegressedLinesOptions {
+  rootDir: string;
+
+  /** LCOV from the run being gated. */
+  lcov: string;
+
+  /** LCOV from the `main` run its ratchet baseline came from. */
+  baselineLcov: string;
+
+  /** Metric groups to inspect; every other group is left alone. */
+  groups: Set<string>;
+
+  /** Repository-relative POSIX paths the pull request changed. */
+  changedFiles: Set<string>;
+}
+
+/**
+ * Find the lines a run leaves uncovered that its baseline run covered, for
+ * source files the pull request did not touch.
+ *
+ * A group can end up over its baseline without the diff adding a single
+ * uncovered line, because the two counts come from two separate measurements of
+ * the same code. A line reached only on some runs — one whose branch depends on
+ * scheduling, on load, or on how test files were distributed — moves the count
+ * on its own. This says which lines moved, so the flapping line can be given a
+ * test that covers it every time.
+ *
+ * Files the pull request changed are skipped: their line numbers moved between
+ * the two checkouts, so a line number means something different in each report.
+ * An untouched file has identical content in both, since the baseline measures
+ * the base-branch commit this run merged.
+ */
+export async function collectRegressedLines(
+  options: RegressedLinesOptions,
+): Promise<RegressedSourceLines[]> {
+  const sourceFiles = await collectSourceFiles(options.rootDir);
+  const candidates = sourceFiles.filter((source) =>
+    options.groups.has(source.metricGroup) &&
+    !options.changedFiles.has(source.relativePath)
+  );
+  const groupByPath = new Map(
+    candidates.map((source) => [source.relativePath, source.metricGroup]),
+  );
+  const paths = candidates.map((source) => source.relativePath);
+
+  const [now, before] = await Promise.all([
+    collectUncoveredLinesForFiles({
+      rootDir: options.rootDir,
+      lcov: options.lcov,
+      files: paths,
+    }),
+    collectUncoveredLinesForFiles({
+      rootDir: options.rootDir,
+      lcov: options.baselineLcov,
+      files: paths,
+    }),
+  ]);
+
+  const regressed: RegressedSourceLines[] = [];
+  for (const [relativePath, uncoveredNow] of now) {
+    const uncoveredBefore = new Set(before.get(relativePath) ?? []);
+    const lines = uncoveredNow.filter((line) => !uncoveredBefore.has(line));
+    if (lines.length === 0) continue;
+    regressed.push({
+      relativePath,
+      metricGroup: groupByPath.get(relativePath) ??
+        metricGroupFor(relativePath),
+      lines,
+    });
+  }
+  return regressed.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
 export async function collectSourceFiles(
@@ -184,6 +358,19 @@ export async function collectSourceFiles(
     }
   }
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
+/**
+ * Whether the metric charges for `relativePath`, a path relative to the
+ * repository root. It has to be under a root the metric walks as well as pass
+ * the file-level test below, which `collectSourceFiles` applies in that order.
+ */
+export function isTrackedSourcePath(relativePath: string): boolean {
+  const normalized = toPosix(relativePath);
+  const underSourceRoot = SOURCE_ROOTS.some((sourceRoot) =>
+    normalized.startsWith(`${sourceRoot}/`)
+  );
+  return underSourceRoot && shouldTrackSourceFile(normalized);
 }
 
 export function shouldTrackSourceFile(relativePath: string): boolean {
@@ -267,44 +454,17 @@ export function trackedSourceLineNumbers(content: string): number[] {
   return lineNumbers;
 }
 
+/**
+ * Read one `deno coverage --lcov` report, keyed by normalized source path.
+ *
+ * Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
+ * normalized away at LCOV GENERATION (write-coverage-lcov.ts,
+ * `normalizeLcovInstancePaths` — CT-1861), so records arriving here already
+ * share one path per physical file; duplicate `SF:` sections accumulate into
+ * the same entry.
+ */
 export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
-  const files = new Map<string, LcovFileCoverage>();
-  let currentPath: string | undefined;
-
-  for (const line of lcov.split(/\r?\n/)) {
-    if (line.startsWith("SF:")) {
-      // Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
-      // normalized away at LCOV GENERATION (write-coverage-lcov.ts,
-      // `normalizeLcovInstancePaths` — CT-1861), so records arriving here
-      // already share one path per physical file; duplicate `SF:` sections
-      // accumulate into the same entry below.
-      currentPath = path.normalize(line.slice(3));
-      if (!files.has(currentPath)) {
-        files.set(currentPath, { lineHits: new Map() });
-      }
-      continue;
-    }
-
-    if (line.startsWith("DA:") && currentPath) {
-      const [lineNumberRaw, hitsRaw] = line.slice(3).split(",");
-      const lineNumber = Number(lineNumberRaw);
-      const hits = Number(hitsRaw);
-      if (Number.isFinite(lineNumber) && Number.isFinite(hits)) {
-        const file = files.get(currentPath)!;
-        file.lineHits.set(
-          lineNumber,
-          (file.lineHits.get(lineNumber) ?? 0) + hits,
-        );
-      }
-      continue;
-    }
-
-    if (line === "end_of_record") {
-      currentPath = undefined;
-    }
-  }
-
-  return files;
+  return parseLcovReports([lcov], { mapPath: path.normalize });
 }
 
 export function countUncoveredProfileLines(coverage: LcovFileCoverage): number {

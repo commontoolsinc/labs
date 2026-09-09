@@ -9,7 +9,7 @@ import { property, state } from "lit/decorators.js";
 // attacker, so everything they then write lands in the attacker's space and
 // their own session is gone. Scanning steals nothing directly (there is no
 // exfiltration channel; the payload gives away the attacker's own key), which
-// makes this screen the entire defence. Hence the DID shown prominently for
+// makes this screen the entire defense. Hence the DID shown prominently for
 // cross-checking against the Pair screen, and copy naming where the code was
 // supposed to have come from.
 //
@@ -26,9 +26,9 @@ import { property, state } from "lit/decorators.js";
 /**
  * How long the accept button stays inert after the dialog appears.
  *
- * The overlay materialises mid-boot on a phone the user has just pointed at a
+ * The overlay materializes mid-boot on a phone the user has just pointed at a
  * QR code, and the accept button is the primary control — a tap already in
- * flight would land on it. For the screen that is the only defence against a
+ * flight would land on it. For the screen that is the only defense against a
  * donated-identity link, that is worth a beat.
  */
 export const TAP_THROUGH_GUARD_MS = 500;
@@ -162,8 +162,15 @@ export class XDeviceLinkView extends LitElement {
   private accessor guarded = true;
 
   #answered = false;
+
+  /** Timer which releases the tap-through guard on the accept button. */
   // `setTimeout` is typed as Node's `Timeout` under this config, not `number`.
   #guardTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** The answer step of this dialog, which a test drives directly. */
+  get accessForTestingOnly(): { finish(accepted: boolean): void } {
+    return { finish: (accepted) => this.#finish(accepted) };
+  }
 
   override firstUpdated() {
     // Schedule the guard release FIRST — before anything below that could throw
@@ -174,7 +181,7 @@ export class XDeviceLinkView extends LitElement {
     }, TAP_THROUGH_GUARD_MS);
 
     const dialog = this.renderRoot.querySelector("dialog");
-    activateModalDialog(dialog, () => this.finish(false));
+    activateModalDialog(dialog, () => this.#finish(false));
 
     // Focus the heading, NOT a button. WebKit scrolls a modal to its focused
     // element; with the accept button disabled during the guard, focus would
@@ -191,7 +198,8 @@ export class XDeviceLinkView extends LitElement {
     super.disconnectedCallback();
   }
 
-  private finish(accepted: boolean) {
+  /** Answers the dialog once, dispatching the result the host listens for. */
+  #finish(accepted: boolean) {
     // Exactly one answer, ever: a double-tap must not dispatch twice.
     if (this.#answered) return;
     // Accept is inert during the tap-through guard; Cancel is always allowed.
@@ -215,7 +223,7 @@ export class XDeviceLinkView extends LitElement {
             Reveal the code again on the Pair screen and rescan it.
           </p>
           <div class="actions">
-            <button @click="${() => this.finish(false)}">Continue</button>
+            <button @click="${() => this.#finish(false)}">Continue</button>
           </div>
         </dialog>
       `;
@@ -235,7 +243,7 @@ export class XDeviceLinkView extends LitElement {
           <div class="did">${this.incomingDid}</div>
           <div class="actions">
             <button
-              @click="${() => this.finish(true)}"
+              @click="${() => this.#finish(true)}"
               ?disabled="${this.guarded}"
             >
               Continue
@@ -267,12 +275,12 @@ export class XDeviceLinkView extends LitElement {
         </p>
         <div class="actions">
           <button
-            @click="${() => this.finish(true)}"
+            @click="${() => this.#finish(true)}"
             ?disabled="${this.guarded}"
           >
             ${replacing ? "Replace identity" : "Continue"}
           </button>
-          <button @click="${() => this.finish(false)}">Cancel</button>
+          <button @click="${() => this.#finish(false)}">Cancel</button>
         </div>
       </dialog>
     `;

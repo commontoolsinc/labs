@@ -300,8 +300,213 @@ string) under every lower mode, with the stable SC-18c reason
 <offending clauses>`. Contract text in
 `docs/specs/cfc-enforcement-matrix.md` §4; implementation in
 `prepareBoundaryCommit` (runner `cfc/prepare.ts`) sharing the egress gates'
-clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Only (a) — the
-standard-profile default — stays open on the confidentiality side.
+clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Two items stay
+open on the confidentiality side: (a) the standard-profile default, and (d)
+the residency half of the write ceiling, recorded next.
+
+One narrowing landed alongside: the measurement quantifies over paths a
+schema could have declared a policy at, and the raw meta seam is not one.
+`setMetaRaw` lands on a document-root sibling of `value` (`schema`,
+`internal`, `patternIdentity`, and the rest of the `MetaField` union), which
+no value schema describes. The seam is outside the check at every rung, so a
+meta path raises neither a strict reject nor a persist-and-flag diagnostic.
+
+A ceiling can still resolve at a meta path, from a document-root declared
+entry by longest prefix, and that route is skipped too. The entry sits at
+logical `[]`, the payload root, and reaches the seam only because
+canonicalization strips a leading `value`. Honoring it would make a piece
+updatable or not according to whether its pattern carries a root `ifc`.
+Declaring on a single result field, which is how a pattern normally labels
+one, leaves the seam's ceiling empty; the piece is then un-updatable under
+strict, because the pattern updater, `setsrc`, and setup over an existing
+piece all stamp meta.
+
+Nothing is laundered. A path counts as meta only while no payload write
+landed on it too, so a transaction writing both leaves the path measured; the
+ancestor collapse runs over measured paths only, so an exempt meta path
+cannot shadow a value write beneath it; meta paths remain flow-label targets,
+so the join persists there and the egress, display, and observation gates
+read the unchanged label; and the seam shares the document, space, and
+replica set of the value surface beside it, so it reaches no further. The
+residual is the shared namespace: where a payload field carries a `MetaField`
+name, an exempt meta write can raise the stored derived label at their common
+logical path past what that field declares. That is over-taint, so reads stay
+protected, and giving the envelope seam its own path space is the fix. Shares
+the meta-seam predicate with the schema write-policy requirement (#6077).
+
+A second narrowing follows the same rule over a document rather than a path.
+A computed cell is the derived internal cell the runtime materializes to hold
+a derivation's result, addressed under its own URI scheme
+(`computed:fid1:<hash>`). No author declares a store policy on one — a
+pattern names the data it declares policy on, and does not name the
+intermediates the reactive graph materializes for it — so its ceiling is the
+empty one, and measuring it refuses every derivation that reads labeled data
+and writes its result. That is ordinary reactive computation, so the refusal
+reaches product flows and not only tests. The id class is outside the check
+at every rung, through the same predicate the meta seam uses, and the skip is
+scoped to a join the target's own space produced: the join records the space
+each contributing document lived in, and a computed target whose join drew a
+clause from elsewhere is measured like any other document. The residency half
+of the ceiling therefore still holds for the direction it was written for,
+while a derivation over its own space's data proceeds — within one space the
+source and the computed cell share a replica set.
+
+Nothing is laundered here either. The join still lands on the computed
+document as its `derived` component, so a later read of it is tainted and a
+later write of what it read misfits on the original clause. What the
+exemption gives up is a refusal that was doing an egress gate's work by
+accident: a value derived from labeled data now lands, and whether it may
+LEAVE is the sink's question. Where the host is the one releasing — a tool
+answering a model with the values a piece computed — there is no sink request
+to record and no commit to gate, so the release is measured directly: read
+what is about to be released through a transaction, and fit that
+transaction's consumed join to the destination's ceiling, which for a model's
+context is the empty one. What is released is a value. A reference the tool
+hands back names the result without carrying it, so it is not measured, and a
+refusal withholds the values while the reference goes out. `describeSinkReleaseRefusal` (runner `cfc/prepare.ts`) is that
+measurement, and it shares `atomsOutsideCeiling` and the refusal-detail
+construction with the in-commit sink gate, so a clause outside a ceiling on
+one route is outside it on the other. Two differences are worth recording:
+the host route measures what releasing the answer resolved rather than what a
+whole transaction consumed, and it applies no exchange-rule rewriting, so it
+refuses a clause a policy evaluation would have discharged. A residual stands where a declared entry did reach a
+computed document, from a schema-carrying write: it stops being a write
+ceiling there, and stays a read floor.
+
+A third narrowing does not skip the measurement but answers it. The runtime
+materializes documents to hold a piece's MACHINERY rather than data an author
+named: a piece's argument, result and internal documents, minted by the runner
+from the piece's result cause; the state documents a builtin mints from its own
+node's cause; and the documents that anchoring splits out of a value written
+into any of those. The atoms these carry are a property of the transaction that
+filled them, so a declaration written into a schema either misses them or
+over-declares every instance of the pattern. §8.12.5's route 2 is what the
+runtime uses instead: the write that puts the join on a path also declares, in
+that same transaction, a policy covering it — the ceiling that resolved at the
+path plus exactly the clauses that had nowhere to go. The store's promise
+becomes the audience of what it holds, rather than the check being skipped.
+
+This is not a new route. §8.12.8's component table already names "explicit
+store-label operations (upgrades per §8.12.5 …)" as a provenance of the
+declared component, alongside schema `ifc` declarations — so a runtime-made
+upgrade is a sanctioned way for that component to change, and §8.12.5 option 2
+states the discipline: atomically tighten the store's label, then write. The
+runtime declares in the transaction that writes, which is that atomicity.
+
+What the widening adds is that the route runs on every write to such a store
+rather than only while a piece is being set up, and what licenses that is a
+property of the declaration rather than of when it is made. A declared clause
+list is a ceiling under §8.12.4 — `canWrite` asks that the store's declared
+confidentiality be at least as restrictive as the data's, which is `∃` a
+declared clause subsuming each label clause — and it is the reader's floor
+under the same section: a reader is tainted by at least the declared label, and
+§8.12.8 makes reader taint consume the effective label, which always includes
+the declared component. Subsumption makes the two agree: satisfying a declared
+clause implies satisfying the label it admits, so every reader of the store
+satisfies every clause the store admits. Each upgrade therefore admits more
+data AND narrows the audience by the same step. An unbounded reactive stream of
+upgrades leaves the store readable by fewer principals than it started with,
+never by more, which is why the route needs no bound on how often it may fire
+or on which clauses a later transaction may contribute. §8.12.5's own
+soundness argument is the same one: existing readers already expect data at the
+original label level.
+
+The route adds CLAUSES and never alternatives, which is the line §8.12.7 and
+safety invariant 1 draw. Adding a clause is the tightening §8.12.1 admits.
+Adding an alternative to a clause already stored grows that clause's reader set
+and is a widening, which those sections admit only through a grant record
+consulted at access time or an intent-gated declassification event — neither of
+which a write-side fit check is or could be. The mint folds clause LISTS, so a
+stored disjunction comes back with the alternatives it went in with.
+
+The cost is §8.12.2's ratchet: a store that once held data derived from a
+labeled read keeps that clause after the read stops, which is the over-taint
+direction. Its end state is a declared list whose clauses have disjoint
+audiences, which no principal satisfies — the store keeps admitting writes and
+stops being readable. §8.12.7 records that outcome for its own case as safe and
+an operational footgun worth flagging in review, and the direction here is the
+same: refusal, not disclosure.
+
+The claim that a store is the runtime's is made by the runtime, never measured
+from an input's own fields: the recording method is on the public transaction
+interface, so a marker without the runtime's authorization names nothing, and
+neither does one naming a store outside the owner's own space. It lasts for one
+transaction where the store is minted and filled in one go, and is enrolled for
+as long as the piece's nodes run where the store is written by the reactive
+updates, event handlers and settled requests that follow the mint. Ownership
+passes to an anchored child, whose id is derived from its parent's rather than
+named by an author. A document nobody named is untouched: a write to an
+ordinary document measures against its own ceiling whichever transaction makes
+it, so widening the route in time does not widen it in scope.
+
+Two costs sit outside the store, and both belong to the route rather than to
+the widening. The declared list is a conjunction every reader carries, so a
+store accumulating clauses with disjoint audiences ends up readable by nobody
+while still admitting writes — §8.12.2's ratchet reaching its end, refusal
+rather than disclosure. And a transaction that could not commit now commits, so
+whatever else it staged proceeds: a post-commit effect, a sink request. A
+builtin whose store moves onto the route therefore needs something else to
+refuse its request, which is a `sink-request` ceiling where the builtin stages
+one and nothing where it does not. Contract text in
+`docs/specs/cfc-enforcement-matrix.md` §4; tests `cfc-writer-fit.test.ts`.
+
+(d) **[normative] Residency fit — the ceiling a document carries by living
+where it lives.** The fit measurement joins the target's declared policy with
+one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow
+clause listing that space among its alternatives therefore fits the document
+whatever it declares. The soundness argument is that writing into the space
+the clause already names discloses nothing: the `Space` atom's audience is
+that space's reader set — §4.9.3 resolves it by dereferencing its id against
+the space's ACL, the same document that decides who receives a replica — so
+every principal holding the target is inside the audience the alternative
+names, and the write reaches no reader the data had not already reached. The
+guarantee is therefore exactly as strong as the deployment's ACL posture, the
+same bound the §4.9.3 membership lookup carries.
+
+The rule is confined to `Space` deliberately, and for two different reasons.
+`User(<subject>)` and the bare DID spelling name a person: a space grants
+reader roles that person does not hold, so admitting them would place data
+readable by one principal into a store its co-readers sync. That argument
+does not reach `PersonalSpace(<owner>)`, which names a space rather than a
+person (SC-39). What keeps that form out is narrower and mechanical: the
+residency clause is built from the target's address alone — `Space(<the space
+this document is stored in>)` — and the runtime cannot form
+`PersonalSpace(<owner>)` from an address, because nothing marks a space as
+personal (§3.6.4 has one stop being personal with no marker changing) or
+names its owner without resolving its ACL. The clause is
+unavailable rather than unsound. A deployment that did resolve ownership
+could admit it on the same footing as `Space`, since the two atoms would then
+name one space and so one audience; the limit is what the measurement can
+construct, not what it may admit.
+
+One spec question this exposes and should settle: §4.9.4 describes
+`HasRole(user, PersonalSpace(User), reader)` as minted by a §4.9.3 point query
+against that space's own ACL record, and calls it one of "the two `Space(...)`
+atoms", which reads `PersonalSpace` as an ACL-dereferenced container atom. That
+sits in tension with §3.6.4's fixed membership, and with a deployment
+classification that commits the very field such a point query would have to
+read. SC-39 settles it: §3.6.5 has a member added to a space gain access to
+all data in it with no labels rewritten, so a personal space's audience grows
+after the fact and the atom is an ACL-dereferenced container. The
+fixed-membership reading recorded here is therefore wrong, and the rationale
+above has been rewritten accordingly. Residency's behavior is unchanged, but
+its ground moves: the atom stays out because the measurement cannot construct
+it from an address, not because its audience is one person. Reading
+back is unaffected in every case: the derived stamp persists the full join, so
+the egress and display ceilings fit the unchanged label, and the space
+principal there resolves to a reader only through the §4.3.3
+`SpaceReaderAccess` exchange rule on verified `HasRole` membership. The
+ungrantable read-failed marker stays outside the residency clause as it stays
+outside every ceiling.
+
+Spec home: §8.12.4's `canWrite`, alongside the declared-policy measurement.
+Two points the spec should settle explicitly. Residency is a property of the
+store rather than a carve-out for an atom family: a store satisfies a clause
+whose audience already contains everyone the store's bytes reach. And
+residency holds over a declared policy rather than only in its absence — a
+declaration narrower than the physical audience of the space cannot be
+enforced by the store anyway, and making residency a fallback would mean that
+adding a narrow declaration newly breaks space-internal flows.
 
 The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
 checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)
@@ -780,3 +985,175 @@ participant's clause; the multi-party conjunction dissolves exactly when all
 are present — §5.3.3 stated operationally). Registry row + a note in §5.3.4
 pointing at the reserved shape. Authoring sketch:
 `cfc-exchange-rules-authoring-extensions.md` §4.
+
+## From the served-execution attribution build (OW34-family, RULED 2026-08-21)
+
+Design of record:
+`docs/history/plans/server-execution-v2/optimize/ow34-attribution-design.md`.
+The serving-side binding sentence lives in
+`docs/specs/server-side-execution/serving-loop.md` §3c; the coverage row is
+verification-coverage.md OW59.
+
+**SC-38 [normative] The current-principal family's served-execution reading
+— the audit-3.5 principal-resolution chain (§6/§8.15).** `open`. The
+`__ctCurrentPrincipal` placeholder (authored-by / represents-principal /
+`ownerPrincipal` subjects) resolves at commit-prep against the transaction's
+trust snapshot, and under served execution that snapshot is PER-RUN: it
+carries the run's acting principal — the event's server-stamped actor, the
+demanded instance's principal, or the delegated carriage's actor — never the
+serving runtime's ambient service identity. The resolved labels are
+indistinguishable from the same run's client-side mint (no served-provenance
+mark; the memory plane already records the delegation per commit via
+`acting_principal` + `capabilityRef`). A run with no acting principal keeps
+the ambient service snapshot. Literal-DID current-principal subjects stay
+refused at authoring; the only path to a user-named label remains a run
+actually carrying that user's acting identity. Proposed edit: when the
+audit-3.5 chain is written into §6/§8.15, state the snapshot's per-run
+binding and the acting-principal resolution as the normative reading for
+serving hosts, citing serving-loop.md §3c.
+
+## From the strict-defaults prerequisites (2026-08-31)
+
+**SC-39 [normative] A personal space's owner is one of its readers —
+§8.12.1's `atomLe`.** `open`. §8.12.1 defines the alternative-level relation
+`atomLe` as structural equality for every atom type but `Expires`, and
+§8.12.4's `canWrite` restates it that way. Under that relation a store
+declaring `User(P)` refuses a value labeled `PersonalSpace(P)`, even though
+P is an owner of that space and therefore one of its readers. Under
+`enforce-strict` that is a refused write. The runtime adds one case to the
+relation, on the LABEL side only: a `PersonalSpace(owner)` alternative also
+answers a ceiling alternative naming that owner.
+
+The criterion is the one §8.12.1 gives for `atomLe` itself — satisfying the
+more restrictive side implies satisfying the other. The guarantee comes from
+the role order rather than from any ACL configuration: §3.6.2 states `owner
+⊃ writer ⊃ reader` — "owners are implicitly writers; writers are implicitly
+readers" — and §3.6.4 makes the named principal the space's sole owner, so
+that principal is one of its readers normatively. A ceiling whose audience
+is that owner is therefore inside the label's audience however the
+membership has since changed, which is the containment the fit test asks
+for. Grounding this in §3.6.4's `readers: {Alice}` would not do: that is a
+starting configuration, and this entry declines to treat it as an invariant
+when it refuses the reverse rule.
+
+The reverse does not hold, and the reverse is the tempting rule. A ceiling
+declaring `PersonalSpace(P)` would have to be read by P ALONE for it to admit
+a `User(P)` label. §3.6.4's fixed membership does not deliver that, and the
+reason is not that a personal space's membership grows — its own sharing
+bullet has adding a member CONVERT the space into a shared one, so
+membership is fixed exactly as long as the space stays personal. What
+defeats the one-person reading is that the label outlives the conversion:
+§3.6.5 rewrites **no labels** when a member is added, so a
+`PersonalSpace(P)` clause stamped beforehand goes on naming a space that has
+stopped being personal. §4.9.4 agrees
+from the other side: it generates `HasRole(user, PersonalSpace(User), reader)`
+by a §4.9.3 point query against that space's own ACL record and calls the
+form one of "the two `Space(...)` atoms", and §15.2 and §4.1.2 both call it a
+convenience form for a per-user space principal. A store declaring it would
+take data labeled for the owner alone and replicate it to a member added
+later.
+
+This corrects the framing SC-18(d) recorded. That note treated §3.6.4's fixed
+membership and §4.9.4's point query as an unsettled tension and took the
+fixed-membership reading as the fail-closed one. The tension dissolves rather
+than resolving against §3.6.4: membership is fixed while the space is
+personal, adding a member converts it, and §3.6.5 rewrites no labels when it
+does — so a stamped clause outlives the conversion and the atom is an
+ACL-dereferenced container. That leaves SC-18(d)'s behavior intact but
+replaces its reason. Residency excludes the atom because its clause is built
+from the target's address and nothing there names a space's owner or marks it
+as personal — not because the atom names one principal, which it does not.
+SC-18(d)'s rationale is rewritten there to say so.
+
+`Space(id)` gains no case. §15.2 derives its access through verified `HasRole`
+exchange, which the fit kernel cannot run, and SC-18(d) already joins
+`Space(<the space the document resides in>)` onto every document's write
+ceiling, so covering it here would admit a person's data into every store in
+that space.
+
+The bare DID string gains no case either, and the runtime's use of one should
+be retired rather than taught. §4.1.1 states that an atom is "not a simple
+string but a structured value with a type and parameters", and §15.2 lists no
+string form. The shell's default display ceiling nonetheless carries a raw
+acting-user DID beside `User` and `PersonalSpace`; §8.10.6's illustrative
+profile lists only the latter two, and its tighten-only rule forbids
+admitting an additional atom family without a release judgment. That entry is
+a pre-existing loosening and wants removing, not generalizing.
+
+Only canonical shapes participate, the discipline §8.12.1 already applies to
+`Expires`: a two-field `PersonalSpace` whose `owner` is a plaintext DID or
+its §4.6.4.1 `{digestOf}` commitment. A record carrying further fields is not
+the atom it resembles. The owner value carries across untouched, so a
+committed field still meets its plaintext twin under the same-form
+comparison.
+
+Clause IDENTITY is untouched: `clausesEqual`, the canonical clause digest,
+and the ceiling meet all still tell the two atoms apart, so a
+mutually-subsuming pair can carry different digests. Every place that shows
+is fail-closed — a §8.12.7 route-2b exemption naming one does not exempt the
+other, and a meet keeps both alternatives rather than collapsing them.
+
+Spec home: §8.12.1's `atomLe`, with the restatement in §8.12.4's `canWrite`
+comment following it. Three points the spec should settle. Whether the case
+belongs in `atomLe` or in a normalization ahead of it — the runtime takes the
+second, so the relation keeps its "equality except `Expires`" shape and the
+integrity floor, which shares the relation, is untouched. Whether the
+one-sided form is permanent, which turns on whether a `PersonalSpace` clause
+may outlive its space's conversion at all: if §3.6.4's conversion re-spelled
+the clause, or §3.6.5 rewrote it, the atom's audience would stay its owner's
+and the relation could be symmetric. And whether a §4.6.4.1 commitment should
+carry its field's type. It does not today, so a well-formedness test on a
+committed field is unenforceable — the plaintext arm of this rule rejects a
+malformed owner and the committed arm cannot, which is a general property of
+every check that validates a commitment-classified field rather than
+something particular to this one.
+
+## From the redundant-entry collapse (2026-09-01)
+
+**SC-40 [editorial] The redundant-entry collapse spans components —
+§4.6.4.** `open`. §4.6.4's idempotent-label-persistence paragraph closes
+with a redundancy rule: "A derived-component entry whose label equals the
+effective label of its parent entry for the same component is redundant and
+SHOULD be dropped at persist time." The qualifier bounds the rule to an
+ancestor of the entry's own component. The runner drops a per-value entry
+whose clauses the DECLARED component already carries at that path, which the
+sentence does not describe.
+
+Three parts of the specification make the broader rule sound, and the entry
+proposes writing them into the sentence rather than leaving an
+implementation to assemble them. §8.12.8 makes the effective label at a path
+the join of the components present there, and that join is a clause union.
+§8.11.4 stores content and flow clauses in one array and does not track them
+apart at runtime, so a clause is the same clause whichever component supplies
+it. §10's compact observer model states that boundary noninterference is
+"not about forcing hidden clauses to be literally identical", and that a
+label map reached outside the first-layer introspection API is an
+"enforcement and proof/model artifact, not a public raw-label surface".
+§4.6.4's own operational guidance already permits avoiding a redundant stored
+template "as long as effective observation labels computed at boundaries are
+identical", which is the test the broader rule meets.
+
+The supplying component's update discipline is the part that has to be said
+out loud. A declared entry may supply the cover because §8.12.1 forbids it to
+shrink, so a clause it carries today it carries tomorrow. A link-carried
+entry may not: §8.12.8 has it replaced when the reference at the path is
+rewritten, which would take the covered clauses with it and leave nothing
+stating them.
+
+One boundary-visible difference follows from the drop rather than from the
+rule. §4.6.4.2 has metadata population fail closed for a declared entry —
+"This interim does not extend to declared or authored entries" — so a path
+left carrying its declaration alone reports its atoms' source-bearing fields
+as unobservable, where the derived entry that was dropped supplied them the
+interim label. That is §4.6.4.2's own treatment of a declared-only path,
+reached by removing an entry rather than by changing what any entry means.
+
+Proposed edit: restate the redundancy sentence over the effective label
+rather than over one component. A per-value entry whose clauses the
+components present at its path already carry is redundant and SHOULD be
+dropped at persist time, provided every supplying component's discipline
+forbids it to lower them — which admits the declared component and excludes
+the link-carried one. Name the observation-class axis in the same breath: the
+cover has to hold under each read class that consumes the entry, since a
+class-scoped declared entry can shadow a covering one for some classes and
+not others.

@@ -39,6 +39,7 @@ import {
 
 export interface User {
   name: string;
+
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   color: string;

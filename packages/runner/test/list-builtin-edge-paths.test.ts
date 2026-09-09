@@ -16,30 +16,31 @@ import {
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resumeSettleRunKind } from "../src/builtins/resume-republish.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
-  TEST_MEMORY_SERVER_AUTH,
+  newSharedServer,
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("list builtin edge paths");
 const space = signer.did();
 
-// These tests exercise edge paths in the three list builtins (map/filter/
-// flatMap) that the resume-preservation tests do not reach:
-//
-//   - The usesIndex re-run branch: a reused per-element run whose element keeps
-//     its identity (a cell link) but lands at a new index re-executes its op so
-//     the index argument it observes is current.
-//   - The non-array guard: a list input that resolves to a non-array value makes
-//     the reconcile throw.
-//
-// Both are driven against a live runtime (no resume needed): cell-link elements
-// give stable identity across a reorder, and a direct set() of a scalar list
-// drives the non-array path.
-
 describe("list builtin edge paths", () => {
+  // These tests exercise edge paths in the three list builtins (map/filter/
+  // flatMap) that the resume-preservation tests do not reach:
+  //
+  //   - The usesIndex re-run branch: a reused per-element run whose element
+  //     keeps its identity (a cell link) but lands at a new index re-executes
+  //     its op so the index argument it observes is current.
+  //   - The non-array guard: a list input that resolves to a non-array value
+  //     makes the reconcile throw.
+  //
+  // Both are driven against a live runtime (no resume needed): cell-link
+  // elements give stable identity across a reorder, and a direct set() of a
+  // scalar list drives the non-array path.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -320,14 +321,14 @@ describe("list builtin edge paths", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Resume harness for the owned-cell walk's nested-node branches.
 //
-// The walk (Runner.collectResumeOwnedCells) recurses through nested sub-pattern
+// The walk (Runner.#collectResumeOwnedCells) recurses through nested sub-pattern
 // nodes. A sub-pattern whose result cell carries a non-"space" cell scope makes
 // the walk re-scope the child result cell before recursing, the branch the
 // single-space resume tests do not reach. A cold resume drives the walk.
-// ---------------------------------------------------------------------------
+//
 
 function plainLoopback(
   server: MemoryV2Server.Server,
@@ -336,10 +337,14 @@ function plainLoopback(
 }
 
 class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: plainLoopback(this.getServer()),
+      transport: plainLoopback(this.#getServer()),
     });
     const session = await client.mount(
       spaceId,
@@ -402,14 +407,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
   let sm2: LoopbackStorageManager;
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
+    server = newSharedServer();
     sm1 = LoopbackStorageManager.make(signer, server);
     sm2 = LoopbackStorageManager.make(signer, server);
   });
@@ -443,7 +441,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("value").get()).toBe(40);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     const rt2 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -469,13 +467,12 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
       }
       expect(rc2.key("value").get()).toBe(40);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Cross-space link load kick (Runtime.ensureLinkedDocLoaded).
 //
 // A value read that follows a link to a target in ANOTHER space, whose doc is
@@ -484,28 +481,10 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
 // queries cannot follow links across space boundaries, so the client fetches
 // the target itself. A reader session that never created the target drives the
 // kick.
-// ---------------------------------------------------------------------------
+//
 
 const spaceH = signer.did(); // "home" — holds the link
 const spaceP = (await Identity.fromPassphrase("edge paths target P")).did();
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-  private sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
 
 const CROSS_SPACE_PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
@@ -542,22 +521,15 @@ const crossSpaceLinkListSchema = {
 
 describe("cross-space link load kick", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
-  let readerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
+  let readerStorage: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    server = newSharedServer();
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
-    readerStorage = SharedServerStorageManager.connectTo(server, {
+    readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
   });
@@ -596,6 +568,10 @@ describe("cross-space link load kick", () => {
       r1.key("create").send({ name: "Ada" });
       await r1.pull();
       await rt1.idle();
+      // The cross-space child creation rides server->client delivery turns;
+      // drain them before reading the freshly pushed link.
+      await clock.settle();
+      await r1.pull();
       // deno-lint-ignore no-explicit-any
       const links = r1.key("items").asSchema(crossSpaceLinkListSchema)
         .get() as any[];
@@ -634,4 +610,18 @@ describe("cross-space link load kick", () => {
       await rt1.dispose();
     }
   });
+});
+
+Deno.test("resume-settle run kind: bookkeeping ONLY on the serving posture; derivation on clients (r3756175819 — the shared decision all three list builtins stamp)", () => {
+  // The settle writes DERIVED content (result := f(input)): stamped
+  // bookkeeping on a flag-ON client it committed authored-class — a
+  // by-construction violation of the client derivation-commit removal.
+  // The serving posture keeps the sanctioned internal bookkeeping kind
+  // (serving-loop.md §3d) so the wave admits the recovery write.
+  expect(
+    resumeSettleRunKind({ servingPosture: true } as unknown as Runtime),
+  ).toBe("bookkeeping");
+  expect(
+    resumeSettleRunKind({ servingPosture: false } as unknown as Runtime),
+  ).toBe("derivation");
 });

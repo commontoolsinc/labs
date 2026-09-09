@@ -1,5 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -30,7 +31,10 @@ async function cleanup(
   await runtime.dispose();
 }
 
+//
 // Benchmark: Cell creation
+//
+
 Deno.bench("Cell creation - simple schemaless (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -83,7 +87,10 @@ Deno.bench("Cell creation - immutable (100x)", async () => {
   await cleanup(runtime, storageManager);
 });
 
+//
 // Schema-based cell creation benchmarks
+//
+
 Deno.bench("Cell creation - simple with schema (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -168,7 +175,10 @@ Deno.bench("Cell creation - array with schema (100x)", async () => {
   await cleanup(runtime, storageManager);
 });
 
+//
 // Benchmark: Cell get operations
+//
+
 Deno.bench("Cell get - simple value schemaless (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -236,7 +246,10 @@ Deno.bench("Cell getRaw - complex object schemaless (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Schema-based get operations
+//
+
 Deno.bench("Cell get - simple value with schema (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -294,7 +307,10 @@ Deno.bench("Cell get - complex object with schema (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Cell set operations
+//
+
 Deno.bench("Cell set - simple value schemaless (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -357,7 +373,10 @@ Deno.bench(
   },
 );
 
+//
 // Schema-based set operations
+//
+
 Deno.bench("Cell set - simple value with schema (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -414,7 +433,10 @@ Deno.bench(
   },
 );
 
+//
 // Benchmark: Nested cell operations
+//
+
 Deno.bench("Cell key - nested access schemaless (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -456,7 +478,10 @@ Deno.bench("Cell key - array access schemaless (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Schema-based nested operations
+//
+
 Deno.bench("Cell key - nested access with schema (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -538,7 +563,10 @@ Deno.bench("Cell key - array access with schema (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Cell derivation
+//
+
 Deno.bench("Cell asSchema - schema transformation (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -590,7 +618,10 @@ Deno.bench("Cell withTx - transaction switching (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Query result proxy operations
+//
+
 Deno.bench(
   "Cell getAsQueryResult - proxy creation schemaless (100x)",
   async () => {
@@ -620,36 +651,10 @@ Deno.bench(
   },
 );
 
-Deno.bench(
-  "Cell proxy - property writes schemaless (100x)",
-  async () => {
-    const { runtime, storageManager } = setup();
-
-    const cell = runtime.getCell<{
-      x: number;
-      y: number;
-    }>(space, "bench-proxy-write", undefined);
-
-    // Initialize with a committed value first
-    const initTx = runtime.edit();
-    cell.withTx(initTx).set({ x: 1, y: 2 });
-    initTx.commit();
-
-    // Measure proxy writes; proxies are read-only by default, so request a
-    // writable view.
-    for (let i = 0; i < 100; i++) {
-      const tx = runtime.edit();
-      const proxy = cell.withTx(tx).getAsQueryResult([], tx, true);
-      proxy.x = i;
-      proxy.y = i * 2;
-      tx.commit();
-    }
-
-    await cleanup(runtime, storageManager);
-  },
-);
-
+//
 // Schema-based get operations for complex objects
+//
+
 Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -690,7 +695,10 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Array operations
+//
+
 Deno.bench("Cell push - array append schemaless (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -737,7 +745,10 @@ Deno.bench("Cell array - proxy map operation schemaless (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Schema-based array operations
+//
+
 Deno.bench("Cell push - array append with schema (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -796,7 +807,10 @@ Deno.bench("Cell array - map operation with schema (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Link operations
+//
+
 Deno.bench("Cell getAsLink - link generation schemaless (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
@@ -849,7 +863,10 @@ Deno.bench("Cell getAsLink - with options (100x)", async (b) => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Subscription operations
+//
+
 Deno.bench("Cell sink - subscription execution (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -930,7 +947,10 @@ Deno.bench(
   },
 );
 
+//
 // Benchmark: Complex nested operations
+//
+
 Deno.bench("Cell complex - schema with asCell references (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -1028,7 +1048,10 @@ Deno.bench("Cell complex - nested cell references (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Schema validation
+//
+
 Deno.bench("Cell schema - complex validation (100x)", async () => {
   const { runtime, storageManager } = setup();
 
@@ -1083,7 +1106,10 @@ Deno.bench("Cell schema - complex validation (100x)", async () => {
   await cleanup(runtime, storageManager);
 });
 
+//
 // Benchmark: Large data structures
+//
+
 Deno.bench("Cell large - array with 1000 items (100x get)", async () => {
   const { runtime, storageManager, tx } = setup();
 
@@ -1144,8 +1170,11 @@ Deno.bench("Cell large - deeply nested object (100x navigation)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Concurrent operations
-Deno.bench("Cell concurrent - multiple cells (100x)", async () => {
+//
+
+Deno.bench("Cell concurrent - multiple cells (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   // Create multiple cells
@@ -1160,15 +1189,20 @@ Deno.bench("Cell concurrent - multiple cells (100x)", async () => {
   await tx.commit();
 
   // Measure concurrent access
+  b.start();
   for (let i = 0; i < 100; i++) {
     cells.forEach((cell) => cell.get());
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Cell equals comparison
-Deno.bench("Cell equals - comparison operations (100x)", async () => {
+//
+
+Deno.bench("Cell equals - comparison operations (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell1 = runtime.getCell<number>(space, "bench-equals-1", undefined, tx);
@@ -1185,16 +1219,23 @@ Deno.bench("Cell equals - comparison operations (100x)", async () => {
   await tx.commit();
 
   // Measure equals operations
+  b.start();
   for (let i = 0; i < 100; i++) {
     cell1.equals(cell1Same); // Should be true
     cell1.equals(cell2); // Should be false
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
 
+//
 // Benchmark: Complex linked document graph (MentionablePiece pattern)
-// This tests .get() performance on a medium-complexity object spread across many documents
+//
+// This tests .get() performance on a medium-complexity object spread across
+// many documents
+//
+
 Deno.bench(
   "Cell complex - MentionablePiece graph (10 top-level, 20 linked each, 100x get)",
   async () => {
@@ -1309,9 +1350,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: Notebook/Notes pattern - tests History.claim() optimization impact
-// These benchmarks measure repeated .get() calls on a notebook with linked notes
-// The claim optimization removes O(n²) overhead during reads
+//
+// Notebook/Notes pattern: the History.claim() optimization's impact
+//
+// These benchmarks measure repeated .get() calls on a notebook with linked
+// notes. The claim optimization removes O(n²) overhead during reads.
+//
 
 const noteSchema: JSONSchema = {
   type: "object",
@@ -1387,7 +1431,6 @@ async function benchmarkNotebookReads(noteCount: number, readCount: number) {
   await storageManager.close();
 }
 
-// 10 notes
 Deno.bench("Notebook read - 10 notes, 0 reads (setup only)", async () => {
   await benchmarkNotebookReads(10, 0);
 });
@@ -1400,7 +1443,6 @@ Deno.bench("Notebook read - 10 notes, 1000 reads", async () => {
   await benchmarkNotebookReads(10, 1000);
 });
 
-// 100 notes
 Deno.bench("Notebook read - 100 notes, 0 reads (setup only)", async () => {
   await benchmarkNotebookReads(100, 0);
 });
@@ -1413,17 +1455,14 @@ Deno.bench("Notebook read - 100 notes, 1000 reads", async () => {
   await benchmarkNotebookReads(100, 1000);
 });
 
-// ============================================================================
+//
 // Overhead microbenchmarks for comparison
-// ============================================================================
+//
 
 Deno.bench(
-  "Overhead - isRecord check (10000x)",
+  "Overhead - isObjectNotArray check (10000x)",
   { group: "overhead" },
   () => {
-    const isRecord = (v: unknown): v is Record<string, unknown> =>
-      typeof v === "object" && v !== null && !Array.isArray(v);
-
     const values = [
       42,
       "string",
@@ -1434,7 +1473,7 @@ Deno.bench(
       { key: "value" },
     ];
     for (let i = 0; i < 10000; i++) {
-      isRecord(values[i % values.length]);
+      isObjectNotArray(values[i % values.length]);
     }
   },
 );

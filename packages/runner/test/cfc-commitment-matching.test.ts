@@ -1,37 +1,40 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
   cfcAtom,
 } from "@commonfabric/api/cfc";
+
 import { atomEntails, matchAtomPattern } from "../src/cfc/atom-pattern.ts";
 import { clauseSubsumes } from "../src/cfc/clause.ts";
-import {
-  atomsOutsideCeiling,
-  cfcIntegritySatisfiesFloorCoherently,
-} from "../src/cfc/observation.ts";
+import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import {
   commitCfcFieldValue,
   transformCfcLabelForCrossSpacePersist,
 } from "../src/cfc/label-representation.ts";
 import {
+  atomsOutsideCeiling,
+  cfcIntegritySatisfiesFloorCoherently,
+} from "../src/cfc/observation.ts";
+import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
+import { createRenderConfidentialityResolver } from "../src/cfc/render-ceiling.ts";
+import {
   dischargeMaterialRiskAtoms,
   schemaWithInjectionSafeAnnotations,
 } from "../src/cfc/schema-sanitization.ts";
-import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
-import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "../src/cfc/standard-profile.ts";
-import { createRenderConfidentialityResolver } from "../src/cfc/render-ceiling.ts";
 
-// Inv-12 Stage 1 same-form matching (SC-25; design §2; spec §4.6.4.1):
-// enforcement keeps working on commitment forms, fail-closed where it
-// cannot. Read gating digests the candidate and compares; a CONCRETE
-// exchange-rule pattern value digest-matches a committed field; a VARIABLE
-// over a committed field does not bind (the rule does not fire — the
-// fail-closed direction: an unevaluable release does not happen).
 describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
+  // Inv-12 Stage 1 same-form matching (SC-25; design §2; spec §4.6.4.1):
+  // enforcement keeps working on commitment forms, fail-closed where it cannot.
+  // Read gating digests the candidate and compares; a CONCRETE exchange-rule
+  // pattern value digest-matches a committed field; a VARIABLE over a committed
+  // field does not bind (the rule does not fire — the fail-closed direction: an
+  // unevaluable release does not happen).
+
   const reader = "did:key:reader";
   const stranger = "did:key:stranger";
   const committedUser = {
@@ -308,7 +311,7 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
       // exactly as it reached the plaintext form.
       const committed = {
         type: CFC_ATOM_TYPE.Caveat,
-        kind: "prompt-injection-risk",
+        kind: "prompt-injection-risk-unscreened",
         source: commitCfcFieldValue(source),
       };
       expect(dischargeMaterialRiskAtoms([committed])).toEqual([]);

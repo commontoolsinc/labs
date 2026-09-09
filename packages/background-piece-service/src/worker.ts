@@ -1,4 +1,11 @@
-import { PieceManager } from "@commonfabric/piece";
+import {
+  createSession,
+  type DID,
+  Identity,
+  keyPairFromRealmValue,
+  Session,
+} from "@commonfabric/identity";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   Cell,
   type ConsoleHandler,
@@ -11,8 +18,9 @@ import {
   runtimePresets,
   Stream,
 } from "@commonfabric/runner";
-import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
+
 import { env } from "./env.ts";
 import {
   getMeter,
@@ -20,13 +28,6 @@ import {
   initOpenTelemetry,
   shutdownOpenTelemetry,
 } from "./otel.ts";
-
-import {
-  createSession,
-  type DID,
-  Identity,
-  Session,
-} from "@commonfabric/identity";
 import {
   InitializationData,
   isWorkerIPCRequest,
@@ -39,7 +40,7 @@ let initialized = false;
 let spaceId: DID | undefined;
 let latestError: Error | null = null;
 let currentSession: Session | null = null;
-let manager: PieceManager | null = null;
+let pieces: PiecesController | null = null;
 let runtime: Runtime | null = null;
 // Detaches the OpenTelemetry bridge from the runtime's telemetry EventTarget.
 // Set when the runtime is created in initialize(), called on cleanup() so the
@@ -108,7 +109,7 @@ export function setWorkerStateForTesting(
     spaceId?: DID;
     latestError?: Error | null;
     currentSession?: Session | null;
-    manager?: PieceManager | null;
+    pieces?: PiecesController | null;
     runtime?: Runtime | null;
     loadedPieces?: Iterable<
       [string, Cell<{ bgUpdater: Stream<unknown> }>]
@@ -120,7 +121,7 @@ export function setWorkerStateForTesting(
   if ("spaceId" in state) spaceId = state.spaceId;
   if ("latestError" in state) latestError = state.latestError ?? null;
   if ("currentSession" in state) currentSession = state.currentSession ?? null;
-  if ("manager" in state) manager = state.manager ?? null;
+  if ("pieces" in state) pieces = state.pieces ?? null;
   if ("runtime" in state) runtime = state.runtime ?? null;
   if ("loadedPieces" in state) {
     loadedPieces.clear();
@@ -138,7 +139,7 @@ export function resetWorkerStateForTesting(): void {
   spaceId = undefined;
   latestError = null;
   currentSession = null;
-  manager = null;
+  pieces = null;
   runtime = null;
   detachOtelBridge = null;
   loadedPieces.clear();
@@ -153,8 +154,13 @@ export async function initialize(
     return;
   }
 
-  const { did, toolshedUrl, rawIdentity, experimental } = data;
-  const identity = await Identity.deserialize(rawIdentity);
+  const { did, toolshedUrl, experimental } = data;
+  const identity = await Identity.fromKeyPair(
+    keyPairFromRealmValue(
+      data.encodedIdentity,
+      "Initialization `encodedIdentity`",
+    ),
+  );
   const apiUrl = new URL(toolshedUrl);
 
   // Initialize session
@@ -164,7 +170,7 @@ export async function initialize(
     spaceDid: spaceId,
   });
 
-  // Initialize runtime and piece manager. Shared first-party posture
+  // Initialize runtime and the pieces controller. Shared first-party posture
   // (CT-1814); `experimental` arrives as data from the main process so the
   // service has one flag decision point (see main.ts createRuntime). The
   // preset pins patternEnvironment to `apiUrl`, matching the explicit pin
@@ -208,8 +214,8 @@ export async function initialize(
     },
   });
 
-  manager = new PieceManager(currentSession, runtime);
-  await manager.ready;
+  pieces = new PiecesController(currentSession, runtime);
+  await pieces.ready;
 
   console.log(`Initialized`);
   initialized = true;
@@ -225,7 +231,7 @@ export async function cleanup(): Promise<void> {
 
   loadedPieces.clear();
   currentSession = null;
-  manager = null;
+  pieces = null;
 
   // Ensure storage is synced before cleanup
   if (runtime) {
@@ -254,7 +260,7 @@ export async function cleanup(): Promise<void> {
 }
 
 export async function runPiece(data: RunData): Promise<void> {
-  if (!manager) {
+  if (!pieces) {
     throw new Error("Worker session not initialized");
   }
   if (!spaceId) {
@@ -275,13 +281,13 @@ export async function runPiece(data: RunData): Promise<void> {
     } catch {
       throw new Error(`Piece ID is not a valid entity id: ${pieceId}`);
     }
-    const pieceCell = manager.runtime.getCellFromEntityId(
+    const pieceCell = pieces.runtime.getCellFromEntityId(
       spaceId,
       pieceEntityId,
     );
 
     // Check whether the piece is still in the active piece list.
-    const piecesEntryCell = await manager.getActivePiece(pieceCell);
+    const piecesEntryCell = await pieces.getActivePiece(pieceCell);
     if (piecesEntryCell === undefined) {
       // Skip any pieces that aren't still in one of the lists
       throw new Error(`No pieces list entry found for piece: ${pieceId}`);
@@ -291,9 +297,9 @@ export async function runPiece(data: RunData): Promise<void> {
     let runningPiece = loadedPieces.get(pieceId);
 
     if (!runningPiece) {
-      // If not loaded yet, get it from the manager
+      // If not loaded yet, get it from the pieces controller
       console.log(`Loading piece ${pieceId} for the first time`);
-      runningPiece = await manager.get(piecesEntryCell, true, {
+      runningPiece = await pieces.getPieceCell(piecesEntryCell, true, {
         type: "object",
         properties: { bgUpdater: { asCell: ["stream"] } },
         required: ["bgUpdater"],
@@ -352,6 +358,12 @@ export async function runPiece(data: RunData): Promise<void> {
 // Logs here are often viewed through observability dashboards
 // that don't render objects well. Attempt to stringify any objects
 // here.
+//
+// TODO(danfuzz): this is an unsafe use of `stringify()` for piece console
+// arguments, which arrive live and in-process (the runtime's console capture
+// dispatches them without serialization): a logged `FabricSpecialObject`
+// renders as `{}`, silently. Wants a `FabricSpecialObject` test rendering
+// via `toCompactDebugString()` from `@commonfabric/data-model`.
 export function safeFormat(value: unknown): unknown {
   if (value && typeof value === "object") {
     try {
@@ -361,7 +373,7 @@ export function safeFormat(value: unknown): unknown {
       // we properly handle sensitive logging.
       return JSON.stringify(
         value,
-        (key, value) => key === "rawIdentity" ? "<REDACTED>" : value,
+        (key, value) => key === "encodedIdentity" ? "<REDACTED>" : value,
       );
     } catch (_e) {
       // satisfy typescript's empty block

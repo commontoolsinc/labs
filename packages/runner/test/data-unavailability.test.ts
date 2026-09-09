@@ -105,47 +105,27 @@ describe("JavaScript-node data unavailability", () => {
       space,
       `data unavailability result ${nextResultId++}`,
     );
-    const runner = runtime.runner as unknown as {
-      writeJavaScriptActionResult: (...args: any[]) => unknown;
-      readJavaScriptArgument: (...args: any[]) => {
-        unavailable?: unknown;
-      };
+    const runner = runtime.runner.accessForTestingOnly;
+    runner.javascriptResultObserver = options.captureWrittenResult;
+    runner.javascriptArgumentObserver = (result, reads) => {
+      options.captureSelectedInput?.(result.unavailable);
+      options.captureArgumentReads?.(reads);
     };
-    const originalWrite = runner.writeJavaScriptActionResult;
-    const originalRead = runner.readJavaScriptArgument;
-    if (options.captureWrittenResult !== undefined) {
-      runner.writeJavaScriptActionResult = function (...args: any[]) {
-        options.captureWrittenResult!(args[2]);
-        return originalWrite.apply(this, args);
-      };
-    }
-    if (
-      options.captureSelectedInput !== undefined ||
-      options.captureArgumentReads !== undefined
-    ) {
-      runner.readJavaScriptArgument = function (...args: any[]) {
-        const tx = args[2] as IExtendedStorageTransaction;
-        const readCountBefore = [...(tx.getReadActivities?.() ?? [])].length;
-        const result = originalRead.apply(this, args);
-        options.captureSelectedInput?.(result.unavailable);
-        options.captureArgumentReads?.(
-          [...(tx.getReadActivities?.() ?? [])].slice(readCountBefore),
-        );
-        return result;
-      };
-    }
     try {
       const result = await runtime.runSynced(
         resultCell,
         trustExecutable(runtime, pattern),
         options.argument as never,
       );
-      await result.pull();
-      return getDerivedInternalCell(result, { partialCause: "output" })
-        .getRaw();
+      const output = getDerivedInternalCell(result, {
+        partialCause: "output",
+      });
+      const pulled = await output.pull();
+      const raw = output.getRaw();
+      return parseLink(raw, output) === undefined ? raw : pulled;
     } finally {
-      runner.writeJavaScriptActionResult = originalWrite;
-      runner.readJavaScriptArgument = originalRead;
+      runner.javascriptResultObserver = undefined;
+      runner.javascriptArgumentObserver = undefined;
     }
   }
 
@@ -754,9 +734,11 @@ describe("JavaScript-node data unavailability", () => {
         if (value instanceof DataUnavailable) localWrites.push(value.reason);
       },
     });
-    expect(localStates[0]).toBe("syncing");
+    // Current-main's static same-space presync can establish authoritative
+    // absence before the value node first runs, so no transient is required.
+    expect(localStates[0]).toBe("schema-mismatch");
     expect(localStates.at(-1)).toBe("schema-mismatch");
-    expect(localWrites[0]).toBe("syncing");
+    expect(localWrites[0]).toBe("schema-mismatch");
     expect(localWrites.at(-1)).toBe("schema-mismatch");
     expect((localOutput as DataUnavailable).reason).toBe("schema-mismatch");
   });
@@ -829,7 +811,7 @@ describe("JavaScript-node data unavailability", () => {
     expectUnavailable(output, "schema-mismatch");
   });
 
-  it("still rejects a sibling mismatch beside accepted readiness syncing", async () => {
+  it("rejects an accessed sibling mismatch beside accepted readiness syncing", async () => {
     const missingRemote = runtime.getCell(
       remoteSpace,
       `accepted nested syncing remote ${nextResultId++}`,
@@ -861,14 +843,14 @@ describe("JavaScript-node data unavailability", () => {
         path: ["missing"],
         reasons: ["syncing"],
       }],
-      implementation: () => {
+      implementation: (value) => {
         calls++;
-        return "should not run";
+        return value.invalid;
       },
       captureWrittenResult: (value) => writes.push(value),
     });
 
-    expect(calls).toBe(0);
+    expect(calls).toBe(1);
     expectUnavailable(writes[0], "schema-mismatch");
     expectUnavailable(output, "schema-mismatch");
   });
@@ -1040,18 +1022,25 @@ describe("JavaScript-node data unavailability", () => {
 
   it("retries a rejected linked-target sync and wakes the consumer", async () => {
     const target = runtime.getCell(
-      space,
+      remoteSpace,
       `reject once target ${nextResultId++}`,
     );
     const targetId = target.getAsNormalizedFullLink().id;
     const originalSyncCell = storageManager.syncCell.bind(storageManager);
     let attempts = 0;
+    let rejectedReadiness = false;
     storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
       if (cell.getAsNormalizedFullLink().id === targetId) {
         attempts++;
-        // The first call is runSynced's static input presync. Reject the second,
-        // readiness-owned call so the retry loop itself is under test.
-        if (attempts === 2) throw new Error("transient selector failure");
+        // Static input presync may make several coverage passes. Reject the
+        // first readiness-owned call so the retry machinery itself is tested.
+        if (
+          runtime.scheduler.getExecutingActionToken() !== undefined &&
+          !rejectedReadiness
+        ) {
+          rejectedReadiness = true;
+          throw new Error("transient selector failure");
+        }
       }
       return await originalSyncCell(cell);
     };
@@ -1197,7 +1186,7 @@ describe("JavaScript-node data unavailability", () => {
 
   it("bounds readiness retries while the provider stays offline", async () => {
     const target = runtime.getCell(
-      space,
+      remoteSpace,
       `offline readiness target ${nextResultId++}`,
     );
     const targetId = target.getAsNormalizedFullLink().id;
@@ -1274,6 +1263,9 @@ describe("JavaScript-node data unavailability", () => {
   });
 
   it("preserves a required nested undefined admitted by an anyOf schema", async () => {
+    let ownsResult = false;
+    let resultIsUndefined = false;
+    let candidatesLength = -1;
     const output = await runValueNode({
       argument: {
         value: {
@@ -1294,16 +1286,18 @@ describe("JavaScript-node data unavailability", () => {
         },
         required: ["result", "candidates"],
       },
-      implementation: (argument) => ({
-        ownsResult: Object.hasOwn(argument, "result"),
-        result: argument.result,
-      }),
+      implementation: (argument) => {
+        ownsResult = Object.hasOwn(argument, "result");
+        resultIsUndefined = argument.result === undefined;
+        candidatesLength = argument.candidates.length;
+        return true;
+      },
     });
 
-    expect(output).toEqual({
-      ownsResult: true,
-      result: undefined,
-    });
+    expect(output).toBe(true);
+    expect(ownsResult).toBe(true);
+    expect(resultIsUndefined).toBe(true);
+    expect(candidatesLength).toBe(0);
   });
 
   it("suppresses value-producing effects while propagating unavailable input", async () => {

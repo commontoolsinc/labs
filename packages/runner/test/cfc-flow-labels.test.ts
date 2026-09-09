@@ -1,9 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { internSchema } from "@commonfabric/data-model-schema";
+import type { URI } from "@commonfabric/memory/interface";
+import type { JSONSchema } from "../src/builder/types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import type { Action } from "../src/scheduler.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-labels");
@@ -26,17 +35,50 @@ const replicaEntries = (
   return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
 };
 
-// S16 default transition: a transaction's outputs are tainted by what it
-// read. Without this, "read labeled data, write a derived plain value to an
-// unlabeled cell" launders the label away (audit S16) — the acceptance
-// scenario for the cfcFlowLabels dial.
+const SECRET_FIELD_SCHEMA = internSchema(
+  { type: "string", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+  true,
+);
+
+/**
+ * Declares the write policy covering a raw write to a seeded document's
+ * `secret` field. A schema-backed write carries this declaration from the
+ * schema it went through; a raw address write states it here instead.
+ */
+const recordSecretWritePolicy = (
+  tx: IExtendedStorageTransaction,
+  id: string,
+): void => {
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: signer.did(),
+      scope: "space",
+      id: id as URI,
+      path: ["value", "secret"],
+    },
+    schemaHash: SECRET_FIELD_SCHEMA.taggedHashString,
+    schema: SECRET_FIELD_SCHEMA.schema,
+  });
+};
+
 describe("CFC flow labels (default transition)", () => {
+  // S16 default transition: a transaction's outputs are tainted by what it
+  // read. Without this, "read labeled data, write a derived plain value to an
+  // unlabeled cell" launders the label away (audit S16) — the acceptance
+  // scenario for the cfcFlowLabels dial.
+
   it("persists derived flow labels on laundered value copies and gates downstream egress", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The derived doc declares
+      // none, and the `flowEntry` assertions below read back the entry that
+      // write persisted.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -52,6 +94,7 @@ describe("CFC flow labels (default transition)", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -61,7 +104,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -107,7 +150,6 @@ describe("CFC flow labels (default transition)", () => {
       // later tx consuming B cannot write into a slot whose ceiling
       // excludes the secret.
       const egress = runtime.edit();
-      egress.setCfcEnforcementMode("enforce-explicit");
       const derivedIn = runtime.getCell(
         signer.did(),
         "cfc-flow-labels-derived",
@@ -142,18 +184,25 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // Runtime-internal surfaces (`["cfc"]`, `["source"]`) are document-root
-  // siblings of `value`; user fields of the same names live under
-  // `["value", ...]` and canonicalize to identical logical paths. The
-  // surface exclusions must therefore key on the RAW storage path — keying
-  // on the canonical path lets `value.source` writes/reads dodge flow-label
-  // propagation entirely (#4011 Codex P1).
   it("does not exempt user value fields named like runtime surfaces", async () => {
+    // Runtime-internal surfaces (`["cfc"]`, `["source"]`) are document-root
+    // siblings of `value`; user fields of the same names live under
+    // `["value", ...]` and canonicalize to identical logical paths. The
+    // surface exclusions must therefore key on the RAW storage path — keying
+    // on the canonical path lets `value.source` writes/reads dodge flow-label
+    // propagation entirely (#4011 Codex P1).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. Neither the target
+      // doc nor the out doc declares one, and the `flowEntry` and `outEntry`
+      // assertions below read back the entries those writes persisted.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts those entries in the
+      // documents.
       cfcFlowLabels: "persist",
     });
     try {
@@ -167,6 +216,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -176,7 +226,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -263,16 +313,23 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // Derived labels are per-value, not a ratchet: overwriting a flow-labeled
-  // path from a transaction that read nothing labeled replaces the derived
-  // component, so the label tracks the current value (the old, tainted value
-  // is gone; reads of it journaled its label at read time).
   it("untainted overwrite replaces the value channel and grows the existence channel", async () => {
+    // Derived labels are per-value, not a ratchet: overwriting a flow-labeled
+    // path from a transaction that read nothing labeled replaces the derived
+    // component, so the label tracks the current value (the old, tainted value
+    // is gone; reads of it journaled its label at read time).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The target declares
+      // none, and the `derivedAfter` assertions below read back the entries
+      // the tainted write and the overwrite left there.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts the value and shape entries
+      // in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -284,6 +341,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -293,7 +351,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -378,7 +436,14 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The target declares
+      // none, so the first derivation's envelope write lands. The second
+      // derivation's `wroteCfc` assertion measures the skip of that same
+      // write.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what makes an envelope write happen at
+      // all, and `wroteCfc` reads it back.
       cfcFlowLabels: "persist",
     });
     try {
@@ -390,6 +455,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -399,7 +465,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{ path: ["secret"], label: { confidentiality: ["x"] } }],
@@ -458,21 +524,28 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // SC-11's equality is over the CANONICAL form (§4.1.3 c14n; spec-changes
-  // SC-11): the prepare-side skip must elide the envelope write even when the
-  // stored form differs BYTE-wise from the rebuild — top-level entry order
-  // and OR-clause alternative order are serialization freedom, not label
-  // changes. The storage layer's raw deep-equal write elision is
-  // order-sensitive and cannot catch these, so this pins the prepare.ts skip
-  // itself: a stored-form permutation (a raw seed, an older writer, a peer
-  // whose view merge ordered alternatives differently) must not be rewritten
-  // by every re-derivation.
   it("SC-11: skips the envelope write for a canonically-equal but byte-different stored form", async () => {
+    // SC-11's equality is over the CANONICAL form (§4.1.3 c14n; spec-changes
+    // SC-11): the prepare-side skip must elide the envelope write even when the
+    // stored form differs BYTE-wise from the rebuild — top-level entry order
+    // and OR-clause alternative order are serialization freedom, not label
+    // changes. The storage layer's raw deep-equal write elision is
+    // order-sensitive and cannot catch these, so this pins the prepare.ts skip
+    // itself: a stored-form permutation (a raw seed, an older writer, a peer
+    // whose view merge ordered alternatives differently) must not be rewritten
+    // by every re-derivation.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The target declares
+      // none, so the first derivation writes the envelope that the permutation
+      // reorders and the second derivation's `wroteCfc` assertion measures the
+      // skip of.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what writes that envelope.
       cfcFlowLabels: "persist",
     });
     try {
@@ -489,6 +562,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -498,7 +572,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -635,16 +709,19 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // H1 observe-mode contract (enforcement-matrix rollout constraint 1:
-  // measure under `observe` before a host flips to `persist`): the join IS
-  // derived and surfaced as a diagnostic, and NOTHING persists — no ["cfc"]
-  // write in the transaction, no envelope on the stored target at all.
   it("observe mode derives the join as a diagnostic and persists nothing", async () => {
+    // H1 observe-mode contract (enforcement-matrix rollout constraint 1:
+    // measure under `observe` before a host flips to `persist`): the join IS
+    // derived and surfaced as a diagnostic, and NOTHING persists — no ["cfc"]
+    // write in the transaction, no envelope on the stored target at all.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The assertions below read that the join is reported as a diagnostic
+      // and that neither the transaction nor the stored document carries an
+      // envelope. That holds at the `observe` rung.
       cfcFlowLabels: "observe",
     });
     try {
@@ -656,6 +733,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -665,7 +743,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -726,15 +804,21 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // A2: trigger reads (§8.9.2). The decision to run was influenced by the
-  // triggering change even when the run never reads the changed value, so
-  // its labels join the derivation.
   it("joins trigger-read labels into the derived component", async () => {
+    // A2: trigger reads (§8.9.2). The decision to run was influenced by the
+    // triggering change even when the run never reads the changed value, so
+    // its labels join the derivation.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The out doc declares
+      // none, and the `entry` assertions below read back what that write
+      // persisted.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -746,6 +830,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -755,7 +840,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -798,15 +883,21 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // A2 end-to-end through the scheduler: run 1 subscribes to the labeled
-  // doc; the rerun triggered by its change takes a branch that never
-  // re-reads it, yet the rerun's write is tainted via the recorded trigger.
   it("taints rerun writes with the triggering change's labels", async () => {
+    // A2 end-to-end through the scheduler: run 1 subscribes to the labeled
+    // doc; the rerun triggered by its change takes a branch that never
+    // re-reads it, yet the rerun's write is tainted via the recorded trigger.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The flag doc declares
+      // none, and the `entry` assertions below read back what the rerun's
+      // write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -818,6 +909,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -827,7 +919,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "v1" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -880,6 +972,8 @@ describe("CFC flow labels (default transition)", () => {
         id: sourceId,
         path: ["value", "secret"],
       }, "v2");
+      recordSecretWritePolicy(bump, sourceId);
+      bump.prepareCfc();
       expect((await bump.commit()).ok).toBeDefined();
       await runtime.idle();
       expect(runs).toBeGreaterThan(1);
@@ -896,19 +990,22 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // A2 + retry: the triggered rerun aborts with RetryImmediately, so its
-  // consumed trigger reads must be restored for the retry run — otherwise
-  // the retry's writes are under-tainted (the run still exists only because
-  // the labeled dep changed).
   it("keeps trigger-read labels across a RetryImmediately rerun", async () => {
-    const { RetryImmediately } = await import(
-      "../src/scheduler/retry-immediately.ts"
-    );
+    // A2 + retry: the triggered rerun aborts with RetryImmediately, so its
+    // consumed trigger reads must be restored for the retry run — otherwise
+    // the retry's writes are under-tainted (the run still exists only because
+    // the labeled dep changed).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The flag doc declares
+      // none, and the `entry` assertions below read back what the retry's
+      // write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -920,6 +1017,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -929,7 +1027,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "v1" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -985,6 +1083,8 @@ describe("CFC flow labels (default transition)", () => {
         id: sourceId,
         path: ["value", "secret"],
       }, "v2");
+      recordSecretWritePolicy(bump, sourceId);
+      bump.prepareCfc();
       expect((await bump.commit()).ok).toBeDefined();
       await runtime.idle();
       expect(runs).toBeGreaterThanOrEqual(3);

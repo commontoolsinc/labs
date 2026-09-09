@@ -1,7 +1,8 @@
-import { createRouter } from "@/lib/create-app.ts";
+import { cors } from "@hono/hono/cors";
+
 import * as handlers from "./whoami.handlers.ts";
 import * as routes from "./whoami.routes.ts";
-import { cors } from "@hono/hono/cors";
+import { createRouter } from "@/lib/create-app.ts";
 
 const router = createRouter();
 

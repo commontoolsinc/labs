@@ -1,16 +1,17 @@
+import { hashOf, toCompactDebugString } from "@commonfabric/data-model";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+
 import {
   type EntityKind,
   entityUriSchemePrefix,
   hasEntityUriScheme,
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
 import type { URI } from "./sigil-types.ts";
 
 /**
@@ -44,7 +45,7 @@ export function toURI(value: unknown, kind?: EntityKind): URI {
       }
       // TODO(seefeld): Remove this once we want to support any URI, ideally
       // once there are no bare ids anymore
-      if (!hasEntityUriScheme(value) && !value.startsWith("data:")) {
+      if (!hasEntityUriScheme(value) && !hasDataUriScheme(value)) {
         throw new Error(`Invalid URI: ${value}`);
       }
       return value as URI;
@@ -71,7 +72,7 @@ export function fromURI(uri: URI | string): string {
     return uri;
   } else if (entityScheme !== undefined) {
     return uri.slice(entityScheme.length);
-  } else if (uri.startsWith("data:")) {
+  } else if (hasDataUriScheme(uri)) {
     return hashOf(uri).toString();
   } else {
     // TODO(seefeld): Remove this once we want to support any URI

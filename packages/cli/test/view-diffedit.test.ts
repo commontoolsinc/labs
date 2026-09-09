@@ -4,6 +4,7 @@
  * resurrected, and saving splices the edited lines back into the underlying
  * files. A diff matching no file on disk is read-only.
  */
+
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
@@ -29,6 +30,17 @@ function press(s: Session, ...names: string[]): void {
 
 function type(s: Session, text: string): void {
   for (const ch of text) s.handleKey({ name: ch, char: ch });
+}
+
+function saveSource(
+  source: ReturnType<typeof diffSource>,
+  text: string,
+  baseline?: string,
+  options?: Parameters<ReturnType<typeof diffSource>["save"]>[3],
+): string {
+  const lineEndings = source.lineEndingProvenance?.(text) ??
+    text.split("\n").map(() => undefined);
+  return source.save(text, lineEndings, baseline, options);
 }
 
 /** Enter edit mode if needed and move the cursor to the given diff line. */
@@ -239,7 +251,7 @@ Deno.test("diffedit: a context line is editable and writes its file line", () =>
   }
 });
 
-Deno.test("diffedit: the incremental highlighter recolours only edited lines", () => {
+Deno.test("diffedit: the incremental highlighter recolors only edited lines", () => {
   const { ws, done } = tempWorkspace();
   try {
     const model = parseDiff(DIFF)!;
@@ -251,7 +263,7 @@ Deno.test("diffedit: the incremental highlighter recolours only edited lines", (
     const out = hl.update(raw.join("\n"));
     assertEquals(out[5].text, raw[5], "edited line reflects the new text");
     // Every other line — the file/hunk headers especially — is byte-identical
-    // to the seed, so nothing reflows or flickers colour between keystrokes.
+    // to the seed, so nothing reflows or flickers color between keystrokes.
     for (let i = 0; i < doc.lines.length; i++) {
       if (i === 5) continue;
       assertEquals(
@@ -329,7 +341,7 @@ export const shown = 2;
   }
 });
 
-Deno.test("diffedit: stateful languages keep complete-file colours after edits", () => {
+Deno.test("diffedit: stateful languages keep complete-file colors after edits", () => {
   const root = Deno.makeTempDirSync();
   try {
     const cases = [
@@ -380,7 +392,7 @@ Deno.test("diffedit: stateful languages keep complete-file colours after edits",
       assertEquals(
         editedLine.spans.find((span) => span.text === "after")?.cls,
         testCase.cls,
-        `${testCase.path} live colour`,
+        `${testCase.path} live color`,
       );
 
       const editedAgainText = editedText.replace("+after", "+again");
@@ -391,7 +403,7 @@ Deno.test("diffedit: stateful languages keep complete-file colours after edits",
       assertEquals(
         editedAgainLine.spans.find((span) => span.text === "again")?.cls,
         testCase.cls,
-        `${testCase.path} repeated live colour`,
+        `${testCase.path} repeated live color`,
       );
 
       const reparsed = source.parse(editedAgainText);
@@ -401,7 +413,7 @@ Deno.test("diffedit: stateful languages keep complete-file colours after edits",
       assertEquals(
         parsedLine.spans.find((span) => span.text === "again")?.cls,
         testCase.cls,
-        `${testCase.path} deferred colour`,
+        `${testCase.path} deferred color`,
       );
     }
   } finally {
@@ -457,7 +469,7 @@ Deno.test("diffedit: a local string edit leaves surrounding template state intac
   }
 });
 
-Deno.test("diffedit: a local string edit retains same-line contextual colours", () => {
+Deno.test("diffedit: a local string edit retains same-line contextual colors", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = [
@@ -748,35 +760,6 @@ const extra = answer + 1;
   }
 });
 
-Deno.test("diffedit: a refused hunk update leaves the removed line intact", () => {
-  const { root, ws, done } = tempWorkspace();
-  try {
-    const s = diffSession(ws);
-    toLine(s, 8); // the "-export const answer = 42;" line
-    const before = s.doc.text;
-    const internals = s as unknown as {
-      adjustHunkCounts(
-        oldDelta: number,
-        newDelta: number,
-        hunkHeader?: number | null,
-      ): boolean;
-    };
-    internals.adjustHunkCounts = () => false;
-
-    press(s, "R");
-
-    assertEquals(s.doc.text, before, "the removed line was not changed");
-    assertEquals(s.view().message, "This hunk could not be updated.");
-    assertEquals(
-      Deno.readTextFileSync(join(root, "m.ts")),
-      FILE_TEXT,
-      "the workspace file was not changed",
-    );
-  } finally {
-    done();
-  }
-});
-
 Deno.test("diffedit: R remains a typed character on an editable diff line", () => {
   const { ws, done } = tempWorkspace();
   try {
@@ -966,7 +949,7 @@ Deno.test("diffedit: a save writes and reports only files whose contents changed
     const edited = TWO_FILE_DIFF.replace("+const y = 3;", "+const y = 30;");
     assertEquals(src.dirtyLabels!(TWO_FILE_DIFF, edited), ["x.ts"]);
     assertEquals(src.dirtyLabels!(TWO_FILE_DIFF, TWO_FILE_DIFF), []);
-    assertEquals(src.save(edited), "Saved 1 file");
+    assertEquals(saveSource(src, edited), "Saved 1 file");
     assertEquals(Deno.readTextFileSync(xPath), "const x = 1;\nconst y = 30;\n");
     assertEquals(Deno.readTextFileSync(zPath), "const z = 1;\nconst w = 3;\n");
     assertEquals(
@@ -985,11 +968,11 @@ Deno.test("diffedit: save reports exact zero- and two-file counts", () => {
     const model = parseDiff(TWO_FILE_DIFF)!;
     const { edit } = buildDiffDocument(TWO_FILE_DIFF, model, ws);
     const src = diffSource(ws, edit);
-    assertEquals(src.save(TWO_FILE_DIFF), "Saved 0 files");
+    assertEquals(saveSource(src, TWO_FILE_DIFF), "Saved 0 files");
     const edited = TWO_FILE_DIFF
       .replace("+const y = 3;", "+const y = 30;")
       .replace("+const w = 3;", "+const w = 30;");
-    assertEquals(src.save(edited), "Saved 2 files");
+    assertEquals(saveSource(src, edited), "Saved 2 files");
   } finally {
     done();
   }
@@ -1013,7 +996,7 @@ Deno.test("diffedit: save reports zero when the edited contents are already on d
     Deno.utimeSync(xPath, oldTime, oldTime);
     const mtime = Deno.statSync(xPath).mtime?.getTime();
 
-    assertEquals(src.save(edited, TWO_FILE_DIFF), "Saved 0 files");
+    assertEquals(saveSource(src, edited, TWO_FILE_DIFF), "Saved 0 files");
     assertEquals(
       Deno.statSync(xPath).mtime?.getTime(),
       mtime,
@@ -1034,8 +1017,8 @@ Deno.test("diffedit: a later save can restore the contents captured at open", ()
       "+const y = 3;",
       "+const y = 30;",
     );
-    assertEquals(src.save(first, TWO_FILE_DIFF), "Saved 1 file");
-    assertEquals(src.save(TWO_FILE_DIFF, first), "Saved 1 file");
+    assertEquals(saveSource(src, first, TWO_FILE_DIFF), "Saved 1 file");
+    assertEquals(saveSource(src, TWO_FILE_DIFF, first), "Saved 1 file");
     assertEquals(
       ws.read([...edit.fileText.keys()][0]),
       "const x = 1;\nconst y = 3;\n",
@@ -1088,7 +1071,7 @@ Deno.test("diffedit: save refuses to overwrite a file changed after opening", ()
     Deno.writeTextFileSync(xPath, external);
 
     assertThrows(
-      () => src.save(edited, TWO_FILE_DIFF),
+      () => saveSource(src, edited, TWO_FILE_DIFF),
       Error,
       "changed after this view opened",
     );
@@ -1290,7 +1273,11 @@ Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () 
       { line: 4, kind: "diffMetadata" },
     ]);
     const rows = renderFrame(s.displayDoc(), view).map(stripAnsi);
-    for (let row = 0; row < 4; row++) {
+    assert(
+      rows[0].endsWith("+1 −1"),
+      "the first line carries the whole-diff totals, not a marker",
+    );
+    for (let row = 1; row < 4; row++) {
       assertEquals(rows[row].at(-1), " ", "earlier metadata is not marked");
     }
     assert(
@@ -1711,7 +1698,9 @@ Deno.test("diffedit: an edit after expanding context saves without duplicating l
   }
 });
 
-// --- regression: review findings (expand overlap, repeated-path revert, etc.) -
+//
+// regression: review findings (expand overlap, repeated-path revert, etc.) -
+//
 
 const MULTI_DIFF = `diff --git a/m.ts b/m.ts
 index 0000000..1111111 100644
@@ -2171,7 +2160,9 @@ Deno.test("diffedit: insert + expand + edit then save writes the file correctly"
   }
 });
 
-// --- regression: git log -p multi-commit diffs must not corrupt files --------
+//
+// regression: git log -p multi-commit diffs must not corrupt files
+//
 
 function stubWs(root: string): DiffWorkspace {
   return {
@@ -2882,7 +2873,9 @@ Deno.test("diffedit: editing a hunk with a blank context line saves without trun
   }
 });
 
-// --- refusing edits that cannot be saved (a commit-message preamble) ---------
+//
+// refusing edits that cannot be saved (a commit-message preamble)
+//
 
 Deno.test("diffedit: refuses editing text before the diff (a commit-message subject)", () => {
   const { ws, done } = tempWorkspace();
@@ -2942,7 +2935,9 @@ Deno.test("diffedit: an edit-mode search skips the preamble to a savable line", 
   }
 });
 
-// --- editing the HEAD commit's message (git show) ----------------------------
+//
+// editing the HEAD commit's message (git show)
+//
 
 Deno.test("diffedit: the HEAD commit's message is editable; save prompts then amends", () => {
   const { root, ws, done } = tempWorkspace();
@@ -3151,7 +3146,7 @@ Deno.test("diffedit: a failed amend restores files written by the save", () => {
     );
     let error = "";
     try {
-      src.save(edited, GIT_SHOW);
+      saveSource(src, edited, GIT_SHOW);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     }
@@ -3182,7 +3177,7 @@ Deno.test("diffedit: save refuses a selected workspace file that disappeared", (
     );
 
     assertThrows(
-      () => source.save(edited, DIFF),
+      () => saveSource(source, edited, DIFF),
       Error,
       "Could not read",
     );
@@ -3213,7 +3208,7 @@ Deno.test("diffedit: failed amend accepts a file already restored by the Git run
     );
 
     const error = assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "commit hook rejected",
     );
@@ -3255,7 +3250,7 @@ Deno.test("diffedit: reports an error while reading a file for rollback", () => 
     );
 
     const error = assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "restoring files failed",
     );
@@ -3292,7 +3287,7 @@ Deno.test("diffedit: a failed amend preserves a file changed during the amend", 
     );
 
     assertThrows(
-      () => src.save(edited, GIT_SHOW),
+      () => saveSource(src, edited, GIT_SHOW),
       Error,
       "changed again and was not restored",
     );
@@ -3381,7 +3376,7 @@ Deno.test("diffedit: refuses to amend after the represented commit header is rem
     );
 
     assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "No commit to amend",
     );
@@ -3415,7 +3410,7 @@ Deno.test("diffedit: refuses to amend after HEAD switches branches", () => {
     currentRef = "refs/heads/topic";
 
     assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "different branch",
     );
@@ -3445,7 +3440,7 @@ Deno.test("diffedit: refuses to amend a selected path missing from the shown com
     );
 
     assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "shown commit does not contain",
     );
@@ -3588,7 +3583,7 @@ Deno.test("diffedit: a hunk-only amend preserves the raw commit message", () => 
     const edited = shown.replace("+after\n", "+after edited\n");
 
     assertEquals(
-      source.save(edited, shown),
+      saveSource(source, edited, shown),
       "Saved 1 file; Amended the commit",
     );
 
@@ -3664,7 +3659,7 @@ Subject: [PATCH] Embedded envelope`,
       const edited = shown.replace(`+${current}\n`, `+${next}\n`);
 
       assertEquals(
-        source.save(edited, shown),
+        saveSource(source, edited, shown),
         "Saved 1 file; Amended the commit",
         format.name,
       );
@@ -3735,7 +3730,11 @@ Deno.test("diffedit: consecutive compact commits keep historical hunk ownership"
     const source = diffSource(ws, edit, undefined, realGit(root));
 
     assertEquals(
-      source.save(shown.replace("+after\n", "+workspace edit\n"), shown),
+      saveSource(
+        source,
+        shown.replace("+after\n", "+workspace edit\n"),
+        shown,
+      ),
       "Saved 1 file",
     );
     assertEquals(runGit(root, ["rev-parse", "HEAD"]), head);
@@ -3773,7 +3772,11 @@ Deno.test("diffedit: consecutive email commits keep historical hunk ownership", 
     const source = diffSource(ws, edit, undefined, realGit(root));
 
     assertEquals(
-      source.save(shown.replace("+after\n", "+workspace edit\n"), shown),
+      saveSource(
+        source,
+        shown.replace("+after\n", "+workspace edit\n"),
+        shown,
+      ),
       "Saved 1 file",
     );
     assertEquals(runGit(root, ["rev-parse", "HEAD"]), head);
@@ -3813,7 +3816,7 @@ Deno.test("diffedit: a CRLF commit preamble keeps an LF-normalized message", () 
     const edited = shown.replace("+after\n", "+after edited\n");
 
     assertEquals(
-      source.save(edited, shown),
+      saveSource(source, edited, shown),
       "Saved 1 file; Amended the commit",
     );
     const rawCommit = runGit(root, ["cat-file", "commit", "HEAD"]);
@@ -4401,7 +4404,9 @@ Deno.test("diffedit: with no git runner the message is not editable", () => {
   }
 });
 
-// --- amend safety (review follow-ups) ----------------------------------------
+//
+// amend safety (review follow-ups)
+//
 
 Deno.test("diffedit: refuses to amend an all-blank commit message", () => {
   const { ws, done } = tempWorkspace();
@@ -4526,7 +4531,9 @@ Deno.test("diffedit: quitting after a message-only edit names the message, not f
   }
 });
 
-// --- context-aware revert prompt ---------------------------------------------
+//
+// context-aware revert prompt
+//
 
 /** Move the text cursor to `line` (up or down), in edit mode. */
 function moveCursorTo(s: Session, line: number): void {

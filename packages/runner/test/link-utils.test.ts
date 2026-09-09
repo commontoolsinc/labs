@@ -1,5 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { deepFreeze } from "@commonfabric/data-model";
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import type { JSONSchema } from "../src/builder/types.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
@@ -8,25 +15,27 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
-  isAliasBinding,
+  inlineExternalSchemaRefsInValue,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedLink,
-  parseAliasBinding,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  parseReferenceParts,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Runtime } from "../src/runtime.ts";
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -47,6 +56,7 @@ describe("link-utils", () => {
   });
 
   afterEach(async () => {
+    resetContentAddressedSchemasConfig();
     tx.abort();
     await runtime?.dispose();
     await storageManager?.close();
@@ -129,14 +139,6 @@ describe("link-utils", () => {
   });
 
   describe("isWriteRedirectLink", () => {
-    it("should not identify alias bindings as write redirect links", () => {
-      // `$alias` is only meaningful as a Pattern binding, not as a link in
-      // data; the binding predicate still matches it.
-      const legacyAlias = { $alias: { cell: "result", path: ["test"] } };
-      expect(isWriteRedirectLink(legacyAlias)).toBe(false);
-      expect(isAliasBinding(legacyAlias)).toBe(true);
-    });
-
     it("should identify sigil links with overwrite redirect as write redirect links", () => {
       const sigilLink = {
         "/": {
@@ -158,25 +160,6 @@ describe("link-utils", () => {
     it("should not identify non-links as write redirect links", () => {
       expect(isWriteRedirectLink("string")).toBe(false);
       expect(isWriteRedirectLink({ notLink: "value" })).toBe(false);
-    });
-  });
-
-  describe("isAliasBinding", () => {
-    it("should fail to match legacy aliases without name or cause", () => {
-      const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isAliasBinding(legacyAlias)).toBe(false);
-    });
-
-    it("should fail to match legacy aliases with cell id", () => {
-      const cell = runtime.getCell(space, "test");
-      const legacyAlias = { $alias: { cell: cell.entityId, path: ["test"] } };
-      expect(isAliasBinding(legacyAlias)).toBe(false);
-    });
-
-    it("should not identify non-legacy aliases", () => {
-      expect(isAliasBinding({ notAlias: "value" })).toBe(false);
-      expect(isAliasBinding({ $alias: "not object" })).toBe(false);
-      expect(isAliasBinding({ $alias: { notPath: "value" } })).toBe(false);
     });
   });
 
@@ -228,16 +211,21 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse toJSON to normalized links", () => {
+    it("should parse a cell's sigil link to normalized links", () => {
       const cell = runtime.getCell(space, "test");
-      const result = parseLink(cell.toJSON(), cell);
+      const result = parseLink(cell.toSigilLinkOrNull(), cell);
 
+      // A sigil-parsed link is DATA-DERIVED (OW51): parseLink stamps a
+      // read-side `viaLinkHop` so a later read dead-ending at its doc is an
+      // unresolved input, not a known absence. Identity + serialization
+      // ignore it; the assertions carry it because they compare full output.
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
         scope: "space",
         schema: undefined,
+        viaLinkHop: true,
       });
     });
 
@@ -259,10 +247,11 @@ describe("link-utils", () => {
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
+        viaLinkHop: true,
       });
     });
 
-    it("should parse sigil links to normalized links", () => {
+    it("should drop a redundant overwrite this when parsing sigil links", () => {
       const sigilLink = {
         "/": {
           [LINK_V1_TAG]: {
@@ -281,10 +270,11 @@ describe("link-utils", () => {
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
+        viaLinkHop: true,
       });
     });
 
-    it("should parse sigil links with overwrite this to normalized links", () => {
+    it("should parse sigil links with overwrite redirect to normalized links", () => {
       const sigilLink = {
         "/": {
           [LINK_V1_TAG]: {
@@ -304,6 +294,7 @@ describe("link-utils", () => {
         space: space,
         schema: { type: "number" },
         overwrite: "redirect",
+        viaLinkHop: true,
       });
     });
 
@@ -325,6 +316,7 @@ describe("link-utils", () => {
         space: space,
         scope: "space",
         schema: undefined,
+        viaLinkHop: true,
       });
     });
 
@@ -340,6 +332,7 @@ describe("link-utils", () => {
 
       expect(result).toEqual({
         path: ["nested", "value"],
+        viaLinkHop: true,
       });
 
       // Don't allow `id: undefined`, etc.
@@ -359,105 +352,21 @@ describe("link-utils", () => {
         space: space,
         scope: "space",
         schema: undefined,
+        viaLinkHop: true,
       });
     });
 
-    it("should not parse alias bindings (those parse via parseAliasBinding)", () => {
+    it("returns `undefined` for an `$alias` record in data", () => {
       const cell = runtime.getCell(space, "test");
-      const legacyAlias = {
-        $alias: {
-          cell: cell.entityId,
-          path: ["nested", "value"],
-          schema: { type: "number" },
-        },
-      };
-      // As data, `$alias` is not a link.
-      expect(parseLink(legacyAlias, cell)).toBeUndefined();
-
-      // As a Pattern binding, it still parses via the binding-side parser
-      // (which ignores the doubly-legacy `cell` ref and resolves to base).
       expect(
-        parseAliasBinding(
-          legacyAlias as unknown as AliasBinding,
-          cell.getAsNormalizedFullLink(),
-        ),
-      ).toEqual({
-        id: expect.stringContaining("of:"),
-        path: ["nested", "value"],
-        space: space,
-        scope: "space",
-        schema: { type: "number" },
-        overwrite: "redirect",
-      });
-    });
-
-    it("should resolve named-cell alias bindings against the base", () => {
-      const baseCell = runtime.getCell(space, "base");
-      const legacyAlias = {
-        $alias: {
-          // Only satisfies the AliasBinding constraint (name or
-          // partialCause); parseAliasBinding resolves against the base link.
-          cell: "result" as const,
-          path: ["nested", "value"],
-        },
-      };
-      expect(parseLink(legacyAlias, baseCell)).toBeUndefined();
-
-      const result = parseAliasBinding(
-        legacyAlias,
-        baseCell.getAsNormalizedFullLink(),
-      );
-      expect(result).toEqual({
-        id: expect.stringContaining("of:"),
-        path: ["nested", "value"],
-        space: space,
-        scope: "space",
-        schema: undefined,
-        overwrite: "redirect",
-      });
-    });
-
-    it("should resolve explicit inherit scope on alias bindings to the base's scope", () => {
-      const baseCell = runtime.getCell(space, "base-inherit-scope");
-      const base = {
-        ...baseCell.getAsNormalizedFullLink(),
-        scope: "session" as const,
-      };
-
-      // The alias types no longer admit `scope: "inherit"` (the builder never
-      // generates it), but stored pattern JSON is untyped: parsing stays
-      // defensive and resolves it to the base link's scope, like an absent
-      // scope.
-      expect(
-        parseAliasBinding(
-          {
-            $alias: { path: ["nested", "value"], scope: "inherit" },
-          } as unknown as AliasBinding,
-          base,
-        ),
-      ).toEqual({
-        id: base.id,
-        path: ["nested", "value"],
-        space: space,
-        scope: "session",
-        overwrite: "redirect",
-      });
-
-      // A partialCause alias denotes a derived internal cell — a different
-      // document minted from the result cell and the partialCause, in the
-      // alias's own scope — so it cannot be parsed against a base link.
-      expect(() =>
-        parseAliasBinding(
-          {
-            $alias: {
-              partialCause: "internal-cell",
-              path: ["nested", "value"],
-              scope: "user",
-            },
+        parseLink({
+          $alias: {
+            cell: cell.entityId,
+            path: ["nested", "value"],
+            schema: { type: "number" },
           },
-          base,
-        )
-      ).toThrow("Cannot parse partialCause alias as link");
+        }, cell),
+      ).toBeUndefined();
     });
 
     it("should return undefined for non-link values", () => {
@@ -537,27 +446,34 @@ describe("link-utils", () => {
 
   describe("createSigilLinkFromParsedLink", () => {
     it("should create sigil link from normalized link", () => {
-      const normalizedLink: NormalizedLink = {
-        id: "of:test",
-        path: ["nested", "value"],
-        space: space,
-        schema: { type: "number" },
-      };
+      // Reference emission is flag-gated; this pin opts in explicitly so
+      // it holds whatever the build's default is.
+      setContentAddressedSchemasConfig(true);
+      try {
+        const normalizedLink: NormalizedLink = {
+          id: "of:test",
+          path: ["nested", "value"],
+          space: space,
+          schema: { type: "number" },
+        };
 
-      const result = createSigilLinkFromParsedLink(normalizedLink, {
-        includeSchema: true,
-      });
+        const result = createSigilLinkFromParsedLink(normalizedLink, {
+          includeSchema: true,
+        });
 
-      expect(result).toEqual({
-        "/": {
-          [LINK_V1_TAG]: {
-            id: "of:test",
-            path: ["nested", "value"],
-            space: space,
-            schema: { type: "number" },
+        expect(result).toEqual({
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:test",
+              path: ["nested", "value"],
+              space: space,
+              schema: externalRefTo({ type: "number" }),
+            },
           },
-        },
-      });
+        });
+      } finally {
+        resetContentAddressedSchemasConfig();
+      }
     });
 
     it("serializes scoped links and parses inherited link scope from the base", () => {
@@ -581,6 +497,7 @@ describe("link-utils", () => {
         path: ["nested"],
         space,
         scope: "session",
+        viaLinkHop: true,
       });
 
       expect(parseLink({
@@ -600,6 +517,7 @@ describe("link-utils", () => {
         path: [],
         space,
         scope: "user",
+        viaLinkHop: true,
       });
     });
 
@@ -687,7 +605,9 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true });
 
-      expect(linkRefPayload(result).schema).toEqual(schema);
+      expect(resolvedSchema(linkRefPayload(result).schema)).toEqual(
+        schema,
+      );
     });
 
     it("should strip stream cell schemas from links when requested", () => {
@@ -714,7 +634,7 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true, keepAsCell: KeepAsCell.None });
 
-      expect(linkRefPayload(result).schema).toEqual({
+      expect(resolvedSchema(linkRefPayload(result).schema)).toEqual({
         type: "object",
         properties: {
           title: { type: "string" },
@@ -728,6 +648,161 @@ describe("link-utils", () => {
         },
         required: ["title"],
       });
+    });
+
+    it("externalizes each sanitization mode for one frozen schema", () => {
+      setContentAddressedSchemasConfig(true);
+      const schema = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            send: {
+              type: "string",
+              asCell: ["stream"],
+            },
+          },
+          required: ["send"],
+        } as const satisfies JSONSchema,
+      );
+      const link = {
+        id: "of:cached-schema",
+        path: [],
+        space,
+        schema,
+      } as const;
+
+      const kept = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      const stripped = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.None,
+      });
+
+      expect(resolvedSchema(linkRefPayload(kept).schema)).toEqual(schema);
+      expect(resolvedSchema(linkRefPayload(stripped).schema)).toEqual({
+        type: "object",
+        properties: {
+          send: { type: "string" },
+        },
+      });
+    });
+
+    it("re-registers cached schema documents after an epoch change", async () => {
+      setContentAddressedSchemasConfig(true);
+      const schema = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+          },
+        } as const satisfies JSONSchema,
+      );
+      const link = {
+        id: "of:cached-schema-epoch",
+        path: [],
+        space,
+        schema,
+      } as const;
+
+      const first = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      expect(resolvedSchema(linkRefPayload(first).schema)).toEqual(schema);
+
+      tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+
+      const second = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      expect(resolvedSchema(linkRefPayload(second).schema)).toEqual(schema);
+    });
+  });
+
+  describe("inlineExternalSchemaRefsInValue", () => {
+    it("carries a link whose schema is boolean through unchanged", () => {
+      // The inliner touches only object schemas carrying an external
+      // reference. A boolean schema is a valid carried schema and not a
+      // reference, so the value rides through as it is.
+      const sigil = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:boolean-schema-target",
+            path: [],
+            schema: true,
+          },
+        },
+      };
+      const value = { entry: sigil };
+      expect(inlineExternalSchemaRefsInValue(value)).toEqual(value);
+    });
+  });
+
+  describe("sanitizeSchemaForLinks through references", () => {
+    it("re-externalizes a nested document the strip changed", () => {
+      // Document B carries the marker; document A reaches it only by
+      // reference. A sanitize that stops at the reference looks clean and
+      // is not: the first reader to resolve B rediscovers the marker and
+      // mints a handle where a plain value is expected. The node must stay
+      // a reference, so the strip moves its target instead of inlining.
+      const documentB = {
+        type: "string",
+        asCell: ["cell"],
+      } as unknown as JSONSchema;
+      const hashB = internSchemaAsTaggedHashString(documentB);
+      registerSchemaDocument(hashB, documentB);
+      const documentA = {
+        type: "object",
+        properties: { name: { $ref: `cid:${hashB}` } },
+      } as unknown as JSONSchema;
+      const hashA = internSchemaAsTaggedHashString(documentA);
+      registerSchemaDocument(hashA, documentA);
+
+      const sanitized = sanitizeSchemaForLinks(
+        { $ref: `cid:${hashA}` } as unknown as JSONSchema,
+      ) as { properties: { name: { $ref?: string } } };
+
+      // The root resolves inline (re-externalized at the emission site);
+      // the nested position stays a REFERENCE — callers pin the served
+      // shape — moved off the tainted document.
+      const movedRef = sanitized.properties.name.$ref;
+      expect(typeof movedRef).toBe("string");
+      expect(movedRef).not.toBe(`cid:${hashB}`);
+      // The whole reachable closure is now marker-free.
+      const resolvedTarget = resolvedSchema(
+        sanitized.properties.name as JSONSchema,
+      );
+      expect(JSON.stringify(resolvedTarget)).not.toContain("asCell");
+      expect((resolvedTarget as { type?: string }).type).toBe("string");
+    });
+
+    it("keeps a reference to a clean document verbatim", () => {
+      const cleanDoc = {
+        type: "string",
+        title: "already-clean",
+      } as unknown as JSONSchema;
+      const hashClean = internSchemaAsTaggedHashString(cleanDoc);
+      registerSchemaDocument(hashClean, cleanDoc);
+      const container = {
+        type: "object",
+        properties: { note: { $ref: `cid:${hashClean}` } },
+      } as unknown as JSONSchema;
+      const hashContainer = internSchemaAsTaggedHashString(container);
+      registerSchemaDocument(hashContainer, container);
+
+      const sanitized = sanitizeSchemaForLinks(
+        { $ref: `cid:${hashContainer}` } as unknown as JSONSchema,
+      ) as { properties: { note: { $ref?: string } } };
+
+      expect(sanitized.properties.note.$ref).toBe(`cid:${hashClean}`);
     });
   });
 
@@ -1545,6 +1620,44 @@ describe("link-utils", () => {
     it("should throw if handle is too short (human name)", () => {
       expect(() => parseLLMFriendlyLink("/of:short/path", space)).toThrow(
         /Piece references must use handles.*"of:short"/,
+      );
+    });
+
+    it("should throw if the embedded space is a name rather than a DID", () => {
+      // A link resolves from the string alone, so a space that needs looking
+      // up is refused here even though the grammar admits it.
+      expect(() => parseLLMFriendlyLink(`/@my:space/${longId}`, space))
+        .toThrow(/Link spaces must be DIDs.*"my:space"/);
+    });
+  });
+
+  describe("parseReferenceParts", () => {
+    const longId = "of:bafyabc12345678901234567890";
+
+    it("splits the parts without holding either to a form", () => {
+      // The wider vocabulary a session can resolve: a space by name and a
+      // piece by slug, in the positions a DID and a handle occupy.
+      expect(parseReferenceParts("/@my-space/tracker@user/items/0")).toEqual({
+        id: "tracker",
+        scope: "user",
+        space: "my-space",
+        path: ["items", "0"],
+      });
+      expect(parseReferenceParts(`/${longId}/path`)).toEqual({
+        id: longId,
+        path: ["path"],
+      });
+    });
+
+    it("throws for a string that is not a reference at all", () => {
+      expect(() => parseReferenceParts(`${longId}/path`)).toThrow(
+        "Target must start with a slash",
+      );
+      expect(() => parseReferenceParts(`/@${space}`)).toThrow(
+        "Target must include a piece handle",
+      );
+      expect(() => parseReferenceParts("/@/tracker")).toThrow(
+        'Target must name a space after "@"',
       );
     });
   });

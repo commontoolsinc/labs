@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { RuntimeProgram } from "@commonfabric/runner";
-import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { assertPatternSchemasBackwardCompatible } from "../src/schema-compatibility.ts";
 import {
   materializeOver,
@@ -23,21 +22,23 @@ import {
  * Where the line with Tier 1 falls — measured, and pinned by the last case
  * here so neither tier is dropped on a wrong assumption about the other:
  *
- * - Additive REQUIRED field with no default (the estuary brick): already
- *   covered twice over. Tier 1's `assertPatternSchemasBackwardCompatible`
- *   rejects the contract ("newly required result field has no default"), and
- *   `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`
- *   drives the runtime rejection over a legacy root. This tier replays it not
- *   for the guard but for the PIPELINE: a class with a known-good outcome is
- *   what makes capture → snapshot → reopen → materialize testable end to end.
+ * - Additive REQUIRED output with no default: accepted by both tiers because
+ *   the new pattern generates that result during setup. Tier 1 accepts the
+ *   output contract, and the runner's role-aware CFC merge accepts the write
+ *   that materializes it over the legacy root. Replaying it here pins the whole
+ *   capture → snapshot → reopen → materialize pipeline.
  * - Moving where a field is STORED under an identical contract: this tier
  *   only. The two result schemas are byte-identical, so no contract check can
  *   see it, and nothing throws — the data is simply gone. What a pattern
  *   writes is not determined by its schema.
- * - Typing a key on an OPEN argument object: this tier only, and for a
+ * - Typing a key on an OPEN argument object: shared with the runner, and for a
  *   sharper reason than the one above. Tier 1 does not fail to see it — it
- *   WAIVES it, on the documented ground that the runner validates merged
- *   durable arguments. Measured: on this path it does not.
+ *   WAIVES it, on the ground that the runner validates merged durable arguments
+ *   in the setup transaction. That guard is real and reached on both update
+ *   routes (`packages/runner/test/pattern-update-argument-validation.test.ts`);
+ *   what this tier adds is driving it from a vintage a real prior version
+ *   wrote, so the waiver is checked against a captured argument rather than an
+ *   in-process one.
  *
  * Nothing else on the obvious list earns a case here. Dropping a result field,
  * narrowing one to a disjoint type, and moving a field between nesting levels
@@ -50,15 +51,13 @@ import {
 const signer = await Identity.fromPassphrase("state continuity vintage");
 
 /**
- * The vintage carries a CFC-labelled field, which is what makes its root doc
+ * The vintage carries a CFC-labeled field, which is what makes its root doc
  * store a CFC schema envelope. That envelope is the thing a later version's
- * schema has to MERGE with, and the merge is where the additive-required guard
- * lives (`packages/runner/src/cfc/schema-merge.ts` — `mergeRequired`). A root
- * with no stored envelope has nothing to merge against, so the guard never
- * runs and the whole migration class is invisible; that is precisely why an
- * earlier version of this test watched a required-no-default field materialize
- * happily. Real system roots (home, profile) are CFC-relevant, so this models
- * them rather than working around them.
+ * schema has to MERGE with. The merge remains strict for input and unclassified
+ * document evolution, but an output-role write may introduce required fields
+ * because the candidate pattern generates their values in the same setup.
+ * Real system roots (home, profile) are CFC-relevant, so this models them
+ * rather than working around them.
  *
  * A CONFIDENTIALITY label is deliberate: it makes the doc CFC-relevant without
  * imposing a write requirement. An ownership label (`ownerPrincipal`) would
@@ -98,11 +97,11 @@ const OLD_WITHOUT_FAVORITES: RuntimeProgram = {
 };
 
 /**
- * The estuary brick: `favorites` is additive AND required AND has no default.
- * CFC schema-merge refuses the setup commit over a doc that predates the field
- * ("required field <name> needs a default to preserve old documents").
+ * `favorites` is additive, required, and has no schema default. The candidate
+ * pattern generates its backing Writable during setup, so this is compatible
+ * output evolution.
  */
-const NEW_REQUIRED_NO_DEFAULT: RuntimeProgram = {
+const NEW_GENERATED_REQUIRED: RuntimeProgram = {
   main: "/main.tsx",
   files: [{
     name: "/main.tsx",
@@ -400,33 +399,19 @@ describe("pattern update over captured prior state", () => {
     ).toEqual([]);
   });
 
-  it("refuses an additive REQUIRED field with no default over a vintage doc", async () => {
-    // The 2026-07-22 estuary brick, reproduced from a captured prior state
-    // rather than asserted against inline source text: `favorites` is additive,
-    // required, and carries no default, so the old doc has no value for it and
-    // none can be synthesized. The setup commit is refused and the piece is
-    // loadable-but-unrunnable — a bricked home.
-    //
-    // This class is NOT Tier 2's alone, and the overlap is worth being exact
-    // about. Tier 1 rejects the contract (pinned by the last case here), and
-    // `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`
-    // already drives the runtime rejection over a legacy root. What that one
-    // cannot show is the part this tier is built for: its vintage is a doc
-    // hand-written in-process from a schema, where this one was written by a
-    // real prior pattern version, snapshotted to a file, and reopened. So this
-    // case earns its keep as the capture/replay pipeline's end-to-end proof on
-    // a class whose correct outcome is independently known — not as the only
-    // evidence the guard fires.
+  it("materializes an additive REQUIRED output over a vintage doc", async () => {
+    // `favorites` did not exist in the captured program or document. The new
+    // program returns a Writable for it during setup, so the result role makes
+    // this compatible even though the result schema has no default.
     const captured = await capture(OLD_WITHOUT_FAVORITES, ["alpha", "beta"]);
-    const result = await replay(captured, NEW_REQUIRED_NO_DEFAULT);
+    const result = await replay(captured, NEW_GENERATED_REQUIRED);
 
-    expect(result.error).toBeDefined();
-    // Assert the SPECIFIC rejection: a generic failure would let this pass for
-    // the wrong reason (a compile error, a missing store, a disposed runtime).
-    expect(result.error).toContain(CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON);
-    expect(result.error).toContain(
-      "required field favorites needs a default to preserve old documents",
-    );
+    expect(result.error).toBeUndefined();
+    expect(result.value?.items).toEqual(["alpha", "beta"]);
+    expect(
+      result.value?.favorites,
+      "the new pattern did not generate its newly required result",
+    ).toEqual([]);
   });
 
   it("strands prior state when the storage key moves under an IDENTICAL schema", async () => {
@@ -471,42 +456,35 @@ describe("pattern update over captured prior state", () => {
     ).toEqual([]); // …not ["alpha", "beta"].
   });
 
-  it("strands a durable ARGUMENT the new version's schema no longer accepts", async () => {
-    // The second class that is Tier 2's alone — and the one where Tier 1 does
-    // not merely fail to see the problem, it DEFERS it by name.
+  it("refuses an update whose stored ARGUMENT the new schema cannot read", async () => {
+    // The second class Tier 2 covers, and the one where Tier 1 does not merely
+    // fail to see the problem — it DEFERS it by name.
     //
     // `schema-compatibility.ts` has a deliberate evolution allowance: over an
     // OPEN argument object, a candidate may name a brand-new optional field of
-    // any type and the contract check accepts it unconditionally. The doc
-    // comment justifies that by asserting "the runner validates the piece's
-    // merged durable arguments against the new schema transactionally before
-    // committing such an update".
+    // any type and the contract check accepts it unconditionally. What makes
+    // that sound is the runner validating the piece's merged durable arguments
+    // against the new schema in the setup transaction. This case is the end of
+    // that sentence: it drives a real captured argument through the production
+    // repair call and requires the refusal.
     //
-    // Measured here: it does not. The update lands with no refusal and the
-    // stored value stops being readable. The bytes survive; the contract that
-    // could reach them does not.
+    // The guard is `Runner.#validateArgument` → `validateSchemaValue`, reached
+    // from `applySetupState`'s re-stage branch. Reaching it on THIS path needed
+    // the setup-completion marker: the repair stamps the candidate's
+    // `patternIdentity` before running setup (`pieces-controller.ts`, and this
+    // harness mirrors it), so the pointer already names the candidate and a
+    // pointer-only comparison reported "same pattern" and skipped the re-stage.
+    // `patternSetupIdentity` still named the version that staged the argument,
+    // which is what tells an update from a same-version replay
+    // (`storedSetupMarker` in `runner.ts`).
     //
-    // The guard itself is real — `Runner.validateArgument` →
-    // `validateSchemaValue` rejects this exact pair in isolation. TWO gates sit
-    // in front of it, and it takes both to explain the miss:
-    //
-    // 1. `applySetupState` re-stages the stored argument only when
-    //    `!sameStoredSetup` (`runner.ts:1410`), and `sameStoredSetup =
-    //    samePattern && !reapplyStoredSetup` (`:1557`). Stamping
-    //    `patternIdentity` before `runSynced` — which is what the roll-forward
-    //    materialize does (`pieces-controller.ts:936`), and what this harness
-    //    mirrors — makes `samePattern` true, so the branch never runs.
-    // 2. Forcing gate 1 open is NOT enough, which is the part worth knowing:
-    //    measured, adding `reapplyStoredSetup: true` still produces no refusal.
-    //    A pattern swap supplies no argument, and the re-stage passes
-    //    `{ unresolvedLinkRaw }` in exactly that case (`:1467`) so a slot whose
-    //    link cannot currently be dereferenced validates as opaque rather than
-    //    as its unreadable materialization. That leniency is deliberate and
-    //    load-bearing (CT-1917), and it is what swallows this too.
-    //
-    // Gate 2 is why the auto-update hot-swap is not a way out either: it hard-
-    // codes `sameStoredSetup = false` (`runner.ts:1911`) but also supplies no
-    // argument, so it lands on the same lenient path.
+    // What the refusal must NOT be is wholesale strictness. A slot whose stored
+    // value is a link that cannot be dereferenced right now stays deferred
+    // (CT-1917 — a nested piece's argument lives in its HOST's doc, and a host
+    // that has not synced must not fail the update). Only a PLAIN value of the
+    // wrong type is refused. Both halves are guarded together in
+    // `packages/runner/test/pattern-update-argument-validation.test.ts`; this
+    // case is the same guard reached from a real captured vintage.
     const captured = await capture(OLD_OPEN_ARGUMENT, [], { count: "seven" });
 
     // Tier 1 waves the pair through — the premise of the case, so it is
@@ -543,38 +521,39 @@ describe("pattern update over captured prior state", () => {
         "cannot read the durable argument it captured",
     ).toEqual({ count: "seven" });
 
-    // Now the candidate. No refusal…
+    // Now the candidate: the update is refused rather than landing over state
+    // it cannot read.
     const replayed = await replayOn(captured, NEW_TYPES_THE_ARGUMENT_KEY);
     expect(
       replayed.outcome.error,
-      "the update was refused. If the runner learned to validate merged " +
-        "durable arguments on this path, that is the FIX — rewrite this case " +
-        "to assert the refusal, and drop the deferral note above",
-    ).toBeUndefined();
+      "the update LANDED over a durable argument the new schema cannot read. " +
+        "Tier 1 waives this class on the promise that the runner validates " +
+        "merged durable arguments in the setup transaction, so either that " +
+        "guard stopped being reachable on the repair path or Tier 1 must stop " +
+        "waiving the class",
+    ).toBeDefined();
+    // Assert the SPECIFIC refusal. A bare `toBeDefined()` would also be
+    // satisfied by a compile error, a broken fixture, or a disposed runtime —
+    // green for the wrong reason on the one thing this case exists to prove.
+    expect(replayed.outcome.error).toContain(
+      "updated arguments do not match the candidate schema",
+    );
+    expect(replayed.outcome.error).toContain(
+      "count: value does not match type number",
+    );
 
+    // A refusal must leave the state alone. The validation write and the schema
+    // retarget ride the setup transaction, so a rejection aborts both; if the
+    // bytes were gone, the update would have destroyed data on its way to
+    // refusing, which is a worse outcome than the one this case guards.
     const link = await vintageArgumentLink(
       replayed.vintage,
       replayed.outcome.resultSchema,
     );
-    // …the bytes are still on disk…
     expect(
       await readVintageArgument(replayed.vintage, link, undefined),
-      "the stored argument bytes are gone, which is a DIFFERENT failure from " +
-        "the one this case pins — the update deleted state rather than " +
-        "leaving it unreachable",
+      "the refused update did not leave the captured argument intact",
     ).toEqual({ count: "seven" });
-    // …and nothing reading through the new contract can see them.
-    expect(
-      await readVintageArgument(
-        replayed.vintage,
-        link,
-        replayed.outcome.argumentSchema,
-      ),
-      "the new argument schema can now read a value the old version stored " +
-        "under an incompatible type. If that is deliberate, this case should " +
-        "be REWRITTEN rather than deleted: Tier 1 waives this class on the " +
-        "promise that something downstream checks it",
-    ).toEqual({});
   });
 
   it("records which classes Tier 1 already covers", async () => {
@@ -591,20 +570,14 @@ describe("pattern update over captured prior state", () => {
       });
     const previous = await compile(OLD_WITHOUT_FAVORITES);
 
-    // The additive-required class is caught by Tier 1 outright, which is why
-    // Tier 2 replays it as a pipeline check rather than as its own coverage.
-    let requiredIssue: string | undefined;
-    try {
+    // Newly required results are compatible: the candidate generates them.
+    const generatedRequired = await compile(NEW_GENERATED_REQUIRED);
+    expect(() =>
       assertPatternSchemasBackwardCompatible(
         previous,
-        await compile(NEW_REQUIRED_NO_DEFAULT),
-      );
-    } catch (error) {
-      requiredIssue = error instanceof Error ? error.message : String(error);
-    }
-    expect(requiredIssue).toContain(
-      "result.favorites: newly required result field has no default",
-    );
+        generatedRequired,
+      )
+    ).not.toThrow();
 
     // The storage-key move is invisible to it: identical schemas, no issue.
     const renamed = await compile(RENAMED_STORAGE_KEY);

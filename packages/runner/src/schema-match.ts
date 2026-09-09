@@ -10,6 +10,7 @@
  * themselves. The `matches` callback owns recursion and ref semantics: the
  * matchers differ exactly there ($defs threading vs fail-closed policy refs).
  */
+
 import type { JSONSchema, JSONSchemaObj } from "./builder/types.ts";
 
 export const arrayMatchesPositionally = (

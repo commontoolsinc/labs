@@ -5,6 +5,7 @@
  * (not encouraged, but should still work). The action is referenced INSIDE
  * the computed expression, so it must be captured in the lift-applied wrapper.
  */
+
 import { action, Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {

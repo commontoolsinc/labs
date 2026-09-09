@@ -1,4 +1,4 @@
-import { assert, computed, pattern, UI, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, UI, Writable } from "commonfabric";
 import Lobby, {
   addSelfToLobby,
   commitTrustedLobbyAction,
@@ -260,7 +260,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_selected_profile_drives_viewer_state },
       { action: selectedAddSelf },
       { assertion: assert_selected_profile_joined },
