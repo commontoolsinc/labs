@@ -6487,6 +6487,24 @@ export class Runner {
   }
 
   /**
+   * Names what a setup or start of `pattern` over the stored piece at
+   * `resultCell` reads and writes: the result document, the argument
+   * document, what the pattern's nodes read through them, and the cells the
+   * pattern owns. The store delivers none of these with the result document,
+   * and a write to a document this replica has not loaded replaces the
+   * document the store holds, so a caller staging a setup over a stored piece
+   * names its family first. Resolves once the documents have arrived.
+   */
+  syncStoredPieceCells(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+  ): Promise<void> {
+    return this.#syncCellsForRunningPattern(resultCell, pattern).then(
+      () => {},
+    );
+  }
+
+  /**
    * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
    * the cells `inputs` links to, the result cell, and the nodes' argument and
    * result documents. Resolves to whether the node walk ran, which it does

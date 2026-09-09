@@ -2344,6 +2344,9 @@ export class PiecesController<T = unknown> {
         this.getSpace(),
       );
       if (pattern === undefined) return root;
+      // The re-stage writes over the stored setup's cells, which are named
+      // before the transaction that writes them opens.
+      await this.runtime.runner.syncStoredPieceCells(root, pattern);
       const result = await timePiecePhase(
         "ensureDefaultPattern.restageRootSetup",
         () =>
