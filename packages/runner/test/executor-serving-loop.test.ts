@@ -46,6 +46,7 @@ import {
 } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { waitUntil } from "./support/wait-until.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
@@ -96,6 +97,19 @@ const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("serving loop service");
 const aliceSigner = await Identity.fromPassphrase("serving loop alice");
 const bobSigner = await Identity.fromPassphrase("serving loop bob");
+
+/**
+ * The `{ total }` result schema of the patterns served below. A client that
+ * wants the derived value reads the result under it: the store delivers the
+ * result document alone, and the crossing from `total` to the computed
+ * document behind it is what puts that document in the client's tracked
+ * set — the demand the serving loop runs the derivation for.
+ */
+const TOTAL_RESULT_SCHEMA = {
+  type: "object",
+  properties: { total: { type: "number" } },
+  required: ["total"],
+} as const satisfies JSONSchema;
 
 describe("stage F serving loop", () => {
   let server: MemoryV2Server.Server;
@@ -433,11 +447,13 @@ describe("stage F serving loop", () => {
     // The client's DEMAND, registered before the piece exists ANYWHERE:
     // the session open activates the space, and the demand cycle's
     // ensure runs against a result doc that carries no patternIdentity
-    // meta yet — the false return this test pins the retry of.
+    // meta yet — the false return this test pins the retry of. Read
+    // under the result schema, so that once the piece exists the watch
+    // reaches the computed doc behind `total` and demands its derivation.
     const clientResult = clientRuntime.getCell<{ total: number }>(
       space,
       "race-result",
-      undefined,
+      TOTAL_RESULT_SCHEMA,
     );
     await clientResult.sync();
 
@@ -3021,13 +3037,14 @@ describe("stage F serving loop", () => {
     const engine = await server.engineForSpace(space);
 
     // Alice's demand, BOTH halves: the ordinary space subscription (the
-    // value pull) and the USER-scoped subscription — the demand row
+    // value pull, under the result schema so it reaches the computed doc
+    // behind `total`) and the USER-scoped subscription — the demand row
     // that carries her (user, session) identity into the registry
     // (scopes.md §5: the DEMAND supplies the run identity).
     const clientResult = clientRuntime.getCell<{ total: number }>(
       space,
       "p2f-supply-result",
-      undefined,
+      TOTAL_RESULT_SCHEMA,
     );
     await clientResult.sync();
     const rootDocId = clientResult.getAsNormalizedFullLink().id;
