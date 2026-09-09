@@ -3,6 +3,7 @@ import {
   cloneIfNecessary,
   deepFreeze,
   isDeepFrozen,
+  isFabricPlainContainer,
   valueEqual,
 } from "@commonfabric/data-model";
 import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
@@ -749,17 +750,21 @@ const isSubsumedByTailSplice = (
     Number(childSegment) >= spliceCandidate.tailSpliceStartIndex;
 };
 
-// TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject` on both sides, so
-// two special objects — or one against a plain `{}` — compare by their empty
-// key sets and report "unchanged" without ever reaching the fabric-aware
-// `valueEqual` fallback. An in-place fabric change at an ancestor prefix then
-// emits no reactivity path. `differential.ts` guards its sibling walk with an
-// explicit `FabricSpecialObject` test for exactly this reason.
+// A `FabricSpecialObject` on either side falls to the `valueEqual` comparison
+// below rather than being compared by key set: its state sits behind no key,
+// so two distinct ones would compare by their empty key sets and report
+// "unchanged", leaving an in-place fabric change at an ancestor prefix with no
+// reactivity path. `differential.ts` guards its sibling walk the same way.
+//
+// That covers a `FabricInstance` too. `buildReactivityPathsForChange` calls
+// this with the value at every proper ancestor prefix of a written path, read
+// from the document as it stood when the transaction opened, so a write
+// anywhere below a stored `FabricError` arrives here at commit time.
 const shallowStructureChanged = (
   before: FabricValue | undefined,
   after: FabricValue | undefined,
 ): boolean => {
-  if (isObjectOrArray(before) && isObjectOrArray(after)) {
+  if (isFabricPlainContainer(before) && isFabricPlainContainer(after)) {
     const beforeKeys = Object.keys(before);
     const afterKeys = Object.keys(after);
     if (beforeKeys.length !== afterKeys.length) {

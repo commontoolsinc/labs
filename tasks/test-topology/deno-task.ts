@@ -295,6 +295,33 @@ async function readTasks(
 }
 
 /**
+ * The environment a named task sets, from the assignments standing
+ * before its command. A task the manifest does not define, and a task
+ * setting nothing, both give an empty environment.
+ *
+ * This reads only the assignments, so it answers for a task whose
+ * command {@link parseTestTask} declines — every `integration` task in
+ * the workspace names a shell variable in its flags, which is a
+ * metacharacter that parser stops at.
+ */
+export async function taskEnvironment(
+  memberDir: string,
+  name: string,
+): Promise<Record<string, string>> {
+  const tasks = await readTasks(memberDir);
+  const task = tasks[name];
+  const command = typeof task === "string" ? task : task?.command;
+  if (command === undefined) return {};
+  const env: Record<string, string> = {};
+  for (const word of command.trim().split(/\s+/)) {
+    const assignment = ASSIGNMENT.exec(word);
+    if (assignment === null) break;
+    env[assignment[1]!] = unquote(assignment[2]!);
+  }
+  return env;
+}
+
+/**
  * A member's test tasks as the topology needs them.
  *
  * The Deno-only half is `deno-test` where a member names one and `test`

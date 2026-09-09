@@ -1338,6 +1338,12 @@ on its own, is not this: without the record it is the quiet exemption the next
 obligation rules out, and the two are told apart by what the site does with the
 answer rather than by which identifier it calls.
 
+`reactive-dependencies.ts` is the worked example. Its `isKeyable()` descends a
+`FabricInstance` by property name, because refusing would cost the rest of a
+notification's changes and reporting one as having no keys would lose
+reachability the walk already reports. The marker above it records what the
+descent still misses, which is the record the paragraph above requires.
+
 So the tripwire is its own enforcement, which is why an ungated site is
 legitimate. What it is not is a flag, so do not cite this section as though one
 stood behind every throw.
@@ -1360,6 +1366,28 @@ than at any one of the sites:
   answer rather than a refusal. What is not on the list is exempting the value
   so the walk stays quiet, and swapping a throwing call for a non-throwing one
   without recording what the site now under-reports is that.
+
+The container question `isWalkableObjectOrArray()` asks is the widest of these
+refusals, being reached from around twenty-five walks across `runner` and
+`piece`. Its strength at those sites is de facto rather than structural: a
+`FabricInstance` can be constructed and handed to any of them. What supports
+the claim is that `FabricError` is the one instance with live traffic today —
+the fetch builtins store one as a result. Writing one, appending one, reading
+one back, replacing one and deleting it were each driven through `Cell` within
+a single transaction, and replacing one was driven again across a commit
+boundary. Four walks refused something those operations reach, and each now
+answers instead: the two stored path reads in `storage/v2-path.ts`, three sites
+in `data-updating.ts`, and the shallow structure comparison in
+`storage/v2-transaction.ts` that the commit-time reactivity pass feeds. The
+last was found only by the cross-boundary replace, which is why the list is a
+record of what has been driven rather than a claim about what has not.
+
+Three walks were given the same treatment without a reachable operation to
+justify it, and are recorded here as untested rather than measured: `getAtPath`
+in `traverse.ts`, `mergeAnyOfMatches` in the same file, and
+`sendValueToBindingInner` in `pattern-binding.ts`. `getAtPath` follows the
+decision `traverseDAG` states a few hundred lines above it, that this file
+cannot fail loudly on an instance yet; the other two keep the refusal.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these

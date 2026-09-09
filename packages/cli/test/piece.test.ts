@@ -1665,11 +1665,10 @@ describe("cli piece parsing", () => {
       schema: { type: ["object", "null"] },
       getRaw: () => sourceRaw,
     };
-    const rootCell = { key: () => targetCell };
     const controller = {
       get: () =>
         Promise.resolve({
-          input: { getCell: () => Promise.resolve(rootCell) },
+          input: { getCell: () => Promise.resolve(targetCell) },
         }),
       runtime: {},
       getSpace: () => "did:key:test-space",
@@ -1855,8 +1854,8 @@ describe("cli piece parsing", () => {
               ),
           }),
           input: {
-            getCell: () =>
-              Promise.resolve({
+            getCell: (path: string[] = []) => {
+              const root = {
                 key: (segment: string) => {
                   order.push(`input.key:${segment}`);
                   return {
@@ -1866,7 +1865,9 @@ describe("cli piece parsing", () => {
                     },
                   };
                 },
-              }),
+              };
+              return Promise.resolve(path.length ? root.key(path[0]) : root);
+            },
             get: () => {
               order.push("input.get");
               return Promise.resolve(["updated-while-stopped"]);

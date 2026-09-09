@@ -24,7 +24,12 @@ A test's identity has three required parts, scoped within a repository:
   repository-root-relative file path with forward slashes, a task name, a
   script's own name (`acl.sh`), a script step (`integration.sh
   piece-values`), or a task-plus-item pair (`cfcheck <file>`,
-  `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
+  `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`). A
+  bdd file declaring a hook outside every `describe` has a root suite
+  invented for it, named `global`, and every chain that file goes on to
+  run opens with that name. A suite it registers as ignored is reported
+  under its bare name. The runner keeps such a suite out of the root
+  suite and never runs its body.
 - **variant**, when present — a stable name for a non-default configuration
   that runs the same test. The default configuration has no variant. The
   server-execution deployed-topology lanes have stable `default` and
@@ -107,9 +112,25 @@ The registration preload is such a module, and it replaces what it takes:
 it writes a name-to-file map into the spool, and ingestion lays that over
 what the report says. The map holds each name `Deno.test` was called with
 and, for a file written with `describe` and `it`, the whole chain of each
-leaf. A suite title two files share says nothing about either and is
-dropped from the merged map; a leaf's whole chain is what usually
-survives that.
+leaf. A hook a file declares outside every `describe` has no suite to
+hold it, so the bdd runner makes one named `global` and every suite that
+file goes on to run sits inside it; the chain each leaf is named by opens
+with that name. A suite title two files share says nothing about either
+and is dropped from the merged map; a leaf's whole chain is what usually
+survives that, and `global` is a title every file declaring such a hook
+shares.
+
+Every package of a workspace run writes into one spool, so each map also
+names the repository-relative directory its process ran in. A caller
+ingesting one package's report asks for that directory. A map naming it
+belongs to that package and is read whole, whatever files it names: a
+test task may name a file anywhere in the tree, and
+`packages/test-support` runs `tools/write-iframe-wrapper.test.ts`, two
+directories above itself. A map naming no directory at all is judged by
+its files instead, and contributes only those under the directory asked
+for. Either way the scope is applied before ambiguity is judged, or a
+name two packages happen to share would cost each of them a file it held
+unambiguously.
 
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`

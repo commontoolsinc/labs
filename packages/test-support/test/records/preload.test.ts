@@ -8,7 +8,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assert } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import {
   dropContainerCases,
   ingestJUnit,
@@ -42,6 +42,14 @@ const FIXTURE_CONFIG = {
 
 interface Fixture {
   dir: string;
+
+  /**
+   * The directory the run happens in, which is the fixture root unless
+   * one was named. A workspace member's test task runs in the member's
+   * own directory, and the file names a run reports are relative to it.
+   */
+  runIn: string;
+
   spool: string;
   junit: string;
 }
@@ -50,7 +58,10 @@ interface Fixture {
  * A tree that looks like a repository to the preload: the `.git` marker is
  * what it climbs to, so a fixture needs one and needs nothing else.
  */
-async function makeFixture(files: Record<string, string>): Promise<Fixture> {
+async function makeFixture(
+  files: Record<string, string>,
+  runIn = ".",
+): Promise<Fixture> {
   const dir = await Deno.makeTempDir({ prefix: "preload-fixture-" });
   await Deno.mkdir(join(dir, ".git"));
   await Deno.writeTextFile(
@@ -58,11 +69,15 @@ async function makeFixture(files: Record<string, string>): Promise<Fixture> {
     JSON.stringify(FIXTURE_CONFIG),
   );
   for (const [name, source] of Object.entries(files)) {
-    await Deno.writeTextFile(join(dir, name), source);
+    const path = join(dir, name);
+    await Deno.mkdir(dirname(path), { recursive: true });
+    await Deno.writeTextFile(path, source);
   }
   const spool = join(dir, "spool");
   await Deno.mkdir(spool);
-  return { dir, spool, junit: join(dir, "report.xml") };
+  const runDir = join(dir, runIn);
+  await Deno.mkdir(runDir, { recursive: true });
+  return { dir, runIn: runDir, spool, junit: join(dir, "report.xml") };
 }
 
 async function runFixture(
@@ -89,7 +104,7 @@ async function runFixture(
       `--junit-path=${fixture.junit}`,
       ...files,
     ],
-    cwd: fixture.dir,
+    cwd: fixture.runIn,
     env,
     stdout: "piped",
     stderr: "piped",
@@ -141,6 +156,94 @@ describe("elsewhere", () => {
 const SHARED_TITLE_FILE = `import { describe, it } from "@std/testing/bdd";
 describe("outer", () => {
   it("elsewhere", () => {});
+});
+`;
+
+// A file declaring a hook outside every `describe`. The bdd runner has
+// no suite to hold it, so it makes one of its own named `global` and
+// every suite the file registers after that is a step inside it, which
+// puts that name at the head of each leaf's chain.
+const HOOKED_FILE =
+  `import { beforeEach, describe, it } from "@std/testing/bdd";
+let ran = 0;
+beforeEach(() => {
+  ran++;
+});
+describe("hooked", () => {
+  it("kept", () => {
+    if (ran === 0) throw new Error("the hook did not run");
+  });
+  it("dropped", () => {});
+});
+`;
+
+// A second file doing the same, so the run holds two root suites under
+// the one name. That name says nothing about either file, and what
+// carries a file is the whole chain of each leaf beneath it.
+const SECOND_HOOKED_FILE =
+  `import { afterEach, describe, it } from "@std/testing/bdd";
+afterEach(() => {});
+describe("second", () => {
+  it("kept", () => {});
+});
+`;
+
+// A file declaring all six hooks the re-export hands out, inside a
+// `describe` rather than outside every one. Each hook writes its own
+// name as it fires, so what the file leaves behind is the order the
+// runner ran them in, and its leaves are named without a root suite.
+const EVERY_HOOK_FILE = `import {
+  after,
+  afterAll,
+  afterEach,
+  before,
+  beforeAll,
+  beforeEach,
+  describe,
+  it,
+} from "@std/testing/bdd";
+
+function note(what: string) {
+  Deno.writeTextFileSync("hooks.log", what + " ", {
+    append: true,
+    create: true,
+  });
+}
+
+describe("hooks", () => {
+  beforeAll(() => note("beforeAll"));
+  before(() => note("before"));
+  beforeEach(() => note("beforeEach"));
+  afterEach(() => note("afterEach"));
+  afterAll(() => note("afterAll"));
+  after(() => note("after"));
+  it("first", () => {});
+  it("second", () => {});
+});
+`;
+
+// A file whose outermost `describe` carries no title of its own. The
+// runner names such a suite after the body it was given.
+const TITLELESS_FILE = `import { describe, it } from "@std/testing/bdd";
+describe(function first() {
+  it("kept", () => {});
+});
+`;
+
+// A second file doing the same, so the run holds two such suites. Each
+// is named after its own body, and the two names are different.
+const SECOND_TITLELESS_FILE = `import { describe, it } from "@std/testing/bdd";
+describe(function second() {
+  it("kept", () => {});
+});
+`;
+
+// A file whose `describe` carries neither a title nor a body with a
+// name in it. The suite's name is empty, and the runner is what says
+// so.
+const NAMELESS_FILE = `import { describe, it } from "@std/testing/bdd";
+describe(() => {
+  it("kept", () => {});
 });
 `;
 
@@ -210,6 +313,48 @@ describe("preload", () => {
     }
   });
 
+  it("places a file above the directory the run happened in", async () => {
+    // A workspace member's test task runs in the member's directory and
+    // may name a file anywhere in the tree: `packages/test-support` runs
+    // the repository tools' own regression tests, two directories above
+    // itself. The map says which directory the run happened in, and a
+    // read scoped to that directory takes it whole.
+
+    const fixture = await makeFixture({
+      "member/own.test.ts": BDD_FILE,
+      "tools/away.test.ts": OTHER_BDD_FILE,
+    }, "member");
+    try {
+      const run = await runFixture(fixture, [
+        "own.test.ts",
+        "../tools/away.test.ts",
+      ]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool, { ranIn: "member" });
+      expect(names.get("outer > kept")).toEqual("member/own.test.ts");
+      expect(names.get("elsewhere > dropped")).toEqual("tools/away.test.ts");
+      // The directory the file sits in is not the directory the run
+      // happened in, and a read scoped to it is offered nothing.
+      expect((await readNameMaps(fixture.spool, { ranIn: "tools" })).size)
+        .toEqual(0);
+
+      // The join ingestion performs, with the prefix the workspace runner
+      // passes. Every class name in the report names the wrapper, so the
+      // map is the only thing that can place either file.
+      const records = ingestJUnit(await Deno.readTextFile(fixture.junit), {
+        kind: "unit",
+        scope: "fixture",
+        filePrefix: "member",
+        fileByName: names,
+      });
+      const byName = new Map(records.map((r) => [r.test.n, r.file]));
+      expect(byName.get("outer > kept")).toEqual("member/own.test.ts");
+      expect(byName.get("elsewhere > dropped")).toEqual("tools/away.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
   it("keeps each leaf's own file where two files share a suite title", async () => {
     const fixture = await makeFixture({
       "bdd.test.ts": BDD_FILE,
@@ -233,6 +378,122 @@ describe("preload", () => {
       const byName = new Map(records.map((r) => [r.test.n, r.file]));
       expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
       expect(byName.get("outer > elsewhere")).toEqual("shared.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("names a leaf inside the root suite a file-scope hook brings about", async () => {
+    const fixture = await makeFixture({
+      "hooked.test.ts": HOOKED_FILE,
+      "second.test.ts": SECOND_HOOKED_FILE,
+      "bdd.test.ts": BDD_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, [
+        "hooked.test.ts",
+        "second.test.ts",
+        "bdd.test.ts",
+      ]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool);
+      // Both hooked files register a root suite under the one name, so
+      // that name carries no file and each leaf carries its own.
+      expect(names.get("global")).toBeUndefined();
+      expect(names.get("global > hooked > kept")).toEqual("hooked.test.ts");
+      expect(names.get("global > second > kept")).toEqual("second.test.ts");
+      // The third file declares no hook, so the runner invents nothing
+      // for it and its leaves are named by their own chain.
+      expect(names.get("outer > kept")).toEqual("bdd.test.ts");
+      expect(names.get("global > outer > kept")).toBeUndefined();
+
+      // The names the report gives those leaves, so the map is joined
+      // onto them rather than sitting beside them.
+      const records = ingestJUnit(await Deno.readTextFile(fixture.junit), {
+        kind: "unit",
+        scope: "fixture",
+        fileByName: names,
+      });
+      const byName = new Map(records.map((r) => [r.test.n, r.file]));
+      expect(byName.get("global > hooked > kept")).toEqual("hooked.test.ts");
+      expect(byName.get("global > second > kept")).toEqual("second.test.ts");
+      expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("hands out each hook, and one inside a describe invents no suite", async () => {
+    const fixture = await makeFixture({ "hooks.test.ts": EVERY_HOOK_FILE });
+    try {
+      const run = await runFixture(fixture, ["hooks.test.ts"]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+
+      // The order the runner ran them in. A binding reaching a function
+      // other than the one it names moves or drops a line here, which
+      // nothing else in this suite would notice.
+      const fired = await Deno.readTextFile(join(fixture.dir, "hooks.log"));
+      expect(fired.trim().split(" ")).toEqual([
+        "beforeAll",
+        "before",
+        "beforeEach",
+        "afterEach",
+        "beforeEach",
+        "afterEach",
+        "afterAll",
+        "after",
+      ]);
+
+      // The hooks sit inside a `describe`, so the runner has a suite to
+      // hold them and invents none of its own.
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("hooks > first")).toEqual("hooks.test.ts");
+      expect(names.get("global > hooks > first")).toBeUndefined();
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("names a suite whose call carries no title after its body", async () => {
+    const fixture = await makeFixture({
+      "first.test.ts": TITLELESS_FILE,
+      "second.test.ts": SECOND_TITLELESS_FILE,
+    });
+    try {
+      const run = await runFixture(fixture, [
+        "first.test.ts",
+        "second.test.ts",
+      ]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("first > kept")).toEqual("first.test.ts");
+      expect(names.get("second > kept")).toEqual("second.test.ts");
+
+      // The name the report gives each leaf, which is the body's name and
+      // not the wrapper's. A wrapper name would be one name two files
+      // share, and neither leaf would carry a file.
+      const records = ingestJUnit(await Deno.readTextFile(fixture.junit), {
+        kind: "unit",
+        scope: "fixture",
+        fileByName: names,
+      });
+      const byName = new Map(records.map((r) => [r.test.n, r.file]));
+      expect(byName.get("first > kept")).toEqual("first.test.ts");
+      expect(byName.get("second > kept")).toEqual("second.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("leaves a suite with no name at all to the runner to refuse", async () => {
+    const fixture = await makeFixture({ "nameless.test.ts": NAMELESS_FILE });
+    try {
+      const run = await runFixture(fixture, ["nameless.test.ts"]);
+      expect(run.success).toBe(false);
+      // The runner's own report of the call it refused, which is what
+      // reaches a reader of the run rather than the wrapper's name.
+      const reported = new TextDecoder().decode(run.stdout);
+      expect(reported).toContain("The test name can't be empty");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });
     }
@@ -429,6 +690,21 @@ describe("preload", () => {
       const reported = await outcomes(fixture);
       expect(reported.get("outer > kept")).toEqual("pass");
       expect(reported.get("outer > dropped")).toEqual("skip");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("skips a leaf under the root suite by the name it is reported as", async () => {
+    const fixture = await makeFixture({ "hooked.test.ts": HOOKED_FILE });
+    try {
+      const run = await runFixture(fixture, ["hooked.test.ts"], {
+        "hooked.test.ts": ["global > hooked > dropped"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("global > hooked > kept")).toEqual("pass");
+      expect(reported.get("global > hooked > dropped")).toEqual("skip");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });
     }

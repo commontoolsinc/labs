@@ -95,6 +95,92 @@ const PER_USER_PATTERN = [
   "});",
 ].join("\n");
 
+/**
+ * The overlay destination under a scripted pair of writers, for the
+ * supersede-by-newer cases below.
+ *
+ * The replica double seals natively and reports a retirement view that
+ * retires nothing, so an entry leaves the destination only when the supersede
+ * rule drops it. `seal` hands the destination whatever operations a case
+ * names, under whichever writer it names.
+ */
+const supersedeHarness = () => {
+  let nextLocalSeq = 10;
+  const replica = {
+    sealNative: (
+      native: { operations: Array<Record<string, unknown>> },
+      _source: unknown,
+      verdict: Promise<unknown>,
+    ) => {
+      const localSeq = nextLocalSeq++;
+      return {
+        localSeq,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: native.operations,
+        },
+        settled: verdict.then(() => undefined, () => undefined),
+      };
+    },
+    speculationRetirementView: () => ({
+      confirmedSeq: 0,
+      pendingLocalSeqs: [] as number[],
+    }),
+    ackedSeqOf: () => undefined,
+    speculationAckObserver: undefined as (() => void) | undefined,
+  };
+  const runtime = {
+    storageManager: { open: () => ({ replica }) },
+    getCellFromLink: () => ({ sink: () => () => {} }),
+  } as unknown as Runtime;
+  const destination = new SpeculationOverlayDestination(runtime);
+  const seal = (
+    writer: object,
+    operations: Array<Record<string, unknown>>,
+  ) => {
+    const tx = {
+      tx: {
+        sourceAction: writer,
+        // These doubles hand-build the ops they seal, so the mark has
+        // nothing to shape; it is present because the seal refuses a
+        // transaction that cannot take it.
+        markWholeDocumentWrites: () => {},
+        sealInto: (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+        }) =>
+          collector.sealSpaceCommit(
+            space,
+            { operations, preconditions: [] },
+            { sourceAction: writer },
+          ).then(() => ({ ok: {} })),
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(tx, {
+      actionId: "supersede",
+      kind: "derivation",
+    });
+    return destination.seal(tx);
+  };
+  const setOf = (id: string) => ({
+    op: "set",
+    id,
+    scope: "user",
+    value: { value: 1 },
+  });
+  return {
+    destination,
+    seal,
+    setOf,
+    writerA: { name: "writer-a" },
+    writerB: { name: "writer-b" },
+  };
+};
+
 describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () => {
   let server: MemoryV2Server.Server;
   let managers: EmulatedStorageManager[];
@@ -420,71 +506,9 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
   });
 
   it("supersede-by-newer (destination-level): a newer whole-doc entry of the same writer retires the older entry over the same instances at seal; a patch does not; another writer does not", async () => {
-    const doc = "of:supersede" as never;
-    let nextLocalSeq = 10;
-    const replica = {
-      sealNative: (
-        native: { operations: Array<Record<string, unknown>> },
-        _source: unknown,
-        verdict: Promise<unknown>,
-      ) => {
-        const localSeq = nextLocalSeq++;
-        return {
-          localSeq,
-          commit: {
-            localSeq,
-            reads: { confirmed: [], pending: [] },
-            operations: native.operations,
-          },
-          settled: verdict.then(() => undefined, () => undefined),
-        };
-      },
-      speculationRetirementView: () => ({
-        confirmedSeq: 0,
-        pendingLocalSeqs: [] as number[],
-      }),
-      ackedSeqOf: () => undefined,
-      speculationAckObserver: undefined as (() => void) | undefined,
-    };
-    const runtime = {
-      storageManager: { open: () => ({ replica }) },
-      getCellFromLink: () => ({ sink: () => () => {} }),
-    } as unknown as Runtime;
-    const destination = new SpeculationOverlayDestination(runtime);
-    const writerA = { name: "writer-a" };
-    const writerB = { name: "writer-b" };
-    const seal = (
-      writer: object,
-      operations: Array<Record<string, unknown>>,
-    ) => {
-      const tx = {
-        tx: {
-          sourceAction: writer,
-          // These doubles hand-build the ops they seal, so the mark has
-          // nothing to shape; it is present because the seal refuses a
-          // transaction that cannot take it.
-          markWholeDocumentWrites: () => {},
-          sealInto: (collector: {
-            sealSpaceCommit: (
-              space: MemorySpace,
-              native: unknown,
-              source: unknown,
-            ) => Promise<unknown>;
-          }) =>
-            collector.sealSpaceCommit(
-              space,
-              { operations, preconditions: [] },
-              { sourceAction: writer },
-            ).then(() => ({ ok: {} })),
-        },
-      } as unknown as IExtendedStorageTransaction;
-      stampSpeculationRunContext(tx, {
-        actionId: "supersede",
-        kind: "derivation",
-      });
-      return destination.seal(tx);
-    };
-    const set = { op: "set", id: doc, scope: "user", value: { value: 1 } };
+    const { destination, seal, setOf, writerA, writerB } = supersedeHarness();
+    const doc = "of:supersede";
+    const set = setOf(doc);
     const patch = {
       op: "patch",
       id: doc,
@@ -511,6 +535,32 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     // invisible); B's entry stays.
     expect((await seal(writerA, [set])).ok).toBeDefined();
     expect(destination.entryCount(space)).toBe(2);
+    destination.close();
+  });
+
+  it("supersede-by-newer keeps an older entry the newer one covers only in part", async () => {
+    // The rule drops an older entry only when the newer entry's whole-doc
+    // ops cover EVERY doc the older one wrote. An older entry over two
+    // instances, met by a newer entry over one of them, keeps its own: the
+    // uncovered instance still reads through the older layer, and dropping
+    // it would take that speculation with it.
+    const { destination, seal, setOf, writerA } = supersedeHarness();
+    const first = setOf("of:supersede-part-1");
+    const second = setOf("of:supersede-part-2");
+
+    // Entry 1 (A) over both instances.
+    expect((await seal(writerA, [first, second])).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(1);
+
+    // Entry 2 (A) over the first instance alone: entry 1 wrote the second
+    // as well, so it is KEPT.
+    expect((await seal(writerA, [first])).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(2);
+
+    // Entry 3 (A) over both instances covers every doc each older entry
+    // wrote, so both go.
+    expect((await seal(writerA, [first, second])).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(1);
     destination.close();
   });
 
