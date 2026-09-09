@@ -527,9 +527,10 @@ export function buildManifest(input: BuildInput): Manifest {
     // Rounded before anything reads it, so the figure the manifest
     // carries is the figure every decision here was taken on, and a
     // consumer applying the same threshold reaches the same answer. A
-    // share that is not zero is held above zero: zero is what says a
-    // test has never been seen to disagree, and the execution count
-    // turns on that rather than on the size of the share.
+    // share that is not zero is held above zero, because zero is the one
+    // point the execution count steps at: once below it, at least twice
+    // above. A rounding that reached zero would take that step on how
+    // many times the test had run.
     const measured = flakeRate(state, input.today);
     const rate = measured === 0
       ? 0
