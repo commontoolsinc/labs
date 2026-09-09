@@ -85,12 +85,12 @@ export {
 
 export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
-export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
-
 export {
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
   tagFromFabricValueElseNull,
   tagFromNativeValue,
-} from "./tag-from.ts";
+  VALUE_TAGS,
+  type ValueTag,
+} from "./value-tags.ts";

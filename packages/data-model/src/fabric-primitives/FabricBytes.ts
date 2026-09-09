@@ -24,7 +24,7 @@ import {
   REALM_CODEC,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { VALUE_TAGS, ValueTag } from "@/VALUE_TAGS.ts";
+import { VALUE_TAGS, ValueTag } from "@/value-tags.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
