@@ -487,3 +487,30 @@ describe("where the run family's output directory is placed", () => {
     }
   });
 });
+
+describe("host mount paths", () => {
+  // Every host path that will be compared against another is walked apart
+  // toward its root. A relative one has no root to reach, so the walk would
+  // never end — and a run that hangs during construction never says why.
+
+  it("refuses a relative workspace path", () => {
+    expect(() =>
+      resolveDockerRunscSandboxConfig({ workspaceHostPath: "project" })
+    ).toThrow(/workspaceHostPath must be an absolute host path/);
+  });
+
+  it("refuses a relative additional-mount path", () => {
+    expect(() =>
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        additionalMounts: [{
+          kind: "host-bind",
+          name: "data",
+          hostPath: "data",
+          sandboxPath: "/data",
+          readOnly: false,
+        }],
+      })
+    ).toThrow(/must be an absolute host path/);
+  });
+});

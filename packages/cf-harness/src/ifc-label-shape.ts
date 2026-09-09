@@ -24,6 +24,46 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 export const MAX_LABEL_DEPTH = 64;
 
 /**
+ * Whether `container` is a plain object or plain array and nothing more.
+ *
+ * The prototype check is what excludes the exotic ones: a class instance, an
+ * object with an inherited `toJSON`, or a `Proxy` over either, all of which
+ * can run code when read. `Object.create(null)` is admitted — it carries no
+ * inherited anything, which is the property being asked about.
+ */
+const isInertContainer = (container: object): boolean => {
+  const prototype = Object.getPrototypeOf(container);
+  if (Array.isArray(container)) {
+    return prototype === Array.prototype;
+  }
+  return prototype === Object.prototype || prototype === null;
+};
+
+/**
+ * The values of an inert container, read through descriptors so that an
+ * accessor property is seen as one rather than invoked. An accessor is not
+ * data, so its presence makes the container unreadable.
+ */
+const inertValues = (container: object): unknown[] => {
+  const values: unknown[] = [];
+  for (const key of Reflect.ownKeys(container)) {
+    const descriptor = Object.getOwnPropertyDescriptor(container, key);
+    if (descriptor === undefined || !descriptor.enumerable) {
+      continue;
+    }
+    if (!("value" in descriptor)) {
+      // An accessor: reading it would run code.
+      return [NOT_DATA];
+    }
+    values.push(descriptor.value);
+  }
+  return values;
+};
+
+/** Stands for a property that is not data, and so cannot be carried. */
+const NOT_DATA = Symbol("cf-harness.not-data");
+
+/**
  * Whether `value` is plain JSON data this can carry: bounded in depth, free
  * of cycles, and holding nothing a serializer would refuse or silently drop.
  *
@@ -37,6 +77,14 @@ export const MAX_LABEL_DEPTH = 64;
  * The visited set holds the containers on the CURRENT path, so an object
  * appearing twice in sequence — one atom named in both clauses — is not
  * mistaken for a cycle, which is an object appearing inside itself.
+ *
+ * Containers are required to be INERT: a plain object or a plain array, read
+ * through property descriptors. Reading `Object.values` off an arbitrary
+ * object runs whatever getters or proxy traps it carries, and an inherited
+ * `toJSON` runs later inside the comparison — either can raise, and a raise
+ * here is the failure this exists to prevent. A label that came from
+ * `JSON.parse`, which is where every real one comes from, is inert by
+ * construction; anything else is a shape this cannot read.
  */
 export const isRepresentableJsonValue = (value: unknown): boolean => {
   type Frame = { value: unknown; depth: number; open: boolean };
@@ -67,16 +115,17 @@ export const isRepresentableJsonValue = (value: unknown): boolean => {
         return false;
     }
     const container = entry as object;
-    if (path.has(container) || frame.depth >= MAX_LABEL_DEPTH) {
+    if (
+      path.has(container) || frame.depth >= MAX_LABEL_DEPTH ||
+      !isInertContainer(container)
+    ) {
       return false;
     }
     path.add(container);
     // A closing frame under the children, so the container leaves the current
     // path once everything below it has been read.
     stack.push({ value: container, depth: frame.depth, open: false });
-    const children = Array.isArray(container)
-      ? container
-      : Object.values(container);
+    const children = inertValues(container);
     for (const child of children) {
       if (child !== undefined) {
         stack.push({ value: child, depth: frame.depth + 1, open: true });

@@ -35,10 +35,13 @@ export interface WriteFileToolSuccessOutput {
 
   /**
    * The sandbox's own CFC result for the write. Kept on the output — and
-   * stripped before the model sees it — because the run's taint accumulator
-   * reads it from here. A write that reached the sandbox and returned no
-   * result is an invocation whose taint cannot be established, which is what
-   * makes the family's knowledge a hole rather than a clean sheet.
+   * stripped before the model sees it — as the run's record of what the write
+   * was exposed to.
+   *
+   * NOT what the family's taint is read from: that is collected at the
+   * sandbox invocation boundary, precisely so a tool cannot lose it by
+   * dropping a field. This is evidence for a reader of the run, and a write
+   * whose result is absent here costs the record rather than the label.
    */
   cfcResult?: CfcSandboxResult;
 }

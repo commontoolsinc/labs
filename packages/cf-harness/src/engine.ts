@@ -382,6 +382,20 @@ const sameLabel = (left: unknown, right: unknown): boolean =>
 const cfcSandboxTaintOfResult = (
   result: SandboxCommandResult | undefined,
 ): IFCLabel | undefined => {
+  try {
+    return readRunscTaint(result);
+  } catch {
+    // The shape checks below are meant to make this unreachable. It is here
+    // because the cost of being wrong about that is silent: an exception on
+    // this path leaves the family recorded as it was, which is to say clean,
+    // and no test would show it. Answering `undefined` poisons instead.
+    return undefined;
+  }
+};
+
+const readRunscTaint = (
+  result: SandboxCommandResult | undefined,
+): IFCLabel | undefined => {
   if (result?.cfcResultOrigin !== "runsc-taint") {
     return undefined;
   }

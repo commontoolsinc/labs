@@ -267,6 +267,14 @@ const resolveCfcInvocationContextDir = (
 const realHostPathOrNearest = (path: string): string => {
   const normalized = normalizeHostPath(path);
   const { root } = parseHostPath(normalized);
+  // A relative path has no root to walk down to: `dirname(".")` is `"."`, so
+  // the loop below would never end. Callers are held to absolute paths, and
+  // this answers rather than hanging for the ones that are not — a
+  // non-terminating walk during construction is a run that never starts and
+  // never says why.
+  if (root === "") {
+    return normalized;
+  }
   const tail: string[] = [];
   let head = normalized;
   // Every step drops a segment, so the walk is finite; it never has to test
@@ -356,6 +364,18 @@ export const resolveDockerRunscSandboxConfig = (
   const additionalMounts = (options.additionalMounts ?? []).map(
     normalizeAdditionalMount,
   );
+  // Every host path that will be compared against another has to be absolute
+  // first. A relative one is not a path this can place a directory against,
+  // and the comparison it would enter has no root to resolve toward.
+  validateAbsoluteHostDir(options.workspaceHostPath, "workspaceHostPath");
+  for (const mount of additionalMounts) {
+    if (mount.hostPath !== undefined) {
+      validateAbsoluteHostDir(
+        mount.hostPath,
+        `additional mount at ${mount.sandboxPath}`,
+      );
+    }
+  }
   validateNonOverlappingMounts([
     { kind: "workspace", sandboxPath: workspaceMountPath },
     ...additionalMounts,

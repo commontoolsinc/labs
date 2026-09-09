@@ -80,11 +80,14 @@ const sandboxResult = (label: IFCLabel): CfcSandboxResult => {
  * passes it through to the comparison, which serializes and throws.
  * `top-level` puts it in an extra property, which the shape check rejects on
  * its own. `deep` holds no cycle at all: it is ordinary JSON nested far
- * enough to exhaust a recursive walk, which is the other way a read can end
- * by raising instead of answering. All three have to come back as a refusal.
+ * enough to exhaust a recursive walk. `getter`, `toJSON` and `proxy` hold
+ * code where data is expected — reachable through `Object.values`, through an
+ * inherited method the serializer calls, and through a trap on any read.
+ * Every one is a way for the read to end by raising instead of answering, and
+ * every one has to come back as a refusal.
  */
 const cyclicLabelResult = (
-  where: "nested" | "top-level" | "deep",
+  where: "nested" | "top-level" | "deep" | "getter" | "toJSON" | "proxy",
 ): CfcSandboxResult => {
   const label: Record<string, unknown> = { confidentiality: [] };
   if (where === "nested") {
@@ -99,6 +102,33 @@ const cyclicLabelResult = (
       nest = [nest];
     }
     (label.confidentiality as unknown[]).push(nest);
+  } else if (where === "getter") {
+    // Reading this property runs code: `Object.values` would run it, while
+    // reading through a descriptor sees an accessor and stops.
+    Object.defineProperty(label.confidentiality as unknown[], "0", {
+      enumerable: true,
+      get() {
+        throw new Error("getter exploded");
+      },
+    });
+  } else if (where === "toJSON") {
+    // Inert to a check that walks own enumerable data only, and it runs
+    // inside the comparison that serializes.
+    const atom = Object.create({
+      toJSON() {
+        throw new Error("toJSON exploded");
+      },
+    }) as Record<string, unknown>;
+    atom.name = "finance";
+    (label.confidentiality as unknown[]).push(atom);
+  } else if (where === "proxy") {
+    (label.confidentiality as unknown[]).push(
+      new Proxy({}, {
+        ownKeys() {
+          throw new Error("proxy exploded");
+        },
+      }),
+    );
   } else {
     label.self = label;
   }
@@ -1441,7 +1471,16 @@ describe("ingest_sandbox_file", () => {
 
     const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
     try {
-      for (const where of ["nested", "top-level", "deep"] as const) {
+      for (
+        const where of [
+          "nested",
+          "top-level",
+          "deep",
+          "getter",
+          "toJSON",
+          "proxy",
+        ] as const
+      ) {
         const perRunId = `${runId}-${where}`;
         try {
           const engine = new CfHarnessEngine({

@@ -132,22 +132,46 @@ export const useWorkspaceTaintRecord = (
   path: string,
 ): { readonly found: boolean; readonly taint: HarnessWorkspaceTaint } => {
   recordPaths.set(familyRunId, path);
-  let stored: { taint?: HarnessWorkspaceTaint } | undefined;
+  let stored: unknown;
   try {
-    stored = JSON.parse(Deno.readTextFileSync(path)) as {
-      taint?: HarnessWorkspaceTaint;
-    };
+    stored = JSON.parse(Deno.readTextFileSync(path));
   } catch {
     stored = undefined;
   }
-  if (stored?.taint === undefined) {
+  if (stored === undefined) {
+    // Nothing this family wrote that can be read at all — no file, or bytes
+    // that are not JSON. There is nothing to seed FROM, which is a different
+    // answer from a record that says something unreadable.
     persistRecord(familyRunId);
     return { found: false, taint: workspaceTaint(familyRunId) };
+  }
+  // The envelope before its contents: a file at this family's own path that
+  // does not describe this family's state is one this cannot account for, and
+  // a family it cannot account for has no label to mint.
+  if (
+    !isObjectNotArray(stored) ||
+    stored.type !== "cf-harness.family-taint" || stored.version !== 1 ||
+    typeof stored.familyRunId !== "string"
+  ) {
+    return {
+      found: true,
+      taint: poisonWorkspaceTaint(
+        familyRunId,
+        "the file holding this run family's state does not describe one, so " +
+          "what its earlier invocations were exposed to cannot be established",
+      ),
+    };
   }
   // A record that exists and cannot be read is FOUND: it is this family's
   // record, and the seed below poisons on it. Reporting it as absent would
   // send the caller to its own run state, which describes a different thing.
-  return { found: true, taint: seedWorkspaceTaint(familyRunId, stored.taint) };
+  return {
+    found: true,
+    taint: seedWorkspaceTaint(
+      familyRunId,
+      stored.taint as HarnessWorkspaceTaint | undefined,
+    ),
+  };
 };
 
 /** What is known about `familyRunId`'s sandbox work. */

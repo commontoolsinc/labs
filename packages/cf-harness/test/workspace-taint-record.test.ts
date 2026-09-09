@@ -97,6 +97,33 @@ describe("the run family's taint record", () => {
     );
   });
 
+  it("reads a file that does not describe a family's state as unknown", async () => {
+    // At this family's own path, but not this family's record. It cannot be
+    // accounted for, and a family that cannot be accounted for has no label
+    // to mint.
+
+    for (
+      const envelope of [
+        { version: 1, familyRunId: "family", taint: { kind: "known" } },
+        {
+          type: "cf-harness.family-taint",
+          version: 2,
+          familyRunId: "family",
+          taint: { kind: "known" },
+        },
+        { type: "cf-harness.family-taint", version: 1, taint: {} },
+        [1, 2, 3],
+      ]
+    ) {
+      await withRecord(JSON.stringify(envelope), (familyRunId, path) => {
+        const read = useWorkspaceTaintRecord(familyRunId, path);
+
+        expect(read.found).toBe(true);
+        expect(read.taint.kind).toBe("unknown");
+      });
+    }
+  });
+
   it("reads a record it cannot parse as absent", async () => {
     // Nothing this family wrote, so there is nothing to seed FROM — which is
     // a different answer from a record that says something unreadable.
