@@ -88,7 +88,9 @@ export function tagFromFabricPrimitiveElseNull(
 
   const tag = value[VALUE_TAG];
 
-  return ((typeof tag === "string") && (tag in VALUE_TAGS)) ? tag : null;
+  return ((typeof tag === "string") && Object.hasOwn(VALUE_TAGS, tag))
+    ? tag
+    : null;
 }
 
 /**

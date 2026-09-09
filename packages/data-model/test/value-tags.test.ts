@@ -1,8 +1,15 @@
 /**
- * Classifying a native value by what it actually is, across the cases where
- * the obvious check fails.
+ * The tag vocabulary and each dispatch that answers with it.
  *
- * A prototype can be severed, an `Error` can arrive from another realm or from
+ * The fabric-side dispatches take a value already typed as a `FabricValue` or
+ * a `FabricPrimitive`, and their cases are about what each declines: a type
+ * lie, a class outside the vocabulary, and a primitive whose reported tag is
+ * not one the vocabulary holds. One group cross-checks them against the
+ * native-side dispatch over the whole corpus, on the values membership
+ * accepts, which is where the two are required to agree.
+ *
+ * The native-side cases classify a value by what it actually is, across the
+ * cases where the obvious check fails. A prototype can be severed, an `Error` can arrive from another realm or from
  * a subclass nobody here knows, an array can be an `Array` subclass, and an
  * object can have no prototype at all. Each still has a right answer, so these
  * cases are mostly the awkward shapes rather than the ordinary ones.
@@ -18,14 +25,28 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { isValidFabricNativeObject } from "@/validity-check.ts";
+import {
+  isValidFabricNativeObject,
+  isValidFabricValueLayer,
+} from "@/validity-check.ts";
 import {
   tagFromFabricPrimitive,
+  tagFromFabricPrimitiveElseNull,
+  tagFromFabricValue,
+  tagFromFabricValueElseNull,
   tagFromNativeBuiltinClass,
   tagFromNativeValue,
   VALUE_TAGS,
+  type ValueTag,
 } from "@/value-tags.ts";
-import { FabricPrimitive } from "@/interface.ts";
+import { FabricPrimitive, type FabricValue } from "@/interface.ts";
+import {
+  BaseFabricPrimitive,
+  VALUE_TAG,
+} from "@/fabric-bases/BaseFabricPrimitive.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { codecClasses } from "@/fabric-primitives/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -34,7 +55,288 @@ import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
+/**
+ * A `BaseFabricPrimitive` subclass whose reported tag is one the vocabulary
+ * holds, though it is not the class the tag names: the dispatch reads the tag
+ * and does not check it against the class.
+ */
+class TaggedProbe extends BaseFabricPrimitive {
+  get [VALUE_TAG](): ValueTag {
+    return VALUE_TAGS.Hash;
+  }
+}
+
+/** A `BaseFabricPrimitive` subclass reporting a tag the vocabulary lacks. */
+class MistaggedProbe extends BaseFabricPrimitive {
+  get [VALUE_TAG](): ValueTag {
+    return "Bogus" as ValueTag;
+  }
+}
+
+/**
+ * A `BaseFabricPrimitive` subclass reporting a name the vocabulary inherits
+ * rather than declares, which a `tag in VALUE_TAGS` test would accept.
+ */
+class InheritedNameProbe extends BaseFabricPrimitive {
+  get [VALUE_TAG](): ValueTag {
+    return "toString" as ValueTag;
+  }
+}
+
+/** A `BaseFabricPrimitive` subclass reporting something that is no string. */
+class UntaggedProbe extends BaseFabricPrimitive {
+  get [VALUE_TAG](): ValueTag {
+    return undefined as unknown as ValueTag;
+  }
+}
+
+/**
+ * A direct `FabricPrimitive` subclass, bypassing `BaseFabricPrimitive`, which
+ * no production class does.
+ */
+class RoguePrimitive extends FabricPrimitive {}
+
+/** One instance of each production primitive class, with the tag it carries. */
+const PRIMITIVE_TAGS: ReadonlyArray<[FabricPrimitive, ValueTag]> = [
+  [new FabricBytes(new Uint8Array([1])), VALUE_TAGS.FabricBytes],
+  [new FabricEpochDay(0n), VALUE_TAGS.EpochDay],
+  [new FabricEpochNsec(0n), VALUE_TAGS.EpochNsec],
+  [new FabricHash(new Uint8Array(32), "fid1"), VALUE_TAGS.Hash],
+  [
+    new FabricKeyPair(
+      "ExampleAlgorithm",
+      new Uint8Array([1]),
+      new Uint8Array([2]),
+    ),
+    VALUE_TAGS.FabricKeyPair,
+  ],
+  [new FabricRegExp(/a/), VALUE_TAGS.FabricRegExp],
+];
+
 describe("value-tags", () => {
+  describe("VALUE_TAGS", () => {
+    it("is frozen", () => {
+      expect(Object.isFrozen(VALUE_TAGS)).toBe(true);
+    });
+
+    it("names each tag by its own string", () => {
+      // A reported tag is accepted by asking whether the table has it as a
+      // key, which holds only while every tag is also a key.
+
+      for (const [key, tag] of Object.entries(VALUE_TAGS)) {
+        expect(tag).toBe(key);
+      }
+    });
+  });
+
+  describe("tagFromFabricPrimitive()", () => {
+    for (const [value, tag] of PRIMITIVE_TAGS) {
+      it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
+        expect(tagFromFabricPrimitive(value)).toBe(tag);
+      });
+    }
+
+    it("is asked about every registered primitive class", () => {
+      // The table above is the domain only while it is the roster, so the two
+      // are held equal rather than the table being trusted.
+
+      const tabled = new Set(
+        PRIMITIVE_TAGS.map(([value]) => value.constructor),
+      );
+      expect(tabled).toEqual(new Set(codecClasses()));
+    });
+
+    it("returns the tag a subclass reports, whatever its class", () => {
+      expect(tagFromFabricPrimitive(new TaggedProbe())).toBe(VALUE_TAGS.Hash);
+    });
+
+    it("throws for a `FabricPrimitive` that is not a `BaseFabricPrimitive`", () => {
+      expect(() => tagFromFabricPrimitive(new RoguePrimitive())).toThrow(
+        "Not a valid `FabricPrimitive`",
+      );
+    });
+
+    it("throws for a reported tag the vocabulary lacks", () => {
+      expect(() => tagFromFabricPrimitive(new MistaggedProbe())).toThrow(
+        "Not a valid `FabricPrimitive`",
+      );
+    });
+
+    it("throws for a type lie", () => {
+      expect(() => tagFromFabricPrimitive({} as FabricPrimitive)).toThrow(
+        "Not a valid `FabricPrimitive`",
+      );
+    });
+  });
+
+  describe("tagFromFabricPrimitiveElseNull()", () => {
+    for (const [value, tag] of PRIMITIVE_TAGS) {
+      it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
+        expect(tagFromFabricPrimitiveElseNull(value)).toBe(tag);
+      });
+    }
+
+    it("returns `null` for a `FabricPrimitive` that is not a `BaseFabricPrimitive`", () => {
+      expect(tagFromFabricPrimitiveElseNull(new RoguePrimitive())).toBe(null);
+    });
+
+    it("returns `null` for a reported tag the vocabulary lacks", () => {
+      expect(tagFromFabricPrimitiveElseNull(new MistaggedProbe())).toBe(null);
+    });
+
+    it("returns `null` for a reported tag that is only an inherited name", () => {
+      expect(tagFromFabricPrimitiveElseNull(new InheritedNameProbe())).toBe(
+        null,
+      );
+    });
+
+    it("returns `null` for a reported tag that is no string", () => {
+      expect(tagFromFabricPrimitiveElseNull(new UntaggedProbe())).toBe(null);
+    });
+
+    it("returns `null` for a type lie", () => {
+      expect(tagFromFabricPrimitiveElseNull({} as FabricPrimitive)).toBe(null);
+      expect(tagFromFabricPrimitiveElseNull(null as unknown as FabricPrimitive))
+        .toBe(null);
+    });
+  });
+
+  describe("tagFromFabricValue()", () => {
+    it("returns `Primitive` for each scalar arm", () => {
+      expect(tagFromFabricValue(null)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValue(undefined)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValue(true)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValue(42)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValue("x")).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValue(42n)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValue(Symbol.for("s"))).toBe(VALUE_TAGS.Primitive);
+    });
+
+    it("returns `Array` for an array", () => {
+      expect(tagFromFabricValue([])).toBe(VALUE_TAGS.Array);
+      expect(tagFromFabricValue([1, [2]])).toBe(VALUE_TAGS.Array);
+    });
+
+    it("returns `Object` for a plain object", () => {
+      expect(tagFromFabricValue({})).toBe(VALUE_TAGS.Object);
+      expect(tagFromFabricValue({ a: 1 })).toBe(VALUE_TAGS.Object);
+    });
+
+    it("returns `Object` for a null-prototype object", () => {
+      // The narrowing this rests on asks a shape question rather than the
+      // membership one, so a record membership refuses is still an `Object`
+      // here. That is the looseness the function's doc comment reserves.
+
+      const obj = Object.create(null) as FabricValue;
+      expect(tagFromFabricValue(obj)).toBe(VALUE_TAGS.Object);
+    });
+
+    for (const [value, tag] of PRIMITIVE_TAGS) {
+      it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
+        expect(tagFromFabricValue(value)).toBe(tag);
+      });
+    }
+
+    it("returns `FabricInstance` for each `FabricInstance` kind", () => {
+      expect(tagFromFabricValue(FabricError.fromNativeError(new Error("x"))))
+        .toBe(VALUE_TAGS.FabricInstance);
+      expect(tagFromFabricValue(new FabricMap(new Map([["a", 1]]))))
+        .toBe(VALUE_TAGS.FabricInstance);
+    });
+
+    it("throws for a function", () => {
+      expect(() => tagFromFabricValue((() => {}) as unknown as FabricValue))
+        .toThrow("Not possibly a valid `FabricValue`");
+    });
+
+    it("throws for a class instance outside the vocabulary", () => {
+      expect(() => tagFromFabricValue(new Date() as unknown as FabricValue))
+        .toThrow("Not possibly a valid `FabricValue`");
+      expect(() => tagFromFabricValue(new Map() as unknown as FabricValue))
+        .toThrow("Not possibly a valid `FabricValue`");
+    });
+
+    it("throws for a primitive whose reported tag the vocabulary lacks", () => {
+      expect(() => tagFromFabricValue(new MistaggedProbe())).toThrow(
+        "Not possibly a valid `FabricValue`",
+      );
+    });
+  });
+
+  describe("tagFromFabricValueElseNull()", () => {
+    it("returns `Primitive` for each scalar arm", () => {
+      expect(tagFromFabricValueElseNull(null)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValueElseNull(undefined)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValueElseNull(false)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValueElseNull(0)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValueElseNull("")).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValueElseNull(0n)).toBe(VALUE_TAGS.Primitive);
+      expect(tagFromFabricValueElseNull(Symbol.for("s")))
+        .toBe(VALUE_TAGS.Primitive);
+    });
+
+    it("returns `Array` for an array and `Object` for a plain object", () => {
+      expect(tagFromFabricValueElseNull([1])).toBe(VALUE_TAGS.Array);
+      expect(tagFromFabricValueElseNull({ a: 1 })).toBe(VALUE_TAGS.Object);
+    });
+
+    for (const [value, tag] of PRIMITIVE_TAGS) {
+      it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
+        expect(tagFromFabricValueElseNull(value)).toBe(tag);
+      });
+    }
+
+    it("returns `FabricInstance` for a `FabricInstance`", () => {
+      expect(
+        tagFromFabricValueElseNull(FabricError.fromNativeError(new Error("x"))),
+      ).toBe(VALUE_TAGS.FabricInstance);
+    });
+
+    it("returns `null` for a function", () => {
+      expect(tagFromFabricValueElseNull((() => {}) as unknown as FabricValue))
+        .toBe(null);
+    });
+
+    it("returns `null` for a class instance outside the vocabulary", () => {
+      expect(tagFromFabricValueElseNull(new Date() as unknown as FabricValue))
+        .toBe(null);
+      expect(tagFromFabricValueElseNull(/x/ as unknown as FabricValue))
+        .toBe(null);
+    });
+
+    it("returns `null` for a primitive whose reported tag the vocabulary lacks", () => {
+      expect(tagFromFabricValueElseNull(new MistaggedProbe())).toBe(null);
+      expect(tagFromFabricValueElseNull(new RoguePrimitive())).toBe(null);
+    });
+  });
+
+  describe("the fabric dispatch and the native dispatch", () => {
+    // On a value membership accepts, the two dispatches are asked the same
+    // question from different sides -- one of a value typed as a `FabricValue`,
+    // one of an `unknown` -- and must give the same answer. Where membership
+    // refuses a value the fabric dispatch owes nothing, so those are held out
+    // rather than asserted either way. The partition is made here so that
+    // each assertion below is unconditional.
+
+    const accepted = LAYER_CORPUS
+      .filter(([, value]) => isValidFabricValueLayer(value));
+    const refused = LAYER_CORPUS
+      .filter(([, value]) => !isValidFabricValueLayer(value));
+
+    for (const [label, value] of accepted) {
+      it(`tags ${label} the same from either side`, () => {
+        const fabric = tagFromFabricValue(value as FabricValue);
+        expect(fabric).toBe(tagFromNativeValue(value));
+        expect(fabric).toBe(tagFromFabricValueElseNull(value as FabricValue));
+      });
+    }
+
+    it("reaches values on both sides of membership", () => {
+      expect(accepted.length).toBeGreaterThan(0);
+      expect(refused.length).toBeGreaterThan(0);
+    });
+  });
+
   describe("tagFromNativeValue()", () => {
     it("returns `Error` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [
