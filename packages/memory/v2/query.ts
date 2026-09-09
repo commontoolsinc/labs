@@ -1685,6 +1685,43 @@ export const queryGraph = (
 // as one number. Recorded whether or not the logger prints.
 const refreshTiming = getLogger("memory", { enabled: false });
 
+/**
+ * The phase clock of one graph's incremental re-evaluation. `enter(name)`
+ * closes the phase in progress, if any, and opens `name`; `close()` closes
+ * the phase in progress and records the whole as `total`, once. The
+ * evaluation closes the clock in a `finally`, so one that throws still
+ * records the phase it was in and its total — an expensive failure is the
+ * one most worth attributing, and it is skipped and requeued by its caller
+ * rather than surfaced anywhere else.
+ */
+const walkPhaseClock = (): {
+  enter(name: string): void;
+  close(): void;
+} => {
+  const startedAt = performance.now();
+  let phaseAt = startedAt;
+  let current: string | undefined;
+  let closed = false;
+  const record = (name: string, now: number) =>
+    refreshTiming.time(phaseAt, now, "memory", "refresh", "walk", name);
+  return {
+    enter(name) {
+      const now = performance.now();
+      if (current !== undefined) record(current, now);
+      current = name;
+      phaseAt = now;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      const now = performance.now();
+      if (current !== undefined) record(current, now);
+      current = undefined;
+      refreshTiming.time(startedAt, now, "memory", "refresh", "walk", "total");
+    },
+  };
+};
+
 export const refreshTrackedGraph = (
   space: string,
   engine: Engine.Engine,
@@ -1702,230 +1739,224 @@ export const refreshTrackedGraph = (
   const affectedMisses = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   const invalidations = new Map<CellScope, Set<string>>();
   const identity = identityOf(state.manager);
-  const phaseStart = performance.now();
-  let phaseAt = phaseStart;
-  // Closes the phase that began at the previous mark (or the entry).
-  const phase = (name: string) => {
-    const now = performance.now();
-    refreshTiming.time(phaseAt, now, "memory", "refresh", "walk", name);
-    phaseAt = now;
-  };
-  for (const dirtyId of dirtyIds) {
-    // Dirtiness arrives keyed by scope INSTANCE (M4, stage F): the dirty
-    // key's scope_key segment IS the tracked doc key's middle segment, so
-    // the affected-tracker lookup is a direct join — no session-identity
-    // re-resolution, and another principal's instance simply never
-    // matches this state's tracker.
-    const { id, scopeKey, scope } = fromDirtyKey(dirtyId);
-    // The manager's read cache keys by (scope name, id) under its ONE
-    // bound identity, so invalidate only dirtiness aimed at THIS
-    // identity's own instance — a foreign instance was never cached here.
-    if (
-      canResolveScopeKey(scope, identity) &&
-      resolveScopeKey(scope, identity) === scopeKey
-    ) {
-      let scopedIds = invalidations.get(scope);
-      if (scopedIds === undefined) {
-        scopedIds = new Set();
-        invalidations.set(scope, scopedIds);
+  const phases = walkPhaseClock();
+  try {
+    phases.enter("select");
+    for (const dirtyId of dirtyIds) {
+      // Dirtiness arrives keyed by scope INSTANCE (M4, stage F): the dirty
+      // key's scope_key segment IS the tracked doc key's middle segment, so
+      // the affected-tracker lookup is a direct join — no session-identity
+      // re-resolution, and another principal's instance simply never
+      // matches this state's tracker.
+      const { id, scopeKey, scope } = fromDirtyKey(dirtyId);
+      // The manager's read cache keys by (scope name, id) under its ONE
+      // bound identity, so invalidate only dirtiness aimed at THIS
+      // identity's own instance — a foreign instance was never cached here.
+      if (
+        canResolveScopeKey(scope, identity) &&
+        resolveScopeKey(scope, identity) === scopeKey
+      ) {
+        let scopedIds = invalidations.get(scope);
+        if (scopedIds === undefined) {
+          scopedIds = new Set();
+          invalidations.set(scope, scopedIds);
+        }
+        scopedIds.add(id);
       }
-      scopedIds.add(id);
+      const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
+      const selectors = state.tracker.get(key);
+      if (selectors !== undefined && selectors.size > 0) {
+        affectedDocs.set(key, new Set(selectors));
+      }
+      // A dirty doc the query's walks MISSED (read as absent) re-fires the
+      // query exactly like a tracked one: this is the arrival half of the
+      // dead-end read contract — the write that creates the document is the
+      // event that heals every read that dead-ended on it. Without this, a
+      // first-hydration miss on a quiet space starves for the session's
+      // life (OW45 arm B).
+      const missedSelectors = state.missed.get(key);
+      if (missedSelectors !== undefined && missedSelectors.size > 0) {
+        affectedMisses.set(key, new Set(missedSelectors));
+      }
     }
-    const key: QueryDocKey = `${space}/${scopeKey}/${id}`;
-    const selectors = state.tracker.get(key);
-    if (selectors !== undefined && selectors.size > 0) {
-      affectedDocs.set(key, new Set(selectors));
+    if (affectedDocs.size === 0 && affectedMisses.size === 0) {
+      return null;
     }
-    // A dirty doc the query's walks MISSED (read as absent) re-fires the
-    // query exactly like a tracked one: this is the arrival half of the
-    // dead-end read contract — the write that creates the document is the
-    // event that heals every read that dead-ended on it. Without this, a
-    // first-hydration miss on a quiet space starves for the session's
-    // life (OW45 arm B).
-    const missedSelectors = state.missed.get(key);
-    if (missedSelectors !== undefined && missedSelectors.size > 0) {
-      affectedMisses.set(key, new Set(missedSelectors));
+    phases.enter("rewalk");
+
+    const manager = new EngineObjectManager(
+      engine,
+      state.branch,
+      state.manager.principal,
+      state.manager.sessionId,
+    );
+    const sharedMemo = createSchemaMemo();
+    const stats = createQueryTraversalStats();
+    const readCountBefore = manager.readCount;
+
+    const recorder = missRecorderFor(state);
+    for (const key of affectedDocs.keys()) {
+      state.tracker.delete(key);
+      // The re-walk below re-records this referrer's still-live misses;
+      // attributions from its PREVIOUS walk no longer stand, so a link
+      // edited away retires its miss instead of leaving a stale wake.
+      releaseReferrerMisses(state, key);
     }
-  }
-  if (affectedDocs.size === 0 && affectedMisses.size === 0) {
-    phase("select-none");
-    return null;
-  }
-  phase("select");
 
-  const manager = new EngineObjectManager(
-    engine,
-    state.branch,
-    state.manager.principal,
-    state.manager.sessionId,
-  );
-  const sharedMemo = createSchemaMemo();
-  const stats = createQueryTraversalStats();
-  const readCountBefore = manager.readCount;
+    // A document a query named, or one delivered as a member of a named
+    // document's family, is owed its family on every re-walk; a document the
+    // walks merely reached keeps its crossing shape.
+    const roleOf = (key: QueryDocKey) =>
+      state.roots.has(key) || state.chased.has(key)
+        ? "root" as const
+        : "crossing" as const;
+    // A named root that was absent when first tracked earns its family on
+    // the visit that finds it born, and a chase records every member it
+    // loaded so the member's own re-walk chases in turn.
+    const recordChased = (
+      key: QueryDocKey,
+      role: "root" | "crossing",
+      evaluated: EvaluatedDocument | null,
+    ) => {
+      if (evaluated === null || role !== "root") return;
+      state.chased.add(key);
+      for (const chasedKey of evaluated.chasedFamilyKeys) {
+        state.chased.add(chasedKey);
+      }
+    };
 
-  const recorder = missRecorderFor(state);
-  for (const key of affectedDocs.keys()) {
-    state.tracker.delete(key);
-    // The re-walk below re-records this referrer's still-live misses;
-    // attributions from its PREVIOUS walk no longer stand, so a link
-    // edited away retires its miss instead of leaving a stale wake.
-    releaseReferrerMisses(state, key);
-  }
-
-  // A document a query named, or one delivered as a member of a named
-  // document's family, is owed its family on every re-walk; a document the
-  // walks merely reached keeps its crossing shape.
-  const roleOf = (key: QueryDocKey) =>
-    state.roots.has(key) || state.chased.has(key)
-      ? "root" as const
-      : "crossing" as const;
-  // A named root that was absent when first tracked earns its family on
-  // the visit that finds it born, and a chase records every member it
-  // loaded so the member's own re-walk chases in turn.
-  const recordChased = (
-    key: QueryDocKey,
-    role: "root" | "crossing",
-    evaluated: EvaluatedDocument | null,
-  ) => {
-    if (evaluated === null || role !== "root") return;
-    state.chased.add(key);
-    for (const chasedKey of evaluated.chasedFamilyKeys) {
-      state.chased.add(chasedKey);
+    for (const [key, selectors] of affectedDocs) {
+      const { id, scope, scopeKey } = fromDocKey(key);
+      const role = roleOf(key);
+      for (const selector of selectors) {
+        const evaluated = evaluateTrackedDocument(
+          space,
+          manager,
+          { id, scope, scopeKey },
+          selector,
+          state.tracker,
+          recorder,
+          sharedMemo,
+          stats,
+          undefined,
+          role,
+        );
+        recordChased(key, role, evaluated);
+      }
     }
-  };
+    phases.enter("misses");
+    // Re-evaluate the dirtied misses. A BORN target is visited — it enters
+    // the tracker (and the update assembly below delivers it) — and its
+    // miss retires; a still-absent one keeps its miss and attributions
+    // untouched (the throwaway sink swallows the absent re-registration:
+    // a miss never migrates into the tracker, whose entries reach the
+    // wire).
+    const stillAbsent = new MapSetStringToPathSelectors(true);
+    for (const [key, selectors] of affectedMisses) {
+      const { id, scope, scopeKey } = fromDocKey(key);
+      const role = roleOf(key);
+      for (const selector of selectors) {
+        const evaluated = evaluateTrackedDocument(
+          space,
+          manager,
+          { id, scope, scopeKey },
+          selector,
+          state.tracker,
+          recorder,
+          sharedMemo,
+          stats,
+          stillAbsent,
+          role,
+        );
+        recordChased(key, role, evaluated);
+      }
+      // Retirement is decided by THIS evaluation's own outcome — the
+      // throwaway sink received the key iff the doc was still absent. The
+      // tracker is no witness here: the same key can be an absent watch
+      // ROOT whose re-evaluation just re-added its seq-0 marker, and
+      // retiring the miss on that would lose the link-derived selector's
+      // closure when the doc is finally born.
+      if (!stillAbsent.has(key)) {
+        retireMiss(state, key);
+      }
+    }
 
-  for (const [key, selectors] of affectedDocs) {
-    const { id, scope, scopeKey } = fromDocKey(key);
-    const role = roleOf(key);
-    for (const selector of selectors) {
-      const evaluated = evaluateTrackedDocument(
+    phases.enter("loaded");
+    const touched = new Set<QueryDocKey>(affectedDocs.keys());
+    for (const key of affectedMisses.keys()) touched.add(key);
+    for (const address of manager.loadedAddresses()) {
+      const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
+      const previous = state.entities.get(key);
+      const detail = manager.detail({
+        id: address.id,
+        scope: address.scope,
+        scopeKey: address.scopeKey,
+      });
+      if (previous !== undefined && detail?.seq === previous.seq) {
+        continue;
+      }
+      touched.add(key);
+    }
+    phases.enter("snapshot");
+    const updates = new Map<QueryDocKey, EntitySnapshot>();
+    for (const key of touched) {
+      if (!state.tracker.has(key)) {
+        continue;
+      }
+      const snapshot = snapshotForDocKey(
         space,
         manager,
-        { id, scope, scopeKey },
-        selector,
-        state.tracker,
-        recorder,
-        sharedMemo,
-        stats,
-        undefined,
-        role,
+        state.branch,
+        key,
       );
-      recordChased(key, role, evaluated);
+      if (snapshot === null) {
+        continue;
+      }
+      updates.set(key, snapshot);
     }
-  }
-  phase("rewalk");
-  // Re-evaluate the dirtied misses. A BORN target is visited — it enters
-  // the tracker (and the update assembly below delivers it) — and its
-  // miss retires; a still-absent one keeps its miss and attributions
-  // untouched (the throwaway sink swallows the absent re-registration:
-  // a miss never migrates into the tracker, whose entries reach the
-  // wire).
-  const stillAbsent = new MapSetStringToPathSelectors(true);
-  for (const [key, selectors] of affectedMisses) {
-    const { id, scope, scopeKey } = fromDocKey(key);
-    const role = roleOf(key);
-    for (const selector of selectors) {
-      const evaluated = evaluateTrackedDocument(
-        space,
-        manager,
-        { id, scope, scopeKey },
-        selector,
-        state.tracker,
-        recorder,
-        sharedMemo,
-        stats,
-        stillAbsent,
-        role,
-      );
-      recordChased(key, role, evaluated);
-    }
-    // Retirement is decided by THIS evaluation's own outcome — the
-    // throwaway sink received the key iff the doc was still absent. The
-    // tracker is no witness here: the same key can be an absent watch
-    // ROOT whose re-evaluation just re-added its seq-0 marker, and
-    // retiring the miss on that would lose the link-derived selector's
-    // closure when the doc is finally born.
-    if (!stillAbsent.has(key)) {
-      retireMiss(state, key);
-    }
-  }
 
-  phase("misses");
-  const touched = new Set<QueryDocKey>(affectedDocs.keys());
-  for (const key of affectedMisses.keys()) touched.add(key);
-  for (const address of manager.loadedAddresses()) {
-    const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
-    const previous = state.entities.get(key);
-    const detail = manager.detail({
-      id: address.id,
-      scope: address.scope,
-      scopeKey: address.scopeKey,
-    });
-    if (previous !== undefined && detail?.seq === previous.seq) {
-      continue;
-    }
-    touched.add(key);
-  }
-  phase("loaded");
-
-  const updates = new Map<QueryDocKey, EntitySnapshot>();
-  for (const key of touched) {
-    if (!state.tracker.has(key)) {
-      continue;
-    }
-    const snapshot = snapshotForDocKey(
+    // `established` extends validation over the whole previously delivered
+    // state, so a corrupted dependency fails the refresh even when its
+    // referrer did not change. A throw here can leave this graph's tracker
+    // partially advanced; the caller marks the session for a full
+    // re-evaluation, which re-diffs everything on the next successful pass
+    // rather than trusting increments computed over the failure.
+    phases.enter("closure");
+    const staged = assembleSchemaDocClosures(
       space,
+      engine,
       manager,
       state.branch,
-      key,
+      state.tracker,
+      updates,
+      state.entities,
     );
-    if (snapshot === null) {
-      continue;
+    phases.enter("merge");
+    for (const key of staged.trackerAdds) {
+      state.tracker.add(key, REJECTING_SELECTOR);
     }
-    updates.set(key, snapshot);
-  }
+    for (const [key, snapshot] of staged.additions) {
+      updates.set(key, snapshot);
+    }
 
-  // `established` extends validation over the whole previously delivered
-  // state, so a corrupted dependency fails the refresh even when its
-  // referrer did not change. A throw here can leave this graph's tracker
-  // partially advanced; the caller marks the session for a full
-  // re-evaluation, which re-diffs everything on the next successful pass
-  // rather than trusting increments computed over the failure.
-  phase("snapshot");
-  const staged = assembleSchemaDocClosures(
-    space,
-    engine,
-    manager,
-    state.branch,
-    state.tracker,
-    updates,
-    state.entities,
-  );
-  phase("closure");
-  for (const key of staged.trackerAdds) {
-    state.tracker.add(key, REJECTING_SELECTOR);
-  }
-  for (const [key, snapshot] of staged.additions) {
-    updates.set(key, snapshot);
-  }
+    for (const [key, snapshot] of updates) {
+      state.entities.set(key, snapshot);
+    }
+    for (const [scope, ids] of invalidations) {
+      state.manager.invalidateIds(ids, scope);
+    }
+    state.manager.mergeFrom(manager);
 
-  for (const [key, snapshot] of updates) {
-    state.entities.set(key, snapshot);
-  }
-  for (const [scope, ids] of invalidations) {
-    state.manager.invalidateIds(ids, scope);
-  }
-  state.manager.mergeFrom(manager);
-  phase("merge");
-  refreshTiming.time(phaseStart, "memory", "refresh", "walk", "total");
+    stats.managerReads = manager.readCount - readCountBefore;
 
-  stats.managerReads = manager.readCount - readCountBefore;
-
-  return {
-    serverSeq: Engine.serverSeq(engine),
-    updates,
-    stats,
-  };
+    return {
+      serverSeq: Engine.serverSeq(engine),
+      updates,
+      stats,
+    };
+  } finally {
+    phases.close();
+  }
 };
 
 /** What `evaluateTrackedDocument` reports of a document it found present. */
