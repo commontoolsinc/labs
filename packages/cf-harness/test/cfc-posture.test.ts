@@ -7,26 +7,48 @@
  * record in — an ungated sink that did not reach the output is a gap nobody
  * reads about.
  *
- * The itemized enforcement dial belongs here too. A run records it beside the
+ * The itemized dials belong here too — the enforcement rung, the flow-label
+ * rung, and where the flow-label rung came from. A run records each beside the
  * record, from the same configuration, and an audit reads both.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { presetCfcOptions } from "@commonfabric/runner";
+import { RUNTIME_CFC_DIAL_DEFAULTS } from "@commonfabric/runner/cfc";
 
 import {
   harnessFabricSessionPosture,
   harnessFabricSessionPostureBanner,
   renderCfcPostureReport,
 } from "../src/cfc-posture.ts";
-import { fabricSessionCfcEnforcementMode } from "../src/config.ts";
+import {
+  fabricSessionCfcEnforcementMode,
+  fabricSessionCfcFlowLabels,
+  fabricSessionCfcFlowLabelsSource,
+  type HarnessFabricCfcFlowLabelsMode,
+} from "../src/config.ts";
 
 const SESSION = {
   apiUrl: "https://toolshed.example/",
   identityKeyPath: "/keys/agent.pkcs8",
   space: "my-space",
 } as const;
+
+/**
+ * Every configuration of the two dials that decide a session's flow-label
+ * rung: the named bundle it selects, and the rung it states itself.
+ */
+const SESSIONS = ([undefined, "max-enforcement"] as const).flatMap(
+  (cfcPosture) =>
+    ([undefined, "off", "observe", "persist"] as const).map((
+      cfcFlowLabels,
+    ) => ({
+      ...SESSION,
+      ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+      ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
+    })),
+);
 
 describe("cfc-posture", () => {
   describe("harnessFabricSessionPosture()", () => {
@@ -119,6 +141,94 @@ describe("cfc-posture", () => {
           harnessFabricSessionPosture(session).enforcementMode.rung,
         );
       }
+    });
+  });
+
+  describe("fabricSessionCfcFlowLabels()", () => {
+    it("returns the rung the named bundle supplies", () => {
+      expect(
+        fabricSessionCfcFlowLabels({
+          ...SESSION,
+          cfcPosture: "max-enforcement",
+        }),
+      ).toBe(presetCfcOptions({ cfcPosture: "max-enforcement" }).cfcFlowLabels);
+    });
+
+    it("returns the runtime's own default when nothing states the dial", () => {
+      expect(fabricSessionCfcFlowLabels(SESSION)).toBe(
+        RUNTIME_CFC_DIAL_DEFAULTS.cfcFlowLabels,
+      );
+    });
+
+    it("returns the rung the session states over the bundle's", () => {
+      expect(
+        fabricSessionCfcFlowLabels({
+          ...SESSION,
+          cfcPosture: "max-enforcement",
+          // `off` is the rung the assertion below reads back.
+          cfcFlowLabels: "off",
+        }),
+      ).toBe("off");
+    });
+
+    it("throws naming the ladder for a rung outside it", () => {
+      // A value outside the ladder reaches a session config only from a
+      // caller the type checker never saw. The record has no rung to state
+      // for it, and the run that would carry one is refused instead. Where
+      // the run holds the whole record beside this dial, the record's own
+      // resolution refuses first; where a host supplied the session factory,
+      // there is no record and this is the only reader.
+
+      expect(() =>
+        fabricSessionCfcFlowLabels({
+          ...SESSION,
+          cfcFlowLabels: "persistt" as HarnessFabricCfcFlowLabelsMode,
+        })
+      ).toThrow("off, observe, persist");
+    });
+
+    it("returns the rung the record projected from that configuration carries", () => {
+      // A run records both from the same configuration: the itemized dial an
+      // audit compares against, and the whole record beside it. Every
+      // configuration of the two dials that reach this one, rather than a
+      // chosen few.
+
+      for (const session of SESSIONS) {
+        expect(fabricSessionCfcFlowLabels(session)).toBe(
+          harnessFabricSessionPosture(session).flowLabels.rung,
+        );
+      }
+    });
+  });
+
+  describe("fabricSessionCfcFlowLabelsSource()", () => {
+    it("returns `configured` when the session states the dial", () => {
+      // `off` is what the runtime also defaults to, so a source read off the
+      // rung rather than the configuration would say `default` here. Both
+      // ways round on the bundle, which the stated dial outranks either way.
+
+      for (const bundle of [{}, { cfcPosture: "max-enforcement" as const }]) {
+        expect(
+          fabricSessionCfcFlowLabelsSource({
+            ...SESSION,
+            ...bundle,
+            cfcFlowLabels: "off",
+          }),
+        ).toBe("configured");
+      }
+    });
+
+    it("returns `posture` when only the named bundle supplies the dial", () => {
+      expect(
+        fabricSessionCfcFlowLabelsSource({
+          ...SESSION,
+          cfcPosture: "max-enforcement",
+        }),
+      ).toBe("posture");
+    });
+
+    it("returns `default` when neither the session nor a bundle states the dial", () => {
+      expect(fabricSessionCfcFlowLabelsSource(SESSION)).toBe("default");
     });
   });
 

@@ -693,6 +693,49 @@ Deno.test("the Coverage Check job records no tests", async () => {
   assertStringIncludes(job, "tasks/coverage-check.ts");
 });
 
+Deno.test("the CFC Property Suite workflow records no tests", async () => {
+  const suite = withoutComments(await workflow("cfc-properties.yml"));
+  const relay = withoutComments(await workflow("test-records-relay.yml"));
+
+  // Both of the job's steps fall outside what a record is for, and for the
+  // two different reasons `docs/specs/test-records.md` gives under
+  // "Recording". The suite step runs `deno test` directly, with no
+  // `--junit-path` to ingest and no registration preload, so nothing under
+  // it records; a wrapper passes recording through to what it runs, so one
+  // here would file a line summarizing the invocation and nothing else.
+  // Those tests are units of `workspace-unit` and record when CI runs
+  // them. The audit step reads the corpus the step before it wrote, so no
+  // lane can be asked to run it. The workflow therefore takes no part in
+  // test records at either end: it spools nothing, and the relay does not
+  // follow it. Spooling again without the relay produces a run whose
+  // records are gathered and never shipped, and the relay assertion is
+  // what keeps its follow list honest about which workflows record.
+  assert(
+    !suite.includes("CF_TEST_RECORDS_DIR"),
+    "the workflow spools test records",
+  );
+  assert(
+    !suite.includes("run-recorded"),
+    "the workflow wraps a command in run-recorded",
+  );
+  assert(
+    !suite.includes("test-records-ship"),
+    "the workflow ships test records",
+  );
+  const name = suite.match(/^name: (.+)$/m);
+  assert(name, "the workflow has no name");
+  assertEquals(
+    workflowTriggers(relay).includes(name[1]),
+    false,
+    `the relay follows ${name[1]}, whose records nothing gathers`,
+  );
+
+  // Both checks themselves still run.
+  const job = jobBlock(suite, "cfc-properties");
+  assertStringIncludes(job, "run: deno test -A test/cfc-properties/\n");
+  assertStringIncludes(job, "deno task cfc-audit ");
+});
+
 Deno.test("One commit publishes one set of release artifacts", async () => {
   // A release artifact is named after the commit it was built from, and the
   // deploy hands the bastion a commit rather than a build. So a commit has one

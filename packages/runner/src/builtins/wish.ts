@@ -2258,11 +2258,9 @@ export function wish(
 
   /**
    * Write `{error, [UI]}` into the wish state doc in its own committed
-   * bookkeeping transaction, SCHEMALESS on purpose: the failed commit was
-   * refused with the full wish-state schema in play (the served-wish shape
-   * dies in CFC prep on that envelope), and re-presenting the same envelope
-   * would meet the same refusal. A bare value write against the stored
-   * envelope does not.
+   * bookkeeping transaction, presenting the two fields it writes and nothing
+   * else. The commit it reports was refused with the whole wish-state
+   * envelope in play, and that envelope is the document's stored one.
    *
    * Bounded retries for the transient classes only: a stale-basis conflict
    * or a local inconsistency converges when re-run against settled state —
@@ -2293,20 +2291,47 @@ export function wish(
         : {}),
     });
     const { schema: _schema, ...bareLink } = stateLink;
-    // RAW value writes on purpose, not cell writes: a cell write against a
-    // doc with stored CFC metadata records the stored schema as the write's
-    // candidate envelope, and the candidate/stored merge re-meets exactly
-    // the refusal being reported (observed live: the divergent /result
-    // envelope refuses the error report too — the "Can't report …" loop).
-    // A raw value write records no candidate; prep keeps the stored
-    // envelope as-is, and the runtime-authored `error`/`$UI` fields carry
-    // no policy of their own (`true` in the wish-state schema).
-    errorTx.writeValueOrThrow(
-      { ...bareLink, path: [...stateLink.path, "error"] },
-      message,
-    );
-    errorTx.writeValueOrThrow(
-      { ...bareLink, path: [...stateLink.path, UI] },
+    // One field of the report: the value, and the schema it is authored
+    // against, written and named together.
+    //
+    // The write is a raw value rather than a cell write, which would record
+    // the document's STORED schema as this write's candidate envelope.
+    //
+    // A value write reaching a path the stored label map reaches is refused
+    // unless something names the schema it was authored against. A resolved
+    // wish whose result carries no `[UI]` of its own emits a `cf-cell-link`
+    // there, and that link persists a label entry under `[UI]/props/$cell`,
+    // so on such a document `[UI]` is one of those paths.
+    //
+    // The schema named is `true`, which is what the wish-state schema says
+    // at both paths. It declares nothing, so a stored claim at either path
+    // is not checked against this write; and a candidate declaring nothing
+    // is covered by whatever the document has stored, which keeps the report
+    // out of the schema merge.
+    //
+    // The requirement is decided per document rather than per path. What
+    // bounds the report is this transaction: it is created here, carries
+    // these two writes and no others, and the transaction whose refusal it
+    // reports is a separate one that has already settled.
+    const report = (
+      path: readonly string[],
+      value: Parameters<IExtendedStorageTransaction["writeValueOrThrow"]>[1],
+    ) => {
+      errorTx.writeValueOrThrow({ ...bareLink, path }, value);
+      errorTx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: stateLink.space,
+          id: stateLink.id,
+          scope: stateLink.scope,
+          path,
+        },
+        schema: true,
+      });
+    };
+    report([...stateLink.path, "error"], message);
+    report(
+      [...stateLink.path, UI],
       errorUI(message) as unknown as Parameters<
         IExtendedStorageTransaction["writeValueOrThrow"]
       >[1],

@@ -141,11 +141,10 @@ describe("executePieceCallable", () => {
     ).rejects.toThrow('Callable "missing" not found');
   });
 
-  it("bootstraps the space root before resolving, help page included", async () => {
-    // The dispatch arm of `loadPieceForCallables`, pinned from the outside:
-    // a verb that creates a piece registers it through the root's `addPiece`
-    // stream, so dispatch starts the root that `verbs`/`describe` skip. A
-    // help page rides the same path because resolution precedes parsing.
+  it("starts only the addressed piece before resolving, help page included", async () => {
+    // A help page rides the dispatch path because resolution precedes
+    // parsing. Its only startup dependency is the addressed piece; the
+    // controller records any attempt to initialize the space root too.
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "refresh",
@@ -176,49 +175,9 @@ describe("executePieceCallable", () => {
       { loadPieces: () => Promise.resolve(manager as never) },
     );
 
-    expect(order).toEqual(["ensureDefaultPattern", "get:fid1:piece-123:true"]);
+    expect(order).toEqual(["get:fid1:piece-123:true"]);
     expect(executed.helpText).toContain("refresh");
     expect(harness.tracker.handlerWrites).toEqual([]);
-  });
-
-  it("reports a bootstrap that would not run through the sink a caller supplied", async () => {
-    // The one warning on the dispatch path that no other seam carries: the
-    // root's bootstrap failed and the call goes on anyway. A caller drawing
-    // its own screen takes it here rather than finding it written behind the
-    // frame, and a caller that names no sink still gets it on the process's
-    // own stream.
-    const harness = createPieceCallableHarness({
-      callableKind: "handler",
-      cellKey: "refresh",
-      inputSchema: { type: "object", properties: {} },
-    });
-    const reported: string[] = [];
-    const manager = {
-      ...harness.pieces,
-      ensureDefaultPattern: () => Promise.reject(new Error("no root")),
-      get: () => Promise.resolve(harness.piece),
-    };
-
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "refresh",
-      ["--help"],
-      {
-        loadPieces: () => Promise.resolve(manager as never),
-        report: (message) => {
-          reported.push(message);
-        },
-      },
-    );
-
-    expect(reported).toEqual([
-      "Warning: Could not ensure default pattern: no root",
-    ]);
   });
 
   it("preserves plain-text mode while resolving a callable", async () => {

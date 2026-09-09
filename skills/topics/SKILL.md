@@ -17,27 +17,29 @@ contracts live in `packages/patterns/topics/main.tsx` and
 
 ## Deployment and identity
 
-Run from the Labs repository root so `cf` uses that checkout:
+Run from inside the Labs checkout. The commands here are spelled `deno task cf`,
+which runs that checkout's CLI from any directory in it and needs nothing on
+PATH; `skills/cf/SKILL.md` covers the other routes. Shell state rarely survives
+between an agent's tool calls, so set these in the same invocation as the
+command that needs them:
 
 ```bash
 export CF_API_URL='https://estuary.saga-castor.ts.net'
 export CF_SPACE='topics-dev-476ea34f'
 export TOPICS_BOARD='/of:fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34'
 export CF_IDENTITY="${CF_IDENTITY:-$HOME/.config/commonfabric/identity.key}"
-test -r "$CF_IDENTITY" || {
-  printf 'Topics identity key is not readable: %s\n' "$CF_IDENTITY" >&2
-  exit 1
-}
 ```
 
 An already-set `CF_IDENTITY` is the explicit override. Otherwise use the team's
 stable per-user default at `~/.config/commonfabric/identity.key`; the path is
 common while its contents belong to that teammate. Use the same Estuary identity
-key as your human user. If the readability check fails, stop and ask the human
-to provision that default or export the correct path. Do not search for keys,
-mint an agent key, use another human's key, or use the publicly derivable
+key as your human user. When `cf` reports that keyfile missing or unreadable,
+stop and ask the human to provision that default or export the correct path; the
+check belongs to `cf`, so the shell never touches the key. Do not search for
+keys, mint an agent key, use another human's key, or use the publicly derivable
 `implicit trust` identity. Never print or inspect key material; use
-`cf id did "$CF_IDENTITY"` when the public DID is needed for verification.
+`deno task cf id did "$CF_IDENTITY"` when the public DID is needed for
+verification.
 
 Every authored-content mutation carries `agentName` in the same event. Use one
 stable agent name, without decorating titles, labels, bodies, or comments with a
@@ -52,21 +54,21 @@ reference edge, take no `agentName`, and return no value.
 The running piece is authoritative. Orient before mutating it:
 
 ```bash
-cf piece verbs --cell "$TOPICS_BOARD" --json
+deno task cf piece verbs --cell "$TOPICS_BOARD" --json
 ```
 
 That listing includes the deployed pattern reference, callable prose, and input
-and output schemas. `cf piece describe --cell "$TOPICS_BOARD" --json` returns a
-superset of it (the same verb rows plus name, purpose, state, and inputs) for
-the same bounded discovery load. Neither command starts the piece; the reason to
-default to `verbs` is payload, not time: the listing is the smaller document to
-hold in context, and it is complete for calling. Use `describe` when you need
-the piece-wide purpose, state, or input documentation. Use
-`cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only after choosing
-a verb and when its generated flags or standalone help are useful; help is
-served through the dispatch path, which also starts the space root, so it is the
-most expensive of the three. Each command is an independent cold CLI process, so
-do not run all three by default.
+and output schemas. `deno task cf piece describe --cell "$TOPICS_BOARD" --json`
+returns a superset of it (the same verb rows plus name, purpose, state, and
+inputs) for the same bounded discovery load. Neither command starts the piece;
+the reason to default to `verbs` is payload, not time: the listing is the
+smaller document to hold in context, and it is complete for calling. Use
+`describe` when you need the piece-wide purpose, state, or input documentation.
+Use `deno task cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only
+after choosing a verb and when its generated flags or standalone help are
+useful; help is served through the dispatch path, which starts the addressed
+piece, so it is the most expensive of the three. Each command is an independent
+cold CLI process, so do not run all three by default.
 
 The deployment can be well behind the checkout the CLI runs from, and that gap
 explains board behavior that would otherwise read as a defect. Ask it which
@@ -112,10 +114,10 @@ retained deliberately.
 
 `editComment` and `removeComment` name their target by REFERENCE, and a comment
 is not a piece: it has no fid to write into an inline JSON event, so these are
-reachable from a reader that holds the row, not from a bare `cf piece call`.
-`removeLink` is the exception and takes `url` for exactly that reason,
-retracting the most recently added link still present with that URL — so
-retracting twice retracts two rather than re-stamping one.
+reachable from a reader that holds the row, not from a bare
+`deno task cf piece call`. `removeLink` is the exception and takes `url` for
+exactly that reason, retracting the most recently added link still present with
+that URL — so retracting twice retracts two rather than re-stamping one.
 
 ## Discover and read
 
@@ -123,7 +125,7 @@ Survey through the compact `index`. Its rows are Topics, and `@` asks for each
 row's canonical address without expanding its body, thread, or verbs:
 
 ```bash
-cf cell get "$TOPICS_BOARD" index --step \
+deno task cf cell get "$TOPICS_BOARD" index --step \
   --select @,title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 ```
 
@@ -149,11 +151,11 @@ evidence the edge is wrong.
 Read one Topic's durable input before changing it:
 
 ```bash
-cf cell get --cell "$TOPIC" title --input
-cf cell get --cell "$TOPIC" body --input
-cf cell get --cell "$TOPIC" comments --input \
+deno task cf cell get --cell "$TOPIC" title --input
+deno task cf cell get --cell "$TOPIC" body --input
+deno task cf cell get --cell "$TOPIC" comments --input \
   --select sentAt,author.kind,author.name,body
-cf cell get --cell "$TOPIC" links --input \
+deno task cf cell get --cell "$TOPIC" links --input \
   --select kind,url,label,addedAt,addedBy.kind,addedBy.name
 ```
 
@@ -176,18 +178,18 @@ it. `addTopic` returns the name it allocated as `name` beside the created
 in one bounded read:
 
 ```bash
-cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName
+deno task cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName
 ```
 
 The number is what a short reference is written with. Once the board's `names`
 map is bound as a slug, `<collection>/<member>` names a Topic wherever an
-address is taken — `cf cell get /@<space>/top/42 title`,
-`cf piece describe --cell /@<space>/top/42`,
-`cf piece call --cell /@<space>/top/42 setTitle '{...}'` — and exactly one
-segment reaches a member, so `/@<space>/top/42/title` is that Topic's `title`
-field. A name with no member after it is refused, naming the piece holding the
-collection; and `no member 999 in top` is the refusal for a member the board
-does not hold. `packages/cli/README.md` is the whole grammar, and
+address is taken — `deno task cf cell get /@<space>/top/42 title`,
+`deno task cf piece describe --cell /@<space>/top/42`,
+`deno task cf piece call --cell /@<space>/top/42 setTitle '{...}'` — and exactly
+one segment reaches a member, so `/@<space>/top/42/title` is that Topic's
+`title` field. A name with no member after it is refused, naming the piece
+holding the collection; and `no member 999 in top` is the refusal for a member
+the board does not hold. `packages/cli/README.md` is the whole grammar, and
 `docs/specs/collection-naming.md` the design.
 
 A member name is the board's, not the fabric's: it means something only through
@@ -213,8 +215,8 @@ reuse that id only to retry the same mutation. Create through the board and
 project the returned Topic to its address:
 
 ```bash
-export CF_INVOCATION_SESSION="$(cf invocation-session new)"
-CREATE="$(cf piece call --cell "$TOPICS_BOARD" \
+export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"
+CREATE="$(deno task cf piece call --cell "$TOPICS_BOARD" \
   --invocation '<unique-topic-create-id>' \
   addTopic \
   '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}' \
@@ -251,8 +253,8 @@ creating another Topic. Retrying on the strength of a timeout is how one Topic
 becomes two.
 
 ```bash
-cf cell get "$TOPICS_BOARD" index --step --select @,title
-cf cell get --cell "$TOPIC" title --input
+deno task cf cell get "$TOPICS_BOARD" index --step --select @,title
+deno task cf cell get --cell "$TOPIC" title --input
 ```
 
 Use one invocation session per agent run and an explicit invocation id per
@@ -263,13 +265,13 @@ pair. The full retry and receipt model is in `skills/cf/SKILL.md` and
 ## Update through Topic verbs
 
 ```bash
-cf piece call --cell "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
+deno task cf piece call --cell "$TOPIC" --invocation '<unique-set-title-id>' setTitle \
   '{"title":"<complete new title>","agentName":"Sol"}'
-cf piece call --cell "$TOPIC" --invocation '<unique-set-body-id>' setBody \
+deno task cf piece call --cell "$TOPIC" --invocation '<unique-set-body-id>' setBody \
   '{"body":"<complete revised body>","agentName":"Sol"}'
-cf piece call --cell "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
+deno task cf piece call --cell "$TOPIC" --invocation '<unique-add-comment-id>' addComment \
   '{"body":"<point-in-time update>","agentName":"Sol"}'
-cf piece call --cell "$TOPIC" --invocation '<unique-add-link-id>' addLink \
+deno task cf piece call --cell "$TOPIC" --invocation '<unique-add-link-id>' addLink \
   '{"url":"<PR URL>","kind":"pr","label":"<label>","agentName":"Sol"}'
 ```
 
@@ -284,13 +286,14 @@ computed, such as a count or board-index row.
 A cross-Topic connection is a reference, not an address pasted into prose. Pass
 the canonical reference in the declared reference position; the CLI turns it
 into the live piece link the verb expects. Set `OTHER_TOPIC` to the `$link` from
-the index row for the Topic being referenced:
+the index row for the Topic being referenced; the row's `{"$link": …}` object
+passes in that position as it was printed, too:
 
 ```bash
 export OTHER_TOPIC='<canonical /of:... address from another index row>'
-cf piece call --cell "$TOPIC" --invocation '<unique-mention-id>' mention \
+deno task cf piece call --cell "$TOPIC" --invocation '<unique-mention-id>' mention \
   "{\"topic\":\"$OTHER_TOPIC\"}"
-cf piece call --cell "$TOPIC" --invocation '<unique-unmention-id>' unmention \
+deno task cf piece call --cell "$TOPIC" --invocation '<unique-unmention-id>' unmention \
   "{\"topic\":\"$OTHER_TOPIC\"}"
 ```
 
@@ -341,7 +344,7 @@ and `ownName` in `packages/patterns/collection-naming/naming.ts` is the lookup.
 A parent writes its member's result and never its member's argument, so
 `backfillNames` names a Topic filed before the namespace in the board's map
 while that Topic goes on reading no name. No pattern can close that gap. One
-`cf piece link` per Topic can, and this is that procedure.
+`deno task cf piece link` per Topic can, and this is that procedure.
 
 It was established by a clone rehearsal, and the evidence — every command, its
 output, and the counts and timings behind the claims here — is
@@ -398,46 +401,48 @@ that before deciding anything this procedure says needs deciding.
 
    **Skipping it leaves a usable board.** A Topic still on pre-graft source is
    named by `backfillNames` like any other member, answers to
-   `cf cell get /top/<n> title`, and reads back as an ordinary `index` row with
-   no `shortName` and no damage to the array around it. So naming, `/top/<n>`
-   addressing and index membership all survive the step being skipped, and
-   `shortName` — the badge, and the number on the index row — is what is absent.
-   That bounds what skipping costs from BELOW, not from above: no run against a
-   populated board has forced a Topic update, so what else a completed one would
-   change there is not known, and the record says so. Step 4's refusal on such a
-   Topic is this state being enforced rather than an error.
+   `deno task cf cell get /top/<n> title`, and reads back as an ordinary `index`
+   row with no `shortName` and no damage to the array around it. So naming,
+   `/top/<n>` addressing and index membership all survive the step being
+   skipped, and `shortName` — the badge, and the number on the index row — is
+   what is absent. That bounds what skipping costs from BELOW, not from above:
+   no run against a populated board has forced a Topic update, so what else a
+   completed one would change there is not known, and the record says so. Step
+   4's refusal on such a Topic is this state being enforced rather than an
+   error.
 
 3. **`backfillNames` once**, through the board. It returns the names it wrote,
    in filing order, and is idempotent: a second run writes nothing and returns
    an empty list.
 
-4. **`cf piece link` once per Topic that `addTopic` did not wire** — that is,
-   per Topic that took step 2. A Topic that skipped it has no `boardNames` input
-   to bind, and the bind says so.
+4. **`deno task cf piece link` once per Topic that `addTopic` did not wire** —
+   that is, per Topic that took step 2. A Topic that skipped it has no
+   `boardNames` input to bind, and the bind says so.
 
 ### The two commands
 
 ```bash
-cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
+deno task cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
   '{"agentName":"Sol"}'
-cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
+deno task cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
 ```
 
 Between them is the gap this procedure exists for: the board's `names` map and
 `namesTable` hold the name, and the Topic does not.
 
 ```
-$ cf cell get --cell "$TOPIC" shortName --step
+$ deno task cf cell get --cell "$TOPIC" shortName --step
 Cannot read piece result at "shortName": stored data is present, but its schema
 could not resolve all required values. The piece was stepped, but the required
 value still did not materialize.
 ```
 
 After the bind that read answers with the number, the board's `index` row for
-that Topic carries it as `shortName`, and `cf cell get /top/<n> title` returns
-its title. A Topic left unbound keeps reporting the message above, which is what
-a half-finished run looks like: the board serves every Topic either way, named
-beside unnamed, and the repair is to bind the rest. Nothing has to be undone.
+that Topic carries it as `shortName`, and `deno task cf cell get /top/<n> title`
+returns its title. A Topic left unbound keeps reporting the message above, which
+is what a half-finished run looks like: the board serves every Topic either way,
+named beside unnamed, and the repair is to bind the rest. Nothing has to be
+undone.
 
 The bind is idempotent — repeating it with the same two endpoints changes
 nothing and commits nothing. Note that `wrote to space` prints either way, so it
@@ -457,7 +462,7 @@ laptop; run it from somewhere that record vindicates.
 The derived `shortName` is the wrong thing to audit — read the durable argument:
 
 ```bash
-cf cell get --cell "$TOPIC" boardNames --input --select name
+deno task cf cell get --cell "$TOPIC" boardNames --input --select name
 ```
 
 A bound Topic returns the whole names table (`[{"name":"1"},…]`); an unbound one
@@ -487,12 +492,13 @@ Use --allow-non-existing to link anyway.
 ```
 
 Taking that suggestion prints `Linked …` and buys nothing: the Topic's input map
-does not gain the key — neither `cf cell get --cell "$TOPIC" --input` nor
-`cf piece inspect`'s Source (Inputs) shows it — and its name never appears. What
-it does do is write the link into the argument document, where the pattern
-cannot reach it but `cf cell get --cell "$TOPIC" boardNames --input` can, which
-is what makes the audit above read it as bound. The next `setsrc` of that Topic
-then fails with an extra
+does not gain the key — neither `deno task cf cell get --cell "$TOPIC" --input`
+nor `deno task cf piece inspect`'s Source (Inputs) shows it — and its name never
+appears. What it does do is write the link into the argument document, where the
+pattern cannot reach it but
+`deno task cf cell get --cell "$TOPIC" boardNames --input` can, which is what
+makes the audit above read it as bound. The next `setsrc` of that Topic then
+fails with an extra
 `updated arguments do not match the candidate schema: boardNames: value does not
 match type array`
 that a clean control piece does not produce. The forced bind poisons the Topic
@@ -500,7 +506,7 @@ against its own migration.
 
 **`setsrc --check` is not read-only against the store** (#6964). It writes, even
 when it refuses and replaces nothing, so a rehearsal clone is spent after one
-and a second pass needs `cf space reset`. Nothing authored moves.
+and a second pass needs `deno task cf space reset`. Nothing authored moves.
 
 **Binding a piece the board does not hold** does nothing wrong and nothing
 useful: it succeeds, and the Topic reads no name. The lookup is by identity —

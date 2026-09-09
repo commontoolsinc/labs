@@ -31,10 +31,11 @@ pattern is torn down, and a launch releases its own registration when the
 transaction staging its setup does not become durable. A release leaves a
 replacement registration alone, leaves a result that holds a lifetime of its
 own running, and leaves a start it cannot see to settle on its own terms.
-Pending commit-gated starts are the exception: a release cancels every one
-held for the result, including one another launch scheduled, because a start
-that has installed no registration yet offers nothing to tell launches apart
-by.
+Pending starts — one gated on a commit, and one held while a piece set up
+elsewhere is named before it runs — are the exception: a release cancels
+every one held for the result, including one another launch scheduled,
+because a start that has installed no registration yet offers nothing to tell
+launches apart by.
 
 Each rule below is one of these two authorities applied to a case.
 
