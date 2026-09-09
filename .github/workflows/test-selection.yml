@@ -1,9 +1,8 @@
 # The publisher: reads the test-record store, folds what is new into a
 # rolling aggregate, scores every identity, and creates one manifest object.
-# The planned five pull-request lanes will read that manifest once CI adopts
-# them. Nothing gates on it today: when this fails, the previous manifest stays
-# newest for the dashboard and read-only tools, so selection quality decays
-# slowly rather than anything turning red.
+# Whatever reads a manifest reads the newest one. Nothing gates on this
+# workflow: when it fails, the manifest before it is still the newest, so
+# selection quality decays slowly rather than anything turning red.
 #
 # Its Google Cloud identity comes from a Workload Identity Federation
 # provider pinned to exactly this workflow file on main, so no other

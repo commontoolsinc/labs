@@ -2915,8 +2915,9 @@ service account is reachable through a Workload Identity provider pinned to one
 workflow file on `main`, exactly as the relay is. Its identity-specific
 `objectCreator` grant cannot overwrite or delete, while the dataset's public
 `objectViewer` grant separately lets it read and list objects like any other
-public reader. Broader bucket administrators remain the infrastructure
-containment caveat rather than another publisher path.
+public reader. A bucket administrator can still write anywhere in the
+bucket. That is a risk the infrastructure has to contain, rather than a
+second way to publish a manifest.
 
 The lane runner treats the manifest as untrusted input and validates it
 whole. The only field that reaches a shell is a suite identifier, which is
