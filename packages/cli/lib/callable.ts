@@ -461,11 +461,13 @@ function carriesCellMarker(node: Record<string, unknown>): boolean {
   return node.asCell !== undefined || node.asStream !== undefined;
 }
 
-/** The address inside the `{"$link": "/of:…"}` object a marked read renders
+/**
+ * The address inside the `{"$link": "/of:…"}` object a marked read renders
  * (`composeLinkAddresses`, cell-selection.ts), whether the address stands
  * alone there or the contents the same read projected sit beside it.
  * `undefined` for every other value, a `$link` holding no string included:
- * `{"$link": true}` is the projection-schema marker, not an address. */
+ * `{"$link": true}` is the projection-schema marker, not an address.
+ */
 function printedAddressOf(value: unknown): string | undefined {
   if (!isObjectNotArray(value)) return undefined;
   const address = (value as Record<string, unknown>)[LINK_MARKER_KEY];
