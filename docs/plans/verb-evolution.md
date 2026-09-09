@@ -51,7 +51,7 @@ here is what it does to a verb's author:
 | Mark a verb `@deprecated` | allowed, and it disappears from listings |
 | Turn a verb into data, or data into a verb | refused |
 | Add an optional field to a verb's input | allowed |
-| Add a required field to a verb's input | refused, unless the field already carried a default |
+| Add a required field to a verb's input | refused, unless the field carries a default |
 | Make a field of a verb's input optional | allowed |
 | Remove or retype a field of a verb's input | refused |
 | Change anything about a verb's **output** | allowed, and nothing checks it |
@@ -72,11 +72,15 @@ the change does.
 **Required-ness of a verb's input is settled** ([#5663]). It reads as the
 argument side's rule, stated in the result comparison's direction, because a
 verb's event is an argument in every respect but where it is declared. Adding
-a newly required field is refused; the default that would rescue it has to be
-one the field already carried, since descending through a stream marker
-withdraws permission to introduce a default below it. Relaxing a field to
-optional is allowed for the same reason it is allowed of an argument: every
-call already written still sent it, so every one still validates.
+a newly required field is refused unless the field carries a default, which
+materializes for every call that omits it. The default may be one the field
+already carried or one the candidate introduces, and a default that changes
+value is accepted as it is of an argument: a stream marker is cell metadata,
+and cell metadata is default-stable ([#7166]) — it does not constrain the
+value beneath it, so it withdraws no permission to introduce or change a
+default there. Relaxing a field to optional is allowed for the same reason it
+is allowed of an argument: every call already written still sent it, so every
+one still validates.
 
 **A verb's output is not checked at all.** The shape records a verb's input
 and discards its output, so renaming a field of what a verb hands back
@@ -705,3 +709,4 @@ Five smaller calls belong to whoever does the work:
 
 [#5663]: https://github.com/commontoolsinc/labs/issues/5663
 [#5746]: https://github.com/commontoolsinc/labs/pull/5746
+[#7166]: https://github.com/commontoolsinc/labs/pull/7166

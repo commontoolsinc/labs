@@ -1395,6 +1395,43 @@ describe("piece schema compatibility", () => {
     }
   });
 
+  it("treats a default beneath unchanged cell metadata as beneath a plain node", () => {
+    // Stable means the plain-node rule applies, not only insertion: a
+    // changed default value is accepted, and a durable-link proof accepts a
+    // target default declared below a cell.
+    const cell = (value: Record<string, number>): JSONSchema => ({
+      type: "object",
+      properties: {
+        settings: {
+          type: "object",
+          additionalProperties: { type: "number" },
+          asCell: ["cell"],
+          default: value,
+        },
+      },
+    });
+    const resultSchema: JSONSchema = { type: "object" };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(cell({ a: 1 }), resultSchema),
+        pattern(cell({ a: 2 }), resultSchema),
+      )
+    ).not.toThrow();
+
+    const linked = (x: JSONSchema): JSONSchema => ({
+      type: "object",
+      properties: {
+        s: { type: "object", asCell: ["cell"], properties: { x } },
+      },
+    });
+    expect(() =>
+      assertSchemaSubset(
+        linked({ type: "number" }),
+        linked({ type: "number", default: 5 }),
+      )
+    ).not.toThrow();
+  });
+
   it("rejects cell and scope changes when a record gains a default", () => {
     for (
       const [before, after, message] of [
@@ -3345,6 +3382,65 @@ describe("verb event required-field transitions", () => {
       assertPatternSchemasBackwardCompatible(
         verbInResult(withDefault(["label"])),
         verbInResult(withDefault(["label", "color"])),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts an event field that becomes required with a newly added default", () => {
+    // The rescue is any default the candidate carries, not only one the
+    // field carried before. A stream marker is cell metadata, and cell
+    // metadata is default-stable (#7166): it says how the value arrives, not
+    // what shape it has, so it withdraws no permission to introduce a
+    // default beneath it. The default materializes for every call that
+    // omits the field, which is what makes the new requirement safe.
+    const before: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    const after: JSONSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        color: { type: "string", default: "none" },
+      },
+      required: ["label", "color"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(before),
+        verbInResult(after),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a changed default on an event field, as on an argument", () => {
+    const withDefault = (color: string): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        color: { type: "string", default: color },
+      },
+      required: ["label"],
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(withDefault("none")),
+        verbInResult(withDefault("blue")),
+      )
+    ).not.toThrow();
+    // The same verb declared in the argument, where the event was already
+    // compared in the argument's direction.
+    const verbInArgument = (event: JSONSchema): Pattern =>
+      pattern({
+        type: "object",
+        properties: { setLabel: { $ref: "#/$defs/Ev", asCell: ["stream"] } },
+        $defs: { Ev: event },
+      }, { type: "object", properties: {} });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInArgument(withDefault("none")),
+        verbInArgument(withDefault("blue")),
       )
     ).not.toThrow();
   });

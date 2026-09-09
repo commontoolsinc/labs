@@ -117,11 +117,18 @@ candidate pattern generates it during setup. This admits the forward migration;
 add a result default as well when an older concurrently running generation must
 still be able to write its previous result shape.
 
-Unchanged cell wrappers (`asCell`) and storage scopes (`scope`) permit default
-insertion, including an empty-object default on a record reached through a
-`$ref`. The metadata itself must still compare equal across an update. Value
-constraints that default insertion can invalidate, such as `maxProperties`,
-continue to require equal defaults beneath them.
+Cell wrappers (`asCell`) and storage scopes (`scope`) are default-stable: they
+say how a value is delivered or stored, not what shape it has, so a default
+beneath one may be introduced or changed under the same rules as beneath a
+plain object node. That covers an empty-object default on a record reached
+through a `$ref`, a default that changes value on an unchanged cell, a verb's
+event below its stream marker (a newly required event field is rescued by any
+default the candidate carries, not only one the field carried before), and a
+durable-link proof whose target declares a default below a cell. The metadata
+itself must still compare equal across an update: a changed `asCell` or
+`scope` is refused on its own. Value constraints that default insertion can
+invalidate, such as `maxProperties`, continue to require equal defaults
+beneath them.
 
 A verb's event is the one place inside a result where that reasoning does not
 hold, and the direction is decided by which side supplies the value rather
