@@ -5,7 +5,6 @@
 
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Primitive } from "@commonfabric/utils/types";
 
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
@@ -18,7 +17,6 @@ import {
   FabricValue,
 } from "./interface.ts";
 import { isValidFabricValue } from "./validity-check.ts";
-import { toDebugKindString } from "./value-debug.ts";
 import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
 
 /** Type for a `mainResult` form. */
