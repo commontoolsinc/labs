@@ -2316,10 +2316,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Link resolution and CFC label-view derivation both do exactly that, and
    * both are driven per element of a collection, so a scan recomputes them
    * once per element per pass. Each user owns its own key prefix and entry
-   * shape; the transaction owns when the map may be used and when it is
-   * dropped. It is replaced wholesale on any write — same rule as the
-   * `Cell.get()` cache above — so an entry is only ever served when nothing
-   * has been written since it was made.
+   * shape; the transaction owns which map is handed out and when it is
+   * dropped. The map for the current instant is replaced wholesale on any
+   * write — same rule as the `Cell.get()` cache above — so an entry is only
+   * ever served when nothing has been written since it was made. A read under
+   * an epoch, or inside a `runWithAmbientReadMeta()` scope, is handed a map of
+   * its own: an entry stands in only for reads journaled the way the caller's
+   * would be, and a map for an epoch outlives writes, since the instant it
+   * describes does.
    *
    * A user must be a derivation whose only observable effect is its result, or
    * must reproduce the rest itself: the reads a memoized derivation skips were
@@ -2329,9 +2333,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * `undefined` is returned where a derivation is not a pure function of the
    * snapshot: once CFC is prepared, where the read path's read-after-prepare
-   * invalidation is load-bearing, and inside a `runWithAmbientReadMeta()`
-   * scope, where the reads carry metadata that a call outside the scope would
-   * not.
+   * invalidation is load-bearing.
    *
    * Optional: transactions that must not memoize (the non-reactive `sample()`
    * wrapper, whose reads are excluded from scheduling) leave it undefined, and

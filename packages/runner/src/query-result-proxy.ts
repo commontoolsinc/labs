@@ -300,9 +300,11 @@ function createViewProxy<T>(
   //
   // The key names no more than the caches below it already distinguish, so
   // this index can never be the reason two things that differ share a view.
-  // `depth` and `pinned` are not in it, because `byLink` conflates the first
-  // and the second changes nothing about what a view of this link against this
-  // transaction is.
+  // `depth` is not in it, because `byLink` conflates it. `pinned` is: a memo
+  // may outlive a write when a reader holds the instant it describes, and
+  // after that write a pinned view still describes that instant while an
+  // unpinned handle reads current state, so the two are different things
+  // under one link.
   //
   // A caller-supplied label view would have to be part of the key, and
   // serializing one costs more than the read it saves. Those reads take the
@@ -311,7 +313,9 @@ function createViewProxy<T>(
   const viewMemo = cfcLabelView === undefined && resolved.memoKey !== undefined
     ? viewTx.getSnapshotMemo?.()
     : undefined;
-  const viewKey = viewMemo === undefined ? "" : `view:${resolved.memoKey}`;
+  const viewKey = viewMemo === undefined
+    ? ""
+    : `view:${pinned ? "pinned" : "handle"}:${resolved.memoKey}`;
   const cached = viewMemo?.get(viewKey) as { view: unknown } | undefined;
   if (cached !== undefined) return cached.view as T;
   const remember = <V>(view: V): V => {
