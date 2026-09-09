@@ -16,8 +16,8 @@ CI job turns this on by setting the `DENO_COVERAGE_DIR` environment variable.
 After the tests finish, `tasks/write-coverage-lcov.ts` converts the raw V8
 profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
 artifact. Most test jobs set `DENO_COVERAGE_DIR`. The pattern and package
-integration jobs do; the two that run the opposite server-execution arm do
-not.
+integration jobs set it. The two workflow jobs running the opposite
+server-execution arm set none.
 
 A focused `*.browser.test.ts` file run through `deno-web-test` executes its
 application module inside Chrome. That browser execution proves DOM behavior,

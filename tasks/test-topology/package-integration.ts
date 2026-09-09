@@ -17,6 +17,7 @@ import {
   type ServerExecutionSuite,
 } from "../server-execution-on-skips.ts";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
+import { taskEnvironment } from "./deno-task.ts";
 import {
   type FilePart,
   fileSuite,
@@ -71,11 +72,12 @@ export async function loadPackageIntegrationSuites(
     const packageDir = `packages/${scope}`;
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
-    // `LOG_LEVEL` is what each package's own `integration` task runs
-    // these with, and running them at the default level is running them
-    // differently from the way they are meant to run.
+    // The environment the package's own `integration` task sets, so the
+    // suite a lane runs and the suite somebody runs by hand are the same
+    // run. `HEADLESS` is not part of it: the task leaves the browser
+    // visible and CI hides it.
     const env: Record<string, string> = {
-      LOG_LEVEL: "warn",
+      ...await taskEnvironment(`${root}/${packageDir}`, "integration"),
       ...(headless ? { HEADLESS: "1" } : {}),
     };
     const on = unavailableFrom(skips[scope], packageDir);

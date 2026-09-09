@@ -14,6 +14,7 @@ import * as path from "@std/path";
 import { PATTERN_TREES } from "../pattern-files.ts";
 import { SERVER_EXECUTION_ON_SKIPS } from "../server-execution-on-skips.ts";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
+import { taskEnvironment } from "./deno-task.ts";
 import {
   type CommandContext,
   fileSuite,
@@ -91,11 +92,14 @@ async function patternIntegrationSuites(
     scope: "patterns",
     filePrefix: packageDir,
   };
-  // What the package's own `integration` task runs these with. Running
-  // them at the default level is running them differently from the way
-  // they are meant to run, and a browser suite at that level writes a
-  // great deal of it.
-  const env = { HEADLESS: "1", LOG_LEVEL: "warn" };
+  // The environment the package's own `integration` task sets, so the
+  // suite a lane runs and the suite somebody runs by hand are the same
+  // run. `HEADLESS` is not part of it: the task leaves the browser
+  // visible and CI hides it.
+  const env = {
+    ...await taskEnvironment(`${root}/${packageDir}`, "integration"),
+    HEADLESS: "1",
+  };
   const on = unavailableFrom(SERVER_EXECUTION_ON_SKIPS.patterns, packageDir);
   const defaultLane = serverExecutionCiLane("default", defaultEnabled);
   const oppositeLane = serverExecutionCiLane("opposite", defaultEnabled);
