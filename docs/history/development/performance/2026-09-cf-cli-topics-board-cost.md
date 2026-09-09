@@ -38,6 +38,12 @@ of which the board's start was 7.0 s, and the server's twelve watch adds took
 documents once; the warm numbers are what a deployment whose cache holds the
 board pays.
 
+These are the intrinsic costs of each command: the rig is a clone whose only
+client is the CLI, so nothing queues behind another session. On Estuary the
+same commands also wait behind other sessions' watch-set refreshes (cause 7
+below), and on a loaded shard that wait exceeds everything in the table
+combined; the numbers here are the floor of the live cost, not the live cost.
+
 The survey's output is 58 KB. Its input read (`--input` on a field) is fast:
 the CLI's own overhead is not the problem, and neither is the server when it
 is warm — both CPU profiles are half idle, each side waiting on the other.

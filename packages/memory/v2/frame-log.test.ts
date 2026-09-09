@@ -1,6 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createFrameLog, frameLogFromEnvironment } from "./frame-log.ts";
+import {
+  appendLineToFile,
+  createFrameLog,
+  frameLogEnabled,
+  frameLogFromEnvironment,
+  logIncomingFrame,
+  logOutgoingFrame,
+  readEnvironmentVariable,
+} from "./frame-log.ts";
 
 describe("frame log", () => {
   const collect = () => {
@@ -372,5 +380,158 @@ describe("frame log document identity", () => {
     const selector = lines.find((line) => line.dir === "selector")!;
     // `{"path":["é"]}` is 14 UTF-16 units and 15 UTF-8 bytes.
     expect(selector.bytes).toBe(15);
+  });
+});
+
+describe("frame log default scope", () => {
+  it("reads a record without a scope as the space scope", () => {
+    const lines: Record<string, unknown>[] = [];
+    const log = createFrameLog((line) => lines.push(JSON.parse(line)));
+    log.logOutgoing({
+      type: "transact",
+      requestId: "req:14",
+      commit: {
+        localSeq: 1,
+        operations: [],
+        reads: {
+          confirmed: [
+            { id: "of:a", path: ["value"], seq: 1 },
+            { id: "of:a", scope: "space", path: ["value", "x"], seq: 1 },
+          ],
+          pending: [],
+        },
+      },
+    }, 10);
+    const reads = (lines[0].commit as { reads: Record<string, unknown> }).reads;
+    expect(reads.distinctDocs).toBe(1);
+  });
+});
+
+describe("frame log edges", () => {
+  const collect = () => {
+    const lines: Record<string, unknown>[] = [];
+    const log = createFrameLog((line) => lines.push(JSON.parse(line)));
+    return { lines, log };
+  };
+
+  it("records a graph.query with its roots and a response with a seq", () => {
+    const { lines, log } = collect();
+    log.logOutgoing({
+      type: "graph.query",
+      requestId: "req:15",
+      query: {
+        roots: [{ id: "of:a", scope: "space", selector: { path: [] } }],
+      },
+    }, 10);
+    const query = lines.find((line) => line.dir === "out")!.query as {
+      roots: unknown[];
+    }[];
+    expect(query[0].roots.length).toBe(1);
+    log.logIncoming(
+      { type: "response", requestId: "req:16", ok: { seq: 7 } },
+      5,
+    );
+    expect(lines.at(-1)!.seq).toBe(7);
+  });
+
+  it("tolerates frames whose parts are missing or not what their type says", () => {
+    const { lines, log } = collect();
+    log.logOutgoing({ type: "transact", requestId: "req:17" }, 5);
+    expect(lines[0].commit).toBeUndefined();
+    log.logOutgoing({ type: "session.watch.add", requestId: "req:18" }, 5);
+    expect(lines[1].watches).toBeUndefined();
+    log.logIncoming({
+      type: "response",
+      requestId: "req:19",
+      ok: { sync: { type: "other" }, entities: "none" },
+    }, 5);
+    expect(lines[2].sync).toBeUndefined();
+    expect(lines[2].entities).toBeUndefined();
+  });
+
+  it("caps the paths recorded for the most-read document at sixty", () => {
+    const { lines, log } = collect();
+    const confirmed = Array.from({ length: 70 }, (_, i) => ({
+      id: "of:a",
+      path: ["value", `k${i}`],
+      seq: 1,
+    }));
+    log.logOutgoing({
+      type: "transact",
+      requestId: "req:20",
+      commit: {
+        localSeq: 1,
+        operations: [],
+        reads: { confirmed, pending: [] },
+      },
+    }, 5);
+    const reads = (lines[0].commit as { reads: { topDocPaths: string[] } })
+      .reads;
+    expect(reads.topDocPaths.length).toBe(60);
+  });
+
+  it("keeps two selectors apart when their hashes collide", () => {
+    // Two selector texts with the same FNV-1a hash, found by search.
+    const { lines, log } = collect();
+    const root = (key: string) => ({
+      id: "w",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:a",
+          scope: "space",
+          selector: { path: [key], schema: { type: "string" } },
+        }],
+      },
+    });
+    log.logOutgoing({
+      type: "session.watch.add",
+      requestId: "req:21",
+      watches: [root("k132789"), root("k729192")],
+    }, 5);
+    const selectors = lines.filter((line) => line.dir === "selector");
+    expect(selectors.length).toBe(2);
+    expect(selectors[1].hash).toBe(`${selectors[0].hash}-1`);
+    const watches = lines.find((line) => line.dir === "out")!.watches as {
+      roots: { selector: string }[];
+    }[];
+    expect(watches[0].roots[0].selector).toBe(selectors[0].hash);
+    expect(watches[1].roots[0].selector).toBe(selectors[1].hash);
+  });
+
+  it("reports a non-Error failure and survives a writer that throws", () => {
+    const { lines, log } = collect();
+    log.logOutgoing({
+      type: "transact",
+      requestId: "req:22",
+      get commit(): never {
+        throw "plain string";
+      },
+    }, 5);
+    expect(lines[0].message).toBe("plain string");
+    const throwing = createFrameLog(() => {
+      throw new Error("disk full");
+    });
+    throwing.logOutgoing({ type: "session.ack", requestId: "req:23" }, 5);
+  });
+
+  it("exposes no-op process-level entry points when the variable is unset", () => {
+    expect(frameLogEnabled).toBe(false);
+    logOutgoingFrame({ type: "session.ack", requestId: "req:24" }, 5);
+    logIncomingFrame({ type: "response", requestId: "req:24" }, 5);
+    expect(readEnvironmentVariable("CF_MEMORY_FRAME_LOG_NOT_SET")).toBe(
+      undefined,
+    );
+  });
+
+  it("appends lines to a file", async () => {
+    const path = await Deno.makeTempFile({ suffix: ".jsonl" });
+    try {
+      appendLineToFile(path, "{}");
+      appendLineToFile(path, "{}");
+      expect(await Deno.readTextFile(path)).toBe("{}\n{}\n");
+    } finally {
+      await Deno.remove(path);
+    }
   });
 });

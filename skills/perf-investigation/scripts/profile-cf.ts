@@ -61,65 +61,99 @@ if (cpu) {
 let finalized = false;
 // Captured before anything can replace it below.
 const realExit = Deno.exit;
-const exitProcess = (code: number): never => realExit(code);
 async function finalize(code: number): Promise<void> {
   if (finalized) return;
   finalized = true;
   const wall = performance.now() - started;
-  if (cpu) {
-    const { profile } = await post("Profiler.stop") as {
-      profile: Parameters<typeof renderProfileReport>[0];
-    };
-    await Deno.writeTextFile(`${out}.cpuprofile`, JSON.stringify(profile));
-    await Deno.writeTextFile(
-      `${out}.report.txt`,
-      renderProfileReport(profile, out, { topFrames: 60, topFiles: 25 }),
-    );
-  }
-  await Deno.writeTextFile(
-    `${out}.timing.json`,
-    JSON.stringify(getTimingStatsBreakdown()),
-  );
-  await Deno.writeTextFile(
-    `${out}.counts.json`,
-    JSON.stringify(getLoggerCountsBreakdown()),
-  );
-  await Deno.writeTextFile(
-    `${out}.flags.json`,
-    JSON.stringify(getLoggerFlagsBreakdown()),
-  );
-  const measures: { name: string; startTime: number; duration: number }[] = [];
-  for (const entry of performance.getEntriesByType("measure")) {
-    if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
-      measures.push({
-        name: entry.name,
-        startTime: entry.startTime,
-        duration: entry.duration,
-      });
+  try {
+    if (cpu) {
+      const { profile } = await post("Profiler.stop") as {
+        profile: Parameters<typeof renderProfileReport>[0];
+      };
+      await Deno.writeTextFile(`${out}.cpuprofile`, JSON.stringify(profile));
+      await Deno.writeTextFile(
+        `${out}.report.txt`,
+        renderProfileReport(profile, out, { topFrames: 60, topFiles: 25 }),
+      );
     }
+    await Deno.writeTextFile(
+      `${out}.timing.json`,
+      JSON.stringify(getTimingStatsBreakdown()),
+    );
+    await Deno.writeTextFile(
+      `${out}.counts.json`,
+      JSON.stringify(getLoggerCountsBreakdown()),
+    );
+    await Deno.writeTextFile(
+      `${out}.flags.json`,
+      JSON.stringify(getLoggerFlagsBreakdown()),
+    );
+    const measures: { name: string; startTime: number; duration: number }[] =
+      [];
+    for (const entry of performance.getEntriesByType("measure")) {
+      if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
+        measures.push({
+          name: entry.name,
+          startTime: entry.startTime,
+          duration: entry.duration,
+        });
+      }
+    }
+    if (measures.length > 0) {
+      await Deno.writeTextFile(
+        `${out}.measures.json`,
+        JSON.stringify(measures),
+      );
+    }
+    clearTimingMeasures();
+    console.error(
+      `[profile-cf] wall ${wall.toFixed(0)}ms, exit ${code}, ` +
+        `measures ${measures.length}, wrote ${out}.*`,
+    );
+  } catch (error) {
+    console.error(
+      `[profile-cf] writing the artifacts failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  } finally {
+    // The command's own code, whatever became of the artifacts.
+    realExit(code);
   }
-  if (measures.length > 0) {
-    await Deno.writeTextFile(`${out}.measures.json`, JSON.stringify(measures));
-  }
-  clearTimingMeasures();
-  console.error(
-    `[profile-cf] wall ${wall.toFixed(0)}ms, exit ${code}, ` +
-      `measures ${measures.length}, wrote ${out}.*`,
-  );
-  exitProcess(code);
 }
 
 // A command may leave through `Deno.exit` directly rather than through the
-// exit `main` is handed; both routes end here, so the artifacts are written
-// either way. The real exit runs once finalize has flushed them.
+// exit `main` is handed. Both routes end in `finalize`, which performs the
+// real exit once the artifacts are flushed. Until then the caller must not
+// continue past its exit — `Deno.exit` never returns, and code after it
+// assumes as much — so the replacement throws a sentinel that unwinds the
+// caller and is swallowed wherever it surfaces.
+class ExitRequested extends Error {
+  constructor(readonly code: number) {
+    super(`[profile-cf] exit ${code} requested; writing artifacts`);
+    this.name = "ExitRequested";
+  }
+}
+const isExitRequested = (reason: unknown): boolean =>
+  reason instanceof ExitRequested;
+globalThis.addEventListener("unhandledrejection", (event) => {
+  if (isExitRequested(event.reason)) event.preventDefault();
+});
+globalThis.addEventListener("error", (event) => {
+  if (isExitRequested(event.error)) event.preventDefault();
+});
 Deno.exit = ((code?: number): never => {
-  void finalize(code ?? Deno.exitCode ?? 0);
-  // The process ends inside finalize; nothing after this runs.
-  return undefined as never;
+  const exitCode = code ?? Deno.exitCode ?? 0;
+  void finalize(exitCode);
+  throw new ExitRequested(exitCode);
 }) as typeof Deno.exit;
 
-await main(Deno.args, {
-  exit: (code) => {
-    void finalize(code);
-  },
-});
+try {
+  await main(Deno.args, {
+    exit: (code) => {
+      void finalize(code);
+    },
+  });
+} catch (error) {
+  if (!isExitRequested(error)) throw error;
+}

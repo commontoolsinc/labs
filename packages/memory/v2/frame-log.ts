@@ -49,9 +49,14 @@ const jsonBytes = (value: unknown): number | undefined => {
  * groups with itself and nothing else.
  */
 const docIdentity = (entry: Record<string, unknown>): string =>
-  [entry.id, entry.scope, entry.branch, entry.scopeKey]
-    .map((part) => part === undefined ? "" : String(part))
-    .join("\0");
+  // Structural, so no spelling of one member can collide with another; the
+  // scope defaults to `space` as the protocol does when a record omits it.
+  JSON.stringify([
+    entry.id,
+    entry.scope ?? "space",
+    entry.branch ?? "",
+    entry.scopeKey ?? null,
+  ]);
 
 /** The top-level keys of a document's value, or its type when it has none. */
 const docKeys = (value: unknown): string[] | string =>
@@ -83,6 +88,7 @@ const summarizeReads = (confirmed: unknown[]): unknown => {
   // Keyed by the document's full identity; the id alone would merge two
   // documents that share it across scopes or branches.
   const byDoc = new Map<string, number>();
+  const idOf = new Map<string, string>();
   for (const read of confirmed) {
     const entry = read as Record<string, unknown>;
     const id = String(entry.id);
@@ -92,9 +98,10 @@ const summarizeReads = (confirmed: unknown[]): unknown => {
     byDepth.set(depth, (byDepth.get(depth) ?? 0) + 1);
     const identity = docIdentity(entry);
     byDoc.set(identity, (byDoc.get(identity) ?? 0) + 1);
+    idOf.set(identity, id);
   }
   const topDocs = [...byDoc].sort((a, b) => b[1] - a[1]).slice(0, 12)
-    .map(([identity, count]) => [identity.split("\0")[0], count] as const);
+    .map(([identity, count]) => [idOf.get(identity)!, count] as const);
   const top = [...byDoc].sort((a, b) => b[1] - a[1])[0]?.[0];
   const topDocPaths = new Set<string>();
   if (top !== undefined) {
@@ -356,11 +363,22 @@ export function frameLogFromEnvironment(
   return createFrameLog((line) => appendTo(target, line));
 }
 
+/** An environment variable, or `undefined` where the process may not read it. */
+export function readEnvironmentVariable(name: string): string | undefined {
+  try {
+    return Deno.env.get(name);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Append one line to the file at `path`, creating it on first use. */
+export function appendLineToFile(path: string, line: string): void {
+  Deno.writeTextFileSync(path, line + "\n", { append: true });
+}
+
 const envLog: FrameLog | undefined = isDeno()
-  ? frameLogFromEnvironment(
-    (name) => Deno.env.get(name),
-    (path, line) => Deno.writeTextFileSync(path, line + "\n", { append: true }),
-  )
+  ? frameLogFromEnvironment(readEnvironmentVariable, appendLineToFile)
   : undefined;
 
 /** Whether frames are being recorded. Read once; a process opts in at start. */

@@ -61,14 +61,25 @@ const meta = await (await fetch(`${api}/api/meta`)).json() as {
   gitSha?: string;
   experimental?: { serverExecution?: boolean };
 };
-const serverPosture = meta.experimental?.serverExecution === true;
+const published = meta.experimental?.serverExecution;
+if (typeof published !== "boolean") {
+  console.error(
+    "profile-toolshed.ts: the server publishes no serverExecution posture " +
+      "on /api/meta, so a delta cannot say which arm it measured",
+  );
+  Deno.exit(2);
+}
+const serverPosture = published;
 const clientOverride = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
 const adoptsServerFlags = Deno.env.get("CF_ADOPT_SERVER_FLAGS") !== "false";
 // How a client that is not built beside its server resolves the flag
-// (docs/development/EXPERIMENTAL_OPTIONS.md): an explicit value wins,
-// otherwise it adopts the server's, otherwise it stays off.
-const clientPosture = clientOverride !== undefined
-  ? clientOverride === "true"
+// (docs/development/EXPERIMENTAL_OPTIONS.md): exactly `true` or `false`
+// wins, any other spelling is ignored, otherwise it adopts the server's,
+// otherwise it stays off.
+const clientPosture = clientOverride === "true"
+  ? true
+  : clientOverride === "false"
+  ? false
   : adoptsServerFlags
   ? serverPosture
   : false;
@@ -156,6 +167,14 @@ try {
     stderr: "inherit",
   }).spawn();
   status = await child.status;
+} catch (error) {
+  // A command that could not start is reported below, after the profiler
+  // has been stopped, as the exit-2 case.
+  console.error(
+    `profile-toolshed.ts: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
 } finally {
   // Whatever became of the command, the toolshed stops being sampled: a
   // profiler left running perturbs every later measurement on that server.

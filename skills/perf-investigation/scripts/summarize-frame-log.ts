@@ -32,7 +32,11 @@ if (file === undefined) {
 }
 const records = (await Deno.readTextFile(file)).split("\n").filter(Boolean)
   .map((line) => JSON.parse(line) as Record_);
-const frames = records.filter((record) => record.dir !== "selector");
+// A record is a frame when it crossed the wire in one direction; selector
+// records and the log's own error records are neither.
+const frames = records.filter((record) =>
+  record.dir === "in" || record.dir === "out"
+);
 const selectors = new Map<string, Record_>();
 for (const record of records) {
   if (record.dir === "selector") selectors.set(String(record.hash), record);
@@ -43,12 +47,21 @@ const bytesOf = (record: { bytes?: unknown }): number =>
     ? record.bytes
     : 0;
 const identityOf = (doc: DocRecord): string =>
-  [doc.id, doc.scope, doc.branch, doc.scopeKey]
-    .map((part) => part === undefined ? "" : String(part)).join("\0");
+  JSON.stringify([
+    doc.id,
+    doc.scope ?? "space",
+    doc.branch ?? "",
+    doc.scopeKey ?? null,
+  ]);
+// A delivery is a document with content: a tombstone (`deleted`) and a
+// snapshot of a document the space does not hold (`absent`) carry none.
 const deliveredIn = (frame: Record_): DocRecord[] => {
   const sync = frame.sync as { upserts?: DocRecord[] } | undefined;
   const entities = frame.entities as DocRecord[] | undefined;
-  return [...(sync?.upserts ?? []), ...(entities ?? [])];
+  return [...(sync?.upserts ?? []), ...(entities ?? [])].filter((doc) =>
+    (doc as { deleted?: unknown }).deleted !== true &&
+    (doc as { absent?: unknown }).absent !== true
+  );
 };
 
 type Bucket = {
@@ -173,11 +186,16 @@ if (flags.includes("--docs")) {
     const [identity, n] of [...docSeen].filter(([, n]) => n > 1)
       .sort((a, b) => b[1] - a[1]).slice(0, 30)
   ) {
-    const [id, scope, branch] = identity.split("\0");
+    const [id, scope, branch, scopeKey] = JSON.parse(identity) as [
+      string,
+      string,
+      string,
+      string | null,
+    ];
     console.log(
-      `${String(n).padStart(4)}x ${id}${scope ? ` scope=${scope}` : ""}${
+      `${String(n).padStart(4)}x ${id} scope=${scope}${
         branch ? ` branch=${branch}` : ""
-      }`,
+      }${scopeKey !== null ? ` instance=${scopeKey}` : ""}`,
     );
   }
 }
