@@ -62,10 +62,20 @@ Composable building blocks designed for embedding in other patterns
 adopter-first entry bar.
 
 `amount-ledger.tsx`, `check-list.tsx`, `counter.tsx`, `dice-roller.tsx`,
-`option-picker.tsx`, `sortable-table.tsx`, and the `demo/` host that embeds all
-six. Each is a single self-contained file taking real, optional inputs, with an
-embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can drop it
-in as a JSX tag or run it standalone.
+`option-picker.tsx`, `sortable-table.tsx`, and the `demo/` host that embeds
+those six. Each is a single self-contained file taking real, optional inputs,
+with an embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can
+drop it in as a JSX tag or run it standalone.
+
+`ledger-month-transactions.tsx` and `mailbox-month-headers.tsx` read a loom
+connector store instead of a caller's own cell. Their input is a `SqliteDb`
+handle, which only whoever wires the input can supply, so neither runs
+standalone and neither is in the `demo/` host; their tests are Deno tests at
+`packages/cf-harness/test/primitives-connector-reads.test.ts`, where a handle
+can be minted. Between them they carry the two tombstone conventions a connector
+store uses — the integer `deleted = 0` flag on a connector ledger,
+`deleted_at IS NULL` on the mail store — which is the thing a session reading
+one of these databases has no other way to learn.
 
 Their adopter is the pattern index: they are published to it as composable
 parts, and their descriptions are derived from their doc comments by

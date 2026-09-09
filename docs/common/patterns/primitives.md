@@ -7,7 +7,7 @@ rendering to the host. They live under `packages/patterns/primitives/` and
 form the `primitive` tier in
 [`packages/patterns/index.md`](../../../packages/patterns/index.md).
 
-**Status: six occupants, all adopted by the pattern index** — see
+**Status: eight occupants, all adopted by the pattern index** — see
 [`packages/patterns/index.md`](../../../packages/patterns/index.md). An earlier
 candidate (`EditableList`) was built, proven against real callers, and retired —
 see [Lessons](#lessons-from-the-first-primitive) below, which is required
@@ -24,8 +24,8 @@ Do not build a primitive from a duplication census alone. Before any code:
    this" is the orphaned-`suggestable/` failure mode; it doesn't count.
    A published pattern index counts as an adopter only on the same evidence: a
    shape sessions have actually built for themselves, read off the corpus, not
-   a shape one might plausibly want. The six current primitives were each
-   chosen against an entry already in the index that rebuilt it from scratch.
+   a shape one might plausibly want. The primitives here were each chosen
+   against an entry already in the index that rebuilt it from scratch.
 2. **Two callers from different families** before the primitive is considered
    proven (one caller just reproduces that caller's needs with the serial
    numbers filed off).
@@ -44,6 +44,23 @@ In priority order:
 2. **An optional default `[UI]`.** A static `VNode` giving a caller who just
    wants the thing a working experience for free. A caller who wants custom
    rendering simply does not render it.
+
+### A primitive over an injected handle
+
+A primitive whose input is a capability handle rather than a caller's cell —
+`SqliteDb` is the one in use — exposes the same surface minus the mutation
+half: it reads through the handle, and returns typed rows, counts, the pending
+flag and the failure text as cells. What it owns is the query, and the query is
+the whole reason it exists. A store's column semantics are not in the handle a
+session is given: `describe_handle` discloses the tables and columns and says
+nothing about which value means "deleted", so a session writing its own query
+guesses, and a wrong guess returns zero rows over a full table rather than an
+error. The primitive is where that knowledge is written down once, in code that
+is tested against both spellings.
+
+Such a primitive cannot run standalone — only whoever wires the input can
+supply a handle — so it is left out of the `demo/` host, and its tests go where
+a handle can be minted rather than beside the pattern.
 
 That's the whole surface. In particular, do **not** add string-addressed
 ("ByText"/"ByTitle") mutation layers "for agents": LLM tool-calls round-trip
