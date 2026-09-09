@@ -12,6 +12,7 @@ import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import { getDerivedInternalCellLink, parseLink } from "../src/link-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { CommitError } from "../src/storage/interface.ts";
@@ -94,7 +95,7 @@ const CARDS_ITEM_SCHEMA = {
   },
 } as const;
 // One card per case, each cold on the replica that runs it.
-const CARD_COUNT = 8;
+const CARD_COUNT = 9;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -118,6 +119,26 @@ function waitForEventCommit(runtime: Runtime): Promise<EventCommitMarker> {
     };
     runtime.telemetry.addEventListener("telemetry", listener);
   });
+}
+
+/** Counts, until called, the deferred starts of `key` that enter the pending index. */
+function countPendingDeferredStarts(
+  runtime: Runtime,
+  key: string,
+): () => number {
+  let count = 0;
+  const listener = (event: Event) => {
+    const marker = (event as CustomEvent<{ marker: DeferredStartMarker }>)
+      .detail.marker;
+    if (marker.type === "runner.deferred-start.pending" && marker.key === key) {
+      count++;
+    }
+  };
+  runtime.telemetry.addEventListener("telemetry", listener);
+  return () => {
+    runtime.telemetry.removeEventListener("telemetry", listener);
+    return count;
+  };
 }
 
 /** Resolves with the next deferred-start marker of `type` for `key`. */
@@ -601,6 +622,57 @@ describe("piece-named-before-start", () => {
     expect((await runTx.commit()).error).toBeUndefined();
     await quiesce(b);
     expect(await send(cardB, "poke")).toBe(11);
+    expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
+  });
+  it("names the piece again when its pattern pointer moved while the name-sync was in flight", async () => {
+    const { cardB, itemB, key } = locateCard(8);
+    const cardV2B = await b.patternManager.compilePattern(CARD_V2_PROGRAM, {
+      space,
+    }) as Pattern;
+    const v2Ref = b.patternManager.getArtifactEntryRef(cardV2B)!;
+    const v1Ref = b.patternManager.getArtifactEntryRef(cardPattern)!;
+    // The pointer moves once the name-sync for the stored pattern has landed
+    // and before the run it gates: what a replica upgrading the card
+    // elsewhere leaves behind while the family it wrote is still on its way.
+    // Written here as the pointer alone, so the second handler's marker is
+    // absent for certain when the run looks.
+    const named: string[] = [];
+    b.runner.accessForTestingOnly.dependencySyncer = async (
+      resultCell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      named.push(b.patternManager.getArtifactEntryRef(pattern)!.identity);
+      const walked = await sync(resultCell, pattern, inputs);
+      if (named.length === 1) {
+        const moveTx = b.edit();
+        cardB.withTx(moveTx).setMetaRaw("patternIdentity", {
+          identity: v2Ref.identity,
+          symbol: v2Ref.symbol,
+        }, rawMetaWriteAuthorization);
+        expect((await moveTx.commit()).error).toBeUndefined();
+      }
+      return walked;
+    };
+    const settled = waitForDeferredStart(
+      b,
+      "runner.deferred-start.settled",
+      key,
+    );
+    const pendingStarts = countPendingDeferredStarts(b, key);
+    // Given no pattern, the run follows the stored pointer, as a resume does.
+    const runTx = b.edit();
+    b.runner.run(runTx, undefined, { item: itemB }, cardB);
+    b.prepareTxForCommit(runTx);
+    expect((await runTx.commit()).error).toBeUndefined();
+    expect((await settled).outcome).toBe("installed");
+    await quiesce(b);
+    expect(named).toEqual([v1Ref.identity, v2Ref.identity]);
+    // One start owns the run throughout: the second name is taken under the
+    // handle the caller already holds, not by a start nested inside it.
+    expect(pendingStarts()).toBe(1);
+    expect(await send(cardB, "poke")).toBe(10);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
 });

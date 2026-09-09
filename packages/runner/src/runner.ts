@@ -5254,7 +5254,7 @@ export class Runner {
     const linksAbsent = (value: unknown, depth: number): boolean => {
       const link = parseLink(value, resultCell);
       if (link !== undefined) {
-        const probeKey = `${link.space}/${link.id}`;
+        const probeKey = `${link.space}/${link.scope}/${link.id}`;
         if (probed.has(probeKey)) return false;
         probed.add(probeKey);
         if (!present(link)) return true;
@@ -5321,9 +5321,11 @@ export class Runner {
    * delivers what running `pattern` over it reads — and runs the piece once
    * that sync has landed, in a transaction of its own. Ownership of the
    * start begins now, as a commit-gated start's does, so a release before
-   * the run cancels it. A run that fails is reported the way a piece-start
-   * commit failure is: loud, and to the serving runtime's observer. Returns
-   * the cancel.
+   * the run cancels it, and it spans every name the run turns out to need:
+   * a pattern pointer that moved while the sync was in flight is named in
+   * turn, under the same ownership. A run that fails is reported the way a
+   * piece-start commit failure is: loud, and to the serving runtime's
+   * observer. Returns the cancel.
    */
   #runAfterNamedFamilyLands<T, R>(
     tx: IExtendedStorageTransaction,
@@ -5341,14 +5343,16 @@ export class Runner {
     const navigateContext = navigateEventContextFromRunInfo(
       waveRunContextOf(tx) ?? speculationRunContextOf(tx),
     );
-    const inFlight = this.#namedFamilies.get(key);
-    let pending: Promise<void>;
-    if (inFlight !== undefined && "pending" in inFlight) {
-      pending = inFlight.pending;
-    } else {
-      pending = this.#syncCellsForRunningPattern(
+    const nameFamily = (
+      toName: { pattern: Pattern; entryKey: string },
+    ): Promise<void> => {
+      const inFlight = this.#namedFamilies.get(key);
+      if (inFlight !== undefined && "pending" in inFlight) {
+        return inFlight.pending;
+      }
+      const pending = this.#syncCellsForRunningPattern(
         resultCell,
-        named.pattern,
+        toName.pattern,
         argument,
       ).then(
         () => {},
@@ -5360,62 +5364,87 @@ export class Runner {
           );
         },
       ).then(() => {
-        this.#namedFamilies.set(key, { landed: named.entryKey });
+        this.#namedFamilies.set(key, { landed: toName.entryKey });
       });
       this.#namedFamilies.set(key, { pending });
-    }
-    const work = pending.then(() => {
-      if (ownership.isCancelled()) return;
-      const startTx = this.#runtime.edit();
-      // Minted outside any scheduler run; the run's setup and node wiring
-      // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
-      this.#runtime.stampServerRun(startTx, {
-        actionId,
-        kind: "bookkeeping",
-      });
-      if (navigateContext !== undefined) {
-        setNavigateEventContext(startTx, navigateContext);
-      }
-      try {
-        const started = this.#runWithStartOwnership(
+      return pending;
+    };
+    const work = (async () => {
+      let toName = named;
+      for (;;) {
+        await nameFamily(toName);
+        if (ownership.isCancelled()) return;
+        const startTx = this.#runtime.edit();
+        // Minted outside any scheduler run; the run's setup and node wiring
+        // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
+        this.#runtime.stampServerRun(startTx, {
+          actionId,
+          kind: "bookkeeping",
+        });
+        if (navigateContext !== undefined) {
+          setNavigateEventContext(startTx, navigateContext);
+        }
+        const startCell = this.#runtime.getCellFromLink<R>(
+          resultLink,
+          undefined,
           startTx,
-          patternOrModule,
-          argument,
-          this.#runtime.getCellFromLink<R>(resultLink, undefined, startTx),
-          options,
         );
-        if (ownership.markInstalled(started.installedCancel)) {
-          startTx.abort("Deferred runner start was cancelled");
+        let started: RunResult<R>;
+        try {
+          // A run given no pattern follows the stored pointer, which can
+          // move while the name-sync is in flight: what landed is the named
+          // pattern's family, and the pattern now pointed at may own cells
+          // it never delivered. Name that one in turn, so the caller's one
+          // handle reaches the start wherever it lands.
+          const again = this.#patternToNameBeforeRun(
+            patternOrModule,
+            argument,
+            startTx,
+            startCell,
+          );
+          if (again !== undefined) {
+            startTx.abort("Named piece's pattern moved before its run");
+            toName = again;
+            continue;
+          }
+          started = this.#runWithStartOwnership(
+            startTx,
+            patternOrModule,
+            argument,
+            startCell,
+            options,
+          );
+          if (ownership.markInstalled(started.installedCancel)) {
+            startTx.abort("Deferred runner start was cancelled");
+            return;
+          }
+          this.#runtime.prepareTxForCommit(startTx);
+        } catch (error) {
+          startTx.abort(error);
+          ownership.cancel();
+          this.#reportPieceStartCommitFailure(actionId, error);
+          throw error;
+        }
+        const { error } = await this.#commitDeferredStart(startTx, resultCell);
+        if (!error) return;
+        if (
+          this.#catchUpAndStartOnStaleRead(
+            error,
+            resultCell,
+            "start",
+            startLifecycleEpoch,
+            false,
+            ownership,
+            started.installedCancel,
+          )
+        ) {
           return;
         }
-        this.#runtime.prepareTxForCommit(startTx);
-        return this.#commitDeferredStart(startTx, resultCell).then(
-          ({ error }) => {
-            if (!error) return;
-            if (
-              this.#catchUpAndStartOnStaleRead(
-                error,
-                resultCell,
-                "start",
-                startLifecycleEpoch,
-                false,
-                ownership,
-                started.installedCancel,
-              )
-            ) {
-              return;
-            }
-            ownership.cancel();
-            this.#reportPieceStartCommitFailure(actionId, error);
-          },
-        );
-      } catch (error) {
-        startTx.abort(error);
         ownership.cancel();
         this.#reportPieceStartCommitFailure(actionId, error);
-        throw error;
+        return;
       }
-    });
+    })();
     this.#runtime.scheduler.trackBackgroundTask(work);
     return ownership.cancel;
   }
