@@ -220,10 +220,10 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     }),
   });
 
-  // A session stating no dial of its own runs at the rungs the session preset
-  // pins. The itemized rungs are read off the record beside them: each pair is
-  // one answer, and a run state naming a rung its own record contradicts is
-  // what this reads for.
+  // A session stating no dial of its own runs at the rung the session preset
+  // pins. The itemized rung is read off the record beside it: the two are one
+  // answer, and a run state naming a rung its own record contradicts is what
+  // this reads for.
   const unstatedSession = {
     apiUrl: "https://toolshed.example/",
     identityKeyPath: "/keys/agent.pkcs8",
@@ -236,7 +236,6 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
   }).getRunState().fabricSessionCfc;
   assertEquals(pinnedCfc?.enforcementMode, unstatedRecord.enforcementMode.rung);
   assertEquals(pinnedCfc?.enforcementModeSource, "preset-pin");
-  assertEquals(pinnedCfc?.flowLabels, unstatedRecord.flowLabels.rung);
   assertEquals(pinnedCfc?.flowLabelsSource, "default");
   assertEquals(pinnedCfc?.record, unstatedRecord);
 
@@ -2001,10 +2000,9 @@ Deno.test("CfHarnessEngine records the fabric session's read ceiling in run stat
   }).getRunState();
   const recorded = runState.fabricSessionCfc;
   assertExists(recorded);
-  // Every field of the published posture but the flow-labels rung, which
-  // `CfHarnessEngine records the fabric session's resolved CFC posture in run
-  // state` reads. No session here states that dial, so the source is
-  // `default`.
+  // Every field of the published posture but the flow-labels rung, which the
+  // `fabricSessionCfcFlowLabels()` cases in `test/cfc-posture.test.ts` read.
+  // No session here states that dial, so the source is `default`.
   const { flowLabels: _rung, ...ceiling } = recorded;
   assertEquals(ceiling, {
     enforcementMode: "enforce-strict",
