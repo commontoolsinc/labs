@@ -3256,15 +3256,11 @@ exercised on the branch on its own.
       would be found only on `main`.
 - [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant. Two test files under
-      `packages/cf-harness/integration/` are reached only by a package
-      task nothing dispatches; they are recorded with the reason each
-      runs nowhere and reported rather than failed on, so a new
-      unclaimed surface still fails. Eight paths that look like tests
-      and are not are declared as the fixtures they are: the five
-      projects under `packages/deno-web-test/test/` that the harness
-      drives, and the three command-line tours the verb-session gate
-      holds the documentation to rather than running.
+      allowed per variant. Eight paths that look like tests and are not
+      are declared as the fixtures they are: the five projects under
+      `packages/deno-web-test/test/` that the harness drives, and the
+      three command-line tours the verb-session gate holds the
+      documentation to rather than running.
 - [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both
