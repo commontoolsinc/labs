@@ -81,24 +81,20 @@ type ActivePairsByRoot = WeakMap<
 >;
 
 /**
- * The keywords a schema comparison may ignore: they annotate a schema without
- * constraining the values it admits, so adding or removing one across a piece
- * update proves nothing about compatibility either way.
+ * The annotations that describe a schema to a reader or to a listing and take
+ * no part in any comparison this module makes. Two schemas that differ only in
+ * these say the same thing, and {@link schemaSubtreesEqual} reads past them.
  *
- * Exported because a second reader classifies keywords and would otherwise
- * keep its own copy of this list. What it says is which keywords are
- * validation-neutral **to this checker**; it is not a statement about what any
- * other consumer of a schema does with a key, and a reader that acts on one —
- * the runner reserves three `$comment` values as traversal control markers —
- * has to settle that against that consumer rather than against this set.
+ * {@link ANNOTATION_KEYS} extends this set with four keywords the subset proof
+ * likewise treats as annotations but the equality walk still compares:
+ * `default` is a value compared whole, `$id` moves the base a `$ref` resolves
+ * against, and `$defs` and `definitions` are maps of schemas the walk
+ * descends. A keyword added here is dropped from equality as well; one that
+ * carries structure belongs on that list instead.
  */
-export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
+const DESCRIPTIVE_ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   "$comment",
-  "$defs",
-  "$id",
   "$schema",
-  "default",
-  "definitions",
   // Standard JSON Schema annotation. The generator emits it from
   // `@deprecated` JSDoc so `cf piece verbs` can hide legacy streams by
   // default; it is validation-neutral by spec, so it must add and remove
@@ -115,6 +111,26 @@ export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   // verbs` shows by default; `cf piece call` never consults it.
   "tier",
   "title",
+]);
+
+/**
+ * The keywords a schema comparison may ignore: they annotate a schema without
+ * constraining the values it admits, so adding or removing one across a piece
+ * update proves nothing about compatibility either way.
+ *
+ * Exported because a second reader classifies keywords and would otherwise
+ * keep its own copy of this list. What it says is which keywords are
+ * validation-neutral **to this checker**; it is not a statement about what any
+ * other consumer of a schema does with a key, and a reader that acts on one —
+ * the runner reserves three `$comment` values as traversal control markers —
+ * has to settle that against that consumer rather than against this set.
+ */
+export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
+  ...DESCRIPTIVE_ANNOTATION_KEYS,
+  "$defs",
+  "$id",
+  "default",
+  "definitions",
 ]);
 
 const COMPLEX_CONSTRAINT_KEYS = [
@@ -1502,7 +1518,15 @@ function schemaAlternatives(
     return anyOf.map((branch) => [base, branch]);
   }
   if (Array.isArray(schema.type)) {
-    return schema.type.map((type) => [{ ...schema, type }]);
+    // A default belongs to the union, and the caller judged it there before
+    // expanding: valid for the whole union under a link proof, unchanged or
+    // safely changed under an update. A synthetic single-type branch must not
+    // inherit it, because the branch whose type the default does not fit —
+    // `undefined` beside a string default — would fail a default-safety check
+    // the union itself passed, and take the update down with it. The `anyOf`
+    // form above keeps its default on the shared base, which carries no type.
+    const { default: _default, ...branch } = schema;
+    return schema.type.map((type) => [{ ...branch, type }]);
   }
   return undefined;
 }
@@ -1607,8 +1631,8 @@ const keywordValuesEqual = (
  * one written on the node being checked.
  *
  * Two schemas that are equal as they stand settle on the first line. Past that
- * validation-neutral prose and listing metadata are ignored. Defaults and
- * reference definitions and boundaries remain part of the comparison. The
+ * the {@link DESCRIPTIVE_ANNOTATION_KEYS} are ignored. Defaults, reference
+ * definitions, and reference boundaries remain part of the comparison. The
  * walk descends the keywords that hold nested schemas, so an `ifc` reached
  * only through a composite keyword (`allOf`, `oneOf`, `if`/`then`, `not`) gets
  * the same reduction as one the per-node recursion reaches directly.
@@ -1621,10 +1645,7 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
   if (fabricAwareEqual(left, right)) return true;
   if (!isPlainObject(left) || !isPlainObject(right)) return false;
   for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
-    if (
-      ANNOTATION_KEYS.has(key) && key !== "default" && key !== "$id" &&
-      !SUBSCHEMA_MAP_KEYS.has(key)
-    ) continue;
+    if (DESCRIPTIVE_ANNOTATION_KEYS.has(key)) continue;
     if (
       key !== "ifc" && Object.hasOwn(left, key) !== Object.hasOwn(right, key)
     ) {

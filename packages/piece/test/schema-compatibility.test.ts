@@ -2249,6 +2249,26 @@ describe("piece schema compatibility", () => {
     ).toThrow();
   });
 
+  it("judges a defaulted union's default once, on the union", () => {
+    const narrow: JSONSchema = { type: ["string", "undefined"], default: "" };
+    const wide: JSONSchema = {
+      type: ["string", "number", "undefined"],
+      default: "",
+    };
+    expect(() => assertSchemaSubset(narrow, wide)).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(narrow, true),
+        pattern(wide, true),
+      )
+    ).not.toThrow();
+    expect(() => assertSchemaSubset(wide, narrow)).toThrow(
+      /schema alternative accepted previously/,
+    );
+    expect(() => assertSchemaSubset(narrow, { ...wide, default: true }))
+      .toThrow(/not stable under default insertion/);
+  });
+
   it("rejects unresolved references and terminates on recursive references", () => {
     const unresolved = pattern(
       {
