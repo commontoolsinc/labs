@@ -310,17 +310,49 @@ leaves the map in the spool, and it applies `CF_TEST_SKIP_LIST`. Wrapping
 own, so a process with nothing to skip and no spool it may write leaves
 `Deno.test` alone and the report's own class names are read instead.
 
-Both of those need permissions the test task grants. Reading
-`CF_TEST_RECORDS_DIR` and `CF_TEST_SKIP_LIST` needs `--allow-env`, so a
-task naming a restricted list of variables names those two among them —
-`readEnv` swallows the refusal, so a task that leaves them out records
-nothing and skips nothing, silently.
+Both of those need permissions. Reading `CF_TEST_RECORDS_DIR` and
+`CF_TEST_SKIP_LIST` needs `--allow-env`, and that one the test task
+grants: a task naming a restricted list of variables names those two
+among them — `readEnv` swallows the refusal, so a task that leaves them
+out records nothing and skips nothing, silently.
+
 Writing the map needs `--allow-write` covering the directory the run
-owner put the spool in, which is a path only the environment knows: a
-task string cannot name it, because `deno task` expands `$VAR` but not
-`${VAR:-default}`, and `--allow-write=` with an unset variable ends the
-run with `Empty values are not allowed`. So a task that has to capture
-grants a write path wide enough to hold whatever spool a run hands it.
+owner put the spool in, and that one the task cannot grant, because it
+cannot name the path: `deno task` expands `$VAR` but not
+`${VAR:-default}`, `--allow-write=` with an unset variable ends the run
+with `Empty values are not allowed`, and a `$` costs its member the file
+granularity `tasks/test-topology/deno-task.ts` reads its task for —
+every `$` but the one command substitution that file resolves, which is
+the `deno eval` naming the executable that several tasks already carry.
+So the caller that appends the preload appends the permission beside it.
+`spoolWriteArgument()` from
+`@commonfabric/test-support/records` builds that argument, and it builds
+none for an invocation already permitted to write everywhere. Deno merges
+two `--allow-write` path lists, so an invocation naming a list of its own
+takes the spool on top of it. A blanket grant is the one that cannot take
+a list beside it: `-A` and `--allow-all` refuse the combination outright,
+ending the run with `the argument '--allow-all...' cannot be used with
+'--allow-write[=<PATH>...]'`, and a bare `--allow-write` or `-W` is cut
+down to whatever list joins it. Short flags cluster, so `-RW` is a
+blanket grant of both, and `-A` is one of everything.
+
+It builds none for an invocation that cannot read the filesystem either,
+and that is the case to hold on to. A writable spool is what makes the
+preload wrap `Deno.test`, and wrapping is what costs the report the class
+names ingestion reads each case's file from; the files that replace them
+come from climbing to the directory holding `.git`, which needs read
+permission. So the write and the read go together, and an invocation
+granted one without the other records no file for any of its tests.
+`tasks/test-topology/package-integration.ts` holds a part in that shape,
+with `--allow-env` and no `--allow-read`.
+
+Three callers append the preload. `tasks/workspace-tests.ts` appends it
+to each member's `deno task test`, and `tasks/test-topology/suite.ts`
+appends it to each invocation a batch runs; both take the write argument
+from `spoolWriteArgument()`. `tasks/integration.ts` appends it without
+one, because every invocation it builds runs under `-A`, so the helper
+would build nothing for any of them. A task there that ever narrows its
+permissions needs the argument too.
 
 A test task naming its own `--import-map` does not take the preload. That
 map governs every module of the invocation, the preload included, so a
