@@ -28,6 +28,9 @@ import { fabricAwareEqual } from "@commonfabric/data-model";
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
 
+/** Object spelling of the unconstrained schema, shared by recursive proofs. */
+const UNCONSTRAINED_SCHEMA = internSchema({});
+
 interface CompatibilityContext {
   sourceRoot: JSONSchema;
   targetRoot: JSONSchema;
@@ -750,6 +753,15 @@ function schemaSubsetIssue(
 
   if (source === false || target === true) return undefined;
   if (source === true) {
+    // The object proof recognizes unconstrained targets such as `{}` and
+    // `type: "unknown"` while checking any constraints beside them.
+    if (
+      target !== false &&
+      schemaSubsetIssue(UNCONSTRAINED_SCHEMA, target, path, {
+          ...context,
+          allowEvolutionPolicy: false,
+        }) === undefined
+    ) return undefined;
     return target === false
       ? `${path}: the candidate schema rejects values accepted previously`
       : `${path}: an unconstrained schema is no longer accepted`;
@@ -1255,7 +1267,14 @@ function additionalPropertiesSubsetIssue(
     return `${path}: additional properties accepted previously would now be rejected`;
   }
   if (sourceAdditional === true) {
-    return `${path}: additional properties are now constrained`;
+    return schemaSubsetIssue(
+        sourceAdditional,
+        targetAdditional,
+        `${path}.*`,
+        context,
+      ) === undefined
+      ? undefined
+      : `${path}: additional properties are now constrained`;
   }
   return schemaSubsetIssue(
     sourceAdditional,
@@ -1588,7 +1607,9 @@ const keywordValuesEqual = (
  * one written on the node being checked.
  *
  * Two schemas that are equal as they stand settle on the first line. Past that
- * the walk descends the keywords that hold nested schemas, so an `ifc` reached
+ * validation-neutral prose and listing metadata are ignored. Defaults and
+ * reference definitions and boundaries remain part of the comparison. The
+ * walk descends the keywords that hold nested schemas, so an `ifc` reached
  * only through a composite keyword (`allOf`, `oneOf`, `if`/`then`, `not`) gets
  * the same reduction as one the per-node recursion reaches directly.
  *
@@ -1600,6 +1621,10 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
   if (fabricAwareEqual(left, right)) return true;
   if (!isPlainObject(left) || !isPlainObject(right)) return false;
   for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (
+      ANNOTATION_KEYS.has(key) && key !== "default" && key !== "$id" &&
+      !SUBSCHEMA_MAP_KEYS.has(key)
+    ) continue;
     if (
       key !== "ifc" && Object.hasOwn(left, key) !== Object.hasOwn(right, key)
     ) {

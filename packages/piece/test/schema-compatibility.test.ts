@@ -2132,6 +2132,123 @@ describe("piece schema compatibility", () => {
     ).toThrow(/candidate schema rejects values accepted previously/);
   });
 
+  it("accepts equivalent unconstrained link contracts", () => {
+    const targets: Exclude<JSONSchema, boolean>[] = [
+      {},
+      { description: "Any retained value" },
+      { type: "unknown" },
+      { default: "fallback" },
+      {
+        $ref: "#/$defs/Anything",
+        $defs: { Anything: { title: "Any value" } },
+      },
+    ];
+    for (const target of targets) {
+      expect(() => assertSchemaSubset(true, target)).not.toThrow();
+      expect(() => assertSchemaSubset(target, true)).not.toThrow();
+      expect(() =>
+        assertSchemaSubset(
+          { type: "object" },
+          { type: "object", additionalProperties: target },
+          "linked object",
+          { targetRoot: target },
+        )
+      ).not.toThrow();
+    }
+  });
+
+  it("accepts annotation changes on a defaulted union", () => {
+    const source: JSONSchema = {
+      type: ["string", "undefined"],
+      default: "",
+      description: "The producer's display name",
+    };
+    const target: JSONSchema = {
+      ...source,
+      description: "The consumer's display name",
+      title: "Name",
+      examples: ["A topic"],
+      deprecated: true,
+      tags: ["display"],
+    };
+    expect(() => assertSchemaSubset(source, target)).not.toThrow();
+    expect(() => assertSchemaSubset(target, source)).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(source, source),
+        pattern(target, target),
+      )
+    ).not.toThrow();
+  });
+
+  it("preserves restrictions beside changed annotations", () => {
+    const source: JSONSchema = {
+      type: ["string", "undefined"],
+      default: "",
+      description: "Producer",
+    };
+    const targets: Exclude<JSONSchema, boolean>[] = [
+      { ...source, type: ["number", "undefined"], default: 0 },
+      { ...source, asCell: ["readonly"] },
+      { ...source, scope: "user" },
+      { ...source, customConstraint: true } as Exclude<JSONSchema, boolean>,
+    ];
+    for (const target of targets) {
+      expect(() =>
+        assertSchemaSubset(source, { ...target, description: "Consumer" })
+      ).toThrow();
+    }
+    for (
+      const target of [
+        { type: "string" },
+        { type: "unknown", maxLength: 3 },
+        { type: "unknown", asCell: ["readonly"] },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(() => assertSchemaSubset(true, target)).toThrow();
+    }
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(true, true),
+        pattern({ properties: { field: { type: "string" } } }, true),
+      )
+    ).toThrow(/unconstrained schema is no longer accepted/);
+    expect(() =>
+      assertSchemaSubset(
+        { const: { description: "Authored content" } },
+        { const: { description: "Different content" } },
+      )
+    ).toThrow();
+  });
+
+  it("preserves default and reference semantics beside changed descriptions", () => {
+    const withDefault = (description: string, value: string): JSONSchema => ({
+      type: "array",
+      uniqueItems: true,
+      items: {
+        type: "object",
+        properties: { name: { type: "string", default: value, description } },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(withDefault("Producer", "old"), true),
+        pattern(withDefault("Consumer", "new"), true),
+      )
+    ).toThrow(/defaults changed/);
+
+    const withRef = (description: string): JSONSchema => ({
+      $ref: "#/$defs/Value",
+      description,
+    });
+    expect(() =>
+      assertSchemaSubset(withRef("Producer"), withRef("Consumer"), "value", {
+        sourceRoot: { $defs: { Value: { type: "number" } } },
+        targetRoot: { $defs: { Value: { type: "string" } } },
+      })
+    ).toThrow();
+  });
+
   it("rejects unresolved references and terminates on recursive references", () => {
     const unresolved = pattern(
       {

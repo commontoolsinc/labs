@@ -609,7 +609,16 @@ that its producer contract was checked when it was created.
 The runtime can compare the previous and candidate argument schemas, result
 schemas, and retained input links. Before a manual source replacement, the
 caller compiles and verifies the candidate and runs these structural
-comparisons. An incompatible pattern contract or retained link becomes an
+comparisons. Descriptions, titles, examples, and listing annotations do not
+change a contract, including inside defaulted unions. Defaults, reference
+targets, value constraints, and capability and CFC metadata remain part of the
+proof. The unconstrained schemas `true`, `{}`, and `{ type: "unknown" }`
+accept the same values; constraints beside `type: "unknown"` still apply.
+Adding an optional `unknown` read to an open producer contract is compatible,
+while adding an optional typed read requires the producer to guarantee that
+type whenever the property is present.
+
+An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line
 tooling requires an explicit flag, before applying it. A materialized retained
 input that does not satisfy the candidate argument schema is not confirmable.
