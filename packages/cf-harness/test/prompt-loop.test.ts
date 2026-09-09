@@ -7558,6 +7558,114 @@ Deno.test("CfHarnessPromptLoop ignores opaque and denied CFC observations for mo
   );
 });
 
+Deno.test("CfHarnessPromptLoop withholds opaque CFC stdout from the model", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const opaqueLabel = "did:key:opaque-stdout";
+  const printedBytes = "withheld-stdout-marker";
+  const withheldByteLength = new TextEncoder()
+    .encode(`${printedBytes}\n`).length;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      // The sandbox prints these bytes and CFC marks the stdout channel
+      // opaque. stderr and the exit code stay observed, which isolates the
+      // stdout channel; the docker route marks all three of a command's
+      // channels together, so this shape comes from the contract rather than
+      // from that route.
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: `${printedBytes}\n`,
+          stderr: "",
+          exitCode: 0,
+          cfcResult: {
+            ...observedCfcResult(""),
+            stdout: {
+              channel: "stdout",
+              policy: "opaque",
+              label: { confidentiality: [opaqueLabel] },
+              byteLength: withheldByteLength,
+            },
+          },
+        },
+      ]),
+      runId: "run-cfc-opaque-stdout-withheld",
+      model: "gpt-5.4",
+      // The strictest rung, which is the posture this case is written for.
+      // Mediation of a CFC result runs at every rung, so each assertion below
+      // holds under all four.
+      cfcEnforcementMode: "enforce-strict",
+    }),
+    fetchFn: twoTurnBashFetch(
+      fetchCalls,
+      { command: "cat opaque.txt" },
+      "The output was withheld.",
+    ),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read the opaque file.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // Withholding a stream is mediation rather than a denial, so the run
+  // carries on and the model gets the second turn that reads the result.
+  assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.policyEvents, []);
+  assertEquals(fetchCalls.length, 2);
+  const secondBody = String(fetchCalls[1]?.body);
+  const toolMessage = chatViewOfRequest(JSON.parse(secondBody)).messages.at(-1);
+  assert(toolMessage !== undefined && toolMessage.role === "tool");
+  assertEquals(toolMessage.tool_call_id, "call-1");
+  // The bytes are absent from the whole request, not only from the message
+  // the exact match below pins.
+  assertEquals(secondBody.includes(printedBytes), false);
+  // What the model reads in place of the bytes. The `denied` policy renders a
+  // denial through the same `stdout` field, so the reason and the handle's
+  // `passThrough` flag are what tell the two apart. Pinning the whole message
+  // also pins the `cfc` descriptor, which is where the label and the size of
+  // what was withheld travel.
+  const content = JSON.parse(toolMessage.content);
+  assertEquals(content, {
+    outputId: "run-cfc-opaque-stdout-withheld:bash:1",
+    stdout: {
+      type: "cf-harness.observation-denied",
+      reason: "needs-opaque-pass-through",
+      detail: "stdout was not released by CFC policy",
+      handle: {
+        type: "cf-harness.opaque-handle",
+        handleId: "run-cfc-opaque-stdout-withheld:bash:1:stdout",
+        scope: "run",
+        createdAt: content.stdout?.handle?.createdAt,
+        passThrough: true,
+      },
+    },
+    stderr: "",
+    exitCode: 0,
+    cwd: "/workspace",
+    cfc: {
+      version: 1,
+      stdout: {
+        channel: "stdout",
+        policy: "opaque",
+        label: { confidentiality: [opaqueLabel] },
+        byteLength: withheldByteLength,
+      },
+      stderr: {
+        channel: "stderr",
+        policy: "observed",
+        label: { confidentiality: ["public"] },
+      },
+      exitCode: {
+        policy: "observed",
+        label: { confidentiality: ["public"] },
+        value: 0,
+      },
+    },
+  });
+  // The released direction is covered by "exposes mediated bash output
+  // instead of raw stdout in enforce mode" earlier in this file.
+});
+
 Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforce-explicit mode", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
