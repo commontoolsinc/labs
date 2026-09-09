@@ -23,6 +23,7 @@ import {
   normalize as normalizeSandboxPath,
 } from "@std/path/posix";
 
+import type { HarnessFabricSessionConfig } from "./config.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 
 export type CfHarnessHostMountMode = "readonly" | "writable";
@@ -164,23 +165,20 @@ export const parseHostMountSpecs = async (
 };
 
 /**
- * Engine options for an interactive run's provisioning flags.
- *
- * Both interactive entrypoints call this — the standalone stdio CLI and the
- * Loom-local host — so neither can advertise a flag it then drops. The first
- * version of this change wired only the Loom host, and the standalone
- * entrypoint accepted `--host-mount`, printed it in its usage text, and ignored
- * it: the same "second entrypoint, no provisioning" defect one layer in.
+ * Resolves host mounts, Loom tools, and the Fabric binding into prompt-loop
+ * options. Throws when a configured host resource cannot be resolved.
  */
 export const resolveInteractiveProvisioning = async (
   parsed: {
     hostMountSpecs?: readonly string[];
+    fabricSession?: HarnessFabricSessionConfig;
     loomAuthoringConfigPath?: string;
     maxModelTurns?: number;
   },
   cwd: string,
 ): Promise<{
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
+  fabricSession?: HarnessFabricSessionConfig;
   loomAuthoring?: HarnessLoomAuthoringConfig;
   maxModelTurns?: number;
 }> => {
@@ -192,6 +190,9 @@ export const resolveInteractiveProvisioning = async (
   );
   return {
     ...(mounts.length > 0 ? { additionalMounts: mounts } : {}),
+    ...(parsed.fabricSession !== undefined
+      ? { fabricSession: parsed.fabricSession }
+      : {}),
     ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(parsed.maxModelTurns !== undefined
       ? { maxModelTurns: parsed.maxModelTurns }
