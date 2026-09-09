@@ -206,6 +206,12 @@ The current package provides:
   identifiers;
 - content-addressed snapshots for in-run `view_image` observations, while
   run-start images remain source-integrity-locked;
+- opt-in skills.sh tools — `search_skills` returns registry metadata only, and
+  `acquire_skill` (which needs a fabric session as well) resolves a skill to a
+  commit SHA, fetches it pinned to that SHA, writes the exact text into a cell
+  stamped with `ExternalIngest` fetch provenance, and hands back a
+  capability-typed handle; each is gated on its own configuration, so a run with
+  discovery but no acquisition offers only the first;
 - opt-in fabric-session tools — `run_pattern`, `assign_slug`, and
   `ingest_sandbox_file` (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`

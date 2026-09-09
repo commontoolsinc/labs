@@ -103,7 +103,6 @@ metadata and container path. See
 
 ## Non-Goals
 
-- Installing skills from remote registries.
 - Managing user-global skill directories outside an explicitly configured root.
 - Running skill scripts automatically or without an exact operator allowlist.
 - Treating `allowed-tools` as a permission grant.
@@ -673,7 +672,8 @@ This avoids ambiguity between host paths and sandbox paths.
 | Pattern Factory phase-specific skills                                               | implemented                                                |
 | Explicit child-profile skill policy and summary-only parent return                  | implemented                                                |
 | Model-driven dynamic `load_skill` activation                                        | not implemented; future design above                       |
-| User/global/remote skill installation                                               | not planned without a product requirement and trust design |
+| Pinned remote skill discovery and acquisition (`search_skills`, `acquire_skill`)    | implemented                                                |
+| User/global skill installation                                                      | not planned without a product requirement and trust design |
 
 ## Open Questions
 
