@@ -5,6 +5,7 @@
  */
 
 import { getPatternIdentityRef } from "@commonfabric/runner";
+import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { pieceId } from "@commonfabric/piece";
 import type { JSONSchema } from "@commonfabric/api";
 
@@ -175,6 +176,79 @@ const patternReference = async (
   return `pattern:${space}/${id}`;
 };
 
+/** Helper for deployment binding, which normalizes an HTTP API base URL. */
+const apiBase = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username || url.password || url.search || url.hash
+    ) return undefined;
+    return url.href.replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Helper for context, which admits at most 32 successful host deployments
+ * bound to this Fabric session and verified as whole Pattern Instances.
+ * Canonical links enter the prompt loop's persisted handle projection.
+ */
+const deployedPatterns = async (
+  context: HarnessToolContext,
+  value: unknown,
+): Promise<{ pattern_token: string }[]> => {
+  const receipts = record(value).receipts;
+  const target = context.fabricSessionTarget;
+  const api = apiBase(target?.apiUrl);
+  if (
+    !Array.isArray(receipts) || context.getFabricSession === undefined ||
+    target === undefined || api === undefined
+  ) return [];
+  const output: { pattern_token: string }[] = [];
+  const seen = new Set<string>();
+  for (const candidate of receipts.slice(0, 32)) {
+    const receipt = record(candidate);
+    if (
+      receipt.schema !== "loom-deployed-pattern-v1" ||
+      apiBase(receipt.api_url) !== api ||
+      typeof receipt.piece_id !== "string" ||
+      !/^fid1:[A-Za-z0-9_-]{43}$/.test(receipt.piece_id)
+    ) continue;
+    try {
+      const { pieces } = await context.getFabricSession();
+      const space = pieces.getSpace();
+      if (receipt.space !== target.space && receipt.space !== space) continue;
+      if (seen.has(receipt.piece_id)) continue;
+      seen.add(receipt.piece_id);
+      const cell = pieces.runtime.getCellFromLink({
+        ...parseHandleRef(`/of:${receipt.piece_id}`),
+        space,
+        schema: undefined,
+      });
+      await cell.sync();
+      if (
+        pieceId(cell) !== receipt.piece_id ||
+        getPatternIdentityRef(cell) === undefined
+      ) continue;
+      const link = createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space);
+      const held = context.handleTable?.entries.filter((entry) => {
+        const address = parseHandleRef(entry.ref);
+        return address.id === `of:${receipt.piece_id}` &&
+          address.path.length === 0 && address.scope === "space" &&
+          (address.space === undefined || address.space === space);
+      }) ?? [];
+      if (held.some((entry) => entry.capability !== undefined)) continue;
+      output.push({ pattern_token: held[0]?.token ?? link });
+    } catch {
+      // Unavailable deployment cells do not prevent ordinary Loom recovery.
+    }
+  }
+  return output;
+};
+
 /**
  * Helper for the three tools, which projects only their public observation.
  * A started host command settles even when the model turn is cancelled; a
@@ -319,6 +393,10 @@ const invoke = async (
     authored: (result.authored as unknown[]).map((entry) => ({
       receipt: projectReceipt(record(entry).receipt),
     })),
+    deployed_patterns: await deployedPatterns(
+      context,
+      result.deployed_patterns,
+    ),
   };
 };
 
@@ -411,7 +489,7 @@ export const loomAuthoringContextTool: HarnessToolDefinition<
     title: "Loom Authoring Context",
     effectClass: "read",
     description:
-      "Recover up to 32 historical receipts for this host-owned run identity and its separately bound Loom. History is not newly authored work and never selects an implicit target. An explicit loom_id overrides only the context target. Inspect the exact chosen target before editing.",
+      "Recover up to 32 historical receipts for this host-owned run identity and its separately bound Loom. Successful Pattern deployments from this run can provide held pattern_token values for loom_compose. History is not newly authored work and never selects an implicit target. An explicit loom_id overrides only the context target. Inspect the exact chosen target before editing.",
     inputSchema: {
       type: "object",
       properties: { loom_id: targetSchema },

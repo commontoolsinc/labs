@@ -2226,6 +2226,14 @@ export class CfHarnessEngine {
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),
+      ...(this.config.fabricSession !== undefined
+        ? {
+          fabricSessionTarget: {
+            apiUrl: this.config.fabricSession.apiUrl,
+            space: this.config.fabricSession.space,
+          },
+        }
+        : {}),
       ...(this.#openProbeRuntime !== undefined
         ? { openProbeRuntime: this.#openProbeRuntime }
         : {}),

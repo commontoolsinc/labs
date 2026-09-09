@@ -116,6 +116,26 @@ automatically.
 
 ## Receipts and recovery
 
+After a successful Loom-mediated Pattern deployment, call
+`loom_authoring_context` with no deployment arguments. Supporting hosts return
+run-scoped `loom-deployed-pattern-v1` receipts in a separate
+`deployed_patterns.receipts` field. The tool admits at most 32 entries, checks
+each API base URL and space against the host-configured Fabric session, and
+loads the cell to verify its whole Pattern identity. It returns accepted entries
+as `deployed_patterns: [{pattern_token}]`; the prompt loop replaces canonical
+links with opaque handles in model-facing messages and persists those handles
+for subsequent composition and resume. Tool artifacts retain the canonical links
+as host-side evidence.
+
+Repeated context calls reuse general handles, including qualified own-space
+addresses, and do not expand a restricted skill handle into a composition grant.
+Missing Fabric backing, omitted receipt fields from older hosts, foreign or
+malformed receipts, and unavailable cells contribute no Pattern tokens while
+ordinary Loom context remains available. Shell output and model supplied Pattern
+addresses do not authorize this handoff. The Loom deployment route remains
+responsible for recording actual success under its broker run identity
+independently of best-effort placeholder placement.
+
 Choose one `request_id` for one logical composition and retain its exact
 arguments on retry. The host atomically commits components, operations, and a
 receipt. A successful tool observation has `kind: "loom-authored"`, its

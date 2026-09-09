@@ -65,6 +65,15 @@ export interface HarnessToolContext {
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
 
+  /** Host-configured deployment target, without its identity key path. */
+  fabricSessionTarget?: {
+    /** Toolshed API base URL for the run. */
+    apiUrl: string;
+
+    /** Configured space name or DID for the run. */
+    space: string;
+  };
+
   /**
    * Opens the render gate's probe runtime; `openProbeRuntime` by default. A
    * test replaces it to see what the gate opens the probe under.
