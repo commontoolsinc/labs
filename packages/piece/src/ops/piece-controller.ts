@@ -1,9 +1,5 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
-import {
-  type FabricValue,
-  taggedHashStringOf,
-  valueEqual,
-} from "@commonfabric/data-model";
+import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -1820,7 +1816,7 @@ function linkMatchesCommittedState(
   basePath: readonly (string | number)[],
 ): boolean {
   // Live Cells prove preservation in `derivePreserveDecision`, not equality
-  // to stored bytes. They are not FabricValues, so `valueEqual` rejects them.
+  // to stored bytes. They are not serialized FabricValues.
   if (isCell(suppliedLink.value)) return false;
   // After excluding live Cells, `parseLinkOrThrow` guarantees a serialized
   // link, which cannot equal an absent committed slot.
@@ -1829,10 +1825,7 @@ function linkMatchesCommittedState(
     ...basePath,
     ...suppliedLink.path,
   ]);
-  return valueEqual(
-    committed as FabricValue,
-    suppliedLink.value as FabricValue,
-  );
+  return fabricAwareEqual(committed, suppliedLink.value);
 }
 
 /** Wrap a per-concern failure in the uniform supplied-link rejection. */

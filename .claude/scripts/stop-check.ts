@@ -1,13 +1,16 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-env --allow-run
 
 /**
  * .claude/scripts/stop-check.ts
  *
  * Claude Code Stop hook.
- * - Checks if there are uncommitted changes.
- * - If so, reminds to consider running tests before finishing.
- * - Does NOT block (just provides context).
+ * - Tells the user how many uncommitted changes the turn is ending on, and on
+ *   which branch.
+ * - Does not block.
  */
+
+import { guardProjectDir } from "./common/guard.ts";
+guardProjectDir();
 
 const rawInput = await new Response(Deno.stdin.readable).text();
 
@@ -26,11 +29,12 @@ if (stopHookActive) {
 
 // Check for uncommitted changes
 const status = await new Deno.Command("git", {
-  // `--no-optional-locks`: `git status` refreshes and rewrites the index when any
-  // tracked file is racily clean — content matching the index with a differing
-  // mtime, which is what editing a file and reverting it leaves behind. This hook
-  // only reports, so without the flag it was writing to the tree on every stop,
-  // and taking `.git/index.lock` there. Measured in a scratch repo.
+  // `--no-optional-locks` stops `git status` writing to the tree. Without it,
+  // `git status` refreshes and rewrites the index whenever a tracked file is
+  // racily clean, meaning its content matches the index but its modification
+  // time differs. Editing a file and reverting it leaves a file in that state.
+  // This hook only reports, so it must not write the index or take
+  // `.git/index.lock`.
   args: ["--no-optional-locks", "status", "--porcelain"],
   stdout: "piped",
   stderr: "piped",

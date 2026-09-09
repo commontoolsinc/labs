@@ -536,26 +536,26 @@ Deno.test("every cited path and specifier resolves", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);
-  assert(docs.length > 0, "found no covered markdown");
+  assert(docs.length > 0, "found no covered files");
   const drift = collectDrift(docs, tree, await readWorkspaceExports(root));
   assertEquals(
     drift.map((d) => `${d.file}:${d.line} ${d.message}`),
     [],
-    "A skill, an AGENTS.md, or a rule cites a path or specifier that no longer " +
-      "resolves. These are live documentation: fix the document to name the " +
-      "current location.",
+    "A skill, an AGENTS.md, a rule, or a hook script cites a path or " +
+      "specifier that no longer resolves. These are live documentation: fix " +
+      "the document to name the current location.",
   );
 });
 
 //
-// The three kinds of document the scan reaches
+// The four kinds of file the scan reaches
 //
 // They are named by different conventions,
 // so each is pinned: a rename that drops one from the scan would otherwise be
 // invisible.
 //
 
-Deno.test("the scan covers skills, AGENTS.md guides, and rules", async () => {
+Deno.test("the scan covers skills, AGENTS.md guides, rules, and hooks", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
   const paths = new Set((await readSkillDocs(root, tree)).map((d) => d.path));
@@ -568,6 +568,10 @@ Deno.test("the scan covers skills, AGENTS.md guides, and rules", async () => {
   assert(
     paths.has(".claude/rules/tests.md"),
     ".claude/rules/ is not scanned",
+  );
+  assert(
+    paths.has(".claude/scripts/post-edit-ts.ts"),
+    ".claude/scripts/ is not scanned",
   );
   // A CLAUDE.md is one `@AGENTS.md` import, with nothing backticked to check.
   assert(!paths.has("CLAUDE.md"), "CLAUDE.md should not be scanned");

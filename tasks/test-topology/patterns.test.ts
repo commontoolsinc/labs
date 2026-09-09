@@ -4,18 +4,37 @@ import { SKIP_LIST_VARIABLE } from "@commonfabric/test-support/records";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import { loadPatternSuites } from "./patterns.ts";
 import { loadPackageIntegrationSuites } from "./package-integration.ts";
-import type { Suite } from "./suite.ts";
+import type { CommandContext, Suite } from "./suite.ts";
 
 const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const suites = [
   ...await loadPatternSuites(root),
   ...await loadPackageIntegrationSuites(root),
 ];
-const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
+const pick = (from: readonly Suite[], id: string): Suite =>
+  from.find((suite) => suite.id === id)!;
+const byId = (id: string): Suite => pick(suites, id);
 
 /** A directory each case writes its reports and lists into. */
 async function outputDir(): Promise<string> {
   return await Deno.makeTempDir({ prefix: "patterns-suite-" });
+}
+
+/** A context that measures both streams, writing into stated directories. */
+function measured(outputDir: string): CommandContext {
+  return {
+    root,
+    outputDir,
+    coverageDir: "/cov",
+    patternCoverageDir: "/pattern",
+  };
+}
+
+/** The two pattern integration suites, named by the arm each resolves to. */
+function arms(defaultEnabled: boolean): { on: string; off: string } {
+  return defaultEnabled
+    ? { on: "pattern-integration", off: "pattern-integration-opposite" }
+    : { on: "pattern-integration-opposite", off: "pattern-integration" };
 }
 
 describe("the pattern and package suites", () => {
@@ -41,6 +60,82 @@ describe("the pattern and package suites", () => {
         { root, outputDir: await outputDir() },
       );
       expect(invocation!.command).toContain("--no-check");
+    }
+  });
+
+  it("gives every suite that measures a pattern somewhere to report it", async () => {
+    // Authored-pattern coverage is LCOV the instrumentation writes for
+    // itself rather than a V8 profile the lane converts, so it needs a
+    // directory of its own. It is the only source of coverage for the
+    // pattern files, and a suite that measured one and reported nowhere
+    // would take that coverage out of the repository-wide figure with
+    // nothing saying so.
+
+    const context = measured(await outputDir());
+    for (const defaultEnabled of [true, false]) {
+      const loaded = await loadPatternSuites(root, defaultEnabled);
+      const { off } = arms(defaultEnabled);
+      for (const id of [off, "pattern-unit", "pattern-reload"]) {
+        const suite = pick(loaded, id);
+        const [invocation] = await suite.command(
+          [{ unit: suite.units[0]!, skip: [] }],
+          context,
+        );
+        expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBe("/pattern");
+        expect(invocation!.env?.DENO_COVERAGE_DIR).toBeDefined();
+      }
+    }
+  });
+
+  it("leaves the pattern instrumentation off the arm that compiles twice", async () => {
+    // Instrumenting a pattern compiles it a second way, and what the
+    // browser worker records is the whole of what ran only where that
+    // worker does all the compiling. The arm running server execution
+    // has another compiler on the server, so it collects the V8 profile
+    // and leaves the authored-pattern report to the other arm.
+
+    const context = measured(await outputDir());
+    for (const defaultEnabled of [true, false]) {
+      const loaded = await loadPatternSuites(root, defaultEnabled);
+      const suite = pick(loaded, arms(defaultEnabled).on);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        context,
+      );
+      expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBeUndefined();
+      expect(invocation!.env?.DENO_COVERAGE_DIR).toBeDefined();
+    }
+  });
+
+  it("leaves the pattern report out where nothing measures the batch", async () => {
+    const suite = byId("pattern-unit");
+    const [invocation] = await suite.command(
+      [{ unit: suite.units[0]!, skip: [] }],
+      { root, outputDir: await outputDir() },
+    );
+    expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBeUndefined();
+    expect(invocation!.env?.DENO_COVERAGE_DIR).toBeUndefined();
+  });
+
+  it("runs an integration suite the way its own task runs it", async () => {
+    // Each package's `integration` task sets the log level, and running
+    // the same files at the default level is running them differently
+    // from the way they are meant to run.
+
+    for (
+      const id of [
+        "pattern-integration",
+        "pattern-integration-opposite",
+        "package-integration",
+        "package-integration-opposite",
+      ]
+    ) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        { root, outputDir: await outputDir() },
+      );
+      expect(invocation!.env?.LOG_LEVEL).toBe("warn");
     }
   });
 
