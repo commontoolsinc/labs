@@ -6,6 +6,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  schemasHaveSameContract,
 } from "../src/schema-compatibility.ts";
 
 function pattern(
@@ -41,6 +42,56 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
+  describe("schemasHaveSameContract()", () => {
+    it("recognizes unchanged defaults without allowing new-link default insertion", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          { type: "string" },
+          { type: "string", default: "" },
+          { type: "undefined" },
+        ],
+      };
+      expect(schemasHaveSameContract(schema, schema)).toBe(true);
+      expect(() => assertSchemaSubset(schema, schema)).toThrow(
+        "not stable under default insertion",
+      );
+    });
+
+    it("compares nested defaults through each reference's owning root", () => {
+      const root = (fallback: string): JSONSchema => ({
+        $defs: {
+          row: {
+            type: "object",
+            properties: { title: { $ref: "#/$defs/text" } },
+          },
+          text: { type: "string", default: fallback },
+        },
+      });
+      const reference = {
+        type: "array",
+        items: { $ref: "#/$defs/row" },
+      } as const;
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: root("Donut"),
+        targetRoot: root("Donut"),
+      })).toBe(true);
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: root("Donut"),
+        targetRoot: root("Glaze"),
+      })).toBe(false);
+    });
+
+    it("returns false for unresolved references", () => {
+      const reference = { $ref: "#/$defs/missing" } as const;
+      expect(schemasHaveSameContract(reference, reference)).toBe(false);
+    });
+
+    it("returns false when the consumer value contract changes", () => {
+      expect(schemasHaveSameContract({ type: "string" }, { type: "number" }))
+        .toBe(false);
+    });
+  });
+
   it("accepts a recompile that only changes writeAuthorizedBy moduleIdentity", () => {
     // A CFC write authorization (`TrustedActionWrite`) lowers to an
     // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is

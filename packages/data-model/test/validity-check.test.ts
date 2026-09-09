@@ -24,7 +24,6 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
-import { tagFromNativeValue } from "@/native-type-tags.ts";
 import { isFabricPlainObject } from "@/type-check.ts";
 import {
   assertValidFabricValueLayer,
@@ -33,7 +32,7 @@ import {
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
-import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
+import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 
 describe("validity-check", () => {
@@ -708,17 +707,17 @@ describe("validity-check", () => {
     // which is what the corpus is for.
 
     const nativeObjectTags: ReadonlyArray<string> = [
-      VALUE_TAGS.Error,
-      VALUE_TAGS.Map,
-      VALUE_TAGS.Set,
-      VALUE_TAGS.Date,
-      VALUE_TAGS.Uint8Array,
-      VALUE_TAGS.RegExp,
+      VALUE_TAGS.JsError,
+      VALUE_TAGS.JsMap,
+      VALUE_TAGS.JsSet,
+      VALUE_TAGS.JsDate,
+      VALUE_TAGS.JsUint8Array,
+      VALUE_TAGS.JsRegExp,
     ];
 
     for (const [label, value] of LAYER_CORPUS) {
       it(`agrees with the full dispatch about ${label}`, () => {
-        const tag = tagFromNativeValue(value);
+        const tag = tagFromNativeValueElseNull(value);
         const viaDispatch = (tag !== null) && nativeObjectTags.includes(tag);
         expect(isValidFabricNativeObject(value)).toBe(viaDispatch);
       });

@@ -39,10 +39,10 @@ export interface Gate {
   /** The record kind, which is `gate` for all but formatting and linting. */
   kind: string;
 
-  /** The task that runs it. */
-  task: string;
+  /** What runs it, as the arguments Deno takes beyond its own path. */
+  run: readonly string[];
 
-  /** Arguments the task takes beyond its own. */
+  /** Further arguments, for a gate that reads the base revision. */
   args?: (context: { baseRef: string }) => string[];
 
   /** Where it runs, repository-relative, when that is not the root. */
@@ -75,22 +75,21 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "deno-fmt",
     kind: "format",
-    task: "fmt",
-    args: () => ["--check"],
+    run: ["fmt", "--check"],
     // Reads every file the root configuration does not exclude.
     reachedBy: [],
   },
   {
     name: "deno-lint",
     kind: "lint",
-    task: "lint",
+    run: ["lint"],
     // The same, over the extensions the linter opens.
     reachedBy: [],
   },
   {
     name: "check-test-topology",
     kind: "gate",
-    task: "check-test-topology",
+    run: ["task", "check-test-topology"],
     // Walks every tree this repository keeps source in for anything
     // that looks like a test, and holds the topology to what it finds.
     // The topology enumerates from those same trees, so a set stated
@@ -101,16 +100,16 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-skill-facts",
     kind: "gate",
-    task: "check-skill-facts",
-    // Holds every path a skill, an `AGENTS.md` or a rule cites to
-    // resolving against the tree, so a file moved or removed anywhere
-    // can fail it.
+    run: ["task", "check-skill-facts"],
+    // Holds every path a skill, an `AGENTS.md`, a rule or a hook script
+    // cites to resolving against the tree, so a file moved or removed
+    // anywhere can fail it.
     reachedBy: [],
   },
   {
     name: "check-tripwires",
     kind: "gate",
-    task: "check-tripwires",
+    run: ["task", "check-tripwires"],
     // Probes the weakness each tripwire asserts is still present, and
     // reads the test file carrying the same assertion. A tripwire added
     // against another package widens this list.
@@ -123,7 +122,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-docs",
     kind: "gate",
-    task: "check-docs",
+    run: ["task", "check-docs"],
     // The documents holding the blocks, and the import map they
     // compile through. The historical tree is walked past: those blocks
     // reflect the API of their era. A block also compiles against this
@@ -134,13 +133,13 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-docs-history-index",
     kind: "gate",
-    task: "check-docs-history-index",
+    run: ["task", "check-docs-history-index"],
     reachedBy: ["docs/history/", "tasks/check-docs-history-index.ts"],
   },
   {
     name: "check-no-waitfor",
     kind: "gate",
-    task: "check-no-waitfor",
+    run: ["task", "check-no-waitfor"],
     // The `integration` directories under `packages`, less the package
     // declaring the polling helper, which is out of the check's scope.
     reachedBy: [
@@ -152,7 +151,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-conflict-markers",
     kind: "gate",
-    task: "check-conflict-markers",
+    run: ["task", "check-conflict-markers"],
     // Reads every tracked file: a marker left behind is a mistake
     // wherever it lands.
     reachedBy: [],
@@ -160,7 +159,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-control-characters",
     kind: "gate",
-    task: "check-control-characters",
+    run: ["task", "check-control-characters"],
     // The same, over every tracked file the extension list does not
     // call binary.
     reachedBy: [],
@@ -168,7 +167,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-verb-session-sync",
     kind: "gate",
-    task: "check-verb-session-sync",
+    run: ["task", "check-verb-session-sync"],
     reachedBy: [
       "docs/common/verbs/",
       "docs/common/workflows/",
@@ -179,7 +178,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-pattern-tiers",
     kind: "gate",
-    task: "check-pattern-tiers",
+    run: ["task", "check-pattern-tiers"],
     // The pattern sources, the tier tables, and the collector deciding
     // which files take a marker at all. The baselines are data beside
     // the patterns and carry no marker.
@@ -194,7 +193,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-unused-deps",
     kind: "gate",
-    task: "check-unused-deps",
+    run: ["task", "check-unused-deps"],
     // Reads every tracked code file, since the import that justifies a
     // declared dependency can sit in any of them.
     reachedBy: [],
@@ -202,7 +201,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-deno-pins",
     kind: "gate",
-    task: "check-deno-pins",
+    run: ["task", "check-deno-pins"],
     reachedBy: [
       ".github/actions/deno-setup/action.yml",
       "Dockerfile.dashboard",
@@ -215,19 +214,19 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-action-pins",
     kind: "gate",
-    task: "check-action-pins",
+    run: ["task", "check-action-pins"],
     reachedBy: [".github/", "tasks/check-action-pins.ts"],
   },
   {
     name: "check-single-copy-deps",
     kind: "gate",
-    task: "check-single-copy-deps",
+    run: ["task", "check-single-copy-deps"],
     reachedBy: ["deno.lock", "tasks/check-single-copy-deps.ts"],
   },
   {
     name: "check-package-cycles",
     kind: "gate",
-    task: "check-package-cycles",
+    run: ["task", "check-package-cycles"],
     // Reads every production module under `packages/` for its imports,
     // which is most of the repository, and no smaller part of it
     // decides the verdict.
@@ -236,7 +235,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-local-program",
     kind: "gate",
-    task: "check-local-program",
+    run: ["task", "check-local-program"],
     // Reads every tracked TypeScript file, since the resolver it looks
     // for can be named from any of them.
     reachedBy: [],
@@ -244,7 +243,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-completion-slots",
     kind: "gate",
-    task: "check-completion-slots",
+    run: ["task", "check-completion-slots"],
     // The command tree it walks and the two provider tables it
     // subtracts against.
     reachedBy: [
@@ -256,7 +255,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-command-docs",
     kind: "gate",
-    task: "check-command-docs",
+    run: ["task", "check-command-docs"],
     // The command tree and the shuttle verbs, against the documents
     // that could describe them: the documentation tree less the two
     // parts of it no live document sits in, the authored skills, and
@@ -276,7 +275,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-cfc-types",
     kind: "gate",
-    task: "check-cfc-types",
+    run: ["task", "check-cfc-types"],
     cwd: "packages/static",
     reachedBy: [
       "packages/api/",
@@ -287,7 +286,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-commonfabric-types",
     kind: "gate",
-    task: "check-commonfabric-types",
+    run: ["task", "check-commonfabric-types"],
     cwd: "packages/static",
     // The pattern API and the workspace modules it re-exports, whose
     // text this one inlines.
@@ -301,7 +300,7 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
   {
     name: "check-withheld-globals",
     kind: "gate",
-    task: "check-withheld-globals",
+    run: ["task", "check-withheld-globals"],
     cwd: "packages/static",
     // The type libraries, and the sandbox contract naming the globals
     // to be stripped from them.
@@ -322,7 +321,7 @@ export const HISTORY_GATES: readonly Gate[] = [
   {
     name: "check-baselines-append-only",
     kind: "gate",
-    task: "check-baselines-append-only",
+    run: ["task", "check-baselines-append-only"],
     args: ({ baseRef }) => [baseRef],
     // The baselines. A deleted pattern file is what excuses deleting
     // the baselines beside it, so it can turn this gate's verdict from
@@ -337,7 +336,7 @@ export const HISTORY_GATES: readonly Gate[] = [
   {
     name: "check-test-aliases",
     kind: "gate",
-    task: "check-test-aliases",
+    run: ["task", "check-test-aliases"],
     args: ({ baseRef }) => [baseRef],
     // The file, and the module holding the line format it parses and
     // the graph rules it applies; the task itself is a `git show`
@@ -401,8 +400,7 @@ function gateSuite(
             gate.name,
             "--",
             Deno.execPath(),
-            "task",
-            gate.task,
+            ...gate.run,
             ...gate.args?.({ baseRef }) ?? [],
           ],
           cwd: gate.cwd === undefined

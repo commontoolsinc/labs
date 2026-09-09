@@ -15,9 +15,13 @@ import {
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
+  isKeyableObjectOrArray,
+  isWalkableObjectOrArray,
+  refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
@@ -29,7 +33,6 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -152,6 +155,19 @@ import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 const INTERNAL_VERIFIER_META = {
   ...ignoreReadForScheduling,
+  ...internalVerifierRead,
+};
+
+// The link-source schema read, which reactivity SEES. Prepare's other reads
+// carry `ignoreReadForScheduling` and are invisible to it. This one decides
+// whether a link write can be labeled at all, and the commit boundary ends
+// the retries on a refusal it cannot answer, so the run is re-triggered when
+// the member it went looking for lands. The stored `["cfc"]` envelope, the
+// other half of that decision, is a dependency of the writer already, through
+// `readStoredCfcMetadata` (cfc/metadata.ts, called from data-updating.ts when
+// the link is written). The read is a commit-time precondition either way:
+// `ignoreReadForScheduling` gates reactivity alone.
+const LINK_SOURCE_SCHEMA_META = {
   ...internalVerifierRead,
 };
 
@@ -1108,8 +1124,11 @@ const storedMetadataFor = (
   // layer-naming half was fixed (verification-coverage.md OW47's
   // re-close; the name-draft triage's arm (c), the path half of the
   // ruled arm (b)). The read is marked as a runtime-internal verifier
-  // read, so it stays in the journal and drives reactivity while the
-  // commit's conflict set drops it (spec §18.6.2, §8.9.4).
+  // read, so the commit's conflict set drops it (spec §18.6.2, §8.9.4);
+  // it carries `ignoreReadForScheduling` besides, so reactivity skips it
+  // like every other read this pass makes. A writer that depends on the
+  // envelope reads it through `readStoredCfcMetadata` (cfc/metadata.ts),
+  // whose meta omits that marker.
   const metadata = tx.readOrThrow({
     space,
     id,
@@ -1140,6 +1159,34 @@ const storedMetadataFor = (
   }
   return metadata;
 };
+
+// Whether this transaction's view of the document has a root value.
+//
+// `storedMetadataFor` answers `undefined` both for a document that stores no
+// CFC metadata and for one whose root the transaction cannot see, and the two
+// differ in whether reading again can change the answer. `readOrThrow`
+// collapses them; the storage layer separates them by the error rather than
+// the value, so the same read is issued again here to see it: a document with
+// no root value answers every read below the root with `NotFoundError`, while
+// one with a root answers a missing `["cfc"]` slot with a successful read of
+// `undefined`. A root that cannot carry the path answers with a type mismatch
+// and counts as no root.
+//
+// The view a read resolves against includes this transaction's own writes, so
+// a document the replica never pulled reads as having a root once this
+// transaction writes into it. The address and the meta are the ones
+// `storedMetadataFor` already read, so this adds nothing to the transaction's
+// read set.
+const documentRootIsReadable = (
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  id: URI,
+  scope: ReturnType<typeof normalizeCellScope>,
+  type: MediaType,
+): boolean =>
+  tx.read({ space, id, scope, type, path: ["cfc"] }, {
+    meta: INTERNAL_VERIFIER_META,
+  }).ok !== undefined;
 
 /**
  * This returns a map whose values are always interned schemas.
@@ -1367,7 +1414,25 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(stripWriterIdentityStamp);
   }
-  if (!isObjectOrArray(value)) {
+  // A link is carried whole. It is a reference rather than a record of the
+  // writer's, so there is no stamp inside one to strip.
+  if (isPrimitiveCellLink(value)) {
+    return value;
+  }
+  // A fabric-valued node -- a schema `default`, say -- is carried by
+  // reference: rebuilding one by its properties would return `{}` and erase
+  // the difference between two schemas that differ only there.
+  //
+  // TODO(danfuzz): this still rebuilds every plain record it visits, schema
+  // `default` VALUES included, so a default that happens to carry `file`
+  // beside `bundleId` has the stamp keys stripped out of it and compares
+  // equal to one that never carried them. Value-bearing keys want to be
+  // carried by reference too.
+  //
+  // An instance is carried whole here as well. This arm returns rather than
+  // rebuilding, so nothing of it is lost, and refusing would take down a
+  // schema comparison over a default that holds one.
+  if (!isKeyableObjectOrArray(value)) {
     return value;
   }
 
@@ -1384,21 +1449,20 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   return next;
 };
 
-// TODO(danfuzz): `stripWriterIdentityStamp` rebuilds every record node it
-// meets, including schema `default` VALUES, and a `FabricSpecialObject`
-// rebuilds as `{}` — so two schemas whose only difference is a
-// `FabricSpecialObject`-valued default compare equal here, and the candidate's
-// default is silently discarded by the merge-skip decisions this feeds. The
-// strip wants to carry value-bearing keys by reference and the comparison wants
-// a fabric-aware equality.
 const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean =>
-  deepEqual(
+  fabricAwareEqual(
     stripWriterIdentityStamp(left),
     stripWriterIdentityStamp(right),
   );
+
+const candidateDeclaresNothing = (
+  candidate: JSONSchema | undefined,
+): boolean =>
+  candidate === true ||
+  (isObjectNotArray(candidate) && Object.keys(candidate).length === 0);
 
 // Exported for unit testing of the merge-skip decision. Not part of the
 // public CFC surface.
@@ -1406,6 +1470,19 @@ export const storedSchemaCoversCandidateEnvelope = (
   stored: JSONSchema | undefined,
   candidate: JSONSchema | undefined,
 ): boolean => {
+  // A candidate that declares nothing — JSON Schema `true`, or the empty
+  // object schema `getSchemaAtPath` returns for it — carries no label, no
+  // policy claim and no shape, so folding it into a stored schema that
+  // admits values leaves that schema as it stands. `false` admits none, and
+  // the merge refuses that form, so it is not one of those.
+  //
+  // The reading is narrower than `cfcSchemaIsTrue`, which also admits a
+  // schema whose only keys are `ifc`, `asCell`, `asStream`, `scope`,
+  // `default` or `$defs`. Each of those carries something the merge folds
+  // in.
+  if (stored !== false && candidateDeclaresNothing(candidate)) {
+    return true;
+  }
   if (stored === undefined || candidate === undefined) {
     return false;
   }
@@ -1424,12 +1501,25 @@ export const storedSchemaCoversCandidateEnvelope = (
       return false;
     }
     const storedProperties = stored.properties;
+    // What a stored `additionalProperties` governs is every key the STORED
+    // side does not name, and the merge pulls that claim down onto a key the
+    // candidate names (`leftClaim` in `mergeCfcSchemaEnvelopes`). So a
+    // candidate key absent from the stored properties is covered only where
+    // no such claim stands to be pulled down; otherwise the merge is what
+    // mints the label for it.
+    const storedGovernsUnnamedKeys = stored.additionalProperties !== undefined;
     if (
       !Object.entries(candidate.properties).every(([key, child]) =>
-        storedSchemaCoversCandidateEnvelope(
-          storedProperties[key] as JSONSchema | undefined,
-          child as JSONSchema,
-        )
+        Object.hasOwn(storedProperties, key)
+          ? storedSchemaCoversCandidateEnvelope(
+            storedProperties[key] as JSONSchema | undefined,
+            child as JSONSchema,
+          )
+          : !storedGovernsUnnamedKeys &&
+            storedSchemaCoversCandidateEnvelope(
+              undefined,
+              child as JSONSchema,
+            )
       )
     ) {
       return false;
@@ -1920,19 +2010,16 @@ export const flowReadExcluded = (
 // non-link leaf (string, number, boolean, null) makes the value content.
 // Such writes get `structure` (shape-only) stamps instead of covering
 // `derived` ones — see `pureLinkContainerPaths`.
-// TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-// `Object.values` are empty and vacuously "all links" — so a `FabricBytes`
-// leaf, or a `FabricInstance` with real contents, classifies as pure link
-// structure and the write receives shape-only stamps in place of its content
-// label. Fails open. Wants a `FabricSpecialObject` test taking the
-// content-bearing (`false`) arm.
+// A `FabricPrimitive` is a content leaf like any other: its state is private,
+// so enumerating it finds no members and would classify a byte blob as
+// pure structure. A `FabricInstance` is refused rather than classified.
 const isPureLinkStructure = (value: unknown): boolean => {
   if (value === undefined) return true;
   if (isPrimitiveCellLink(value)) return true;
   if (Array.isArray(value)) {
     return value.every((member) => isPureLinkStructure(member));
   }
-  if (isObjectOrArray(value)) {
+  if (isWalkableObjectOrArray(value)) {
     return Object.values(value).every((member) => isPureLinkStructure(member));
   }
   return false;
@@ -1964,11 +2051,9 @@ const pureLinkContainerPaths = (
     );
     return;
   }
-  // TODO(danfuzz): same `isObjectOrArray` gap as `isPureLinkStructure` above: a
-  // `FabricPrimitive` is pushed as if it were a container (a stamp path for
-  // an opaque leaf), and a `FabricInstance`'s codec contents are never
-  // enumerated, so nothing nested in one gets a per-slot stamp.
-  if (isObjectOrArray(value)) {
+  // A `FabricSpecialObject` mints no path here: it is a content leaf, not a
+  // container whose shape the writing transaction computed.
+  if (isWalkableObjectOrArray(value)) {
     out.push(path);
     for (const [key, member] of Object.entries(value)) {
       pureLinkContainerPaths(member, [...path, key], out);
@@ -3099,15 +3184,17 @@ const linkedWriteValueForPolicy = (
   });
 };
 
-// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates on
-// `typeof value === "object"` and then `head in value`, both true-shaped for a
-// `FabricSpecialObject` — but no key of an instance's codec contents is an own
-// (or any) property, so a pattern path into one resolves to no values and the
-// policy condition it feeds is never evaluated for that content.
-// `changedValuesAtPatternPath`'s leaf case additionally compares with
-// `deepEqual`, which calls two same-class `FabricSpecialObject`s equal
-// regardless of contents, so a genuine change reads as "unchanged". Both fail
-// open.
+// Whether a pattern-path descent may address `value` by key.
+//
+// A path segment never addresses anything inside a `FabricSpecialObject`, so
+// the two descents below stop at one rather than resolving the segment against
+// its class surface. That covers a `FabricInstance` as well: these descents run
+// over ordinary stored values, a `FabricError` among them.
+//
+// TODO(danfuzz): stopping is an incomplete answer for an instance. No key of
+// its codec contents is reachable by property name, so a pattern path into one
+// resolves to no values and the policy condition it feeds is never evaluated
+// for that content. Fails open.
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -3126,7 +3213,13 @@ const valuesAtPatternPath = (
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  // A pattern path does not descend through a link: the reference is the value
+  // at that slot, and what it points at is resolved elsewhere. Under the
+  // legacy representation a link is written as a record, which the container
+  // question below reads as keyable, so this test is what stops the descent
+  // there. Under `modernCellRep` a link is a `FabricLink`, which that question
+  // stops at on its own.
+  if (isPrimitiveCellLink(value) || !isKeyableObjectOrArray(value)) {
     return [];
   }
   if (!(head in value)) {
@@ -3141,7 +3234,7 @@ const changedValuesAtPatternPath = (
   path: readonly string[],
 ): unknown[] => {
   if (path.length === 0) {
-    return deepEqual(value, previousValue) ? [] : [value];
+    return fabricAwareEqual(value, previousValue) ? [] : [value];
   }
 
   const [head, ...rest] = path;
@@ -3157,12 +3250,13 @@ const changedValuesAtPatternPath = (
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  // As in `valuesAtPatternPath`: a link ends the descent, and the test comes
+  // before the walk question for the same reason.
+  if (isPrimitiveCellLink(value) || !isKeyableObjectOrArray(value)) {
     return [];
   }
-  const previousChild = previousValue !== null &&
-      previousValue !== undefined &&
-      typeof previousValue === "object"
+  const previousChild = !isPrimitiveCellLink(previousValue) &&
+      isKeyableObjectOrArray(previousValue)
     ? (previousValue as Record<string, unknown>)[head]
     : undefined;
   if (!(head in value)) {
@@ -3256,20 +3350,14 @@ const policySchemaMatchesValue = (
     }
     return policySchemaMatchesValue(resolved, value, schemaRoot);
   }
-  // TODO(danfuzz): these `deepEqual` checks call two same-class fabric
-  // values equal regardless of contents, so a fabric-valued `const`/`enum`
-  // condition matches the wrong value; and the `properties` arm below admits
-  // a `FabricSpecialObject` through `isObjectOrArray` and reads `undefined` for
-  // every key, matching vacuously. Each fails open — the ifc entry applies
-  // (or the policy passes) with nothing actually checked. `valueEqual` and a
-  // `FabricSpecialObject` gate are the fabric-aware shapes;
-  // `schemaTypeMatchesValue` below already carries the type half.
-  if (schema.const !== undefined && !deepEqual(schema.const, value)) {
+  if (
+    schema.const !== undefined && !fabricAwareEqual(schema.const, value)
+  ) {
     return false;
   }
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => deepEqual(candidate, value))
+    !schema.enum.some((candidate) => fabricAwareEqual(candidate, value))
   ) {
     return false;
   }
@@ -3293,7 +3381,18 @@ const policySchemaMatchesValue = (
       policySchemaMatchesValue(branch, value, schemaRoot)
     );
   }
-  if (isObjectOrArray(value) && isObjectOrArray(schema.properties)) {
+  // A link matches by what it is, not by what a `properties` condition would
+  // read off the record a legacy one is written as. `isPrimitiveCellLink()`
+  // recognizes whichever form the active regime uses, so it takes a
+  // `FabricLink` out of the walk question's way as well; a modern argument
+  // link arriving here is what makes that load-bearing rather than tidy.
+  //
+  // A `FabricPrimitive` carries no property for a `properties` condition to
+  // read, so it falls past this arm.
+  if (
+    !isPrimitiveCellLink(value) && isWalkableObjectOrArray(value) &&
+    isObjectOrArray(schema.properties)
+  ) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       policySchemaMatchesValue(childSchema, value[key], schemaRoot)
@@ -3482,11 +3581,7 @@ const ifcEntryAppliesToAttemptedWrite = (
     sawTargetWrite = true;
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
     if (pathPatternMatches(path, writePath)) {
-      // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
-      // equal regardless of contents, so a genuine change to a slot holding
-      // one reads as "unchanged" and the ifc entry is skipped. Fails open;
-      // `valueEqual` is the fabric-aware comparison.
-      return !deepEqual(write.value, write.previousValue) &&
+      return !fabricAwareEqual(write.value, write.previousValue) &&
         wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
     }
     if (concretePathHasPrefix(prefix, writePath)) {
@@ -4317,13 +4412,7 @@ const verifyExactCopyRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
-    // equal regardless of contents — under the modern cell rep even two
-    // `FabricLink`s to different documents — so an `exactCopyOf` claim over
-    // `FabricSpecialObject`-valued state verifies for values that are not
-    // copies, and the source label is carried anyway. Fails open; wants
-    // `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (!fabricAwareEqual(sourceValue, targetValue)) {
       return `exactCopyOf failed at /${entry.path.join("/")}`;
     }
   }
@@ -4389,10 +4478,7 @@ const verifyProjectionRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): same `deepEqual` gap as `verifyExactCopyRequirements`
-    // above — fabric-valued state verifies as a projection when it is not
-    // one. Fails open; wants `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (!fabricAwareEqual(sourceValue, targetValue)) {
       return `projection claim failed at /${entry.path.join("/")}`;
     }
   }
@@ -4792,7 +4878,7 @@ const setupResultSchemaFor = (
     type: "application/json",
     path: ["schema"],
   }, {
-    meta: INTERNAL_VERIFIER_META,
+    meta: LINK_SOURCE_SCHEMA_META,
   });
   return schema === undefined || schema === null
     ? undefined
@@ -4867,13 +4953,35 @@ const derivePersistedLinkLabel = (
     sourceMetadata === undefined && pendingSourceSchema === undefined &&
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
-    return {
-      // Untagged, so retryable: the source document's metadata is not
-      // available in this transaction. It loads, and the re-run decides.
-      reason: `missing link source metadata for ${input.target.id} at /${
-        input.target.path.join("/")
-      }`,
-    };
+    // Name the SOURCE document, which is the one carrying no metadata, and
+    // the target location the link was being written into.
+    const reason = `missing link source metadata for ${input.source.id} at /${
+      input.source.path.join("/")
+    }, linked into ${input.target.id} at /${input.target.path.join("/")}`;
+    // A source whose root this transaction cannot see is what the untagged
+    // default is for: reading the document is what decides, so the reason
+    // stays retryable.
+    //
+    // Where the root IS readable, two of its members decided — `["cfc"]`
+    // above and `["schema"]` through `setupResultSchemaFor` — and the rest of
+    // the decision is the link value and the writer's own schema inputs,
+    // which a re-run reconstructs identically. So an immediate re-run refuses
+    // over the same absence, which is a verdict.
+    //
+    // Those immediate attempts are what end here, not the subscription. A
+    // later revision of the source can carry either member, and the run
+    // depends on both: `["cfc"]` through the writer's `readStoredCfcMetadata`
+    // and `["schema"]` through this pass's `LINK_SOURCE_SCHEMA_META` read. The
+    // arriving member re-triggers the reader, with the full retry budget the
+    // terminal disposition clears.
+    const sourceRootIsReadable = documentRootIsReadable(
+      tx,
+      input.source.space,
+      input.source.id as URI,
+      input.source.scope,
+      "application/json",
+    );
+    return { reason: sourceRootIsReadable ? verdictReason(reason) : reason };
   }
   if (
     sourceMetadata === undefined && pendingSourceSchema === undefined &&

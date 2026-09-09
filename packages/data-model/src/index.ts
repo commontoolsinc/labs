@@ -76,8 +76,6 @@ export {
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
 
-export { tagFromNativeClass, tagFromNativeValue } from "./native-type-tags.ts";
-
 export {
   toCompactDebugString,
   toDebugKindString,
@@ -87,4 +85,14 @@ export {
 
 export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
-export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
+export {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+  tagFromFabricPrimitive,
+  tagFromFabricPrimitiveElseNull,
+  tagFromFabricValue,
+  tagFromFabricValueElseNull,
+  tagFromNativeValueElseNull,
+  VALUE_TAGS,
+  type ValueTag,
+} from "./value-tags.ts";

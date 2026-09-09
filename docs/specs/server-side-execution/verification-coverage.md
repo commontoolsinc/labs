@@ -6674,8 +6674,11 @@ supply; OW29/OW32/OW34 closed):
     DROP notice; no stream wedge). An LT1 copy withdraws through the
     abort alone (no onFailure): the batch marks only a surviving lt1
     run, the entry lands unmarked, the drain re-delivers with a
-    `streamEntry`. Client/OFF dispatches carry no mark and keep the
-    silent skip. Spec: events.md §5's new handler-body-did-not-run
+    `streamEntry`. A client/OFF dispatch carries no mark and is withdrawn
+    and requeued by the scheduler within its retry window, or withdrawn
+    and dropped at once when it was sent with `retries: false`
+    (events.md §5's client bullet); a flag-ON client echo seals its skip
+    as an empty speculative commit. Spec: events.md §5's handler-body-did-not-run
     bullet (RULED 2026-08-27). **Pin (red-first, watched):**
     `executor-events-down.test.ts` "mark/effects atomicity at the
     DISPATCH layer" — a served event whose handler `$ctx` requires a

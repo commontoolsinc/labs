@@ -4,9 +4,12 @@
  * What matters is that the wrapper is transparent: every way the real
  * ones can be called still registers, and a call the wrapper does not
  * model reaches the real function untouched rather than being dropped.
- * The shapes below are registered for real, which is the assertion — a
- * shape the wrapper mishandled would fail to register, or would register
- * a test with no body, and Deno would refuse the module.
+ * The shapes below are registered for real, and a run with a capture
+ * installed puts each of them through the wrapper. A run without one
+ * gets the real functions back, so what the shapes prove there is that
+ * the file states them as the real functions accept them; the wrapper's
+ * own behavior is asserted against it directly further down, and
+ * through a recording run in preload.test.ts.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -43,6 +46,29 @@ describe("bdd", () => {
         expect(true).toBe(true);
       });
     },
+  });
+
+  // A suite named by the handle `describe` hands back, rather than by
+  // nesting inside its body. Each leaf below reaches the runner through
+  // the entry points a test file uses.
+  const handle = describe("a suite named by its handle");
+
+  it(handle, "registers a leaf given the suite it belongs to", () => {
+    expect(true).toBe(true);
+  });
+
+  it({
+    suite: handle,
+    name: "registers a leaf whose definition names its suite",
+    fn: () => {
+      expect(true).toBe(true);
+    },
+  });
+
+  describe(handle, "a suite given the suite it sits under", () => {
+    it("registers a leaf beneath both of them", () => {
+      expect(true).toBe(true);
+    });
   });
 
   describe("the entry points hanging off each of them", () => {
@@ -85,29 +111,37 @@ describe("reading the shape of a bdd call", () => {
 });
 
 describe("what the wrappers do once a capture is installed", () => {
-  /** A capture that skips what a case names, and says what it was asked. */
+  /**
+   * A capture that skips what a case names, and says what it was asked.
+   * One capture stands behind every call, as the installed one does, so
+   * the names it was given accumulate in a map a case can read.
+   */
   function capturing(skips: readonly string[] = []) {
     const asked: string[] = [];
-    const capture = () => ({
-      names: new Map<string, string>(),
+    const names = new Map<string, string>();
+    const capture = {
+      names,
       skipped: (_file: string | undefined, name: string) => {
         asked.push(name);
         return skips.includes(name);
       },
       flush: () => {},
-    });
-    return Object.assign(capture, { asked });
+    };
+    return Object.assign(() => capture, { asked, names });
   }
 
   it("passes a call it cannot read straight through", () => {
     // An unfamiliar overload still runs and still reports its own
     // error, rather than being dropped by a wrapper that did not
-    // recognize it.
+    // recognize it. A `describe` carrying neither a name nor a body is
+    // one: it opens no chain and hands back no suite this module can
+    // put a chain against. A `describe` carrying a name but no body is
+    // not, since that call is where a suite handle comes from.
     const seen: unknown[][] = [];
     const through = (...args: unknown[]) => seen.push(args);
-    wrapDescribe(through)("a name with no body");
+    wrapDescribe(through)();
     wrapIt(through, () => {}, capturing())({ no: "name" });
-    expect(seen).toEqual([["a name with no body"], [{ no: "name" }]]);
+    expect(seen).toEqual([[], [{ no: "name" }]]);
   });
 
   it("encloses a leaf in the chain of a suite declared as one definition", () => {
@@ -126,6 +160,62 @@ describe("what the wrappers do once a capture is installed", () => {
       fn: () => it_("leaf", () => {}),
     });
     expect(inner.asked).toEqual(["outer > leaf"]);
+  });
+
+  /** A `describe` that runs the body it is given and hands back a handle. */
+  function handing(...args: unknown[]): { symbol: symbol } {
+    for (const arg of args) {
+      if (typeof arg === "function") (arg as () => void)();
+    }
+    return { symbol: Symbol("suite") };
+  }
+
+  it("puts a leaf under the suite its call names", () => {
+    // A leaf can name the suite it belongs to instead of sitting inside
+    // it, and the runner reports it under that suite's chain. Nothing
+    // encloses the calls below, so the chain the capture is asked about
+    // is the handle's or nothing at all.
+    const named = capturing();
+    const describe_ = wrapDescribe(handing);
+    const it_ = wrapIt(() => {}, () => {}, named);
+    const outer = describe_("outer");
+    const inner = describe_(outer, "inner");
+    it_(outer, "direct", () => {});
+    it_({ suite: inner, name: "by definition", fn: () => {} });
+    expect(named.asked).toEqual([
+      "outer > direct",
+      "outer > inner > by definition",
+    ]);
+    // The name map is keyed by the same identity, since that is what
+    // ingestion joins a report's names onto.
+    expect([...named.names.keys()]).toEqual([
+      "outer > direct",
+      "outer > inner > by definition",
+    ]);
+  });
+
+  it("ignores the chain enclosing a call that names its own suite", () => {
+    // The chain a call sits in and the chain it names can differ, and
+    // the runner reports the named one. A leaf that names no suite in
+    // the same body still takes the chain it sits in.
+    const named = capturing();
+    const describe_ = wrapDescribe(handing);
+    const it_ = wrapIt(() => {}, () => {}, named);
+    const elsewhere = describe_("elsewhere");
+    describe_("lexical", () => {
+      it_(elsewhere, "named", () => {});
+      it_("enclosed", () => {});
+    });
+    expect(named.asked).toEqual(["elsewhere > named", "lexical > enclosed"]);
+  });
+
+  it("encloses a body in the chain of the suite its call names", () => {
+    const named = capturing();
+    const describe_ = wrapDescribe(handing);
+    const it_ = wrapIt(() => {}, () => {}, named);
+    const outer = describe_("outer");
+    describe_(outer, "inner", () => it_("leaf", () => {}));
+    expect(named.asked).toEqual(["outer > inner > leaf"]);
   });
 
   it("names a leaf by itself where no suite encloses it", () => {

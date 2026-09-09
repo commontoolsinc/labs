@@ -111,7 +111,7 @@ size, not because `describe` lacks the schema. Build a payload from the `verbs`
 listing or from a verb's own help page, both of which report the schema the
 dispatcher will judge the payload against. Of the two, prefer the listing you
 already have: a verb's help page is served through the dispatch path, which
-also starts the space root, so it is the most expensive read on this ladder.
+starts the addressed piece, so it is the most expensive read on this ladder.
 
 **Both listings hide wrapper-tier and deprecated verbs by default**, and both
 say so rather than hiding them silently: `--json` carries a `hidden` object

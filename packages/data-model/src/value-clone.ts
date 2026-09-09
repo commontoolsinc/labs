@@ -26,8 +26,7 @@ import {
   MutableFabricContainerValueLayer,
   MutableFabricPlainObjectLayer,
 } from "./interface.ts";
-import { VALUE_TAGS } from "./VALUE_TAGS.ts";
-import { tagFromNativeValue } from "./native-type-tags.ts";
+import { tagFromNativeValueElseNull, VALUE_TAGS } from "./value-tags.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricContainerValue,
@@ -208,16 +207,16 @@ export function cloneHelper(
     return Object.isFrozen(v) === frozen;
   }
 
-  switch (tagFromNativeValue(value)) {
+  switch (tagFromNativeValueElseNull(value)) {
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
     case VALUE_TAGS.Primitive:
-    case VALUE_TAGS.EpochNsec:
-    case VALUE_TAGS.EpochDay:
+    case VALUE_TAGS.FabricEpochNsec:
+    case VALUE_TAGS.FabricEpochDay:
     case VALUE_TAGS.FabricBytes:
     case VALUE_TAGS.FabricKeyPair:
     case VALUE_TAGS.FabricRegExp:
-    case VALUE_TAGS.Hash:
+    case VALUE_TAGS.FabricHash:
       return value;
 
     case VALUE_TAGS.FabricInstance: {

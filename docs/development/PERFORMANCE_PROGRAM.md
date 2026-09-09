@@ -200,7 +200,7 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-3 | Link resolution without JSON.stringify | High | S | `linkAddressKey` in `link-resolution.ts` allocates via `JSON.stringify` on every hop. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. The same key names a resolution's entry in the transaction's snapshot memo, so a collision there serves one link's resolution for another; the memo's own tests cover that. [Tests needed.](#perf-3-link-resolution) |
+| PERF-3 | Link resolution without JSON.stringify | High | S | `linkAddressKey` in `link-resolution.ts` names a link for the walk's cycle check and for the transaction's snapshot memo. (done: a length-prefixed NUL-separated concat, 4x faster than `JSON.stringify` on board-shaped links; a prefix code, so a segment containing the separator cannot collide — `snapshot-memo.test.ts` pins the boundary case.) |
 
 ### Likely High-Impact (pending profiling confirmation)
 
@@ -231,10 +231,9 @@ types. Partial discriminated unions (only some branches have the discriminator)
 are untested. Nested anyOf has benchmarks but no correctness tests. **Write
 these tests first.**
 
-**<a id="perf-3-link-resolution"></a>PERF-3 (link resolution):** Good existing coverage (28 tests). Add 2-3 tests for
-cross-space cycles and separator edge cases. The replacement key function must
-not collide on path segments containing the separator. **Can ship alongside the
-fix.**
+**<a id="perf-3-link-resolution"></a>PERF-3 (link resolution):** Done. The
+key is a prefix code, and `snapshot-memo.test.ts` holds the case of two paths
+whose segments differ only in where a boundary falls.
 
 **<a id="perf-4-engine-files"></a>PERF-4 (engine files):** No test verifies the sandbox receives all needed files —
 current tests pass because the superset always includes everything. **Add

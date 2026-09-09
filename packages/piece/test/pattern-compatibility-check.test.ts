@@ -1,3 +1,11 @@
+/**
+ * Compatibility preflight collects issues without moving the source pointer
+ * or restaging inputs. Candidate compilation stores unattached artifacts.
+ * Stored-value validation is shared with setup, while enforcement runs inside
+ * the apply transaction. These cases compare the verdicts and check that a
+ * refused preflight leaves the piece intact.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { spy } from "@std/testing/mock";
@@ -20,21 +28,6 @@ import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema"
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
-
-// `cf piece setsrc <main>` replaces the source of a LIVE piece. Until now the
-// only way to learn whether a source could be applied was to attempt it, and
-// what came back was whichever low-level rejection happened to surface first —
-// a schema-subset assertion, a retained-link proof, or an argument validation
-// failure at the setup-commit boundary. Fix one, meet the next.
-//
-// `checkPattern()` answers the question up front without changing the piece.
-// (It is not a pure read — compiling the candidate writes content-addressed
-// artifacts into the space — but it moves no pointer and re-stages nothing.)
-// It runs the SAME review the apply path runs
-// (`pieceSourceCompatibilityReview`), which is the property worth pinning: a
-// preflight that reimplements the rules drifts
-// from enforcement and becomes a liar. So these cases assert the two verdicts
-// agree, not merely that each is individually plausible.
 
 const signer = await Identity.fromPassphrase("pattern compatibility check");
 
@@ -390,12 +383,9 @@ describe("setsrc compatibility preflight", () => {
     // The contract that keeps the preflight honest: a source the check refuses
     // is refused by `setPattern`, for the same underlying reason.
     //
-    // Agreement is on the VERDICT and the CAUSE, deliberately not on identical
-    // prose. Enforcement lives on the apply path and reports in its own words;
-    // the check reports the review's. An earlier revision of this PR made the
-    // strings identical by running the review ahead of the swap, and that
-    // silently changed what `setPattern` accepts (see
-    // setsrc-cold-argument.test.ts). Message equality is not worth that.
+    // Preflight reports its read-time snapshot; apply enforces the rules in
+    // the setup transaction. Compare the verdict and cause rather than the
+    // formatting of the two error reports.
     const piece = await livePiece();
     const report = await piece.checkPattern(incompatibleProgram());
     expect(report.compatible).toBe(false);
@@ -526,11 +516,8 @@ describe("setsrc compatibility preflight", () => {
     expect(forced).toContain("CFC enforcement rejected commit");
     expect(forced).toContain("confidentiality cannot be weakened at /seed");
 
-    // And without the override, the apply path refuses too — naming the same
-    // cause in enforcement's own words. Agreement is on the verdict and the
-    // cause, not on identical prose: making the strings match would mean
-    // running the review ahead of the swap, which changes what `setPattern`
-    // accepts (see setsrc-cold-argument.test.ts).
+    // Apply enforces the same rule in its setup transaction. Its refusal and
+    // preflight's report must name the same cause, regardless of formatting.
     const applied = await piece.setPattern(labelledNext()).then(
       () => undefined,
       (error: unknown) =>
