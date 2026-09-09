@@ -168,17 +168,21 @@ describe("the expected-posture spec", () => {
       expect(postureMismatches(spec, MAX_ENFORCEMENT_RECORD)).toEqual([]);
     });
 
-    it("names every field a posture below that profile misses", async () => {
+    it("names a rung field and a sink field a posture below that profile misses", async () => {
+      // One of each kind the profile carries, rather than the whole set: the
+      // rest of the set is whatever rungs the fleet resolves for the dials a
+      // session cannot state, which is not what this case is about.
       const spec = await loadExpectedPosture(
         join(PROFILES_DIR, "max-enforcement.json"),
       );
-      const mismatches = postureMismatches(spec, BELOW_PROFILE_RECORD);
-      expect(mismatches.map((mismatch) => mismatch.field)).toContain(
-        "flowLabels",
+      const fields = postureMismatches(spec, BELOW_PROFILE_RECORD).map(
+        (mismatch) => mismatch.field,
       );
-      expect(mismatches.map((mismatch) => mismatch.field)).toContain(
-        "ceilingedSinks[fetchText]",
-      );
+      expect(fields).toContain("flowLabels");
+      expect(fields).toContain("ceilingedSinks[fetchText]");
+      // The profile's enforcement rung is a floor this record sits on, so it
+      // is not among them.
+      expect(fields).not.toContain("enforcementMode");
     });
 
     it("finds nothing wrong with a record stricter than the rung a spec names", () => {

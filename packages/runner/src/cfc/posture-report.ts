@@ -327,22 +327,20 @@ type ToggleDial = {
  * every rung and for nothing else. It is therefore the ladder as well as the
  * words, and a check driven from it accepts a rung the moment the ladder
  * gains one.
- */
-/**
- * Every ladder dial's rungs, weakest first, each named with what it decides.
  *
- * The key order is the ladder itself: a rung later in one dial's table decides
- * everything an earlier one decides and more. A reader ordering two rungs of
- * one dial orders them by their position here.
+ * The key order is the ladder's own, weakest rung first, so a reader ordering
+ * two rungs of one dial orders them by their position here. The tables are
+ * frozen: runtime validation and the audit's floor comparison both read this
+ * one, and an importer that reordered a ladder would move what they mean.
  */
-export const CFC_DIAL_LADDERS = {
-  cfcEnforcementMode: ENFORCEMENT_MODE_DECIDES,
-  cfcFlowLabels: FLOW_LABELS_DECIDES,
-  cfcWriteFloor: WRITE_FLOOR_DECIDES,
-  cfcPolicyEvaluation: POLICY_EVALUATION_DECIDES,
-  cfcLabelMetadataProtection: LABEL_METADATA_DECIDES,
-  cfcDeclaredMonotonicity: DECLARED_MONOTONICITY_DECIDES,
-} satisfies { [K in LadderDial]: Record<ResolvedCfcDials[K], string> };
+export const CFC_DIAL_LADDERS = Object.freeze({
+  cfcEnforcementMode: Object.freeze(ENFORCEMENT_MODE_DECIDES),
+  cfcFlowLabels: Object.freeze(FLOW_LABELS_DECIDES),
+  cfcWriteFloor: Object.freeze(WRITE_FLOOR_DECIDES),
+  cfcPolicyEvaluation: Object.freeze(POLICY_EVALUATION_DECIDES),
+  cfcLabelMetadataProtection: Object.freeze(LABEL_METADATA_DECIDES),
+  cfcDeclaredMonotonicity: Object.freeze(DECLARED_MONOTONICITY_DECIDES),
+}) satisfies { [K in LadderDial]: Record<ResolvedCfcDials[K], string> };
 
 /**
  * One ladder dial's rung: what `stated` names, or the default when it names
