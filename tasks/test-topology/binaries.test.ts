@@ -55,7 +55,7 @@ describe("the binary build suites", () => {
     // others to report for themselves.
     const invocations = byId("binaries").command(
       [{ unit: "cf", skip: [] }, { unit: "toolshed", skip: [] }],
-      { root: "/repo", outputDir: "/out" },
+      { root: "/repo", outputDir: "/out", spoolDir: "/spool" },
     );
     return invocations.then((made) => {
       expect(made.length).toBe(2);
@@ -68,7 +68,7 @@ describe("the binary build suites", () => {
     const opposite = serverExecutionCiLane("opposite");
     return byId("binaries-opposite").command(
       [{ unit: "toolshed", skip: [] }],
-      { root: "/repo", outputDir: "/out" },
+      { root: "/repo", outputDir: "/out", spoolDir: "/spool" },
     ).then((made) => {
       expect(made[0]!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
         String(opposite.enabled),

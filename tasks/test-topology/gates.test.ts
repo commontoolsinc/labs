@@ -25,7 +25,7 @@ const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 
 const suites = await loadGateSuites(root);
 const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
-const context = { root: "/repo", outputDir: "/out" };
+const context = { root: "/repo", outputDir: "/out", spoolDir: "/spool" };
 
 describe("the repository's gate suites", () => {
   it("gives the base revision to the gates whose suite asks for history", async () => {

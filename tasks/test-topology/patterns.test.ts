@@ -27,6 +27,7 @@ function measured(outputDir: string): CommandContext {
     outputDir,
     coverageDir: "/cov",
     patternCoverageDir: "/pattern",
+    spoolDir: "/spool",
   };
 }
 
@@ -42,7 +43,7 @@ describe("the pattern and package suites", () => {
     const suite = byId("pattern-integration");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
-      { root, outputDir: await outputDir() },
+      { root, outputDir: await outputDir(), spoolDir: "/spool" },
     );
     expect(invocation!.cwd).toBe(`${root}/packages/patterns`);
     expect(invocation!.env?.HEADLESS).toBe("1");
@@ -57,7 +58,7 @@ describe("the pattern and package suites", () => {
       const suite = byId(id);
       const [invocation] = await suite.command(
         [{ unit: suite.units[0]!, skip: [] }],
-        { root, outputDir: await outputDir() },
+        { root, outputDir: await outputDir(), spoolDir: "/spool" },
       );
       expect(invocation!.command).toContain("--no-check");
     }
@@ -111,7 +112,7 @@ describe("the pattern and package suites", () => {
     const suite = byId("pattern-unit");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
-      { root, outputDir: await outputDir() },
+      { root, outputDir: await outputDir(), spoolDir: "/spool" },
     );
     expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBeUndefined();
     expect(invocation!.env?.DENO_COVERAGE_DIR).toBeUndefined();
@@ -133,7 +134,7 @@ describe("the pattern and package suites", () => {
       const suite = byId(id);
       const [invocation] = await suite.command(
         [{ unit: suite.units[0]!, skip: [] }],
-        { root, outputDir: await outputDir() },
+        { root, outputDir: await outputDir(), spoolDir: "/spool" },
       );
       expect(invocation!.env?.LOG_LEVEL).toBe("warn");
     }
@@ -144,7 +145,7 @@ describe("the pattern and package suites", () => {
     const suite = byId("pattern-integration-opposite");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
-      { root, outputDir: await outputDir() },
+      { root, outputDir: await outputDir(), spoolDir: "/spool" },
     );
     expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
       String(opposite.enabled),
@@ -169,7 +170,7 @@ describe("the pattern and package suites", () => {
       expect(suite.variant).toBe(opposite.recordVariant);
       const [invocation] = await suite.command(
         [{ unit: suite.units[0]!, skip: [] }],
-        { root, outputDir: await outputDir() },
+        { root, outputDir: await outputDir(), spoolDir: "/spool" },
       );
       expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
         String(opposite.enabled),
@@ -184,11 +185,12 @@ describe("the pattern and package suites", () => {
     const [whole] = await suite.command([{ unit, skip: [] }], {
       root,
       outputDir: out,
+      spoolDir: "/spool",
     });
     expect(whole!.env?.[SKIP_LIST_VARIABLE]).toBeUndefined();
     const [partial] = await suite.command(
       [{ unit, skip: ["counter > counts up"] }],
-      { root, outputDir: out },
+      { root, outputDir: out, spoolDir: "/spool" },
     );
     const listed = partial!.env?.[SKIP_LIST_VARIABLE];
     expect(listed).toBeDefined();
@@ -201,7 +203,12 @@ describe("the pattern and package suites", () => {
     const suite = byId("pattern-integration");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
-      { root, outputDir: await outputDir(), coverageDir: "/cov" },
+      {
+        root,
+        outputDir: await outputDir(),
+        coverageDir: "/cov",
+        spoolDir: "/spool",
+      },
     );
     expect(invocation!.env?.DENO_COVERAGE_DIR).toBe(
       "/cov/pattern-integration-patterns",
@@ -217,7 +224,7 @@ describe("the pattern and package suites", () => {
     const shell = suite.units.find((u) => u.startsWith("packages/shell/"))!;
     const made = await suite.command(
       [{ unit: runner, skip: [] }, { unit: shell, skip: [] }],
-      { root, outputDir: await outputDir() },
+      { root, outputDir: await outputDir(), spoolDir: "/spool" },
     );
     expect(made.length).toBe(2);
     expect(made.map((i) => i.junit?.[0]?.scope).toSorted())
@@ -234,7 +241,7 @@ describe("the pattern and package suites", () => {
     expect(suite.needs).toContain("toolshed");
     const made = await suite.command(
       suite.units.map((unit) => ({ unit, skip: [] })),
-      { root, outputDir: await outputDir() },
+      { root, outputDir: await outputDir(), spoolDir: "/spool" },
     );
     expect(made.map((invocation) => invocation.junit?.[0]?.scope)).toEqual([
       "background-piece-service",
@@ -250,10 +257,12 @@ describe("the pattern and package suites", () => {
     expect(suite.units).toEqual(["packages/patterns/integration/reload"]);
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
-      { root, outputDir: "/out" },
+      { root, outputDir: "/out", spoolDir: "/spool" },
     );
     expect(invocation!.command).toContain("patterns-reload");
-    expect(await suite.command([], { root, outputDir: "/out" })).toEqual([]);
+    expect(
+      await suite.command([], { root, outputDir: "/out", spoolDir: "/spool" }),
+    ).toEqual([]);
   });
 
   it("locates a reload record by the directory it came from", () => {
@@ -282,7 +291,7 @@ describe("the pattern and package suites", () => {
     const chosen = suite.units.slice(0, 2);
     const [invocation] = await suite.command(
       chosen.map((unit) => ({ unit, skip: [] })),
-      { root, outputDir: out },
+      { root, outputDir: out, spoolDir: "/spool" },
     );
     const flag = invocation!.command.find((arg) => arg.startsWith("--files="))!;
     const listed = await Deno.readTextFile(flag.slice("--files=".length));
@@ -303,7 +312,13 @@ describe("the pattern and package suites", () => {
 
   it("builds nothing for a suite asked for no units", async () => {
     for (const id of ["pattern-unit", "generated-patterns"]) {
-      expect(await byId(id).command([], { root, outputDir: "/out" }))
+      expect(
+        await byId(id).command([], {
+          root,
+          outputDir: "/out",
+          spoolDir: "/spool",
+        }),
+      )
         .toEqual([]);
     }
   });

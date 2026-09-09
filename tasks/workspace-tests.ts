@@ -13,7 +13,9 @@ import {
   ingestJUnit,
   preloadArgument,
   readNameMaps,
+  RECORDS_DIR_VARIABLE,
   recordsDir,
+  spoolWriteArgument,
 } from "@commonfabric/test-support/records";
 import { parseShard, type Shard } from "./shard-utils.ts";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
@@ -56,7 +58,7 @@ export async function testPackage(
   coverageRoot: string | undefined,
   extraEnv?: Record<string, string>,
   junitPath?: string,
-  preload = true,
+  recording: readonly string[] = [],
 ): Promise<{
   memberPath: string;
   packageName: string;
@@ -77,13 +79,13 @@ export async function testPackage(
 
     // Trailing arguments to `deno task` append to the task's command line,
     // which is what threads the flags down to the leaf `deno test`. The
-    // preload travels with the JUnit path because both reach the leaf the
-    // same way and the report is what the preload's map is joined onto; a
-    // member whose task cannot take one cannot take the other.
+    // recording arguments travel with the JUnit path because they reach
+    // the leaf the same way and the report is what the preload's map is
+    // joined onto; a member whose task cannot take one cannot take the
+    // other.
     const args = ["task", "test"];
     if (junitPath !== undefined) {
-      args.push(`--junit-path=${junitPath}`);
-      if (preload) args.push(preloadArgument());
+      args.push(`--junit-path=${junitPath}`, ...recording);
     }
     result = await new Deno.Command(Deno.execPath(), {
       args,
@@ -377,18 +379,70 @@ export function acceptsPreload(
   return task === undefined || !/--import-map[= ]/.test(task);
 }
 
-/** The members whose leaves also take the preload. */
-export async function preloadCapableMembers(
+/**
+ * The spool this run records into, absolute, or undefined where there is
+ * none or Deno cannot be told about the one there is.
+ *
+ * Resolving here is what makes one directory of three: the runner reads
+ * the spool with the workspace as its working directory, each leaf runs
+ * with its own package as one, and the write granted to a leaf names a
+ * path. A comma separates one path from the next inside `--allow-write=`,
+ * and Deno offers no way to write one that belongs to a path, so a spool
+ * holding a comma is granted as two paths that are not it; such a run
+ * records nothing and says so, as every other recording problem does.
+ */
+export function recordingSpool(
+  raw: string | undefined,
+  workspaceCwd: string,
+  warn: (message: string) => void = console.warn,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  const spool = path.resolve(workspaceCwd, raw);
+  if (!spool.includes(",")) return spool;
+  warn(`test records: no recording, the spool holds a comma: ${spool}`);
+  return undefined;
+}
+
+/**
+ * The flags the leaf `deno test` of a member's task runs under. A
+ * forwarding runner's task line holds two lists: the runner process's
+ * own flags, and after `--` the ones it hands its leaf. The leaf is what
+ * loads the preload, so the leaf's list is the one that decides what
+ * permission the preload has. Every other member runs its leaf directly,
+ * and the whole line is that leaf's.
+ */
+export function leafFlags(member: string, task: string): string[] {
+  const tokens = task.split(/\s+/);
+  if (!FLAG_FORWARDING_RUNNERS.has(member)) return tokens;
+  const forwarded = tokens.indexOf("--");
+  return forwarded === -1 ? tokens : tokens.slice(forwarded + 1);
+}
+
+/**
+ * What each member's leaf takes to record, beyond the JUnit path: the
+ * preload, and the write permission it needs to leave its name map in
+ * the spool. A member whose task cannot take the preload takes neither,
+ * and appears with no arguments at all.
+ */
+export async function memberRecordingArguments(
   members: readonly string[],
+  spool: string,
   root: string | URL = Deno.cwd(),
-): Promise<Set<string>> {
-  const capable = new Set<string>();
+): Promise<Map<string, string[]>> {
+  const recording = new Map<string, string[]>();
   for (const member of members) {
-    if (acceptsPreload(member, await memberTestTask(member, root))) {
-      capable.add(member);
+    const task = await memberTestTask(member, root);
+    if (!acceptsPreload(member, task)) {
+      recording.set(member, []);
+      continue;
     }
+    const write = spoolWriteArgument(leafFlags(member, task ?? ""), spool);
+    recording.set(
+      member,
+      write === undefined ? [preloadArgument()] : [preloadArgument(), write],
+    );
   }
-  return capable;
+  return recording;
 }
 
 /** The members whose leaves take the flag, read from their manifests. */
@@ -527,7 +581,7 @@ export async function runTests(
   // plumbing: it forwards the flag and moves the results; the reported
   // names come from the leaves. A temporary directory that cannot be
   // created turns recording off with a warning; it never fails the suite.
-  const spoolDir = recordsDir();
+  const spoolDir = recordingSpool(recordsDir(), workspaceCwd);
   let junitRoot: string | undefined;
   if (spoolDir !== undefined) {
     try {
@@ -546,9 +600,9 @@ export async function runTests(
   const capable = junitRoot !== undefined
     ? await junitCapableMembers(memberPaths, workspaceUrl)
     : new Set<string>();
-  const preloadable = junitRoot !== undefined
-    ? await preloadCapableMembers(memberPaths, workspaceUrl)
-    : new Set<string>();
+  const recording = junitRoot !== undefined && spoolDir !== undefined
+    ? await memberRecordingArguments(memberPaths, spoolDir, workspaceUrl)
+    : new Map<string, string[]>();
 
   const results: PackageResult[] = [];
   let nextUnit = 0;
@@ -567,9 +621,11 @@ export async function runTests(
         unit.packageName,
         packagePath,
         coverageRoot,
-        unit.env,
+        spoolDir === undefined
+          ? unit.env
+          : { ...unit.env, [RECORDS_DIR_VARIABLE]: spoolDir },
         junitPath,
-        preloadable.has(unit.memberPath),
+        recording.get(unit.memberPath),
       );
       results.push(result);
       if (
