@@ -190,70 +190,79 @@ function feedLength(hasher: IncrementalHasher, value: number): void {
 
 /**
  * Feeds a single `FabricValue` into the hasher, using the type-tagged byte
- * format from the byte-level spec. Dispatches on the value's tag, with the
- * primitives ahead of everything else, those being the leaves a walk ends at.
+ * format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
-  switch (tagFromNativeValueElseNull(value)) {
-    case VALUE_TAGS.boolean: {
+  switch (typeof value) {
+    case "boolean":
       hasher.update(value ? TAG_BOOLEAN_TRUE_BYTES : TAG_BOOLEAN_FALSE_BYTES);
-      return;
-    }
+      break;
 
-    case VALUE_TAGS.number: {
+    case "number":
       hasher.update(TAG_NUMBER_BYTES);
       if (Number.isNaN(value)) {
         hasher.update(CANONICAL_NAN_BYTES);
       } else {
-        f64View.setFloat64(0, value as number, false); // big-endian
+        f64View.setFloat64(0, value, false); // big-endian
         hasher.update(f64Bytes);
       }
-      return;
+      break;
+
+    case "string": {
+      hasher.update(getStringRep(value));
+      break;
     }
 
-    case VALUE_TAGS.string: {
-      hasher.update(getStringRep(value as string));
-      return;
-    }
-
-    case VALUE_TAGS.bigint: {
+    case "bigint": {
       hasher.update(TAG_BIGINT_BYTES);
-      const bytes = bigintToMinimalTwosComplement(value as bigint);
+      const bytes = bigintToMinimalTwosComplement(value);
       feedLength(hasher, bytes.length);
       hasher.update(bytes);
-      return;
+      break;
     }
 
-    case VALUE_TAGS.symbol: {
-      const key = Symbol.keyFor(value as symbol);
+    case "symbol": {
+      const key = Symbol.keyFor(value);
       if (key === undefined) {
         throw new Error("Cannot hash unique (uninterned) symbol");
       }
       hasher.update(TAG_SYMBOL_BYTES);
       hasher.update(getStringRep(key));
-      return;
+      break;
     }
 
-    case VALUE_TAGS.undefined: {
+    case "undefined":
       hasher.update(TAG_UNDEFINED_BYTES);
-      return;
-    }
+      break;
 
-    case VALUE_TAGS.null: {
-      hasher.update(TAG_NULL_BYTES);
-      return;
-    }
+    case "object":
+      if (value === null) {
+        hasher.update(TAG_NULL_BYTES);
+      } else {
+        feedObjectValue(hasher, value);
+      }
+      break;
 
-    case VALUE_TAGS.Array: {
-      feedArray(hasher, value as unknown[]);
-      return;
-    }
+    default:
+      throw new Error(
+        `\`hashOf()\`: unsupported type \`${typeof value}\``,
+      );
+  }
+}
 
-    case VALUE_TAGS.Object: {
-      feedPlainObject(hasher, value as Record<string, unknown>);
-      return;
-    }
+/**
+ * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
+ * or plain object) into the hasher. Dispatches via
+ * `tagFromNativeValueElseNull()` / `VALUE_TAGS` for recognized types. The
+ * `null` case is handled by the caller (`feedValue()`).
+ */
+function feedObjectValue(
+  hasher: IncrementalHasher,
+  value: object,
+): void {
+  const nativeTag = tagFromNativeValueElseNull(value);
 
+  switch (nativeTag) {
     case VALUE_TAGS.FabricEpochNsec: {
       hasher.update(TAG_EPOCH_NSEC_BYTES);
       const bytes = bigintToMinimalTwosComplement(
@@ -285,6 +294,14 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       hasher.update(cidBytes);
       return;
     }
+
+    case VALUE_TAGS.Array:
+      feedArray(hasher, value as unknown[]);
+      return;
+
+    case VALUE_TAGS.Object:
+      feedPlainObject(hasher, value as Record<string, unknown>);
+      return;
 
     case VALUE_TAGS.FabricBytes: {
       hasher.update(TAG_BYTES_BYTES);
@@ -340,16 +357,12 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       return;
     }
 
-    case VALUE_TAGS.function: {
-      throw new Error("`hashOf()`: unsupported type `function`");
-    }
-
     default: {
       // Nothing else is handled. As of this writing, specifically missing are
       // `Map`, `Set`, and `Error`.
       throw new Error(
         `\`hashOf()\`: unsupported object type ${
-          backtickQuote((value as object).constructor?.name ?? typeof value)
+          backtickQuote(value?.constructor?.name ?? typeof value)
         }`,
       );
     }
