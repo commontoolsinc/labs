@@ -341,7 +341,8 @@ Each of these gates fails CI on its own, and none of them run as part of
   string is identical; written as the byte, a single NUL makes the whole file
   read as binary, so `grep` skips it silently
 - `deno task check-skill-facts` — a path or import cited by a skill, an
-  `AGENTS.md`, or a rule that stopped resolving
+  `AGENTS.md`, a rule, or a hook script under `.claude/scripts/` that stopped
+  resolving
 - `deno task check-verb-session-sync` — a `cf` command or act reference in
   `docs/common/verbs/the-verb-session.md` or
   `docs/common/verbs/session-walkthrough.md` that its demo script does not back;
