@@ -114,6 +114,21 @@ describe("console/turn-result", () => {
         }],
       }]);
       expect(JSON.stringify(result)).not.toContain("@held-clock");
+      // A reused call id later in the transcript cannot retroactively make
+      // the preceding successful call/result pair ambiguous.
+      transcript.push(
+        call("named", "other_tool", {}),
+        call("composed", "other_tool", {}),
+        call("composed", "loom_compose", {}),
+      );
+      await writeTranscript(artifactRoot, "later-duplicates", transcript);
+      const laterDuplicates = await readConsoleTurnResult({
+        artifactRoot,
+        turnId: "later-duplicates",
+        spaceName: "space",
+      });
+      expect(laterDuplicates?.pieces).toEqual(result?.pieces);
+      transcript.splice(5);
       // A separate named Pattern is not covered by the source-link collection.
       transcript[1] = call("named", "assign_slug", {
         token: "@independent-clock",
@@ -195,6 +210,16 @@ describe("console/turn-result", () => {
       (messages: HarnessTranscriptMessage[]) => void,
       number?,
     ][] = [
+      ...[null, {}, { id: 42 }].map((malformed, index): [
+        string,
+        (messages: HarnessTranscriptMessage[]) => void,
+      ] => ["malformed-call-id-" + index, (m) => {
+        m[3] = {
+          role: "assistant",
+          content: "",
+          toolCalls: [malformed],
+        } as unknown as HarnessTranscriptMessage;
+      }]),
       ["duplicate-id-different-tool", (m) => {
         m.splice(3, 0, call("compose", "other_tool", args));
       }],

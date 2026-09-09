@@ -8,6 +8,7 @@ import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
   type BuiltinToolId,
   DEFAULT_PARENT_TOOL_IDS,
+  LOOM_AUTHORING_TOOL_IDS,
 } from "./tool-descriptor.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
@@ -146,8 +147,7 @@ export const resolveHarnessChatPolicy = (
           allowedToolIds: [
             ...READONLY_INTERACTIVE_CHAT_TOOL_IDS,
             ...policy.allowedToolIds.filter((id) =>
-              ["loom_compose", "loom_inspect", "loom_authoring_context"]
-                .includes(id)
+              LOOM_AUTHORING_TOOL_IDS.has(id)
             ),
           ],
         }

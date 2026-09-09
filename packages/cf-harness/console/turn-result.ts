@@ -17,6 +17,7 @@ import type {
   HarnessChatStructuredEvent,
 } from "../src/contracts/interactive-chat.ts";
 import type {
+  HarnessToolCall,
   HarnessToolTranscriptMessage,
   HarnessTranscriptMessage,
 } from "../src/contracts/transcript.ts";
@@ -120,27 +121,51 @@ interface TurnRunArtifacts {
   finalText: string;
 }
 
+/** The first two occurrences suffice to establish uniqueness at any prefix. */
+interface IndexedCall {
+  index: number;
+  call: HarnessToolCall;
+  secondIndex?: number;
+}
+
+const indexCalls = (
+  artifacts: TurnRunArtifacts,
+): ReadonlyMap<string, IndexedCall> => {
+  const calls = new Map<string, IndexedCall>();
+  artifacts.transcript.forEach((message, index) => {
+    if (
+      !artifacts.currentTranscriptIndexes.has(index) ||
+      message.role !== "assistant" || !Array.isArray(message.toolCalls)
+    ) return;
+    for (const call of message.toolCalls) {
+      if (typeof call?.id !== "string") continue;
+      const prior = calls.get(call.id);
+      if (prior === undefined) calls.set(call.id, { index, call });
+      else if (prior.secondIndex === undefined) prior.secondIndex = index;
+    }
+  });
+  return calls;
+};
+
 /**
  * Pairs only this turn's unique, preceding assistant call with its tool result.
  * Historical calls and malformed/duplicate pairs cannot prove membership.
  */
 const callArguments = (
-  artifacts: TurnRunArtifacts,
+  calls: ReadonlyMap<string, IndexedCall>,
   resultIndex: number,
   result: HarnessToolTranscriptMessage,
 ): Record<string, unknown> | undefined => {
-  const matches = artifacts.transcript.flatMap((message, index) => {
-    if (
-      index >= resultIndex || !artifacts.currentTranscriptIndexes.has(index) ||
-      message.role !== "assistant" || !Array.isArray(message.toolCalls)
-    ) return [];
-    return message.toolCalls.filter((call) => call?.id === result.toolCallId);
-  });
-  if (matches.length !== 1 || matches[0].function?.name !== result.toolName) {
+  const match = calls.get(result.toolCallId);
+  if (
+    match === undefined || match.index >= resultIndex ||
+    (match.secondIndex !== undefined && match.secondIndex < resultIndex) ||
+    match.call.function?.name !== result.toolName
+  ) {
     return undefined;
   }
   try {
-    const value: unknown = JSON.parse(matches[0].function.arguments);
+    const value: unknown = JSON.parse(match.call.function.arguments);
     return typeof value === "object" && value !== null && !Array.isArray(value)
       ? value as Record<string, unknown>
       : undefined;
@@ -274,6 +299,7 @@ export const readConsoleTurnResult = async (
   if (artifacts === undefined) {
     return undefined;
   }
+  const calls = indexCalls(artifacts);
   const membership = new Map<
     string,
     { loomId: string; componentId: string }[]
@@ -286,7 +312,7 @@ export const readConsoleTurnResult = async (
     try {
       const output: unknown = JSON.parse(message.content);
       if (!isLoomAuthoredObservation(output)) return [];
-      const args = callArguments(artifacts, index, message);
+      const args = callArguments(calls, index, message);
       const ids = output.receipt.component_ids as string[];
       // compose preserves request order in component_ids. This correlation
       // needs both the matching successful call and its exact receipt; it is
@@ -327,7 +353,7 @@ export const readConsoleTurnResult = async (
       }
       const piece = pieceFromAssignSlug(message);
       if (piece === undefined) return [];
-      const args = callArguments(artifacts, index, message);
+      const args = callArguments(calls, index, message);
       const coverage = typeof args?.token === "string"
         ? membership.get(args.token)
         : undefined;

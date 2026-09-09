@@ -83,7 +83,7 @@ const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /** Tools backed only by an explicitly configured host Loom transport. */
-const LOOM_AUTHORING_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set([
+export const LOOM_AUTHORING_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set([
   "loom_compose",
   "loom_inspect",
   "loom_authoring_context",
