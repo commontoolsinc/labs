@@ -1,8 +1,15 @@
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
-import { FabricInstance, FabricPrimitive, type FabricValue } from "./interface.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+} from "./interface.ts";
 import { isFabricArray, isFabricPlainObject } from "./type-check.ts";
 import { toCompactDebugString } from "./value-debug.ts";
-import { BaseFabricPrimitive, VALUE_TAG } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import {
+  BaseFabricPrimitive,
+  VALUE_TAG,
+} from "@/fabric-bases/BaseFabricPrimitive.ts";
 
 /**
  * Maps a `FabricPrimitive` to its tag. This `throw`s if it determines that the
@@ -23,16 +30,16 @@ export function tagFromFabricPrimitive(value: FabricPrimitive): ValueTag {
  * Maps a `FabricPrimitive` to its tag. This returns `null` if the given value
  * turns out not to be valid.
  */
-export function tagFromFabricPrimitiveElseNull(value: FabricPrimitive): ValueTag | null {
+export function tagFromFabricPrimitiveElseNull(
+  value: FabricPrimitive,
+): ValueTag | null {
   if (!(value instanceof BaseFabricPrimitive)) {
     return null;
   }
 
   const tag = value[VALUE_TAG];
 
-  return ((typeof tag === "string") && (tag in VALUE_TAGS))
-    ? tag
-    : null;
+  return ((typeof tag === "string") && (tag in VALUE_TAGS)) ? tag : null;
 }
 
 /**
@@ -56,7 +63,9 @@ export function tagFromFabricValue(value: FabricValue): ValueTag {
  * determines that the given value cannot possibly be valid. To be clear, this
  * function does not go out of its way to make a validity determination.
  */
-export function tagFromFabricValueElseNull(value: FabricValue): ValueTag | null {
+export function tagFromFabricValueElseNull(
+  value: FabricValue,
+): ValueTag | null {
   switch (typeof value) {
     case "function": {
       return null;

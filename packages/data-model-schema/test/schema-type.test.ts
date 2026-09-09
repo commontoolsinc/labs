@@ -19,7 +19,10 @@ import {
 } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@commonfabric/data-model";
-import { BaseFabricPrimitive, VALUE_TAG } from "@commonfabric/data-model/fabric-bases";
+import {
+  BaseFabricPrimitive,
+  VALUE_TAG,
+} from "@commonfabric/data-model/fabric-bases";
 import {
   codecClasses,
   FabricBytes,
@@ -116,7 +119,9 @@ describe("schema-type", () => {
       // Death before confusion: a primitive class that reaches the mapping
       // without a schema type name must fail loudly, not degrade to "object".
       class RogueFabricPrimitive extends BaseFabricPrimitive {
-        get [VALUE_TAG](): "EpochNsec" { return "EpochNsec"; }
+        get [VALUE_TAG](): "EpochNsec" {
+          return "EpochNsec";
+        }
       }
       expect(() => schemaTypeOfFabricPrimitive(new RogueFabricPrimitive()))
         .toThrow(/RogueFabricPrimitive/);
