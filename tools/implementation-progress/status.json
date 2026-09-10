@@ -39,8 +39,8 @@
     {
       "id": "A4",
       "title": "Read-side benchmark",
-      "status": "review",
-      "detail": "Browser benchmark landed in #7261; all three sizes recorded below. Regression ceilings remain after read-budget landing."
+      "status": "active",
+      "detail": "Browser benchmark landed in #7261 with three recorded sizes. Remaining A4 work: assert read-count regression limits after A3 lands."
     },
     {
       "id": "A5",

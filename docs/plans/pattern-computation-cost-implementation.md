@@ -3,9 +3,10 @@
 Status: A1/A2 instrumentation is shipped in
 [PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
 fixture, accounting and reporting regressions, and dashboard are shipped in
-[PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3 read budgets are
-under review in [PR #7257](https://github.com/commontoolsinc/labs/pull/7257), and A4's
-browser benchmark shipped in
+[PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3 read budgets
+are under review in
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257), and A4's browser
+benchmark shipped in
 [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
 
 This tracker executes the design in
@@ -90,9 +91,9 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by replica document object, and registered dependencies. Specify
-        repeated reads, missing values, enumeration, shallow reads, and memo
-        hits. A read activity is not interchangeable with a proxy access.
+        identified by replica document object, and registered dependencies.
+        Specify repeated reads, missing values, enumeration, shallow reads, and
+        memo hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.
         Distinguish a union of documents across a step from a sum of per-run
         cardinalities. Define failure, restart, idempotency verification, nested
@@ -151,11 +152,13 @@ durations are used as performance evidence.
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
 - [ ] **A4 — Add the read-side benchmark.**
-  - [ ] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
+  - [x] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
         settling with its tally on screen across declared collection sizes.
-  - [ ] Preserve the existing write-burst benchmark as a separate workload.
-        Record reads, runs, commits, and timing; assert counts in regression
-        tests and report timing as benchmark trends.
+  - [x] Preserve the existing write-burst benchmark as a separate workload.
+        Record reads, runs, commits, and timing in
+        [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
+  - [ ] Add read-count regression limits after A3 lands; benchmark timing is
+        reported as a trend.
 - [ ] **A5 — Explain probe/product differences.**
   - [ ] Compare matched inputs in the headless probe and browser, varying worker
         boundary and single-space/cross-space voter links separately.
@@ -293,10 +296,10 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Define A3's budget declaration and extend measurement to event dispatch and
-commit work before enforcing whole-step budgets. Preserve separate
-initialization limits and include short-lived actions and failed attempts. The
-controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. Do not
-implement collection operators before the measurement and semantic gates above
-are satisfied.
+Complete A3's review and CI gates, then add A4's remaining read-count regression
+limits. The A4 browser benchmark is available in
+[PR #7261](https://github.com/commontoolsinc/labs/pull/7261); A5 still needs
+cross-space and deployed comparisons. Continue C1's nested-swatch invalidation
+repair and retain the production workaround until its full regressions pass. Do
+not implement collection operators before the measurement and semantic gates
+above are satisfied.
