@@ -49,11 +49,7 @@ import {
   SUBPATTERN_ARGUMENT_BUILTIN_REFS,
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import {
-  applyArgumentIfcToResult,
-  applyInputIfcToOutput,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
+import { applyInputIfcToOutput, connectInputAndOutputs } from "./node-utils.ts";
 import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import { reactive } from "./reactive.ts";
 import {
@@ -732,8 +728,14 @@ function factoryFromPattern<T, R>(
     frameworkProvidedPaths,
   );
 
-  const resultSchema =
-    applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
+  // The schema the author declared, as declared. A pattern's result carries
+  // its argument's confidentiality edge by edge: a result field aliasing an
+  // argument cell carries that cell's own label through the link machinery,
+  // and a field fed by a lift or a handler carries the join that module makes
+  // onto its own result. A join at this schema's root persists as a label
+  // covering the whole result document, `$UI` among its fields, which denies a
+  // piece's entire view at the display ceiling.
+  const resultSchema = resultSchemaArg ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
     const module = withAliasBindings(

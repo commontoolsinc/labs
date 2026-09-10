@@ -1168,11 +1168,14 @@ export async function runTestPattern(
     console.log("  Idempotency verification disabled for this measurement.");
   }
   const readReport = options.verbose ? new ActionReadReport() : undefined;
+  const onReadReport = (event: Event) => {
+    if (event instanceof RuntimeTelemetryEvent) {
+      readReport?.record(event.marker);
+    }
+  };
   if (readReport) {
     runtime.scheduler.setReadStatsEnabled(true);
-    runtime.telemetry.addEventListener("telemetry", (event) => {
-      readReport.record((event as RuntimeTelemetryEvent).marker);
-    });
+    runtime.telemetry.addEventListener("telemetry", onReadReport);
   }
   // Channel 1: capture pattern-code console.error / console.warn calls that
   // flow through the scheduler's harness console event.  The handler must
@@ -1573,8 +1576,11 @@ export async function runTestPattern(
       // step is transparent — it produces no result. A settle timeout propagates
       // to the outer handler and fails the whole run (a stuck settle is fatal).
       if (isSettle) {
-        if (!stepValue.skip) await settleFully(i);
-        printReadReport(`settle_${i}`, performance.now() - itemStart);
+        try {
+          if (!stepValue.skip) await settleFully(i);
+        } finally {
+          printReadReport(`settle_${i}`, performance.now() - itemStart);
+        }
         continue;
       }
 
@@ -1585,16 +1591,19 @@ export async function runTestPattern(
       if (isRender) {
         renderCount++;
         const renderName = `render_${renderCount}`;
-        if (!stepValue.skip) {
-          await materializeTestVDOM(
-            stepCell.key("render") as Cell<unknown>,
-            () => settleRuntime(i, renderName, 20),
-          );
-          if (options.verbose) console.log(`  ◇ ${renderName}`);
-        } else if (options.verbose) {
-          console.log(`  ⊘ ${renderName} (skipped)`);
+        try {
+          if (!stepValue.skip) {
+            await materializeTestVDOM(
+              stepCell.key("render") as Cell<unknown>,
+              () => settleRuntime(i, renderName, 20),
+            );
+            if (options.verbose) console.log(`  ◇ ${renderName}`);
+          } else if (options.verbose) {
+            console.log(`  ⊘ ${renderName} (skipped)`);
+          }
+        } finally {
+          printReadReport(renderName, performance.now() - itemStart);
         }
-        printReadReport(renderName, performance.now() - itemStart);
         continue;
       }
 
@@ -2001,6 +2010,7 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
+    runtime.telemetry.removeEventListener("telemetry", onReadReport);
     if (
       patternCoverage && options.patternCoverageDir &&
       writeLocalPatternCoverage

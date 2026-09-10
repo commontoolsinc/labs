@@ -1,4 +1,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+
+import { createRef } from "../create-ref.ts";
+import { toURI } from "../uri-utils.ts";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import {
@@ -11,7 +15,6 @@ import {
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
-import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -61,6 +64,7 @@ import {
   type QueuedEvent,
   type ReactivityLog,
   type ServedEventFailureOutcome,
+  type TelemetryAnnotations,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -68,6 +72,127 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
+
+const guardedImplementations = Symbol("guarded event implementations");
+
+type GuardedDispatcher = EventHandler & {
+  [guardedImplementations]: {
+    implementations: Map<string, { handler: EventHandler }>;
+    current(): EventHandler | undefined;
+  };
+};
+
+/** Whether a registered callback dispatches among guarded implementations. */
+function isGuardedDispatcher(
+  handler: EventHandler,
+): handler is GuardedDispatcher {
+  return guardedImplementations in handler;
+}
+
+/** Resolve exactly one implementation while recording every selector read. */
+function selectEventImplementation(
+  handler: EventHandler,
+  tx: IExtendedStorageTransaction,
+): EventHandler | undefined {
+  if (!isGuardedDispatcher(handler)) return handler;
+  const registration = handler[guardedImplementations];
+  const current = registration.current();
+  if (current !== handler) {
+    return current === undefined
+      ? undefined
+      : selectEventImplementation(current, tx);
+  }
+  let selected: EventHandler | undefined;
+  let ambiguous = false;
+  for (
+    const { handler: implementation } of registration.implementations.values()
+  ) {
+    if (implementation.implementationSelection!.matches(tx)) {
+      if (selected !== undefined) ambiguous = true;
+      selected = implementation;
+    }
+  }
+  return ambiguous ? undefined : selected;
+}
+
+/** Stable queued callback whose selection follows the live stream registry. */
+function createGuardedDispatcher(
+  ref: NormalizedFullLink,
+  eventHandlers: readonly EventHandlerRegistration[],
+): GuardedDispatcher {
+  const dispatcher: GuardedDispatcher = Object.assign(
+    (tx: IExtendedStorageTransaction, event: unknown) => {
+      const implementation = selectEventImplementation(dispatcher, tx);
+      if (implementation === undefined) {
+        tx.dispatchedHandlerNotRun = {
+          reason: "no unique event implementation matches the current program",
+        };
+        return;
+      }
+      return implementation(tx, event);
+    },
+    {
+      [guardedImplementations]: {
+        implementations: new Map<string, { handler: EventHandler }>(),
+        current: () => findEventHandler(eventHandlers, ref)?.handler,
+      },
+    },
+  );
+  Object.defineProperty(dispatcher, "name", {
+    value: `event-dispatcher:${toURI(createRef(ref, "event dispatcher"))}`,
+  });
+  Object.defineProperty(dispatcher, "schedulerObservationIdentity", {
+    get: () => {
+      const registration = dispatcher[guardedImplementations];
+      const current = registration.current();
+      if (current !== dispatcher) {
+        return (current as Partial<TelemetryAnnotations> | undefined)
+          ?.schedulerObservationIdentity;
+      }
+      const identities = [...registration.implementations.values()].flatMap(
+        ({ handler }) => {
+          const identity = (handler as Partial<TelemetryAnnotations>)
+            .schedulerObservationIdentity;
+          return identity === undefined ? [] : [identity];
+        },
+      );
+      if (identities.length <= 1) return identities[0];
+      // A queued event supplies its actor to every candidate root before
+      // selection: the selector itself can need that actor's cold inputs.
+      // Dispatch and its diagnostics use the selected handler's own identity.
+      return {
+        ...identities[0],
+        demandRootIds: [
+          ...new Set(identities.flatMap((identity) =>
+            identity.demandRootIds ??
+              (identity.pieceRootId === undefined ? [] : [identity.pieceRootId])
+          )),
+        ],
+      };
+    },
+  });
+  dispatcher.populateDependencies = (tx, event) => {
+    selectEventImplementation(dispatcher, tx)?.populateDependencies?.(
+      tx,
+      event,
+    );
+  };
+  return dispatcher;
+}
+
+/** The actor used by both selection probes and the eventual stamped dispatch. */
+function eventScopeIdentity(event: QueuedEvent): ScopeKeyIdentity | undefined {
+  const firedAt = event.served?.firedAt;
+  if (firedAt !== undefined) {
+    return {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as ScopeKeyIdentity;
+  }
+  return event.originTx !== undefined
+    ? waveRunContextOf(event.originTx)?.scopeKeyIdentity
+    : undefined;
+}
 
 type EventCommitError = {
   readonly name?: string;
@@ -791,39 +916,115 @@ export function addSchedulerEventHandler(state: {
     }
     registration.readinessCancels.clear();
   };
+  const installRegistration = (
+    handler: EventHandler,
+  ): EventHandlerRegistration => {
+    const registration: EventHandlerRegistration = {
+      ref: args.ref,
+      handler,
+      generation: state.nextEventHandlerGeneration(),
+      readinessCancels: new Set(),
+      active: true,
+    };
+    state.eventHandlers.push(registration);
+    let hydratedPendingEvent = false;
+    for (const queuedEvent of state.eventQueue ?? []) {
+      if (
+        queuedEvent.handlerLoadPending === true &&
+        areNormalizedLinksSame(queuedEvent.eventLink, registration.ref)
+      ) {
+        hydrateLoadPendingEvent(queuedEvent, registration);
+        hydratedPendingEvent = true;
+      }
+    }
+    if (hydratedPendingEvent) state.queueExecution?.();
+    return registration;
+  };
+  const retireGuardedRegistration = (
+    registration: EventHandlerRegistration,
+    reason: string,
+  ) => {
+    const index = state.eventHandlers.indexOf(registration);
+    if (index !== -1) state.eventHandlers.splice(index, 1);
+    for (const cancelReadiness of [...registration.readinessCancels]) {
+      cancelReadiness(reason);
+    }
+    registration.readinessCancels.clear();
+    // A queued event deliberately keeps the stable dispatcher alive after it
+    // leaves the current registry. Its next selection follows whatever
+    // registration then owns this stream. With no queued owner, retirement is
+    // an ordinary cancellation and the generation becomes stale immediately.
+    if (
+      !(state.eventQueue ?? []).some((queuedEvent) =>
+        queuedEvent.handlerRegistration === registration
+      )
+    ) {
+      registration.active = false;
+    }
+  };
   if (args.populateDependencies) {
     args.handler.populateDependencies = args.populateDependencies;
   }
   const existingIndex = state.eventHandlers.findIndex((existing) =>
     existing.active && areNormalizedLinksSame(existing.ref, args.ref)
   );
+  const existingRegistration = state.eventHandlers[existingIndex];
+  const existing = existingRegistration?.handler;
+  if (args.handler.implementationSelection !== undefined) {
+    const dispatcher = existing && isGuardedDispatcher(existing)
+      ? existing
+      : createGuardedDispatcher(args.ref, state.eventHandlers);
+    if (dispatcher !== existing) {
+      if (existingRegistration !== undefined) {
+        state.eventHandlers.splice(existingIndex, 1);
+        cancelRegistration(
+          existingRegistration,
+          "Event handler registration replaced",
+        );
+      }
+      installRegistration(dispatcher);
+    }
+    const key = args.handler.implementationSelection.key;
+    const registration = { handler: args.handler };
+    dispatcher[guardedImplementations].implementations.set(key, registration);
+    return () => {
+      const { implementations } = dispatcher[guardedImplementations];
+      if (implementations.get(key) !== registration) return;
+      implementations.delete(key);
+      if (implementations.size === 0) {
+        const dispatcherRegistration = state.eventHandlers.find(
+          (registration) =>
+            registration.active && registration.handler === dispatcher,
+        );
+        if (dispatcherRegistration !== undefined) {
+          retireGuardedRegistration(
+            dispatcherRegistration,
+            "Event handler registration canceled",
+          );
+        }
+      }
+    };
+  }
   if (existingIndex !== -1) {
-    const [existing] = state.eventHandlers.splice(existingIndex, 1);
-    cancelRegistration(existing, "Event handler registration replaced");
+    if (existing && isGuardedDispatcher(existing)) {
+      existing[guardedImplementations].implementations.clear();
+      retireGuardedRegistration(
+        existingRegistration,
+        "Event handler registration replaced",
+      );
+    } else {
+      state.eventHandlers.splice(existingIndex, 1);
+      cancelRegistration(
+        existingRegistration,
+        "Event handler registration replaced",
+      );
+    }
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
       { linkId: args.ref.id },
     ]);
   }
-  const registration: EventHandlerRegistration = {
-    ref: args.ref,
-    handler: args.handler,
-    generation: state.nextEventHandlerGeneration(),
-    readinessCancels: new Set(),
-    active: true,
-  };
-  state.eventHandlers.push(registration);
-  let hydratedPendingEvent = false;
-  for (const queuedEvent of state.eventQueue ?? []) {
-    if (
-      queuedEvent.handlerLoadPending === true &&
-      areNormalizedLinksSame(queuedEvent.eventLink, registration.ref)
-    ) {
-      hydrateLoadPendingEvent(queuedEvent, registration);
-      hydratedPendingEvent = true;
-    }
-  }
-  if (hydratedPendingEvent) state.queueExecution?.();
+  const registration = installRegistration(args.handler);
   return () => {
     if (!registration.active) return;
     cancelRegistration(registration, "Event handler registration canceled");
@@ -1006,21 +1207,11 @@ export function preflightQueuedEventDependencies(state: {
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
   depTx.setReadOnly?.("scheduler.populateDependencies()");
-  // A SERVED event's dependency probe reads AS the event's server-stamped
-  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
-  // LD1): the handler run will read that actor's instances of every
-  // scoped input, so the probe must name the SAME instances — its absent
-  // reads then kick instance-named loads, and the pending-load park below
-  // holds the head event on exactly those loads (an at-most-once handler
-  // must not run against the service instance's empty draft — the R7
-  // wall). Absent on every client-side event, byte-identical there.
-  const firedAt = queuedEvent.served?.firedAt;
-  if (firedAt?.user !== undefined) {
-    depTx.tx.scopeKeyIdentity = {
-      principal: firedAt.user,
-      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
-    } as never;
-  }
+  // Selection and input probes use the dispatch actor. Their scoped reads
+  // register that actor's instance loads, which park the head event until its
+  // program and inputs are available.
+  const probeIdentity = eventScopeIdentity(queuedEvent);
+  if (probeIdentity !== undefined) depTx.tx.scopeKeyIdentity = probeIdentity;
   let stepStart = performance.now();
   logger.timeStart(
     "scheduler",
@@ -1029,9 +1220,14 @@ export function preflightQueuedEventDependencies(state: {
     "pullPopulateDependencies",
   );
   try {
-    handler.populateDependencies?.(depTx, eventValue);
+    const implementation = selectEventImplementation(handler, depTx);
+    queuedEvent.preflightImplementation = implementation;
+    implementation?.populateDependencies?.(depTx, eventValue);
   } catch (error) {
-    state.handleError(error as Error, handler);
+    state.handleError(
+      error as Error,
+      queuedEvent.preflightImplementation ?? handler,
+    );
     // Dropping the event here is its final outcome — settle the commit
     // callback like the other drop paths instead of leaving callers that
     // await it hanging.
@@ -1278,7 +1474,6 @@ export async function processPullQueuedEventDuringExecute(
   delete queuedEvent.notBefore;
 
   const { handler } = queuedEvent;
-  const handlerId = state.getActionId(handler);
 
   let shouldSkipEvent = false;
   if (handler.populateDependencies) {
@@ -1347,8 +1542,12 @@ export async function processPullQueuedEventDuringExecute(
     if (state.eventPreflightTelemetryEnabled) {
       state.runtime.telemetry.submit({
         type: "scheduler.event.preflight",
-        handlerId,
-        handlerInfo: state.getActionTelemetryInfo(handler),
+        handlerId: state.getActionId(
+          queuedEvent.preflightImplementation ?? handler,
+        ),
+        handlerInfo: state.getActionTelemetryInfo(
+          queuedEvent.preflightImplementation ?? handler,
+        ),
         readCount: preflight.deps.reads.length,
         shallowReadCount: preflight.deps.shallowReads.length,
         dirtySizeBefore: preflight.dirtySizeBefore,
@@ -1433,33 +1632,31 @@ export async function dispatchQueuedEvent(state: {
   ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retry, onCommit } = queuedEvent;
-  const handlerId = state.getActionId(handler);
+  // Presync follows the actor-scoped dependency probe. Dispatch rechecks the
+  // selection after the await so a replacement cannot run with stale inputs.
+  const presyncedImplementation = isGuardedDispatcher(handler)
+    ? queuedEvent.preflightImplementation
+    : handler;
+  const diagnosticHandler = presyncedImplementation ?? handler;
+  const handlerId = state.getActionId(diagnosticHandler);
 
   state.runtime.telemetry.submit({
     type: "scheduler.invocation",
     handlerId,
-    handlerInfo: state.getActionTelemetryInfo(handler),
+    handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
   });
 
   // Ensure the handler's input docs are locally available before the body
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
   // surface as the handler's own read failure, not silently drop the event.
-  if (typeof handler.presyncInputs === "function") {
+  if (typeof presyncedImplementation?.presyncInputs === "function") {
     try {
       // A served event's presync loads the event actor's instances (stage
       // A — see EventHandler.presyncInputs); a client-side event passes
       // nothing, byte-identical to before.
-      const firedAt = queuedEvent.served?.firedAt;
-      await handler.presyncInputs(
+      await presyncedImplementation.presyncInputs(
         eventValue,
-        firedAt?.user !== undefined
-          ? {
-            principal: firedAt.user,
-            sessionId: firedAt.session === "server"
-              ? undefined
-              : firedAt.session,
-          } as never
-          : undefined,
+        eventScopeIdentity(queuedEvent),
       );
     } catch (error) {
       logger.warn(
@@ -2132,7 +2329,7 @@ export async function dispatchQueuedEvent(state: {
         state.runtime.telemetry.submit({
           type: "scheduler.event.commit",
           handlerId,
-          handlerInfo: state.getActionTelemetryInfo(handler),
+          handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
           readCount: log.reads.length + log.shallowReads.length,
           writeCount: log.writes.length,
           changedWriteCount: log.writes.length,
@@ -2362,8 +2559,22 @@ export async function dispatchQueuedEvent(state: {
   };
 
   try {
-    if (hasAnnotatedWrites(handler)) {
-      recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
+    let implementation = handler;
+    if (isGuardedDispatcher(handler)) {
+      const selected = selectEventImplementation(handler, tx);
+      if (
+        selected === undefined || selected !== presyncedImplementation
+      ) {
+        tx.dispatchedHandlerNotRun = {
+          reason:
+            "event implementation changed or is unavailable after presync",
+        };
+      } else {
+        implementation = selected;
+      }
+    }
+    if (hasAnnotatedWrites(implementation)) {
+      recordTrustedEventPolicyInputs(tx, implementation.writes, eventValue);
     }
     const actionStartTime = performance.now();
     logger.timeStart(
@@ -2374,10 +2585,16 @@ export async function dispatchQueuedEvent(state: {
     );
     try {
       const runningPromise = Promise.resolve(
-        state.runtime.harness.invoke(() => action(tx)),
+        state.runtime.harness.invoke(() =>
+          tx.dispatchedHandlerNotRun !== undefined
+            ? undefined
+            : isGuardedDispatcher(handler)
+            ? implementation(tx, eventValue)
+            : action(tx)
+        ),
       ).then(() => {
         const trustedEventCandidates =
-          trustedEventWriteCandidatesFromTransaction(tx, handler, [
+          trustedEventWriteCandidatesFromTransaction(tx, implementation, [
             queuedEvent.eventLink.space,
           ]);
         recordTrustedEventPolicyInputs(

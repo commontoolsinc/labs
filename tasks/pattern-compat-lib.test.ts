@@ -445,6 +445,16 @@ describe("incompatibilityPaths", () => {
   it("returns nothing for a detail with no issue lines", () => {
     expect(incompatibilityPaths("something else entirely")).toEqual([]);
   });
+
+  it("reads a root issue as the bare role", () => {
+    // `schemaSubsetIssue` appends `.<property>` as it descends, so an issue
+    // about the schema itself carries the role it started with and no pointer.
+    // An entry forgiving one has to name it the same way.
+    expect(incompatibilityPaths(
+      "Pattern schemas are not backward compatible:\n" +
+        "- result: ifc changed",
+    )).toEqual(["result"]);
+  });
 });
 
 describe("partitionAcceptedBreaks", () => {

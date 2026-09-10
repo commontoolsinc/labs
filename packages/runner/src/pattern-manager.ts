@@ -3752,6 +3752,19 @@ export class PatternManager {
   }
 
   /**
+   * Returns the process-cached pattern without compiling or replicating source.
+   * The caller must first complete `compileOrGetPattern` for this program and
+   * space so target-space persistence work is registered with the barrier.
+   */
+  getCompiledPatternForProgramSync(
+    input: RuntimeProgram,
+    space: MemorySpace,
+  ): Pattern | undefined {
+    const key = programCompilationKey(snapshotQueryResult(input), space);
+    return this.#compiledByContent.get(key)?.pattern;
+  }
+
+  /**
    * Compiles a pattern from source, or returns a cached/in-flight result.
    * Snapshots the program at entry and deduplicates by its content and
    * compilation context, including when the input is a query-result view.
