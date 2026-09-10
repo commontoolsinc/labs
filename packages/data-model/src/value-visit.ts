@@ -504,7 +504,7 @@ export abstract class ContainerIteratingVisitor<
   visitFabricPlainObject(
     value: FabricPlainObject,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    return doMapContents(Object.entries(value));
+    return doMapContents<DomainExtra>(Object.entries(value));
   }
 
   /** @inheritDoc */
