@@ -999,6 +999,13 @@ function votersArg(args: readonly string[]): number | undefined {
   return parsed;
 }
 
+/** One line naming a case the way the probe announces it. */
+export function describeCase(config: CaseConfig): string {
+  return `${config.optionCount} options x ${config.userCount} users, ` +
+    `rounds=${config.voteRounds}` +
+    (config.voters === undefined ? "" : `, voters=${config.voters}`);
+}
+
 export function casesFromConfig(
   config: MatrixConfig,
   args: readonly string[] = Deno.args,
@@ -1041,13 +1048,7 @@ async function run(): Promise<void> {
   })[] = [];
 
   for (const caseConfig of cases) {
-    console.error(
-      `[lunch-poll diagnose] case ${caseConfig.optionCount} options x ` +
-        `${caseConfig.userCount} users, rounds=${caseConfig.voteRounds}` +
-        (caseConfig.voters === undefined
-          ? ""
-          : `, voters=${caseConfig.voters}`),
-    );
+    console.error(`[lunch-poll diagnose] case ${describeCase(caseConfig)}`);
     try {
       results.push({ ok: true, result: await runCase(caseConfig) });
     } catch (error) {

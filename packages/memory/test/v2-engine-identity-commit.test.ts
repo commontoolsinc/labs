@@ -372,4 +372,107 @@ describe("applyCommit() with an identity commit", () => {
       "of:fresh",
     ]);
   });
+
+  it("refuses a commit with no operations over a stale confirmed read", () => {
+    // Only the wave path admits an empty operation list, for a wave whose
+    // outbound appends ride the transaction; a stale read on one is still
+    // a stale read, with nothing for the identity proof to prove.
+    const installSeq = installThenRewrite();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(2, {
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
+            pending: [],
+          },
+        }),
+        allowEmptyOperations: true,
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("refuses a delete over a stale confirmed read", () => {
+    const installSeq = installThenRewrite();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(2, {
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
+            pending: [],
+          },
+          operations: [{ op: "delete", id: "of:doc" } as never],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("accepts an identical content-addressed re-set beside an identical set over a stale read", () => {
+    const installSeq = installThenRewrite();
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [setOp("cid:fid1:closure", { type: "string" })],
+      }),
+    });
+
+    const verdict = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        reads: {
+          confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
+          pending: [],
+        },
+        operations: [
+          setOp("cid:fid1:closure", { type: "string" }),
+          setOp("of:doc", { n: 2 }),
+        ],
+      }),
+    });
+
+    expect(verdict.elidedOpIndexes).toEqual([0, 1]);
+    expect(verdict.revisions).toEqual([]);
+  });
+
+  it("refuses a content-addressed set of new content over a stale read", () => {
+    const installSeq = installThenRewrite();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(2, {
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
+            pending: [],
+          },
+          operations: [
+            setOp("cid:fid1:fresh", { type: "number" }),
+            setOp("of:doc", { n: 2 }),
+          ],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("refuses a patch that cannot apply on the document at its basis", () => {
+    const installSeq = installThenRewrite();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(2, {
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
+            pending: [],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/missing/n", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
 });

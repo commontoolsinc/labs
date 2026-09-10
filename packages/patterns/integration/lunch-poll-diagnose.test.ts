@@ -19,6 +19,7 @@ import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   casesFromConfig,
   compactActionSite,
+  describeCase,
   matrixConfigFromArgs,
   runCase,
   voterIdentity,
@@ -54,6 +55,15 @@ describe("lunch-poll-diagnose", () => {
 
     expect(() => matrixConfigFromArgs(["--voters=0"]))
       .toThrow("--voters must be an integer >= 1");
+
+    expect(describeCase({ optionCount: 14, userCount: 2, voteRounds: 3 }))
+      .toBe("14 options x 2 users, rounds=3");
+    expect(describeCase({
+      optionCount: 14,
+      userCount: 2,
+      voteRounds: 3,
+      voters: 1,
+    })).toBe("14 options x 2 users, rounds=3, voters=1");
 
     const explicitArgs = ["--production", "--rounds=2", "--cases=2x3,4x5"];
     expect(
