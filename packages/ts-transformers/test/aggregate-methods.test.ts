@@ -1,8 +1,16 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import ts from "typescript";
+
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
-import { callsNamed, emittedSchemas, parseModule } from "./transformed-ast.ts";
+import {
+  calleeName,
+  callsNamed,
+  collect,
+  emittedSchemas,
+  parseModule,
+} from "./transformed-ast.ts";
 import { transformSource } from "./utils.ts";
 
 describe("aggregate methods", () => {
@@ -56,8 +64,34 @@ describe("aggregate methods", () => {
       );
       const calls = callsNamed(parseModule(output), `${method}WithPattern`);
       expect(calls).toHaveLength(1);
-      expect(calls[0].arguments[0].getText()).toContain("pattern(");
-      expect(calls[0].arguments[0].getText()).toContain("n");
+      const argument = calls[0].arguments[0];
+      if (!ts.isCallExpression(argument)) {
+        throw new Error("Expected an inline pattern call");
+      }
+      expect(calleeName(argument)).toBe("pattern");
+      const callback = argument.arguments[0];
+      if (!ts.isArrowFunction(callback) || !ts.isIdentifier(callback.body)) {
+        throw new Error(
+          "Expected the pattern callback to reference its capture",
+        );
+      }
+      expect(callback.body.text).toBe("n");
+      let enclosing: ts.Node | undefined = calls[0].parent;
+      while (enclosing && !ts.isArrowFunction(enclosing)) {
+        enclosing = enclosing.parent;
+      }
+      if (!enclosing || !ts.isArrowFunction(enclosing)) {
+        throw new Error("Expected an enclosing callback");
+      }
+      const bindings = collect(
+        enclosing.parameters[0].name,
+        ts.isBindingElement,
+      );
+      expect(
+        bindings.some((binding) =>
+          ts.isIdentifier(binding.name) && binding.name.text === "n"
+        ),
+      ).toBe(true);
     }
   });
 

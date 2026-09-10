@@ -305,6 +305,8 @@ Define A3's budget declaration and extend measurement to event dispatch and
 commit work before enforcing whole-step budgets. Preserve separate
 initialization limits and include short-lived actions and failed attempts. The
 controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. Do not
-implement collection operators before the measurement and semantic gates above
-are satisfied.
+browser and cross-space measurements before product performance claims.
+For the pending collection operators, settle B1's index contracts before
+implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
+measurements use the shipped counters and the aggregate comparison method;
+A4/A5 gate deployed-product claims rather than operator implementation.
