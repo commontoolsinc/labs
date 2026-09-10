@@ -493,7 +493,7 @@ patch shape documented under Resolution.
 
 The server's shared traversal already follows the `cfc.schemaHash` seam by
 synthesizing a `cid:` link and adding the document to the query result and
-watch set (`cfcMetaToSigilLink` / `loadMetaLinkedDocs`). Beyond that seam,
+watch set (`cfcMetaToSigilLink` / `loadLabelSchemaDoc`). Beyond that seam,
 delivery and traversal split the work in two layers:
 
 - **Traversal** loads the closure where a schema enters it — the selector
