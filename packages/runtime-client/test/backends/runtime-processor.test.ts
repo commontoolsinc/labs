@@ -1057,11 +1057,17 @@ describe("runtime-processor", () => {
       "space"
     ];
 
+    /**
+     * A cell over `ref`. `resultSchema` is the `schema` meta of its document
+     * and `linkedSchema` the schema the links along its path carry, which
+     * `asSchemaFromLinks()` adopts; a cell reached through `key()` keeps both.
+     */
     function mockCell(ref: CellRef, options: {
       raw?: unknown;
       patternLink?: unknown;
       patternIdentity?: unknown;
       resultSchema?: unknown;
+      linkedSchema?: CellRef["schema"];
       onSync?: () => void;
     } = {}) {
       return {
@@ -1080,6 +1086,15 @@ describe("runtime-processor", () => {
             : undefined,
         getAsLink: () => cellRefToSigilLink(ref),
         getAsNormalizedFullLink: () => ref,
+        key: (...keys: string[]) =>
+          mockCell({ ...ref, path: [...ref.path, ...keys] }, options),
+        asSchemaFromLinks: () =>
+          mockCell(
+            options.linkedSchema === undefined
+              ? ref
+              : { ...ref, schema: options.linkedSchema },
+            options,
+          ),
         asSchema: (schema: CellRef["schema"]) =>
           mockCell({ ...ref, schema }, options),
       };
@@ -1226,7 +1241,7 @@ describe("runtime-processor", () => {
       expect(result.piece.cell.schema).toBeUndefined();
     });
 
-    it("returns a cell inside a piece under the piece's result schema at its path, syncing the piece's root alone", async () => {
+    it("returns a cell inside a piece under the piece's result schema at its path when its links carry none, syncing the piece's root alone", async () => {
       const targetRef: CellRef = {
         id: "of:fid1-parent-piece" as CellRef["id"],
         space,
@@ -1300,6 +1315,60 @@ describe("runtime-processor", () => {
       expect(result.piece.cell).toMatchObject({
         ...targetRef,
         schema: activityTabSchema,
+      });
+    });
+
+    it("returns a cell inside a piece under the schema the links along its path carry, over the result schema at that path", async () => {
+      // What a stored link on the path says it is read under wins, as it
+      // does for a piece cell `getPieceCell()` resolves: the result schema
+      // is what the piece declared, and the link is what is there.
+      const targetRef: CellRef = {
+        id: "of:fid1-parent-piece" as CellRef["id"],
+        space,
+        scope: "space",
+        path: ["activityTab"],
+      };
+      const landingRef: CellRef = { ...targetRef, path: [] };
+      const slugRef: CellRef = {
+        id: "of:fid1-slug-doc" as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const linkedSchema: NonNullable<CellRef["schema"]> = {
+        type: "object",
+        properties: { entries: { type: "array" } },
+      };
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema: {
+          type: "object",
+          properties: { activityTab: { type: "object" } },
+        },
+        linkedSchema,
+      });
+      const targetCell = mockCell(targetRef);
+      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+      const processor = buildProcessor({
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
+        cc: { getSpace: () => space },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
+
+      expect(result.piece.cell).toMatchObject({
+        ...targetRef,
+        schema: linkedSchema,
       });
     });
 

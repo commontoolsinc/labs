@@ -2232,12 +2232,20 @@ export class RuntimeProcessor {
         return { piece: createPieceRef(target) };
       }
       if (targetLink.path.length > 0) {
-        // A cell inside a piece is read under the piece's result schema at
-        // its path, as `getPieceCell()` reads a piece cell reached with one.
+        // The schema a cell inside a piece is read under: what the links
+        // along its path carry, as `getPieceCell()` resolves a piece cell
+        // reached with a path, and the piece's result schema at that path
+        // where they carry none. Reached through the landing document, whose
+        // sync it shares, so that nothing here starts a watch at the path.
+        const inside = landing.key(...targetLink.path);
+        const linked = inside.asSchemaFromLinks();
+        if (linked.getAsNormalizedFullLink().schema !== undefined) {
+          return { piece: createPieceRef(linked) };
+        }
         const resultSchema = landing.getMetaRaw("schema") as
           | JSONSchema
           | undefined;
-        const cell = resultSchema === undefined ? target : target.asSchema(
+        const cell = resultSchema === undefined ? inside : inside.asSchema(
           ContextualFlowControl.schemaAtPath(resultSchema, targetLink.path),
         );
         return { piece: createPieceRef(cell) };
