@@ -104,3 +104,20 @@ These probes do not replace the repository's required package, pattern, or
 integration lanes. The v2 testing specification's integration command and the
 current baked CI capability path are distinct harnesses; report which one
 actually ran.
+
+## Build and run one execution arm
+
+`run-arm.ts` requires a clean committed checkout with no untracked inputs.
+Commit workload helpers and any ablation on an isolated branch before invoking
+it. It records rejected source state in the artifact directory. The runner
+builds the requested baked posture afresh, rechecks source state, and atomically
+replaces its cached binary only after successful compilation. A failed build
+preserves the old binary. This avoids treating an embedded commit as proof that
+a cached binary contains the current source.
+
+The child environment always follows the requested lane, even when the parent's
+execution flag disagrees. Endpoint reads reject unsuccessful HTTP responses; the
+server, client, and baked shell must agree with the lane. The seed checker
+resolves an unset execution flag through the first-party default. Latency runs
+require the quiet-machine condition both before setup and after compilation, and
+every sample during the workload must satisfy it.

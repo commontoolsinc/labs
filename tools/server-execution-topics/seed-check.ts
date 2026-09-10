@@ -6,6 +6,7 @@
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import { watermarkCell } from "@commonfabric/runner/executor/watermark";
 
@@ -24,22 +25,30 @@ const apiUrl = new URL(Deno.env.get("API_URL")!);
 const runDir = Deno.env.get("CF_CAMPAIGN_RUN_DIR")!;
 const spaceName = Deno.env.get("SPACE_NAME")!;
 const expectedPosture =
-  Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true";
-expect(experimentalOptionsFromEnv(Deno.env.get).serverExecution).toBe(
-  expectedPosture,
-);
+  experimentalOptionsFromEnv(Deno.env.get).serverExecution ??
+    SERVER_EXECUTION_DEFAULT_ENABLED;
+const topicCount = Number(Deno.env.get("CF_TOPIC_BOARD_TOPICS") ?? 5);
+if (!Number.isInteger(topicCount) || topicCount < 1) {
+  throw new Error("CF_TOPIC_BOARD_TOPICS must be a positive integer.");
+}
 const identity = await seedIdentity("server-execution topics campaign");
 const shape = {
-  topicCount: Number(Deno.env.get("CF_TOPIC_BOARD_TOPICS") ?? 5),
+  topicCount,
   crossrefsPerTopic: 2,
   citingTopics: 3,
   bodyWords: 120,
 };
 const fixture = await seedTopicBoard({ apiUrl, spaceName, identity, ...shape });
 await Deno.writeTextFile(join(runDir, "fixture.json"), JSON.stringify(fixture));
+const response = await fetch(new URL("/api/health/stats", apiUrl));
+if (!response.ok) {
+  throw new Error(
+    `Fetching /api/health/stats failed with status ${response.status}.`,
+  );
+}
 await Deno.writeTextFile(
   join(runDir, "stats-after-seed.json"),
-  await (await fetch(new URL("/api/health/stats", apiUrl))).text(),
+  await response.text(),
 );
 
 const reader = await initializePiecesController({
