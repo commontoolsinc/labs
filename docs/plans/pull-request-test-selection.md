@@ -193,7 +193,8 @@ belong.
 11. Flaky tests are found, and the finding is used: to run intermittent
     things more often where that catches more, and to keep tests too
     noisy to judge from blocking anybody. A test kept out of pull
-    requests for being flaky goes on being measured on `main`, often
+    requests for being flaky goes on being measured on `main`, and where
+    it can be run without its neighbours it is measured there often
     enough that its share can rise as well as fall.
 12. Every dial is in one documented place, and a pull request can opt out
     of selection entirely and run everything.
@@ -3221,11 +3222,11 @@ pull request's own run could not have:
   added has since disagreed with itself.
 - **A test too flaky for pull requests that failed every one of its runs
   at this commit and passed every one at the parent.** Those failures do
-  not fail the run, so this comment is the only thing that carries them to
-  a person. It says the test is a known flaky one, that the run stayed
-  green, and that the same record is what one bad runner produces, since
-  every run of an identity at a commit shares a lane. Weak evidence, named
-  as weak, is what there is.
+  not fail the run, so the lane's job summary is the only other place they
+  appear, and nobody reads the summary of a run that passed. It says the
+  test is a known flaky one, that the run stayed green, and that the same
+  record is what one bad runner produces, since every run of an identity at
+  a commit shares a lane. Weak evidence, named as weak, is what there is.
 - **A rename that discarded history**, with the alias line to append and
   the number of catches it would bring back. See [Renames, and the alias
   file](#renames-and-the-alias-file).

@@ -605,10 +605,11 @@ itself.
   across attempts.
 - **A test too flaky for a change that failed every one of its runs at
   this commit and passed every one at the parent.** Those failures do not
-  fail the run, so the note is the only thing that carries them to a
-  person. It says the test is one the store has seen disagreeing with
-  itself, that the run stayed green, and that one bad runner produces the
-  same record, since every run of a test at a commit shares a lane. The
+  fail the run, so the lane's job summary is the only other place they
+  appear, and nobody reads the summary of a run that passed. It says the
+  test is one the store has seen disagreeing with itself, that the run
+  stayed green, and that one bad runner produces the same record, since
+  every run of a test at a commit shares a lane. The
   extra runs are what make the observation possible, so this note is
   silent until they land.
 - **A rename that discarded history**, with the number of catches it
