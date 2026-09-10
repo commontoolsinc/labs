@@ -5622,6 +5622,9 @@ const applyCommitTransaction = (
       // sequence is an identity only where it is idempotent.
       const basisSeq = patchBasisSeq(first);
       const basis = basisSeq === undefined ? stored : at(basisSeq) ?? undefined;
+      // A patch that cannot be applied to one of the two bases proves no
+      // identity, and the staleness refusal it arrived with stands; the
+      // ordinary apply path reports the patch's own failure on the retry.
       try {
         const fromBasis = replay(basis, operations);
         const onStored = replay(stored, operations);
@@ -5631,9 +5634,8 @@ const applyCommitTransaction = (
         ) {
           return false;
         }
-      } catch (error) {
-        if (error instanceof PatchApplyError) return false;
-        throw error;
+      } catch {
+        return false;
       }
     }
     return true;

@@ -468,8 +468,10 @@ describe("applyCommit() with an identity commit", () => {
             confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
             pending: [],
           },
+          // A path through the scalar `n` is not traversable, where a
+          // missing object key would be created on the way down.
           operations: [patchOp("of:doc", [
-            { op: "replace", path: "/value/missing/n", value: 2 },
+            { op: "replace", path: "/value/n/x", value: 2 },
           ])],
         }),
       })
