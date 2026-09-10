@@ -57,6 +57,7 @@ import {
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { isSigilLink, type NormalizedFullLink } from "./link-utils.ts";
 import { type Runtime } from "./runtime.ts";
+import { recordProxyAccess } from "./read-accounting.ts";
 import {
   createOpaqueReference,
   processDefaultValue,
@@ -768,6 +769,7 @@ function createObjectView(
   // callback: a reader walking a large value touches this per property, and a
   // callback would allocate a closure each time.
   const childOrAbsent = (key: string): unknown => {
+    recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveChild(key);
     const previous = tx.enterReadEpoch(epoch);
     try {
@@ -885,6 +887,7 @@ function createArrayView(
   // into the instant this view describes, and skips the step entirely until the
   // transaction has written. See the note there for why it is entered by hand.
   const element = (index: number): unknown => {
+    recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveElement(index);
     const previous = tx.enterReadEpoch(epoch);
     try {
@@ -924,7 +927,10 @@ function createArrayView(
   return new Proxy(new Array(value.length), {
     get: (_target, prop, receiver) => {
       if (prop === "then" && tx.status().status !== "ready") return undefined;
-      if (prop === "length") return value.length;
+      if (prop === "length") {
+        recordProxyAccess(tx);
+        return value.length;
+      }
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return (): Cell<unknown> =>
@@ -941,7 +947,9 @@ function createArrayView(
       }
       if (isArrayIndexPropertyName(prop)) {
         const index = Number(prop);
-        return index in value ? element(index) : undefined;
+        if (index in value) return element(index);
+        recordProxyAccess(tx);
+        return undefined;
       }
       const method = Reflect.get(Array.prototype, prop, receiver);
       if (typeof method !== "function") return method;
@@ -961,6 +969,7 @@ function createArrayView(
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (prop === "length") {
+        recordProxyAccess(tx);
         return Object.getOwnPropertyDescriptor(target, "length");
       }
       if (typeof prop === "symbol" || !isArrayIndexPropertyName(prop)) {

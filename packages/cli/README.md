@@ -1,5 +1,19 @@
 # @commonfabric/cli
 
+## Pattern-test read costs
+
+`cf test <file> --verbose --stats-threshold 0` prints reactive action read costs
+separately for initialization and each test step. Rows name authored source
+locations where available and rank by proxy accesses. Builtins and short-lived
+actions contribute to totals; `--stats-action-limit` limits only the displayed
+rows. Document and dependency totals sum per-run cardinalities.
+
+These counters cover reactive action bodies, including failures, and exclude
+event dispatch, commit work, and diagnostic idempotency reruns. See
+[read accounting](../../docs/features/read-accounting.md) for the event
+definitions and execution boundary. They do not replace an on-screen interaction
+benchmark.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source

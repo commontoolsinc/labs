@@ -10,6 +10,7 @@ import { resolveLinkTracingDereferences } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
+import { recordProxyAccess } from "./read-accounting.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
@@ -450,7 +451,9 @@ function createViewProxy<T>(
         // with no `then`; every other property still refuses.
         if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
         if (Array.isArray(value) && prop === "length") {
-          const current = readTx().readValueOrThrow(link) as typeof value;
+          const accessTx = readTx();
+          recordProxyAccess(accessTx);
+          const current = accessTx.readValueOrThrow(link) as typeof value;
           return Array.isArray(current) ? current.length : 0;
         }
 
@@ -478,10 +481,12 @@ function createViewProxy<T>(
                       path: [...link.path, "length"],
                     }) as number;
                     if (index < length) {
+                      const accessTx = childViewTx();
+                      recordProxyAccess(accessTx);
                       const result = {
                         value: createViewProxy(
                           runtime,
-                          childViewTx(),
+                          accessTx,
                           tx,
                           {
                             ...link,
@@ -547,9 +552,11 @@ function createViewProxy<T>(
                   if (!(i in current)) {
                     continue;
                   }
+                  const accessTx = childViewTx();
+                  recordProxyAccess(accessTx);
                   copy[i] = createViewProxy(
                     runtime,
-                    childViewTx(),
+                    accessTx,
                     tx,
                     { ...link, path: [...link.path, String(i)] },
                     depth + 1,
@@ -593,9 +600,11 @@ function createViewProxy<T>(
           return Reflect.get(value, prop);
         }
 
+        const accessTx = childViewTx();
+        recordProxyAccess(accessTx);
         return createViewProxy(
           runtime,
-          childViewTx(),
+          accessTx,
           tx,
           { ...link, path: [...link.path, prop] },
           depth + 1,
@@ -658,7 +667,9 @@ function createViewProxy<T>(
         if (Array.isArray(target) && prop === "length") {
           // Read the array fully (not SHAPE_READ) so the length descriptor tracks
           // element add/remove, matching the `length` get trap above. [review: ubik2]
-          const current = readTx().readValueOrThrow(link);
+          const accessTx = readTx();
+          recordProxyAccess(accessTx);
+          const current = accessTx.readValueOrThrow(link);
           return {
             configurable: false,
             enumerable: false,
@@ -700,13 +711,15 @@ function createViewProxy<T>(
           (isObjectOrArray(current) || Array.isArray(current)) &&
           Object.hasOwn(current, prop)
         ) {
+          const accessTx = childViewTx();
+          recordProxyAccess(accessTx);
           return {
             configurable: true,
             enumerable: true,
             writable: false,
             value: createViewProxy(
               runtime,
-              childViewTx(),
+              accessTx,
               tx,
               { ...link, path: [...link.path, prop as string] },
               depth + 1,

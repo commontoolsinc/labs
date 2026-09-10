@@ -54,6 +54,7 @@ import {
   Runtime,
   type RuntimeOptions,
   runtimePresets,
+  RuntimeTelemetryEvent,
   TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
@@ -85,6 +86,7 @@ import {
 import { timeout } from "@commonfabric/utils/sleep";
 
 import { assertionOutcome } from "./assert-record.ts";
+import { ReadCostReport } from "./read-cost-report.ts";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   appendLoggerDeltaMessages,
@@ -1159,6 +1161,23 @@ export async function runTestPattern(
       })),
   );
   runtime.enableIdempotencyCheck();
+  const readCost = options.verbose ? new ReadCostReport() : undefined;
+  const onReadCost = (event: Event) => {
+    if (event instanceof RuntimeTelemetryEvent) readCost?.record(event.marker);
+  };
+  const printReadCost = (label: string, started: number) => {
+    if (
+      readCost === undefined ||
+      performance.now() - started < (options.statsThreshold ?? 5000)
+    ) return;
+    for (const line of readCost.lines(label, options.statsActionLimit ?? 10)) {
+      console.log(line);
+    }
+  };
+  if (readCost !== undefined) {
+    runtime.scheduler.setReadAccountingEnabled(true);
+    runtime.telemetry.addEventListener("telemetry", onReadCost);
+  }
   // Channel 1: capture pattern-code console.error / console.warn calls that
   // flow through the scheduler's harness console event.  The handler must
   // return args unchanged so the call still appears in the host console.
@@ -1506,7 +1525,16 @@ export async function runTestPattern(
     let actionCount = 0;
     let renderCount = 0;
 
+    if (readCost !== undefined) {
+      for (
+        const line of readCost.lines(
+          "initialization",
+          options.statsActionLimit ?? 10,
+        )
+      ) console.log(line);
+    }
     for (let i = 0; i < testSteps.length; i++) {
+      readCost?.clear();
       if (options.verbose) {
         resetAllCountBaselines();
         resetAllTimingBaselines();
@@ -1536,6 +1564,7 @@ export async function runTestPattern(
       // to the outer handler and fails the whole run (a stuck settle is fatal).
       if (isSettle) {
         if (!stepValue.skip) await settleFully(i);
+        printReadCost(`settle step ${i + 1}`, itemStart);
         continue;
       }
 
@@ -1555,6 +1584,7 @@ export async function runTestPattern(
         } else if (options.verbose) {
           console.log(`  ⊘ ${renderName} (skipped)`);
         }
+        printReadCost(`${renderName} (step ${i + 1})`, itemStart);
         continue;
       }
 
@@ -1866,6 +1896,7 @@ export async function runTestPattern(
         const statsThreshold = options.statsThreshold ?? 5000;
         const stepDuration = performance.now() - itemStart;
         if (stepDuration > statsThreshold || statsThreshold === 0) {
+          printReadCost(`step ${i + 1}`, itemStart);
           const stepLabel = isAction
             ? `action_${actionCount}`
             : `assertion_${assertionCount}`;
@@ -1957,6 +1988,7 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
+    runtime.telemetry.removeEventListener("telemetry", onReadCost);
     if (
       patternCoverage && options.patternCoverageDir &&
       writeLocalPatternCoverage

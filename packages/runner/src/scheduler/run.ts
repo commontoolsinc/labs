@@ -18,6 +18,10 @@ import {
 import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
+  beginReadAccounting,
+  finishReadAccounting,
+} from "../read-accounting.ts";
+import {
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_RETRIES_FOR_REACTIVE,
   OFF_BUDGET_RETRY_WARN_INTERVAL,
@@ -61,7 +65,11 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "./types.ts";
-import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
+import type {
+  ActionReadStats,
+  NonIdempotentReport,
+  SchedulerActionInfo,
+} from "../telemetry.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -430,6 +438,7 @@ export interface SchedulerActionRunState {
   readonly runtime: Runtime;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
+  readonly getReadAccountingEnabled: () => boolean;
   readonly retries: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
@@ -591,6 +600,7 @@ export async function runSchedulerAction(
         : {}),
     });
     const actionStartTime = performance.now();
+    if (state.getReadAccountingEnabled()) beginReadAccounting(tx);
 
     let result: any;
     return new Promise((resolve) => {
@@ -789,12 +799,29 @@ function finalizeSchedulerAction(
 ): void {
   // Record action execution time for cycle-aware scheduling
   const elapsed = performance.now() - args.actionStartTime;
-  recordActionTime(state.actionTimingState, args.action, elapsed);
+  const accesses = finishReadAccounting(args.tx);
+  let reads: ActionReadStats | undefined;
+  if (accesses !== undefined) {
+    const log = txToReactivityLog(args.tx);
+    reads = {
+      ...accesses,
+      dependencies: sortAndCompactPaths(log.reads).length +
+        sortAndCompactPaths(log.shallowReads, false).length,
+    };
+  }
+  recordActionTime(
+    state.actionTimingState,
+    args.action,
+    elapsed,
+    performance.now(),
+    reads,
+  );
   state.runtime.telemetry.submit({
     type: "scheduler.run.complete",
     actionId: args.actionId,
     actionInfo: state.getActionTelemetryInfo(args.action),
     durationMs: elapsed,
+    ...(reads === undefined ? {} : { reads }),
     ...(args.error !== undefined
       ? { error: args.error instanceof Error ? args.error.message : "error" }
       : {}),

@@ -317,6 +317,7 @@ export class Scheduler {
     actionStats: this.#actionStats,
     getActionId: (action) => this.#getActionId(action),
   };
+  #readAccountingEnabled = false;
   #actionIdentityState: SchedulerActionIdentityState = {
     anonymousActionIds: new WeakMap<Action | EventHandler, string>(),
     anonymousActionCounter: 0,
@@ -1837,6 +1838,14 @@ export class Scheduler {
   }
 
   /**
+   * Enables read accounting for subsequent reactive action bodies, including
+   * builtins and effects. In-flight runs retain their starting setting.
+   */
+  setReadAccountingEnabled(enabled: boolean): void {
+    this.#readAccountingEnabled = enabled;
+  }
+
+  /**
    * Returns filter statistics for the current/last execution cycle.
    */
   getFilterStats(): { filtered: number; executed: number } {
@@ -2764,6 +2773,7 @@ export class Scheduler {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
+      getReadAccountingEnabled: () => this.#readAccountingEnabled,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,

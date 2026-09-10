@@ -2,9 +2,10 @@
 // to record events that can be subscribed to in other
 // contexts to visualize or log events inside the runtime.
 
-import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
 import type { FabricValue } from "@commonfabric/data-model";
 
+import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
+import type { ReadAccessCounts } from "./read-accounting.ts";
 import { IMemoryChange } from "./storage/interface.ts";
 
 /**
@@ -16,6 +17,19 @@ export type ActionStats = {
   averageTime: number;
   lastRunTime: number;
   lastRunTimestamp: number; // When the action last ran (performance.now())
+
+  /** Read measurements for runs that explicitly enabled accounting. */
+  reads?: {
+    runCount: number;
+    total: ActionReadStats;
+    last: ActionReadStats;
+  };
+};
+
+/** Read work and compacted scheduling dependencies at action-body completion. */
+export type ActionReadStats = ReadAccessCounts & {
+  /** Recursive and shallow read paths, compacted separately as in scheduling. */
+  readonly dependencies: number;
 };
 
 // Types for scheduler graph visualization
@@ -71,6 +85,9 @@ export type SchedulerGraphSnapshot = {
 };
 
 export type SchedulerActionInfo = {
+  /** Verified authored call site, when this action has one. */
+  src?: string;
+
   patternName?: string;
   moduleName?: string;
   reads?: string[];
@@ -161,6 +178,9 @@ export type RuntimeTelemetryMarker = {
   actionId: string;
   actionInfo?: SchedulerActionInfo;
   durationMs: number;
+  /** This body's read work when accounting was enabled at its start. */
+  reads?: ActionReadStats;
+
   error?: string;
 } | {
   // Emitted as the runner begins installing a piece's registration under

@@ -79,6 +79,7 @@ import {
   type ValuePath,
 } from "./link-types.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
+import { recordLinkResolution } from "./read-accounting.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
@@ -2496,6 +2497,7 @@ function followPointer(
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
   // We use a nonRecursive read, since we may not need everything at the target.
+  recordLinkResolution(tx);
   const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
