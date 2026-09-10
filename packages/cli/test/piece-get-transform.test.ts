@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
@@ -2080,7 +2080,7 @@ describe("cf cell get transforms", () => {
     }
   });
 
-  it("returns the projection from its accepted setup without another setup commit", async () => {
+  it("sets up the projection once and returns its result without runtime-owned setup", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(
       space,
@@ -2091,26 +2091,24 @@ describe("cf cell get transforms", () => {
     source.set({ id: 1 });
     expect((await tx.commit()).ok).toBeDefined();
 
-    // The CLI owns the first setup transaction. Refuse any subsequent owned
-    // setup so a swallowed rejection cannot masquerade as an empty result.
-    const originalEditWithRetry = runtime.editWithRetry;
-    runtime.editWithRetry = () =>
+    // Count caller-provided setup and refuse runtime-owned setup so neither
+    // path can silently introduce a second setup transaction.
+    using setups = spy(runtime, "setup");
+    using ownedSetups = stub(runtime, "editWithRetry", () =>
       Promise.resolve({
         error: {
           name: "StorageTransactionAborted",
           message: "forced setup rejection",
           reason: "forced setup rejection",
         },
-      });
-    try {
-      expect(
-        await deriveSelectedValue(runtime, space, source, {
-          projection: parseSelectProjection("id"),
-        }),
-      ).toEqual({ id: 1 });
-    } finally {
-      runtime.editWithRetry = originalEditWithRetry;
-    }
+      }));
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("id"),
+      }),
+    ).toEqual({ id: 1 });
+    expect(setups.calls).toHaveLength(1);
+    expect(ownedSetups.calls).toHaveLength(0);
   });
 
   for (const failure of ["sync", "start", "missing"] as const) {
