@@ -40,6 +40,9 @@ async function settle<T>(operation: Promise<T>): Promise<T> {
   return await operation;
 }
 
+const selector = Deno.args[0] ?? "";
+let registered = 0;
+
 describe("SpaceServer", () => {
   let server: MemoryServer.Server;
   let serving: SpaceServer | undefined;
@@ -284,10 +287,12 @@ describe("SpaceServer", () => {
       await fixture.drain();
       expect(failures).toBe(1);
       for (const wave of fixture.snapshots) {
-        expect(wave.entries.filter((entry) =>
-          entry.consequenced !== true && typeof entry.seq === "number" &&
-          entry.seq <= wave.watermark
-        )).toEqual([]);
+        expect(
+          wave.entries.filter((entry) =>
+            entry.consequenced !== true && typeof entry.seq === "number" &&
+            entry.seq <= wave.watermark
+          ),
+        ).toEqual([]);
       }
       expect(fixture.called).toEqual([]);
       expect(fixture.stats.events.visibilityBarriers).toBe(1);
@@ -318,6 +323,47 @@ describe("SpaceServer", () => {
       }
     });
   }
+
+  it("processes a re-admission after a consequenced legacy entry with no sequence", async () => {
+    const fixture = await openFixture();
+    await fixture.admit();
+    await fixture.drain();
+    expect(fixture.called).toEqual(["A", "B"]);
+    // Legacy consumed history holds the same IDs without a sequence. New
+    // admission stamps a distinct sequence, which identifies the live slot.
+    Engine.applyCommit(fixture.engine, {
+      space,
+      sessionId: "visibility-legacy-history",
+      principal: service.did(),
+      commitClass: "system",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: sidecars.map((id) => ({
+          op: "patch",
+          id,
+          patches: [{ op: "remove", path: "/value/entries/0/seq" }],
+        })),
+      },
+    });
+    expect(fixture.entries().map((entry) => entry.seq)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    fixture.notices.length = 0;
+    await fixture.admit();
+    const before = fixture.snapshots.length;
+    await fixture.drain();
+    expect(fixture.snapshots[before]?.log).toEqual(["A", "B", "A", "B"]);
+    expect(fixture.called).toEqual(["A", "B", "A", "B"]);
+    expect(fixture.stats.events.skippedIdempotent).toBe(0);
+    expect(fixture.entries().map((entry) => entry.consequenced)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
 
   it("marks the current entry index after consumed history compacts during synchronization", async () => {
     const fixture = await openFixture();
@@ -374,15 +420,14 @@ describe("SpaceServer", () => {
     const fixture = await openFixture();
     await fixture.admit();
     const provider = fixture.runtime.storageManager.open(space);
-    const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    using _pull = stub(provider, "pullToServerHead", async () => {
-      entered.resolve();
+    using pulls = stub(provider, "pullToServerHead", async () => {
       await release.promise;
     });
     try {
       await fixture.drain();
-      await entered.promise;
+      expect(pulls.calls, "the visibility response must start before teardown")
+        .toHaveLength(1);
       await settle(fixture.serving.park("visibility-test"));
       release.resolve();
       await clock.settle();
@@ -518,6 +563,12 @@ describe("SpaceServer", () => {
   }
 });
 
+if (selector !== "" && registered === 0) {
+  throw new Error(`No visibility control matches: ${selector}`);
+}
+
 function it(name: string, body: () => Promise<void>) {
-  if (name.includes(Deno.args[0] ?? "")) registerIt(name, body);
+  if (!name.includes(selector)) return;
+  registered += 1;
+  registerIt(name, body);
 }

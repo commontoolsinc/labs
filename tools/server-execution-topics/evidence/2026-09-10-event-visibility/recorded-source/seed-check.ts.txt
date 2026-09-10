@@ -28,28 +28,18 @@ const expectedPosture =
 expect(experimentalOptionsFromEnv(Deno.env.get).serverExecution).toBe(
   expectedPosture,
 );
-const topicCount = Number(Deno.env.get("CF_TOPIC_BOARD_TOPICS") ?? 5);
-if (!Number.isInteger(topicCount) || topicCount < 1) {
-  throw new Error("CF_TOPIC_BOARD_TOPICS must be a positive integer.");
-}
 const identity = await seedIdentity("server-execution topics campaign");
 const shape = {
-  topicCount,
+  topicCount: Number(Deno.env.get("CF_TOPIC_BOARD_TOPICS") ?? 5),
   crossrefsPerTopic: 2,
   citingTopics: 3,
   bodyWords: 120,
 };
 const fixture = await seedTopicBoard({ apiUrl, spaceName, identity, ...shape });
 await Deno.writeTextFile(join(runDir, "fixture.json"), JSON.stringify(fixture));
-const response = await fetch(new URL("/api/health/stats", apiUrl));
-if (!response.ok) {
-  throw new Error(
-    `Fetching /api/health/stats failed with status ${response.status}.`,
-  );
-}
 await Deno.writeTextFile(
   join(runDir, "stats-after-seed.json"),
-  await response.text(),
+  await (await fetch(new URL("/api/health/stats", apiUrl))).text(),
 );
 
 const reader = await initializePiecesController({
