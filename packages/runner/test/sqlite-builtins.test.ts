@@ -18,6 +18,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
 
 import { createBuilder } from "../src/builder/factory.ts";
+import { getTopFrame, popFrame } from "../src/builder/pattern.ts";
 import { sqliteQueryStateNodeFactory } from "../src/builtins/sqlite/query-node.ts";
 import { createCell } from "../src/cell.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
@@ -378,6 +379,78 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
           labelView: rowLabel,
           logicalPath: ["0", "1"],
         })).toEqual(expect.arrayContaining(["secret", "column-secret"]));
+      } finally {
+        cancel();
+      }
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
+  it("anchors labeled rows without an ambient builder frame", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    const issued = defer<void>();
+    const reply = defer<{
+      rows: { id: number }[];
+      columns: { output: string; table: string; column: string }[];
+    }>();
+    provider.sqliteQuery = () => {
+      issued.resolve();
+      return reply.promise;
+    };
+    try {
+      const queryPattern = cf.pattern(() => {
+        const { table, constant } = cf.cfSqlite;
+        const db = cf.sqliteDatabase({
+          tables: {
+            items: table(
+              { id: "integer primary key" },
+              () => ({ confidentiality: constant("secret") }),
+            ),
+          },
+        });
+        return cf.sqliteQuery({
+          db,
+          sql: "SELECT id FROM items",
+          reactOn: db,
+        });
+      });
+      const resultCell = runtime.getCell(
+        space,
+        "sqlite-frameless-labeled-row",
+        queryPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, queryPattern, {}, resultCell);
+      await tx.commit();
+
+      const view = result as unknown as {
+        get: () => QueryValue;
+        sink: (f: () => void) => () => void;
+      };
+      const cancel = view.sink(() => {});
+      try {
+        await issued.promise;
+        const frame = getTopFrame();
+        expect(frame?.runtime).toBe(runtime);
+        popFrame(frame);
+        reply.resolve({
+          rows: [{ id: 1 }],
+          columns: [{ output: "id", table: "items", column: "id" }],
+        });
+
+        await runtime.settled();
+        expect(view.get()).toEqual({ rows: [{ id: 1 }] });
+        const rowLabel = cfcLabelViewForCell(
+          result.key("rows").key(0).resolveAsCell(),
+        );
+        expect(cfcConfidentialityForObservationNode({
+          labelView: rowLabel,
+          logicalPath: [],
+        })).toContainEqual("secret");
       } finally {
         cancel();
       }

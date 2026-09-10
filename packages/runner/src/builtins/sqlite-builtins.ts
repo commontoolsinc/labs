@@ -21,6 +21,7 @@
 // this read path.
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import { popFrame, pushFrame } from "../builder/pattern.ts";
 import { parseLink } from "../link-utils.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import {
@@ -1463,7 +1464,7 @@ export function sqliteQuery(
                   id: toURI(createRef({ id: i }, {
                     parent: { id: base.id, space: base.space },
                     path: [...base.path, "value", "rows"],
-                    context: "sqlite-entry-row",
+                    context: `sqlite-entry-row:${hash}`,
                   })),
                   path: [],
                   schema: {
@@ -1477,21 +1478,36 @@ export function sqliteQuery(
                 rowCell.set(row);
                 return rowCell;
               });
-              const target = writeSchema
-                ? result.asSchema(writeSchema).withTx(wtx)
-                : result.withTx(wtx);
-              target.set({
-                pending: false,
-                value: {
-                  rows: storedRows,
-                  ...(withheld !== undefined ? { withheld } : {}),
-                },
-                // Persist one row collection. The legacy channel resolves this
-                // relative link, while the public channel reads value.rows.
-                result: legacyRowsLink,
-                requestHash: hash,
-                ...(withheld !== undefined ? { withheld } : {}),
+              // The async writeback has no builder frame of its own. Supply a
+              // request-stable internal frame so the ordinary Cell.set array
+              // walk gives object rows entity identities without inheriting
+              // an unrelated runtime's ambient frame. A new request gets new
+              // row docs, allowing its data-derived label to change.
+              const rowFrame = pushFrame({
+                cause: `sqlite-query-rows:${hash}`,
+                runtime,
+                tx: wtx,
+                space: base.space,
               });
+              try {
+                const target = writeSchema
+                  ? result.asSchema(writeSchema).withTx(wtx)
+                  : result.withTx(wtx);
+                target.set({
+                  pending: false,
+                  value: {
+                    rows: storedRows,
+                    ...(withheld !== undefined ? { withheld } : {}),
+                  },
+                  // Persist one row collection. The legacy channel resolves this
+                  // relative link, while the public channel reads value.rows.
+                  result: legacyRowsLink,
+                  requestHash: hash,
+                  ...(withheld !== undefined ? { withheld } : {}),
+                });
+              } finally {
+                popFrame(rowFrame);
+              }
               // Per-row label attachment (CFC Phase 3): object rows split into
               // entity docs. Labeled entry-list rows are anchored explicitly
               // because arrays otherwise remain inline. Both forms attach the
