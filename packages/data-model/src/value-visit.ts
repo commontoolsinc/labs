@@ -78,7 +78,10 @@ export type RecurseForm = { type: "recurse"; value: true };
  * visitor engine to redo visitor dispatch with the replacement (as if the
  * replacement were the value in the same position as the original).
  */
-export type ReplaceForm<DomainExtra> = { type: "replace"; value: DomainFor<DomainExtra> };
+export type ReplaceForm<DomainExtra> = {
+  type: "replace";
+  value: DomainFor<DomainExtra>;
+};
 
 /**
  * A `visitSubtype` form. This is returned by visitor methods which cover
@@ -288,7 +291,9 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * the visitor system will call one of `visitFabricContainer()`,
    * `visitNonFabricValue()`, or `visitPrimitive()`.
    */
-  visitValue(value: DomainFor<DomainExtra>): DispatchingVisitorResult<DomainExtra, ResultType>;
+  visitValue(
+    value: DomainFor<DomainExtra>,
+  ): DispatchingVisitorResult<DomainExtra, ResultType>;
 }
 
 /**
@@ -438,14 +443,16 @@ export class EmptyValueVisitor<DomainExtra, ResultType>
 
   /** @inheritDoc */
   visitPrimitive(
-    _value: (Primitive | FabricPrimitive),
+    _value: Primitive | FabricPrimitive,
     _type: ValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
-  visitValue(_value: DomainFor<DomainExtra>): DispatchingVisitorResult<DomainExtra, ResultType> {
+  visitValue(
+    _value: DomainFor<DomainExtra>,
+  ): DispatchingVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 }
@@ -644,7 +651,10 @@ class VisitInProgress<DomainExtra, ResultType> {
    */
   #visitResolvingSubtype(
     value: DomainFor<DomainExtra>,
-  ): Exclude<LeafVisitorResult<DomainExtra, ResultType>, ReplaceForm<DomainExtra>> {
+  ): Exclude<
+    LeafVisitorResult<DomainExtra, ResultType>,
+    ReplaceForm<DomainExtra>
+  > {
     const vis = this.#visitor;
 
     for (;;) {
