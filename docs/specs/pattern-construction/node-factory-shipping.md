@@ -986,9 +986,16 @@ detached named reference and its concrete canonical source declaration remain
 authoritative. Generic declarations and type-parameter references are not
 concrete recovery sources. Authored unions collapsed to `unknown`, and explicit
 `unknown` keywords or declarations, emit the runtime-dropping unknown schema. A
-materialized snapshot spread into an array is a full-shape read: its element
-schema must not be shrunk to `unknown`, because the callback observes every
-copied element. Calling a materialized array-snapshot method whose result
+lift factory's injected argument schema remains authoritative when that factory
+is invoked from a more concrete call site: the caller's binding schema does not
+replace an authored `unknown` parameter with the caller's payload type. A
+callback that examines the payload itself, such as a runtime sanitizer, must
+therefore expose a concrete readable parameter type (or wrap a broader helper
+in a concretely typed lift callback); `unknown` intentionally exposes only an
+opaque reference. A materialized snapshot spread into an array is a full-shape
+read: its element schema must not be shrunk to `unknown`, because the callback
+observes every copied element. Calling a materialized array-snapshot method
+whose result
 retains complete elements (`concat`, `slice`, `toReversed`, `toSpliced`, or
 `with`) is likewise a full-shape read, including when the receiver is a union
 of array, tuple, and branded-intersection forms. Element or array arguments
