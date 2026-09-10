@@ -603,6 +603,14 @@ itself.
   every test in the missing part look new — which passed and failed at
   this one commit, across the repeats a lane runs, across shards and
   across attempts.
+- **A test too flaky for a change that failed every one of its runs at
+  this commit and passed every one at the parent.** Those failures do not
+  fail the run, so the note is the only thing that carries them to a
+  person. It says the test is one the store has seen disagreeing with
+  itself, that the run stayed green, and that one bad runner produces the
+  same record, since every run of a test at a commit shares a lane. The
+  extra runs are what make the observation possible, so this note is
+  silent until they land.
 - **A rename that discarded history**, with the number of catches it
   would bring back and the line to append to
   `tasks/test-identity-aliases.jsonl`. Four things have to hold: the

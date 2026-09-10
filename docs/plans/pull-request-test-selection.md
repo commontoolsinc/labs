@@ -173,8 +173,9 @@ belong.
    for the group.
 6. A push to `main` still runs every test, and every failure fails the
    run, apart from the tests measurement has shown too noisy to judge a
-   change by, which run there more often than anywhere else and report
-   rather than fail.
+   change by, which report rather than fail. Those of them that can be
+   run without their neighbours run there more often than anywhere else,
+   which is what keeps their measurement going.
 7. Selection is recomputed every few hours, and what it produces is not
    stored in git.
 8. Adding a test, a kind of test, or a configuration of existing tests
