@@ -9,7 +9,7 @@ import type { BuiltInCompileAndRunParams } from "commonfabric";
 import { compileAndRun } from "../../src/builtins/compile-and-run.ts";
 import type { Cell } from "../../src/cell.ts";
 import { readStoredCfcMetadata } from "../../src/cfc/metadata.ts";
-import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "../../src/executor/outbox.ts";
+import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "../../src/executor/runner-acceptance.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,

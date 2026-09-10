@@ -45,6 +45,7 @@ import type { PostCommitSideEffect } from "../cfc/types.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { WaveRunContext } from "./wave.ts";
 import type { ServingLoopStats } from "./stats.ts";
+import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "./runner-acceptance.ts";
 
 const logger = getLogger("space-outbox", { enabled: true, level: "warn" });
 
@@ -56,19 +57,6 @@ export interface SealedEffectBatch {
   tx: IExtendedStorageTransaction;
   effects: readonly PostCommitSideEffect[];
   context: WaveRunContext | undefined;
-}
-
-/** Local runner state published only after its enclosing wave accepts. */
-export const RUNNER_ACCEPTANCE_EFFECT_KIND = "runner-acceptance";
-
-/** Settles local runner callbacks when their deferred effects are discarded. */
-export function abandonRunnerAcceptanceEffects(
-  effects: readonly PostCommitSideEffect[],
-  reason: unknown,
-): void {
-  for (const effect of effects) {
-    if (effect.kind === RUNNER_ACCEPTANCE_EFFECT_KIND) effect.abandon?.(reason);
-  }
 }
 
 /** Per-space egress budgets (Phase 6 — serving-loop.md §5's

@@ -116,11 +116,8 @@ import {
   type ServingLoopStats,
   updateDeliveryCheckpointStats,
 } from "./stats.ts";
-import {
-  abandonRunnerAcceptanceEffects,
-  type SealedEffectBatch,
-  SpaceOutbox,
-} from "./outbox.ts";
+import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
+import { abandonRunnerAcceptanceEffects } from "./runner-acceptance.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
 import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../scheduler/constants.ts";

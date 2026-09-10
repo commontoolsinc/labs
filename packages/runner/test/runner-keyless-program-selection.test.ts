@@ -5,7 +5,7 @@ import { Identity } from "@commonfabric/identity";
 
 import type { Cell } from "../src/cell.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
-import { abandonRunnerAcceptanceEffects } from "../src/executor/outbox.ts";
+import { abandonRunnerAcceptanceEffects } from "../src/executor/runner-acceptance.ts";
 import {
   requireWaveAcceptance,
   stampWaveRunContext,

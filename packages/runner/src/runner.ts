@@ -123,7 +123,7 @@ import {
   waveRunContextOf,
   waveSettlementOf,
 } from "./executor/wave.ts";
-import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "./executor/outbox.ts";
+import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "./executor/runner-acceptance.ts";
 import {
   causalFormOfBinding,
   findAllWriteRedirectCells,

@@ -35,8 +35,8 @@ import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import {
   abandonRunnerAcceptanceEffects,
   RUNNER_ACCEPTANCE_EFFECT_KIND,
-  SpaceOutbox,
-} from "../src/executor/outbox.ts";
+} from "../src/executor/runner-acceptance.ts";
+import { SpaceOutbox } from "../src/executor/outbox.ts";
 import { emptyServingLoopStats } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
