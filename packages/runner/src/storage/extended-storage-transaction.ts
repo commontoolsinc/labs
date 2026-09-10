@@ -722,15 +722,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.diagnostics.push(message);
   }
 
+  // A refusal this transaction has already reported. Prepare decides and
+  // reports; commit reports the refusals prepare never saw.
+  #cfcDenialReported = false;
+
   /**
    * The dials behind a write-gate decision. They decide the outcome, and they
    * are configured on the Runtime, out of sight of the code whose write the
    * gate refused.
    */
-  // A refusal this transaction has already reported. Prepare decides and
-  // reports; commit reports the refusals prepare never saw.
-  #cfcDenialReported = false;
-
   #cfcDials(): Record<string, unknown> {
     return {
       enforcement: this.#cfcState.enforcementMode,

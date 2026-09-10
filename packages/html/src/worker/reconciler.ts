@@ -3972,8 +3972,11 @@ export class WorkerReconciler {
                   policyChildren.blocked;
               childState.elementState.renderPolicy = policy;
               childState.elementState.childRenderPolicy = childPolicy;
-              childState.elementState.childrenBlockedByPolicy =
-                policyChildren.blocked;
+              this.#setChildrenBlocked(
+                childState.elementState,
+                policyChildren,
+                childPolicy,
+              );
               childState.elementState.sourceChildren = sanitized.children;
               childState.elementState.sourceProps = sanitized.props;
               // Taking over a wrapper for an authored node of the same tag is

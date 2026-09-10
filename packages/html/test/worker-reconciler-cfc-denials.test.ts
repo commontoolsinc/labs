@@ -106,6 +106,8 @@ Deno.test("worker reconciler CFC denials", async (t) => {
   ): Promise<string> => {
     const logger = getLogger("cfc");
     const level = logger.level;
+    const stderrRoute = Deno.env.get("LOG_TO_STDERR");
+    Deno.env.set("LOG_TO_STDERR", "0");
     const said: string[] = [];
     const real = globalThis.console;
     const capture = (...args: unknown[]) => {
@@ -119,11 +121,6 @@ Deno.test("worker reconciler CFC denials", async (t) => {
       log: capture,
       debug: capture,
     } as Console;
-    const realWriteSync = Deno.stderr.writeSync;
-    Deno.stderr.writeSync = (data: Uint8Array) => {
-      capture(new TextDecoder().decode(data));
-      return data.length;
-    };
     logger.level = options.debug ? "debug" : "info";
     resetCfcDenialAnnouncements();
     let cancel = () => {};
@@ -139,7 +136,8 @@ Deno.test("worker reconciler CFC denials", async (t) => {
     } finally {
       cancel();
       globalThis.console = real;
-      Deno.stderr.writeSync = realWriteSync;
+      if (stderrRoute === undefined) Deno.env.delete("LOG_TO_STDERR");
+      else Deno.env.set("LOG_TO_STDERR", stderrRoute);
       logger.level = level;
     }
     return said.join("\n");

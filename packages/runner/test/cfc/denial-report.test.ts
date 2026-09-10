@@ -15,6 +15,8 @@ import {
 const said = (body: () => void, options: { debug?: boolean } = {}): string => {
   const logger = getLogger("cfc");
   const level = logger.level;
+  const stderrRoute = Deno.env.get("LOG_TO_STDERR");
+  Deno.env.set("LOG_TO_STDERR", "0");
   const console = globalThis.console;
   const lines: string[] = [];
   const capture = (...args: unknown[]) => {
@@ -28,17 +30,13 @@ const said = (body: () => void, options: { debug?: boolean } = {}): string => {
     log: capture,
     debug: capture,
   } as Console;
-  const realWriteSync = Deno.stderr.writeSync;
-  Deno.stderr.writeSync = (data: Uint8Array) => {
-    capture(new TextDecoder().decode(data));
-    return data.length;
-  };
   logger.level = options.debug ? "debug" : "info";
   try {
     body();
   } finally {
     globalThis.console = console;
-    Deno.stderr.writeSync = realWriteSync;
+    if (stderrRoute === undefined) Deno.env.delete("LOG_TO_STDERR");
+    else Deno.env.set("LOG_TO_STDERR", stderrRoute);
     logger.level = level;
   }
   return lines.join("\n");
