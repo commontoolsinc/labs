@@ -14,15 +14,16 @@ not restorable backups, live in [`DEPLOY-AND-SHARE.md`](./DEPLOY-AND-SHARE.md).
 By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
 
-Each case opens one poll across as many runtimes as it has voters, gives every
-voter an identity, joins them, has the host add the options, and then runs the
-requested number of rounds of concurrent voting. Every phase is sampled for
+Each case opens one poll across as many runtimes as it has users, gives every
+user an identity, joins them, has the host add the options, and then runs the
+requested number of rounds of concurrent voting by the users who vote, which is
+all of them unless `--voters` says otherwise. Every phase is sampled for
 scheduler graph size, settle cost, and action-run trace, and each case ends with
 the commit-churn counters and a cross-session convergence check. The sampled
 phases go to standard output as one JSON document; the per-phase summary lines
 go to standard error.
 
-Run a single lunch-poll scenario with `N` options, `M` voters, and `X` vote
+Run a single lunch-poll scenario with `N` options, `M` users, and `X` vote
 cycles by setting one option count, one user count, and one round count. `M`
 must be at least `1` because one user is the host that creates options and
 drives refreshes:

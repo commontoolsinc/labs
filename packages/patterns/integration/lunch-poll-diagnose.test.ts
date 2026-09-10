@@ -86,6 +86,12 @@ describe("lunch-poll-diagnose", () => {
     ]);
   });
 
+  it("refuses a case with more voters than users before opening a harness", async () => {
+    await expect(
+      runCase({ optionCount: 1, userCount: 2, voteRounds: 0, voters: 3 }),
+    ).rejects.toThrow("--voters=3 exceeds the 2 users of 1x2");
+  });
+
   it("measures a poll two voters joined, filled, and voted in", async () => {
     const result = await runCase({
       optionCount: 1,

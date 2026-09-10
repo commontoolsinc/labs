@@ -767,11 +767,17 @@ async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
 }
 
 /**
- * Run one case end to end: open the poll across a runtime per voter, give each
- * voter an identity, join them, add the options, and vote. Exported so a test
- * can drive the probe's own setup rather than a copy of it.
+ * Run one case end to end: open the poll across a runtime per user, give each
+ * user an identity, join them, add the options, and have the voting subset
+ * cast. Exported so a test can drive the probe's own setup rather than a copy
+ * of it. A `voters` above `userCount` is refused here as on the command line.
  */
 export async function runCase(config: CaseConfig): Promise<CaseResult> {
+  validateVoters(
+    config.voters,
+    config.userCount,
+    `${config.optionCount}x${config.userCount}`,
+  );
   traceCursors.clear();
   const harness = await createHarness(config);
   const phases: PhaseSample[] = [];
