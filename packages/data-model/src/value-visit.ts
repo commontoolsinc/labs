@@ -61,7 +61,7 @@ export type ContainerIterationResult<ResultType> =
  *
  * See the included result types for details on what they mean.
  */
-export type GeneralVisitorResult<Domain, ResultType> =
+export type DispatchingVisitorResult<Domain, ResultType> =
   | LeafVisitorResult<Domain, ResultType>
   | VisitSubtypeForm;
 
@@ -193,7 +193,7 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    */
   visitFabricContainer(
     value: Domain & FabricContainerValue,
-  ): GeneralVisitorResult<Domain, ResultType>;
+  ): DispatchingVisitorResult<Domain, ResultType>;
 
   /**
    * Visits an item from a `mapContents` result.
@@ -224,12 +224,12 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    * the visitor system will call one of `visitFabricContainer()`,
    * `visitNonFabricValue()`, or `visitPrimitive()`.
    */
-  visitValue(value: Domain): GeneralVisitorResult<Domain, ResultType>;
+  visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType>;
 }
 
 /**
- * EmptyNo-op implementation of `ValueVisitor`: Every method is implemented and
- * just returns `undefined`.
+ * Empty implementation of `ValueVisitor`: Every method is implemented and just
+ * returns `undefined`.
  */
 export class EmptyValueVisitor<Domain, ResultType>
   implements ValueVisitor<Domain, ResultType> {
@@ -277,7 +277,7 @@ export class EmptyValueVisitor<Domain, ResultType>
   /** @inheritDoc */
   visitFabricContainer(
     value: Domain & FabricContainerValue,
-  ): GeneralVisitorResult<Domain, ResultType> {
+  ): DispatchingVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
@@ -305,7 +305,7 @@ export class EmptyValueVisitor<Domain, ResultType>
   }
 
   /** @inheritDoc */
-  visitValue(value: Domain): GeneralVisitorResult<Domain, ResultType> {
+  visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType> {
     return undefined;
   }
 }
@@ -473,7 +473,10 @@ class VisitInProgress<Domain, ResultType> {
    */
   #visitResolvingCyclesAndReplacement(
     value: Domain,
-  ): Exclude<GeneralVisitorResult<Domain, ResultType>, ReplaceForm<Domain>> {
+  ): Exclude<
+    DispatchingVisitorResult<Domain, ResultType>,
+    ReplaceForm<Domain>
+  > {
     const vis = this.#visitor;
 
     for (;;) {
@@ -501,7 +504,7 @@ class VisitInProgress<Domain, ResultType> {
     const vis = this.#visitor;
 
     for (;;) {
-      let result: GeneralVisitorResult<Domain, ResultType> = this
+      let result: DispatchingVisitorResult<Domain, ResultType> = this
         .#visitResolvingCyclesAndReplacement(value);
 
       if (result?.type !== "visitSubtype") {
