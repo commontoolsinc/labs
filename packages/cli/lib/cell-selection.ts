@@ -3393,7 +3393,7 @@ export async function deriveSelectedValue(
   if (installedPattern === undefined) reads.patterns.set(readKey, mainPattern);
   const errors = runtimeErrorLog(runtime);
   const errorCountBefore = errors.length;
-  const result = runtime.run(
+  const result = await runtime.setup(
     tx,
     installedPattern ?? mainPattern,
     {
@@ -3416,6 +3416,13 @@ export async function deriveSelectedValue(
         `Could not apply get transform: ${committed.error}`,
       );
     }
+    // A session-local projection can reuse space-scoped mapped children.
+    // The committed argument lets synchronized startup resolve their identities
+    // and load their execution state before the coordinator initializes them.
+    await timeSelectionPhase(
+      "start",
+      () => runtime.runSynced(result.withTx(), installedPattern ?? mainPattern),
+    );
     // pull() is the readiness boundary for this output: it drives transitive
     // computations, waits for linked documents those reads discover, and
     // re-idles after each arrival. Nothing downstream re-checks it: the
