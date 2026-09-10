@@ -1,15 +1,15 @@
 {
-  "updated": "2026-09-10T21:32:31.901383+00:00",
+  "updated": "2026-09-10T21:59:50.470379+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Merged #7241 after all 69 gates, a latest Cubic review reporting zero issues, and antagonistic review. Browser benchmark PR #7261 is under CI. Read-budget PR #7257 has six Cubic findings being fixed and revalidated.",
-  "review": "Landed: #7241 and #7256. #7257: settlement, contributor attribution, event completion, skipped-limit documentation, and acceptance evidence fixes are under local validation. #7261: antagonistic review clean; CI/Cubic pending.",
+  "activity": "Merged #7241 and #7256. Benchmark #7261 and dashboard #7264 have clean latest Cubic reviews and are completing CI. Read-budget fixes are pushed in #7257; Cubic skipped the rebased push, so a fresh review remains required. Linked-profile remote-row probes pass.",
+  "review": "Antagonistic reviews completed for budget, benchmark, dashboard, and initial C1 probes. Cubic is clean on latest #7261 and #7264; #7257 needs a fresh review after rebase.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
-    "#7257: full runner before latest review fixes passed 1,410 tests / 8,761 steps. Latest focused fixes pass 22 CLI and 19 lifecycle steps; broader revalidation is running.",
-    "#7261: all three browser sizes passed; fixture assertions, patterns package tests, all repository type-check groups, formatting/lint passed. CI and Cubic pending."
+    "#7257: full runner 1,410 tests / 8,765 steps passed. Full CLI 1,821 tests / 2,916 steps passed with two known baseline color failures. Rebased focused tests and all 46 type-check groups pass.",
+    "#7261: all three browser sizes passed. Final click/commit guard passes real-browser validation; latest Cubic reports zero issues. CI running."
   ],
   "stages": [
     {
@@ -22,25 +22,25 @@
       "id": "A1",
       "title": "Reactive read accounting",
       "status": "done",
-      "detail": "Core instrumentation shipped in #7246. Additional accounting and reporting regressions are being reconciled in #7241."
+      "detail": "Core instrumentation shipped in #7246; additional accounting and reporting regressions landed in #7241."
     },
     {
       "id": "A2",
       "title": "Attributed CLI reports",
       "status": "done",
-      "detail": "Core instrumentation shipped in #7246. Additional accounting and reporting regressions are being reconciled in #7241."
+      "detail": "Core instrumentation shipped in #7246; additional accounting and reporting regressions landed in #7241."
     },
     {
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "PR #7257: six Cubic findings are addressed locally; strengthened settlement, attribution, and event-completion regressions pass. Full revalidation and review remain before landing."
+      "detail": "Six Cubic findings fixed and validated in #7257. Fresh review required after rebasing onto merged #7241; CI running."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "review",
-      "detail": "Browser benchmark PR #7261 records all three sizes, worker reads and event commits; screenshots below. CI/Cubic pending. Regression ceilings follow read-budget landing."
+      "detail": "Browser benchmark #7261 has clean latest Cubic and antagonistic reviews. All three sizes recorded below; CI running."
     },
     {
       "id": "A5",
@@ -51,8 +51,8 @@
     {
       "id": "C1",
       "title": "Multi-replica reproductions",
-      "status": "next",
-      "detail": "Reproduce nested-filter and remote-row failures before choosing repairs."
+      "status": "active",
+      "detail": "Nested filters and derived tally rows pass remote-update browser and independent-replica probes with linked same-space profiles. Cold cross-space loading, membership/reordering, and production nested swatches remain; workaround retained."
     },
     {
       "id": "B1",
