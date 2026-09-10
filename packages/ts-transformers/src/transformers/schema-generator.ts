@@ -107,6 +107,10 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         // Build options for schema generation
         const generationOptions: SchemaGenerationOptions = {
           ...(widenLiterals !== undefined ? { widenLiterals } : {}),
+          // The program's own word on default-library membership; the
+          // generator only holds a checker, which cannot reach the program.
+          isDefaultLibrarySourceFile: (sourceFile) =>
+            context.isSourceFileDefaultLibrary(sourceFile),
           // The schema-generator owns the general/nested CFC alias path. Give
           // it the same spelling and stamp source used by the direct
           // WriteAuthorizedBy special case below, including for bindings
