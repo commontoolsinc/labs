@@ -304,7 +304,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
- * path into it, and where it lives.
+ * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
  * carries its whole value in its id, so the id is the one part that varies
@@ -317,6 +317,7 @@ export function dataURISyncKey(identity: {
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
+  scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
     identity.id,
@@ -324,6 +325,7 @@ export function dataURISyncKey(identity: {
     [...identity.path],
     identity.space,
     normalizeCellScope(identity.scope),
+    identity.scopeKeyIdentity,
   ]);
 }
 
@@ -2321,7 +2323,14 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(cell, space, id, schema, scope);
+      return this.#syncDataURICell(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        { ...(options?.scopeKeyIdentity ?? this.scopeKeyIdentity()) },
+      );
     }
 
     const provider = this.open(space);
@@ -2450,7 +2459,12 @@ export class StorageManager implements IStorageManager {
    * resolved error counted as the load's failure and logged.
    */
   #trackPendingProviderSync(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
     const releaseLoad = this.#registerPendingLoad(address);
@@ -2501,6 +2515,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2508,10 +2523,18 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
+      scopeKeyIdentity: identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(cell, space, id, schema, scope);
+      work = this.#syncDataURILinkTargets(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        identity,
+      );
       this.#dataURISyncs.set(cacheKey, work);
     }
     await work;
@@ -2524,6 +2547,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2546,6 +2570,7 @@ export class StorageManager implements IStorageManager {
       schema,
       promises,
       new Set(),
+      identity,
     );
     if (promises.length > 0) {
       await Promise.all(promises);
@@ -2563,6 +2588,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
+    identity?: ScopeKeyIdentity,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2579,14 +2605,25 @@ export class StorageManager implements IStorageManager {
         const scope = normalizeCellScope(
           link.scope as CellScope | undefined,
         );
+        const instance = this.#foreignInstanceKey(scope, identity);
         promises.push(
           this.#trackPendingProviderSync(
-            { space, scope, id: link.id },
+            {
+              space,
+              scope,
+              id: link.id,
+              ...(instance !== undefined ? { scopeKey: instance } : {}),
+            },
             () =>
-              this.open(space).sync(link.id!, {
-                path: link.path.map((segment) => segment.toString()),
-                schema: link.schema ?? schema ?? false,
-              }, scope),
+              this.open(space).sync(
+                link.id!,
+                {
+                  path: link.path.map((segment) => segment.toString()),
+                  schema: link.schema ?? schema ?? false,
+                },
+                scope,
+                instance,
+              ),
           ),
         );
       }
@@ -2605,6 +2642,7 @@ export class StorageManager implements IStorageManager {
           itemSchema,
           promises,
           seen,
+          identity,
         );
       }
       return;
@@ -2632,6 +2670,7 @@ export class StorageManager implements IStorageManager {
           childSchema,
           promises,
           seen,
+          identity,
         );
       }
     }

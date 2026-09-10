@@ -9,6 +9,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -647,17 +648,21 @@ describe("plain-schema array traversal", () => {
 //
 
 describe("elementSchemaFor tuple (prefixItems) schemas", () => {
-  const tupleArraySchema = {
-    type: "array",
-    prefixItems: [
-      { $ref: "#/$defs/Point" },
-      { type: "number" },
-    ],
-    items: { type: "string" },
-    $defs: {
-      Point: { type: "object", properties: { x: { type: "number" } } },
-    },
-  } as const satisfies JSONSchema;
+  // Interned, as a cell's schema is: a slot with no local ref then comes back
+  // without `$defs`. An unfrozen schema would have them attached unscanned.
+  const tupleArraySchema = internSchema(
+    {
+      type: "array",
+      prefixItems: [
+        { $ref: "#/$defs/Point" },
+        { type: "number" },
+      ],
+      items: { type: "string" },
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    } as const satisfies JSONSchema,
+  ) as JSONSchema;
 
   it("picks the slot schema for a covered index, threading $defs", () => {
     expect(elementSchemaFor(tupleArraySchema, 0)).toEqual({
@@ -666,32 +671,18 @@ describe("elementSchemaFor tuple (prefixItems) schemas", () => {
         Point: { type: "object", properties: { x: { type: "number" } } },
       },
     });
-    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({
-      type: "number",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    // A slot with no local ref needs no definitions.
+    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({ type: "number" });
   });
 
   it("picks items past the tuple slots", () => {
-    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({
-      type: "string",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({ type: "string" });
   });
 
   it("treats an index-less element as rest-region (items)", () => {
     // elementById is id-keyed: tuple slots are positional and cannot be
     // id-addressed, so the element falls under `items`.
-    expect(elementSchemaFor(tupleArraySchema)).toEqual({
-      type: "string",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    expect(elementSchemaFor(tupleArraySchema)).toEqual({ type: "string" });
   });
 
   it("yields undefined for a pure tuple (no items) without an index", () => {

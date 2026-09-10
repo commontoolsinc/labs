@@ -78,6 +78,16 @@ export type EventHandler =
   & ((tx: IExtendedStorageTransaction, event: any) => any)
   & {
     /**
+     * Alternative implementation at a shared stream address. Implementations
+     * coexist by key; `matches()` reads the selector through the event actor's
+     * transaction so dependency preflight and dispatch track the same inputs.
+     */
+    implementationSelection?: {
+      key: string;
+      matches(tx: IExtendedStorageTransaction): boolean;
+    };
+
+    /**
      * Optional callback to populate a transaction with the handler's read dependencies.
      * Called by the scheduler to discover what cells the handler will read.
      * The callback should read all cells (using .get({ traverseCells: true })) that
@@ -383,6 +393,9 @@ export type QueuedEvent = {
   action: Action;
   handler: EventHandler;
   event: any;
+
+  /** Guarded implementation whose input dependencies passed preflight. */
+  preflightImplementation?: EventHandler;
 
   /**
    * Payload keys the RUNTIME itself injected into `event`'s value (send's

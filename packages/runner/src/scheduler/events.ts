@@ -1,5 +1,9 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { DataUnavailableReason } from "@commonfabric/data-model/fabric-instances";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+
+import { createRef } from "../create-ref.ts";
+import { toURI } from "../uri-utils.ts";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import {
@@ -12,7 +16,6 @@ import {
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
-import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -61,6 +64,7 @@ import {
   type QueuedEvent,
   type ReactivityLog,
   type ServedEventFailureOutcome,
+  type TelemetryAnnotations,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -68,6 +72,133 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
+
+const guardedImplementations = Symbol("guarded event implementations");
+
+type GuardedDispatcher = EventHandler & {
+  [guardedImplementations]: {
+    implementations: Map<string, { handler: EventHandler }>;
+    current(): EventHandler | undefined;
+  };
+};
+
+/** Whether a registered callback dispatches among guarded implementations. */
+function isGuardedDispatcher(
+  handler: EventHandler,
+): handler is GuardedDispatcher {
+  return guardedImplementations in handler;
+}
+
+/** Resolve exactly one implementation while recording every selector read. */
+function selectEventImplementation(
+  handler: EventHandler,
+  tx: IExtendedStorageTransaction,
+): EventHandler | undefined {
+  if (!isGuardedDispatcher(handler)) return handler;
+  const registration = handler[guardedImplementations];
+  const current = registration.current();
+  if (current !== handler) {
+    return current === undefined
+      ? undefined
+      : selectEventImplementation(current, tx);
+  }
+  let selected: EventHandler | undefined;
+  let ambiguous = false;
+  for (
+    const { handler: implementation } of registration.implementations.values()
+  ) {
+    if (implementation.implementationSelection!.matches(tx)) {
+      if (selected !== undefined) ambiguous = true;
+      selected = implementation;
+    }
+  }
+  return ambiguous ? undefined : selected;
+}
+
+/** Stable queued callback whose selection follows the live stream registry. */
+function createGuardedDispatcher(
+  ref: NormalizedFullLink,
+  eventHandlers: readonly [NormalizedFullLink, EventHandler][],
+): GuardedDispatcher {
+  const dispatcher: GuardedDispatcher = Object.assign(
+    (tx: IExtendedStorageTransaction, event: unknown) => {
+      const implementation = selectEventImplementation(dispatcher, tx);
+      if (implementation === undefined) {
+        tx.dispatchedHandlerNotRun = {
+          reason: "no unique event implementation matches the current program",
+        };
+        return;
+      }
+      return implementation(tx, event);
+    },
+    {
+      [guardedImplementations]: {
+        implementations: new Map<string, { handler: EventHandler }>(),
+        current: () => findEventHandler(eventHandlers, ref),
+      },
+    },
+  );
+  Object.defineProperty(dispatcher, "name", {
+    value: `event-dispatcher:${toURI(createRef(ref, "event dispatcher"))}`,
+  });
+  Object.defineProperty(dispatcher, "schedulerObservationIdentity", {
+    get: () => {
+      const registration = dispatcher[guardedImplementations];
+      const current = registration.current();
+      if (current !== dispatcher) {
+        return (current as Partial<TelemetryAnnotations> | undefined)
+          ?.schedulerObservationIdentity;
+      }
+      const identities = [...registration.implementations.values()].flatMap(
+        ({ handler }) => {
+          const identity = (handler as Partial<TelemetryAnnotations>)
+            .schedulerObservationIdentity;
+          return identity === undefined ? [] : [identity];
+        },
+      );
+      if (identities.length <= 1) return identities[0];
+      // A queued event supplies its actor to every candidate root before
+      // selection: the selector itself can need that actor's cold inputs.
+      // Dispatch and its diagnostics use the selected handler's own identity.
+      return {
+        ...identities[0],
+        demandRootIds: [
+          ...new Set(identities.flatMap((identity) =>
+            identity.demandRootIds ??
+              (identity.pieceRootId === undefined ? [] : [identity.pieceRootId])
+          )),
+        ],
+      };
+    },
+  });
+  dispatcher.populateDependencies = (tx, event) => {
+    selectEventImplementation(dispatcher, tx)?.populateDependencies?.(
+      tx,
+      event,
+    );
+  };
+  dispatcher.inputReadiness = (tx, event) =>
+    selectEventImplementation(dispatcher, tx)?.inputReadiness?.(tx, event) ?? {
+      ready: true,
+    };
+  return dispatcher;
+}
+
+/** The actor used by both selection probes and the eventual stamped dispatch. */
+export function eventScopeIdentity(
+  event: QueuedEvent,
+): ScopeKeyIdentity | undefined {
+  const firedAt = event.served?.firedAt;
+  if (firedAt !== undefined) {
+    return {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as ScopeKeyIdentity;
+  }
+  return event.originTx !== undefined
+    ? waveRunContextOf(event.originTx)?.scopeKeyIdentity
+    : undefined;
+}
 
 type EventCommitError = {
   readonly name?: string;
@@ -732,7 +863,34 @@ export function addSchedulerEventHandler(state: {
   const existingIndex = state.eventHandlers.findIndex(([existing]) =>
     areNormalizedLinksSame(existing, args.ref)
   );
+  const existing = state.eventHandlers[existingIndex]?.[1];
+  if (args.handler.implementationSelection !== undefined) {
+    const dispatcher = existing && isGuardedDispatcher(existing)
+      ? existing
+      : createGuardedDispatcher(args.ref, state.eventHandlers);
+    if (dispatcher !== existing) {
+      if (existingIndex !== -1) state.eventHandlers.splice(existingIndex, 1);
+      state.eventHandlers.push([args.ref, dispatcher]);
+    }
+    const key = args.handler.implementationSelection.key;
+    const registration = { handler: args.handler };
+    dispatcher[guardedImplementations].implementations.set(key, registration);
+    return () => {
+      const { implementations } = dispatcher[guardedImplementations];
+      if (implementations.get(key) !== registration) return;
+      implementations.delete(key);
+      if (implementations.size === 0) {
+        const index = state.eventHandlers.findIndex(([, h]) =>
+          h === dispatcher
+        );
+        if (index !== -1) state.eventHandlers.splice(index, 1);
+      }
+    };
+  }
   if (existingIndex !== -1) {
+    if (existing && isGuardedDispatcher(existing)) {
+      existing[guardedImplementations].implementations.clear();
+    }
     state.eventHandlers.splice(existingIndex, 1);
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
@@ -884,21 +1042,11 @@ export function preflightQueuedEventDependencies(state: {
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
   depTx.setReadOnly?.("scheduler.populateDependencies()");
-  // A SERVED event's dependency probe reads AS the event's server-stamped
-  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
-  // LD1): the handler run will read that actor's instances of every
-  // scoped input, so the probe must name the SAME instances — its absent
-  // reads then kick instance-named loads, and the pending-load park below
-  // holds the head event on exactly those loads (an at-most-once handler
-  // must not run against the service instance's empty draft — the R7
-  // wall). Absent on every client-side event, byte-identical there.
-  const firedAt = queuedEvent.served?.firedAt;
-  if (firedAt?.user !== undefined) {
-    depTx.tx.scopeKeyIdentity = {
-      principal: firedAt.user,
-      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
-    } as never;
-  }
+  // Selection and input probes use the dispatch actor. Their scoped reads
+  // register that actor's instance loads, which park the head event until its
+  // program and inputs are available.
+  const probeIdentity = eventScopeIdentity(queuedEvent);
+  if (probeIdentity !== undefined) depTx.tx.scopeKeyIdentity = probeIdentity;
   let stepStart = performance.now();
   logger.timeStart(
     "scheduler",
@@ -907,12 +1055,17 @@ export function preflightQueuedEventDependencies(state: {
     "pullPopulateDependencies",
   );
   try {
-    handler.populateDependencies?.(depTx, eventValue);
-    inputReadiness = handler.inputReadiness?.(depTx, eventValue) ?? {
+    const implementation = selectEventImplementation(handler, depTx);
+    queuedEvent.preflightImplementation = implementation;
+    implementation?.populateDependencies?.(depTx, eventValue);
+    inputReadiness = implementation?.inputReadiness?.(depTx, eventValue) ?? {
       ready: true,
     };
   } catch (error) {
-    state.handleError(error as Error, handler);
+    state.handleError(
+      error as Error,
+      queuedEvent.preflightImplementation ?? handler,
+    );
     // Dropping the event here is its final outcome — settle the commit
     // callback like the other drop paths instead of leaving callers that
     // await it hanging.
@@ -1117,6 +1270,26 @@ export function preflightQueuedEventDependencies(state: {
   };
 }
 
+/** Recheck a presynced handler's availability without starting another load gate. */
+function probeEventInputReadiness(
+  runtime: Runtime,
+  queuedEvent: QueuedEvent,
+  handler: EventHandler,
+): { readiness: HandlerInputReadiness; deps: ReactivityLog } {
+  const tx = runtime.edit();
+  tx.setReadOnly?.("scheduler.inputReadiness()");
+  const identity = eventScopeIdentity(queuedEvent);
+  if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+  try {
+    const readiness = handler.inputReadiness?.(tx, queuedEvent.event) ?? {
+      ready: true,
+    };
+    return { readiness, deps: txToReactivityLog(tx) };
+  } finally {
+    tx.commit();
+  }
+}
+
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
   eventBlockingDeps: Set<Action>,
@@ -1175,54 +1348,6 @@ export async function processPullQueuedEventDuringExecute(
   delete queuedEvent.notBefore;
 
   const { handler } = queuedEvent;
-  const handlerId = state.getActionId(handler);
-
-  // Sync handler-only input cells before readiness preflight. Keeping this
-  // await before the queue shift means readiness is checked again after the
-  // async boundary; once preflight says ready, dispatch reaches the handler
-  // body without another await in which the input can become unavailable.
-  // Fail open so the readiness/read path surfaces the actual state.
-  if (typeof handler.presyncInputs === "function") {
-    try {
-      const firedAt = queuedEvent.served?.firedAt;
-      await handler.presyncInputs(
-        queuedEvent.event,
-        firedAt?.user !== undefined
-          ? {
-            principal: firedAt.user,
-            sessionId: firedAt.session === "server"
-              ? undefined
-              : firedAt.session,
-          } as never
-          : undefined,
-      );
-    } catch (error) {
-      logger.warn(
-        "scheduler",
-        "handler input presync failed; checking readiness anyway",
-        { error, handlerId },
-      );
-    }
-  }
-
-  // Presync is an async boundary. A speculative origin can fail while it is
-  // in flight, and its lineage callback removes this exact queue object.
-  if (
-    queuedEvent.finalOutcomeNotified ||
-    state.eventQueue[0] !== queuedEvent
-  ) {
-    return;
-  }
-  if (
-    queuedEvent.originTx !== undefined &&
-    state.lineageStatus(queuedEvent.originTx) === "failed"
-  ) {
-    state.dropEvent(
-      queuedEvent,
-      `Event dropped: lineage origin failed while ${queuedEvent.id} inputs synced`,
-    );
-    return;
-  }
 
   let shouldSkipEvent = false;
   let preflight: EventDependencyPreflightResult | undefined;
@@ -1294,33 +1419,119 @@ export async function processPullQueuedEventDuringExecute(
         for (const dep of plan.runnableDeps) demand.add(dep);
       });
     }
+  }
 
-    if (state.eventPreflightTelemetryEnabled) {
-      state.runtime.telemetry.submit({
-        type: "scheduler.event.preflight",
-        handlerId,
-        handlerInfo: state.getActionTelemetryInfo(handler),
-        readCount: preflight.deps.reads.length,
-        shallowReadCount: preflight.deps.shallowReads.length,
-        dirtySizeBefore: preflight.dirtySizeBefore,
-        pendingSizeBefore: preflight.pendingSizeBefore,
-        dirtyDependencyCount: preflight.invalidDeps.size,
-        hasDirtyDependencies: preflight.hasInvalidDependencies,
-        skipped: shouldSkipEvent || preflight.shouldParkForInputs,
-        ...(preflight.inputUnavailableReason !== undefined && {
-          inputUnavailableReason: preflight.inputUnavailableReason,
-        }),
-        queueDepth: state.eventQueue.length,
-        populateMs: preflight.populateMs,
-        txToLogMs: preflight.txToLogMs,
-        depCommitMs: preflight.depCommitMs,
-        collectMs: preflight.collectMs,
-        scheduleMs: preflight.scheduleMs,
-        stats: state.snapshotEventPreflightTraceContext(
-          preflight.preflightStats,
-        ),
-      });
+  if (!shouldSkipEvent) {
+    const presyncImplementation = isGuardedDispatcher(handler)
+      ? queuedEvent.preflightImplementation
+      : handler;
+    const didPresync = typeof presyncImplementation?.presyncInputs ===
+      "function";
+
+    // The dependency preflight selects the implementation and handles any
+    // selector loads before handler-only input cells are synchronized.
+    if (didPresync) {
+      try {
+        await presyncImplementation.presyncInputs!(
+          queuedEvent.event,
+          eventScopeIdentity(queuedEvent),
+        );
+      } catch (error) {
+        logger.warn(
+          "scheduler",
+          "handler input presync failed; checking readiness anyway",
+          {
+            error,
+            handlerId: state.getActionId(presyncImplementation),
+          },
+        );
+      }
+
+      // Presync is an async boundary. A speculative origin can fail while it
+      // is in flight, and its lineage callback removes this exact queue object.
+      if (
+        queuedEvent.finalOutcomeNotified ||
+        state.eventQueue[0] !== queuedEvent
+      ) {
+        return;
+      }
+      if (
+        queuedEvent.originTx !== undefined &&
+        state.lineageStatus(queuedEvent.originTx) === "failed"
+      ) {
+        state.dropEvent(
+          queuedEvent,
+          `Event dropped: lineage origin failed while ${queuedEvent.id} inputs synced`,
+        );
+        return;
+      }
+
+      // Only availability needs another probe after presync. Repeating the
+      // load gate here would classify the selector's own fire-and-forget read
+      // as a concurrent refresh and indefinitely re-park the head event.
+      if (preflight !== undefined && presyncImplementation.inputReadiness) {
+        try {
+          const { readiness, deps } = probeEventInputReadiness(
+            state.runtime,
+            queuedEvent,
+            presyncImplementation,
+          );
+          preflight.deps = {
+            reads: [...preflight.deps.reads, ...deps.reads],
+            shallowReads: [
+              ...preflight.deps.shallowReads,
+              ...deps.shallowReads,
+            ],
+            writes: [...preflight.deps.writes, ...deps.writes],
+          };
+          preflight.shouldParkForInputs = !readiness.ready &&
+            (readiness.reason === "pending" || readiness.reason === "syncing");
+          if (readiness.ready) {
+            delete preflight.inputUnavailableReason;
+          } else {
+            preflight.inputUnavailableReason = readiness.reason;
+          }
+        } catch (error) {
+          state.handleError(error as Error, presyncImplementation);
+          state.dropEvent(
+            queuedEvent,
+            `Event dropped: inputReadiness threw after input presync for ${queuedEvent.eventLink.id}`,
+          );
+          shouldSkipEvent = true;
+        }
+      }
     }
+  }
+
+  if (preflight !== undefined && state.eventPreflightTelemetryEnabled) {
+    state.runtime.telemetry.submit({
+      type: "scheduler.event.preflight",
+      handlerId: state.getActionId(
+        queuedEvent.preflightImplementation ?? handler,
+      ),
+      handlerInfo: state.getActionTelemetryInfo(
+        queuedEvent.preflightImplementation ?? handler,
+      ),
+      readCount: preflight.deps.reads.length,
+      shallowReadCount: preflight.deps.shallowReads.length,
+      dirtySizeBefore: preflight.dirtySizeBefore,
+      pendingSizeBefore: preflight.pendingSizeBefore,
+      dirtyDependencyCount: preflight.invalidDeps.size,
+      hasDirtyDependencies: preflight.hasInvalidDependencies,
+      skipped: shouldSkipEvent || preflight.shouldParkForInputs,
+      ...(preflight.inputUnavailableReason !== undefined && {
+        inputUnavailableReason: preflight.inputUnavailableReason,
+      }),
+      queueDepth: state.eventQueue.length,
+      populateMs: preflight.populateMs,
+      txToLogMs: preflight.txToLogMs,
+      depCommitMs: preflight.depCommitMs,
+      collectMs: preflight.collectMs,
+      scheduleMs: preflight.scheduleMs,
+      stats: state.snapshotEventPreflightTraceContext(
+        preflight.preflightStats,
+      ),
+    });
   }
 
   if (shouldSkipEvent) return;
@@ -1391,12 +1602,16 @@ export async function dispatchQueuedEvent(state: {
   ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retry, onCommit } = queuedEvent;
-  const handlerId = state.getActionId(handler);
+  const selectedImplementation = isGuardedDispatcher(handler)
+    ? queuedEvent.preflightImplementation
+    : handler;
+  const diagnosticHandler = selectedImplementation ?? handler;
+  const handlerId = state.getActionId(diagnosticHandler);
 
   state.runtime.telemetry.submit({
     type: "scheduler.invocation",
     handlerId,
-    handlerInfo: state.getActionTelemetryInfo(handler),
+    handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
   });
 
   // Input presync and the lineage recheck happen in the queue-head preflight;
@@ -1934,7 +2149,7 @@ export async function dispatchQueuedEvent(state: {
         state.runtime.telemetry.submit({
           type: "scheduler.event.commit",
           handlerId,
-          handlerInfo: state.getActionTelemetryInfo(handler),
+          handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
           readCount: log.reads.length + log.shallowReads.length,
           writeCount: log.writes.length,
           changedWriteCount: log.writes.length,
@@ -2156,8 +2371,22 @@ export async function dispatchQueuedEvent(state: {
   };
 
   try {
-    if (hasAnnotatedWrites(handler)) {
-      recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
+    let implementation = handler;
+    if (isGuardedDispatcher(handler)) {
+      const selected = selectEventImplementation(handler, tx);
+      if (
+        selected === undefined || selected !== selectedImplementation
+      ) {
+        tx.dispatchedHandlerNotRun = {
+          reason:
+            "event implementation changed or is unavailable after presync",
+        };
+      } else {
+        implementation = selected;
+      }
+    }
+    if (hasAnnotatedWrites(implementation)) {
+      recordTrustedEventPolicyInputs(tx, implementation.writes, eventValue);
     }
     const actionStartTime = performance.now();
     logger.timeStart(
@@ -2168,10 +2397,16 @@ export async function dispatchQueuedEvent(state: {
     );
     try {
       const runningPromise = Promise.resolve(
-        state.runtime.harness.invoke(() => action(tx)),
+        state.runtime.harness.invoke(() =>
+          tx.dispatchedHandlerNotRun !== undefined
+            ? undefined
+            : isGuardedDispatcher(handler)
+            ? implementation(tx, eventValue)
+            : action(tx)
+        ),
       ).then(() => {
         const trustedEventCandidates =
-          trustedEventWriteCandidatesFromTransaction(tx, handler, [
+          trustedEventWriteCandidatesFromTransaction(tx, implementation, [
             queuedEvent.eventLink.space,
           ]);
         recordTrustedEventPolicyInputs(

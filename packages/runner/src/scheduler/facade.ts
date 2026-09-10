@@ -102,6 +102,7 @@ import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  eventScopeIdentity,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
@@ -1894,7 +1895,10 @@ export class Scheduler {
     this.#filterStats.executed = 0;
   }
 
-  /** Enables or disables per-action read accounting for subsequent runs. */
+  /**
+   * Enables or disables read accounting for subsequent action runs. A fan-out
+   * run retains its starting setting across every instance.
+   */
   setReadStatsEnabled(enabled: boolean): void {
     this.#collectReadStats = enabled;
   }
@@ -3285,6 +3289,8 @@ export class Scheduler {
     // never arrive.
     const readTx = this.runtime.edit();
     readTx.setReadOnly?.("scheduler.parkEventUntilInputChanges()");
+    const identity = eventScopeIdentity(event);
+    if (identity !== undefined) readTx.tx.scopeKeyIdentity = identity;
     let readiness: HandlerInputReadiness | undefined;
     try {
       readiness = this.withExecutingAction(

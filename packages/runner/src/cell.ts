@@ -114,6 +114,7 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import {
   isRendererTrustedEvent,
@@ -744,14 +745,9 @@ export function elementSchemaFor(
       index < prefixItems.length
     ? prefixItems[index]
     : arraySchema.items;
-  if (!isObjectNotArray(covering)) {
-    return covering as JSONSchema | undefined;
-  }
-  const defs = arraySchema.$defs;
-  if (defs && !("$defs" in covering)) {
-    return { ...covering, $defs: defs } as JSONSchema;
-  }
-  return covering as JSONSchema;
+  return covering === undefined
+    ? undefined
+    : cfcSchemaWithInheritedDefs(covering, arraySchema.$defs);
 }
 
 /** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
