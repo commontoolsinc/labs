@@ -9,6 +9,7 @@ export { Runtime } from "./runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
   type FabricSpaceHostOptions,
+  isLoopbackHostname,
   normalizeSpaceHost,
   spaceHostFromFabricAuthority,
   SpaceHostValidationError,
