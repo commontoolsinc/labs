@@ -361,6 +361,9 @@ export class Client {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
       }
+      if (result.error.conflict !== undefined) {
+        Object.assign(error, { conflict: result.error.conflict });
+      }
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
           result.error.retriable;

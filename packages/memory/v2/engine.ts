@@ -1028,11 +1028,20 @@ export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
   readonly of?: string;
 
+  /** Scope of the entity whose confirmed read went stale, when one is named. */
+  readonly scope?: CellScope;
+
   readonly seq?: number;
   readonly conflictSeq?: number;
+
   constructor(
     message: string,
-    details?: { of: string; seq: number; conflictSeq: number },
+    details?: {
+      of: string;
+      scope?: CellScope;
+      seq: number;
+      conflictSeq: number;
+    },
   ) {
     super(message);
     this.name = "ConflictError";
@@ -1040,6 +1049,7 @@ export class ConflictError extends Error {
       this.of = details.of;
       this.seq = details.seq;
       this.conflictSeq = details.conflictSeq;
+      this.scope = details.scope ?? DEFAULT_SCOPE;
     }
   }
 }
@@ -6172,7 +6182,7 @@ const validateConfirmedReads = (
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
-        { of: read.id, seq: read.seq, conflictSeq },
+        { of: read.id, scope: read.scope, seq: read.seq, conflictSeq },
       );
     }
   }

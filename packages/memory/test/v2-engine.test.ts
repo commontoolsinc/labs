@@ -1278,12 +1278,10 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
 
 Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted entity structurally and in the message", async () => {
   // CT-1824 contract: a stale-read ConflictError must name the conflicted
-  // entity BOTH structurally (of/seq/conflictSeq — read in-process by
-  // editWithRetry's pull) AND in the message with this exact shape — server
-  // Error fields do not survive serialization to the browser, so the runner
-  // client re-derives `of` by parsing the message (runner storage/v2.ts
-  // toRejectedError). Changing either surface breaks conflict recovery for
-  // blind writes.
+  // entity structurally (of/scope/seq/conflictSeq) and in the message with
+  // this exact shape. The wire response preserves the scoped address; older
+  // peers rely on the diagnostic parsed by runner storage/v2.ts's
+  // toRejectedError. Both surfaces support conflict recovery for blind writes.
 
   const { engine, path } = await createEngine();
   const sessionId = "session:alice";
@@ -1342,6 +1340,7 @@ Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted ent
       ConflictError,
     );
     assertEquals(error.of, "entity:stale-named");
+    assertEquals(error.scope, "space");
     assertEquals(error.seq, 1);
     assertEquals(error.conflictSeq, 2);
     assertMatch(

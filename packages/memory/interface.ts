@@ -1,6 +1,6 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Signer as IdentitySigner } from "@commonfabric/identity";
-import type { ClientCommit } from "./v2.ts";
+import type { CellScope, ClientCommit } from "./v2.ts";
 
 export type {
   AsBytes,
@@ -139,6 +139,9 @@ export type Conflict = {
    * Identifier of the entity where conflict occurred.
    */
   of: Entity;
+
+  /** Scope of the conflicting instance; omitted by peers without scoped errors. */
+  scope?: CellScope;
 };
 
 export interface ConflictError extends Error {

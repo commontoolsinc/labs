@@ -9,6 +9,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  type CellScope,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -2827,8 +2828,9 @@ export class Runtime {
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
    * docs the serving side was materializing). So the named doc is pulled
-   * too, and the retry's write carries its true version instead of
-   * re-asserting seq 0.
+   * in the conflict's scope too, and the retry's write carries its true
+   * version instead of re-asserting seq 0. Errors without scope use the
+   * default space instance.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2868,7 +2870,7 @@ export class Runtime {
     }
     if (teardownSignal?.aborted) return;
     const conflict = (error as {
-      conflict?: { space?: MemorySpace; of?: string };
+      conflict?: { space?: MemorySpace; of?: string; scope?: CellScope };
     })?.conflict;
     if (
       conflict?.space !== undefined &&
@@ -2880,6 +2882,7 @@ export class Runtime {
           this.storageManager.open(conflict.space).sync(
             conflict.of as unknown as URI,
             { path: [], schema: false },
+            conflict.scope,
           ),
         );
       } catch {

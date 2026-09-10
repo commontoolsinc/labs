@@ -4043,6 +4043,12 @@ export class Server {
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
           }
+          if (
+            error instanceof Engine.ConflictError &&
+            error.of !== undefined && error.scope !== undefined
+          ) {
+            responseError.conflict = { of: error.of, scope: error.scope };
+          }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
           );

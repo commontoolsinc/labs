@@ -1735,6 +1735,9 @@ export type V2Error = {
   precondition?: string;
   retryAfterSeq?: number;
 
+  /** Scoped entity named by a stale confirmed read, resolved by the session. */
+  conflict?: { of: EntityId; scope: CellScope };
+
   /**
    * Present on an `AuthorizationError` that a fresh handshake can heal — the
    * connection-challenge and invocation-freshness anti-replay races (an expired,

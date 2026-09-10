@@ -3165,6 +3165,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
+      conflict: { of: "of:doc:1", scope: "space" },
     });
     assertEquals(messages.length, 0);
 
@@ -3401,6 +3402,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
+      conflict: { of: "of:doc:1", scope: "space" },
     });
     assertEquals(messages.length, 0);
 

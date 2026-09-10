@@ -411,16 +411,23 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
+  /** Present when a confirmed read names the conflicting scoped entity. */
+  conflict?: { of: string; scope: "space" | "user" | "session" };
 }
 ```
 
 The rejection carries no document values. Instead the server marks the commit's
 write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
 for the session — origin-less, so the session's own echo suppression does not
-hide them — and the next sync frame delivers the current documents for all of
-them as ordinary upserts. Repair therefore arrives as a consistent cut over the
-session's watched view — covering stale read dependencies as well as write
-targets, with every document the frame links to delivered in the same cut.
+hide them — and the next sync frame delivers the watched documents as ordinary
+upserts. Repair therefore arrives as a consistent cut over the
+session's watched view, with every document the frame links to delivered in the
+same cut. A dirty address outside that view does not gain a watch through dirty
+marking alone. For stale confirmed reads, the error's `conflict` address
+preserves the entity ID and scope so a retry helper can explicitly sync the
+conflicting instance. The scope resolves under the rejected session's identity.
+Older responses can omit this address; their diagnostic identifies the entity
+but does not preserve its scope.
 
 ## 3.7 Server-Side Commit Processing
 

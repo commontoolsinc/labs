@@ -53,6 +53,7 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
+  type V2Error,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
@@ -84,7 +85,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
@@ -8255,12 +8256,13 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
+    // Structured wire errors preserve scope alongside identity. In-process
+    // engine errors expose the same fields directly; older peers name only
+    // the entity in the diagnostic and retain default-scope recovery.
+    const details = (error as { conflict?: V2Error["conflict"] })?.conflict;
+    const staleReadOf = details?.of ?? (error as { of?: unknown })?.of ??
       message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    const scope = details?.scope ?? (error as { scope?: unknown })?.scope;
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8278,6 +8280,7 @@ const toRejectedError = (
         the: DOCUMENT_MIME,
         of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
           firstOperationId ?? "of:unknown") as Entity,
+        ...(isCellScope(scope) ? { scope } : {}),
       },
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
