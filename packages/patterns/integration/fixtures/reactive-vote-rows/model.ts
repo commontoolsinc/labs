@@ -37,9 +37,19 @@ export const cast = handler<
   { votes: Writable<Vote[]>; profiles: Writable<{ name: string }[]> }
 >(({ key, optionId, color }, { votes, profiles }) => {
   const voter = profiles.elementById(key);
-  voter.set({ name: key });
-  profiles.addUnique(voter);
+  if (!voter.get()) {
+    voter.set({ name: key });
+    profiles.addUnique(voter);
+  }
   const vote = votes.elementById(key);
   vote.set({ optionId, color, voter });
   votes.addUnique(vote);
+});
+
+/** Changes a linked profile without editing the vote that references it. */
+export const rename = handler<
+  { key: string; name: string },
+  { profiles: Writable<{ name: string }[]> }
+>(({ key, name }, { profiles }) => {
+  profiles.elementById(key).key("name").set(name);
 });

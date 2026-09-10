@@ -1,16 +1,17 @@
 /** Demands remote linked votes and profiles inside reactive option-row filters. */
 
 import { NAME, pattern, UI } from "commonfabric";
-import { cast, type Input } from "./model.ts";
+import { cast, type Input, rename } from "./model.ts";
 
 export default pattern<Input>(({ options, votes, profiles }) => {
-  const rows = options.map((option) => ({
-    id: option.id,
-    colors: votes.filter((vote) => vote.optionId === option.id)
-      .map((vote) => vote.color),
-    names: votes.filter((vote) => vote.optionId === option.id)
-      .map((vote) => vote.voter.name),
-  }));
+  const rows = options.map((option) => {
+    const matched = votes.filter((vote) => vote.optionId === option.id);
+    return {
+      id: option.id,
+      colors: matched.map((vote) => vote.color),
+      names: matched.map((vote) => vote.voter.name),
+    };
+  });
   return {
     [NAME]: "Nested vote filters",
     [UI]: (
@@ -24,5 +25,6 @@ export default pattern<Input>(({ options, votes, profiles }) => {
     ),
     rows,
     cast: cast({ votes, profiles }),
+    rename: rename({ profiles }),
   };
 });

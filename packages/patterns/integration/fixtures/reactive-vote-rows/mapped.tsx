@@ -1,7 +1,7 @@
 /** Renders reactive rows over ranked tallies containing resolved voter profiles. */
 
 import { computed, NAME, pattern, UI } from "commonfabric";
-import { cast, type Input } from "./model.ts";
+import { cast, type Input, rename } from "./model.ts";
 
 export default pattern<Input>(({ options, votes, profiles }) => {
   const ranked = computed(() =>
@@ -24,12 +24,26 @@ export default pattern<Input>(({ options, votes, profiles }) => {
     [NAME]: "Reactive vote rows",
     [UI]: (
       <div>
-        {rows.map((row) => (
-          <div data-row={row.id} title={row.names}>{row.id}: {row.color}</div>
+        {ranked.map((tally) => (
+          <div
+            data-row={tally.id}
+            data-tally-colors={tally.voters.map((voter) => voter.color).join(
+              ",",
+            )}
+            title={tally.voters.map((voter) => voter.name).join(",")}
+          >
+            {tally.id}:{" "}
+            {tally.voters.map((voter) => (
+              <span data-swatch={voter.name} title={voter.name}>
+                {voter.color}
+              </span>
+            ))}
+          </div>
         ))}
       </div>
     ),
     rows,
     cast: cast({ votes, profiles }),
+    rename: rename({ profiles }),
   };
 });

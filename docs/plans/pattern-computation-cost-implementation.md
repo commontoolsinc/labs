@@ -2,9 +2,10 @@
 
 Status: A1/A2 instrumentation is shipped in
 [PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
-fixture, accounting and reporting regressions, and dashboard are being reconciled
-in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
-implementation requires adaptation to the shipped accounting API before review.
+fixture, accounting and reporting regressions, and dashboard are being
+reconciled in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's
+local implementation requires adaptation to the shipped accounting API before
+review.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -88,9 +89,9 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by replica document object, and registered dependencies. Specify
-        repeated reads, missing values, enumeration, shallow reads, and memo
-        hits. A read activity is not interchangeable with a proxy access.
+        identified by replica document object, and registered dependencies.
+        Specify repeated reads, missing values, enumeration, shallow reads, and
+        memo hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.
         Distinguish a union of documents across a step from a sum of per-run
         cardinalities. Define failure, restart, idempotency verification, nested
@@ -174,16 +175,36 @@ durations are used as performance evidence.
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
 
-  Initial probes cover separately stored same-space votes and voter profiles:
-  [independent replicas](../../packages/patterns/integration/reactive-vote-rows.test.ts)
-  assert nested-filter membership and derived tally updates;
+  The
+  [independent-replica probes](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+  assert nested-filter membership and derived tally updates. The
   [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
-  assert remotely updated row colors and resolved profile names. The browser
-  subscribes before the writer creates the linked entities. Headless result
+  cover same-space and cross-space profiles, remote colors, profile-only edits,
+  membership additions, ranking changes, and nested mapped swatches. The browser
+  subscribes before votes are created. Cross-space profiles are created in a
+  separate transaction and edited directly in their own space. Headless result
   reads explicitly pull data, so browser rendering owns the passive-update
-  check. C1 remains open for cold cross-space links, removals and reconnects,
-  ranking changes, profile-only updates, and production-shaped nested swatches.
-  These probes do not authorize removing the lunch-poll workaround.
+  check. C1 remains open for cold-materialization verification, removals, and
+  reconnects. These synthetic probes do not authorize removing the lunch-poll
+  workaround or accessing the live poll.
+
+  C3's candidate fix records the mutable inline element used when resolving a
+  nested array to a content-addressed snapshot. The
+  [cell callback regression](../../packages/runner/test/cell-callbacks.test.ts)
+  fails without the fix after initial demand settles, then passes with the fix;
+  it also verifies that changing a neighboring inline element causes no rerun.
+  Four browser cases and the full runner suite (1,411 tests / 8,764 steps) pass.
+  C3 remains open pending review and its remaining acceptance checks.
+
+  To record synthetic browser evidence with a local test server, set `API_URL`
+  and `FRONTEND_URL`, then run:
+
+  ```sh
+  CF_ROW_REPRO_ARTIFACT_DIR=/tmp/reactive-row-artifacts deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+  ```
+
+  The artifact directory receives screenshots and assertion metadata for all
+  four cases. Live poll access requires coordination with Mike.
 
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
