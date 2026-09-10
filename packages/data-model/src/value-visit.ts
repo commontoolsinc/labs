@@ -715,6 +715,8 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           }
         }
       }
+
+      return undefined;
     } finally {
       this.#stack.popExpect(value);
     }
