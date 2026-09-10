@@ -160,20 +160,29 @@ describe("policy", () => {
       expect(weights + policy.VALUE_FLOOR).toBeCloseTo(1, 10);
     });
 
-    it("puts the repeat rates below the exclusion rate, in order", () => {
-      const rates = policy.FLAKE_REPEAT_RATES;
-      expect(rates.length).toBe(policy.MAX_REPEATS - 1);
-      for (let i = 1; i < rates.length; i++) {
-        expect(rates[i]!).toBeGreaterThan(rates[i - 1]!);
-      }
-      expect(rates[rates.length - 1]!).toBeLessThan(
+    it("climbs the execution count with the rate, up to its cap", () => {
+      expect(policy.FLAKE_ANCHOR_EXECUTIONS).toBeGreaterThan(
+        policy.FLAKE_MIN_EXECUTIONS,
+      );
+      expect(policy.MAX_EXECUTIONS).toBeGreaterThanOrEqual(
+        policy.FLAKE_ANCHOR_EXECUTIONS,
+      );
+      expect(policy.FLAKE_MIN_EXECUTIONS).toBeGreaterThan(1);
+    });
+
+    it("anchors the count past the rate that stops a test being picked", () => {
+      // The line is allowed past the exclusion, and has to be: what
+      // reaches a lane above that rate is a change that edits the test,
+      // and the count is what makes it prove itself.
+      expect(policy.FLAKE_ANCHOR_RATE).toBeGreaterThan(
         policy.FLAKE_EXCLUSION_RATE,
       );
     });
 
-    it("reads churn and flakes over windows the decay has faded", () => {
+    it("reads churn over a window its decay has faded", () => {
       // Past four half-lives a day's weight is under one part in sixteen,
-      // which is what makes the read window a performance choice.
+      // which is what makes that read window a performance choice. The
+      // flake window has no such property, since its decay is by runs.
       expect(policy.CHURN_WINDOW_DAYS).toBeGreaterThanOrEqual(
         4 * policy.CHURN_HALF_LIFE_DAYS,
       );

@@ -135,6 +135,7 @@ export {
 export type {
   Calibration,
   CoverageBaseline,
+  FlakeEvidence,
   LanePlan,
   Manifest,
   ManifestEntry,
