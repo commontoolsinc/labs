@@ -911,6 +911,14 @@ Not every diagnostic comes from a validation transformer. The lowering stages
 report these through the same collector (deduplicated via §2.2's
 `markDiagnosticReported` channel):
 
+- **Warning** `schema-default:unresolved` (`schema-generator.ts`) — the
+  schema generator cannot recover a `Default<>` or `DeepDefault<>` value after
+  trying the node, type, and applicable brand-payload routes. That annotation
+  supplies no schema default; compilation continues. The warning points to the
+  default value type when it belongs to the current file, otherwise to the local
+  schema use.
+  Repeated reports for that source range collapse to one. See §7 of the
+  schema-generator mapping spec and `test/default-empty-record-schema.test.ts`.
 - **Error** `pattern-context:receiver-method-call`
   (`pattern-body-reactive-root-lowering.ts:162`) — the pattern-body
   reactive-root seam could not admit a receiver-method call on a tracked
@@ -1952,8 +1960,10 @@ Special path:
 - empty-record defaults emit `default: {}` in pattern argument schemas,
   including inside `Writable`. Both `Record<string, unknown> | Default<V>`
   and `Default<Record<string, unknown>, V>` support `V` written as `{}`,
-  `Record<string, never>`, `Record<PropertyKey, never>`, or an alias of either
-  record (`test/default-empty-record-schema.test.ts`). The extraction rules
+  `Record<string, never>`, `Record<PropertyKey, never>`, or an alias of any of
+  these types, including alias chains and imports
+  (`test/default-empty-record-schema.test.ts`). Unresolved default values emit
+  `schema-default:unresolved` warnings (§6.12). The extraction rules
   live in §7 of the schema-generator mapping spec.
 - the node-based generator analyzes through a `readonly` type operator to
   its wrapped array type. A pattern-scope `.get()` on a `Cell<unknown[]>`
