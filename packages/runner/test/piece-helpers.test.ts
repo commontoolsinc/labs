@@ -65,6 +65,12 @@ describe("parseCellPath", () => {
 });
 
 describe("resolveCellPath", () => {
+  it("materializes the root when the requested path is empty", () => {
+    const root = { label: "copied label" };
+
+    assertEquals(resolveCellPath(makeCell(root) as never, []), root);
+  });
+
   it("does not read unrelated siblings when the selected child is available", () => {
     const child = makeCell("selected");
     const cell: FakeCell = {

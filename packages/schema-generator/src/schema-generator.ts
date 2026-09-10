@@ -16,7 +16,10 @@ import { attachUiContract, getUiContractHint } from "./ui-contract.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
-import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
+import {
+  CommonFabricFormatter,
+  resolveScopeWrapperNode,
+} from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
@@ -283,7 +286,7 @@ export class SchemaGenerator {
 
     // Check if this is a wrapper type - if so, use type-based analysis
     const wrapperKind = detectWrapperViaNode(typeNode, checker);
-    if (wrapperKind) {
+    if (wrapperKind || resolveScopeWrapperNode(typeNode)) {
       return false;
     }
 

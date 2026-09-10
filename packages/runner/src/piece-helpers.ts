@@ -48,8 +48,9 @@ export function resolveCellPath<T>(
   path: CellPath,
   options: { requireProjection?: boolean } = {},
 ): unknown {
+  if (path.length === 0) return cell.get();
   let currentCell: Cell<unknown> = cell;
-  let value: unknown;
+  let value: unknown = options.requireProjection ? cell.get() : undefined;
   for (const [index, segment] of path.entries()) {
     if (isCell(value)) {
       currentCell = value;
@@ -64,12 +65,17 @@ export function resolveCellPath<T>(
       // parent projection so membership and useful error messages remain
       // exact. Correlated schemas explicitly request that projection below.
       const narrowed = currentCell.get();
-      if (narrowed !== undefined || index < path.length - 1) {
+      const unresolvedHandle = isCell(narrowed) &&
+        currentCell.getRaw() === undefined;
+      if (
+        (!unresolvedHandle && narrowed !== undefined) ||
+        index < path.length - 1
+      ) {
         value = narrowed;
         continue;
       }
     }
-    value = parentCell.get();
+    if (value === undefined) value = parentCell.get();
     if (value != null && typeof value !== "object") {
       throw new Error(
         `Cannot access path "${

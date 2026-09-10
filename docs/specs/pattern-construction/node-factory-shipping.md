@@ -826,7 +826,14 @@ arbitrary-function rejection rules as generic reads and writes; no raw-state
 reader or root-function document representation is part of this contract.
 Path-addressed readers narrow to the requested child before materializing a
 containing object, so an unrelated cold factory sibling cannot block an
-already-readable field.
+already-readable field. An empty path still materializes and returns the root;
+child-first narrowing applies only when at least one path segment exists. An
+unresolved Cell handle at the selected child falls back to the parent
+projection so an absent property remains distinguishable from a present
+property whose value is explicitly `undefined`. When a correlated schema
+requires a parent projection, path traversal materializes that projection once
+and descends through the projected value; rematerializing a narrower Cell must
+not discard the active ancestor branch.
 
 A constant list callback serializes into the immutable inputs document as
 Factory@1 when it has a verified artifact ref. A ref-less, capture-free callback
@@ -1196,6 +1203,11 @@ paths.
 The schema generator recognizes factory types before its generic callable and
 callable-returning-cell logic. A factory-valued field uses a Common Fabric
 extension such as:
+
+This recognition does not weaken existing wrapper semantics. In particular, a
+scope wrapper around `any` remains an object schema carrying only that scope;
+the erased `any` must not be routed through generic node fallback and widened
+to `true`.
 
 ```ts
 // Shown for illustration only.
