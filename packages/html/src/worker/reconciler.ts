@@ -987,6 +987,8 @@ export class WorkerReconciler {
       | Cell<WorkerRenderNode | WorkerRenderNode[]>
       | undefined;
     blocked: boolean;
+    /** The cell whose label the block was decided on, when one was. */
+    blockedBy?: Cell<unknown>;
   } {
     if (node.children === undefined) {
       return { children: undefined, blocked: false };
@@ -995,8 +997,29 @@ export class WorkerReconciler {
     if (blocked === undefined) {
       return { children: node.children, blocked: false };
     }
-    this.#denyCellRender(blocked, policy);
-    return { children: [this.#blockedPlaceholderVNode()], blocked: true };
+    return {
+      children: [this.#blockedPlaceholderVNode()],
+      blocked: true,
+      blockedBy: blocked,
+    };
+  }
+
+  /**
+   * Record whether a node's children are blocked, reporting a block the pass
+   * it takes effect rather than each time the policy is asked.
+   */
+  #setChildrenBlocked(
+    state: NodeState,
+    policyChildren: { blocked: boolean; blockedBy?: Cell<unknown> },
+    policy: RenderPolicy,
+  ): void {
+    if (
+      policyChildren.blocked && !state.childrenBlockedByPolicy &&
+      policyChildren.blockedBy !== undefined
+    ) {
+      this.#denyCellRender(policyChildren.blockedBy, policy);
+    }
+    state.childrenBlockedByPolicy = policyChildren.blocked;
   }
 
   /**
@@ -1360,7 +1383,7 @@ export class WorkerReconciler {
         ...this.#renderLabelSummary(cell),
         ceiling: policy.maxConfidentiality ?? "unbounded",
         declassified: policy.declassifyConfidentiality,
-        caveatKindAllow: policy.caveatKindAllow ?? [],
+        caveatKindAllow: policy.caveatKindAllow,
       }),
     );
   }
@@ -1384,7 +1407,7 @@ export class WorkerReconciler {
           ...(prop === undefined ? {} : { prop }),
           labelSource: label.labelSource,
           integrity: label.integrity,
-          requiredIntegrity: policy.textIntegrity?.requiredIntegrity ?? [],
+          textIntegrity: policy.textIntegrity,
         };
       },
     );
@@ -1398,7 +1421,7 @@ export class WorkerReconciler {
         "unendorsed text",
       () => ({
         ...(prop === undefined ? {} : { prop }),
-        requiredIntegrity: policy.textIntegrity?.requiredIntegrity ?? [],
+        textIntegrity: policy.textIntegrity,
       }),
     );
   }
@@ -1793,15 +1816,10 @@ export class WorkerReconciler {
         state.textIntegrityBlockedProps?.delete(key);
         return this.#transformPropValue(key, value);
       }
-      // Text-integrity props are exempt from the unchanged-value skip, so
-      // this method runs every reconcile. Reporting is keyed to the pass the
-      // prop turns from rendering to blocked.
-      if (state.textIntegrityBlockedProps?.has(key) !== true) {
-        if (sourceCell !== undefined) {
-          this.#denyCellText(sourceCell, state.renderPolicy, key);
-        } else {
-          this.#denyLiteralText(state.renderPolicy, key);
-        }
+      if (sourceCell !== undefined) {
+        this.#denyCellText(sourceCell, state.renderPolicy, key);
+      } else {
+        this.#denyLiteralText(state.renderPolicy, key);
       }
       const boundaryNodeIds = this.#markTextIntegrityBlocked(
         state.renderPolicy,
@@ -1921,7 +1939,7 @@ export class WorkerReconciler {
         }));
         oldState.renderPolicy = policy;
         oldState.childRenderPolicy = childPolicy;
-        oldState.childrenBlockedByPolicy = policyChildren.blocked;
+        this.#setChildrenBlocked(oldState, policyChildren, childPolicy);
         oldState.sourceChildren = sanitized.children;
         oldState.sourceProps = sanitized.props;
         // Update props in place with proper diffing
@@ -2581,7 +2599,7 @@ export class WorkerReconciler {
 
     state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
-    state.childrenBlockedByPolicy = policyChildren.blocked;
+    this.#setChildrenBlocked(state, policyChildren, childPolicy);
     if (policyChildren.children === undefined) {
       return;
     }
@@ -2629,7 +2647,7 @@ export class WorkerReconciler {
 
     state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
-    state.childrenBlockedByPolicy = policyChildren.blocked;
+    this.#setChildrenBlocked(state, policyChildren, childPolicy);
     this.#initializeTextIntegrityBoundary(childPolicy, state.nodeId);
   }
 
@@ -2935,7 +2953,11 @@ export class WorkerReconciler {
       sanitized,
       state.childRenderPolicy,
     );
-    state.childrenBlockedByPolicy = activePolicyChildren.blocked;
+    this.#setChildrenBlocked(
+      state,
+      activePolicyChildren,
+      state.childRenderPolicy,
+    );
     if (activePolicyChildren.children !== undefined) {
       addCancel(
         this.#bindChildren(
@@ -3671,7 +3693,11 @@ export class WorkerReconciler {
     childState.currentValue = child;
     childState.elementState.renderPolicy = policy;
     childState.elementState.childRenderPolicy = childPolicy;
-    childState.elementState.childrenBlockedByPolicy = policyChildren.blocked;
+    this.#setChildrenBlocked(
+      childState.elementState,
+      policyChildren,
+      childPolicy,
+    );
     // Same reasoning as the keyed path above: an authored node holding this
     // element is not a wrapper, whatever it was before. A key derived from
     // content cannot match an array against a VNode today, so this only holds

@@ -727,6 +727,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * are configured on the Runtime, out of sight of the code whose write the
    * gate refused.
    */
+  // A refusal this transaction has already reported. Prepare decides and
+  // reports; commit reports the refusals prepare never saw.
+  #cfcDenialReported = false;
+
   #cfcDials(): Record<string, unknown> {
     return {
       enforcement: this.#cfcState.enforcementMode,
@@ -2511,6 +2515,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         cfcEnforcementStrictness(this.#cfcState.enforcementMode) >=
           CFC_ENFORCING_STRICTNESS
       ) {
+        this.#cfcDenialReported = true;
         reportCfcDenial(
           this.#commitPreparationCrash === undefined
             ? "write-policy-gate"
@@ -3141,13 +3146,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
         // The reasons as they stand here are the set that refused, covering
         // both a reason prepare recorded and one a later invalidation added.
-        reportCfcDenial(
-          reasons.length > 0 ? "write-policy-gate" : "write-unprepared",
-          reasons.length > 0
-            ? "a policy check refused the commit"
-            : "a CFC-relevant transaction reached commit without preparing",
-          () => ({ reasons: plainReasons, refusals, dials: this.#cfcDials() }),
-        );
+        if (!this.#cfcDenialReported) {
+          this.#cfcDenialReported = true;
+          reportCfcDenial(
+            reasons.length > 0 ? "write-policy-gate" : "write-unprepared",
+            reasons.length > 0
+              ? "a policy check refused the commit"
+              : "a CFC-relevant transaction reached commit without preparing",
+            () => ({
+              reasons: plainReasons,
+              refusals,
+              dials: this.#cfcDials(),
+            }),
+          );
+        }
         const message =
           `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
@@ -3186,7 +3198,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             reportCfcDenial(
               "write-prepared-digest-mismatch",
               "the transaction's CFC activity changed after it prepared",
-              () => ({ dials: this.#cfcDials() }),
+              () => ({
+                reasons: this.#cfcState.prepare.status === "invalidated"
+                  ? this.#cfcState.prepare.reasons.map(plainReason)
+                  : [],
+                dials: this.#cfcDials(),
+              }),
             );
             return this.#rejectCommitBeforeStorage({
               error: {

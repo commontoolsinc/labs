@@ -119,7 +119,12 @@ Deno.test("worker reconciler CFC denials", async (t) => {
       log: capture,
       debug: capture,
     } as Console;
-    if (options.debug) logger.level = "debug";
+    const realWriteSync = Deno.stderr.writeSync;
+    Deno.stderr.writeSync = (data: Uint8Array) => {
+      capture(new TextDecoder().decode(data));
+      return data.length;
+    };
+    logger.level = options.debug ? "debug" : "info";
     resetCfcDenialAnnouncements();
     let cancel = () => {};
     try {
@@ -134,6 +139,7 @@ Deno.test("worker reconciler CFC denials", async (t) => {
     } finally {
       cancel();
       globalThis.console = real;
+      Deno.stderr.writeSync = realWriteSync;
       logger.level = level;
     }
     return said.join("\n");
@@ -234,6 +240,62 @@ Deno.test("worker reconciler CFC denials", async (t) => {
           children: [confidential as never],
         }, { collector });
         expect(collector.texts()).toContain("Content hidden by policy");
+        expect(said.split(CEILING_BLOCK).length - 1).toBe(1);
+      },
+    );
+
+    // The gate blocks a cell whose label it cannot read, and reports the
+    // decision it made without one.
+    await t.step("names an unreadable label as the source", async () => {
+      const unreadable = runtime.getCell<string>(
+        signer.did(),
+        "cfc-denials-unsigned",
+      );
+      unreadable.resolveAsCell = () => {
+        throw new Error("label resolution failed");
+      };
+      const collector = collectOps();
+      const said = await mounted({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [unreadable as never],
+      }, { collector, ceiling: true, debug: true });
+      expect(collector.texts()).toContain("Content hidden by policy");
+      expect(said).toContain("unreadable");
+    });
+
+    // A boundary whose props arrive as a cell has no policy on its first pass,
+    // so the cell child renders and is then blocked when the policy settles,
+    // beside the boundary blocking its own children. Two gates decide; the
+    // warning is written once, which is what reaches a console.
+    await t.step(
+      "announces a boundary whose props arrive as a cell once",
+      async () => {
+        const tx = runtime.edit();
+        runtime.getCell<Record<string, unknown>>(
+          signer.did(),
+          "cfc-denials-boundary-props",
+          undefined,
+          tx,
+        ).set({ maxConfidentiality: [], $value: confidential as never });
+        expect((await tx.commit()).ok).toBeDefined();
+        const props = runtime.getCell<Record<string, unknown>>(
+          signer.did(),
+          "cfc-denials-boundary-props",
+        );
+        const collector = collectOps();
+        const said = await mounted({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: props as never,
+          children: [confidential as never],
+        }, { collector });
+        expect(
+          collector.texts().filter((text) =>
+            text === "Content hidden by policy"
+          ),
+        ).toHaveLength(1);
         expect(said.split(CEILING_BLOCK).length - 1).toBe(1);
       },
     );

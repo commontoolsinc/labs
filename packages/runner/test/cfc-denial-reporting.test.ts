@@ -87,12 +87,18 @@ const capturing = async (
     log: capture,
     debug: capture,
   } as Console;
-  if (options.debug) logger.level = "debug";
+  const realWriteSync = Deno.stderr.writeSync;
+  Deno.stderr.writeSync = (data: Uint8Array) => {
+    capture(new TextDecoder().decode(data));
+    return data.length;
+  };
+  logger.level = options.debug ? "debug" : "info";
   resetCfcDenialAnnouncements();
   try {
     await body();
   } finally {
     globalThis.console = real;
+    Deno.stderr.writeSync = realWriteSync;
     logger.level = level;
   }
   return lines.join("\n");

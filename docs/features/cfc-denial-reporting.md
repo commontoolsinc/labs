@@ -1,8 +1,10 @@
 # Saying what a Contextual Flow Control gate turned away
 
 Contextual Flow Control decides, twice, whether something may proceed. The
-write gate in `packages/runner/src/cfc/prepare.ts` decides whether a
-transaction may commit. The render gate in the worker reconciler,
+write gate decides whether a transaction may commit: the rules live in
+`packages/runner/src/cfc/prepare.ts`, which produces the prepare reasons, and
+`packages/runner/src/storage/extended-storage-transaction.ts` acts on them and
+reports. The render gate in the worker reconciler,
 `packages/html/src/worker/reconciler.ts`, decides whether a piece of content
 may reach the document. Both fail closed.
 
@@ -35,10 +37,11 @@ reportCfcDenial(
 `render-confidentiality-ceiling`, `render-text-integrity`, and
 `render-literal-text-integrity`.
 
-Only a decision that stopped something reports. A write gate below
-`enforce-explicit` records its reasons and lets the commit through, so nothing
-was turned away and nothing is reported; those reasons stay on the
-transaction's diagnostics, reachable through `getCfcState()`.
+Only a decision that stopped something reports. Under `observe` the write gate
+records its reasons and lets the commit through, so nothing was turned away and
+nothing is reported; those reasons stay on the transaction's diagnostics,
+reachable through `getCfcState()`. Under `disabled` the gate does not prepare at
+all, so there are no reasons and nothing to read.
 
 The write gate reports where prepare records its reasons, which is the point
 the decision is made: an enforcing transaction can no longer commit, whether or
@@ -52,13 +55,21 @@ nothing assembled from a reason, a label, a value, or a path, and it goes to
 the `cfc` logger at warning level.
 
 The **inputs** are different, and they are where everything specific lives. A
-render denial's inputs name the confidentiality label of content this viewer
+confidentiality-ceiling denial's inputs name the label of content this viewer
 was not cleared to see, and a label gives away the thing it protects:
-`Space(the-acquisition-of-Acme)` is the secret, not a description of it. A
-write denial's inputs carry the prepare reasons, and a prepare reason may name
-the confidentiality atoms it refused over, rendered as JSON — the sink-ceiling
-and writer-fit reasons both do. So the inputs go only to debug, and they are
-passed as a function so a gate builds them only where something prints them.
+`Space(the-acquisition-of-Acme)` is the secret, not a description of it. The
+two text-integrity denials read the boundary's integrity floor rather than a
+confidentiality label, and the literal-text one has no cell to read a label
+from at all. A write denial's inputs carry the prepare reasons, and a prepare
+reason may name the confidentiality atoms it refused over, rendered as JSON —
+the sink-ceiling and writer-fit reasons both do. So the inputs go only to
+debug, and they are passed as a function so a gate builds them only where
+something prints them.
+
+Where a label is read, `labelSource` says where from: `stored` for the cell's
+own label, `schema` for the information-flow constraint the gate falls back to,
+and `unreadable` when reading it threw, which is the case the gate blocks on
+without ever seeing a label.
 
 A refused commit's message still quotes its first prepare reason. That message
 is a value returned to the caller that asked for the commit; the log is read by
