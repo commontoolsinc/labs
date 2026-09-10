@@ -105,11 +105,6 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
   }
 }
 
-// The first full watch-set update fails without changing server state. The
-// runner must issue it again: watchRemoveSync has already removed the probe id
-// from the session's local watch intent, so the second request carries the
-// corrected complete set and acknowledges cleanup.
-
 Deno.test("memory v2 runner applies removes carried in a watch refresh batch", async () => {
   const docA = `of:watch-remove-keep-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-remove-drop-${crypto.randomUUID()}` as URI;

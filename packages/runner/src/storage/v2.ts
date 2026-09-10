@@ -3493,7 +3493,6 @@ export class SpaceReplica
     refreshWatchSet(
       entries: Iterable<[WatchAddress, SchemaPathSelector]>,
       type?: "pull" | "integrate",
-      watchBranch?: string,
     ): Promise<Result<Unit, PullError>>;
     applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
     waitForConflictReadRepair(
@@ -3510,8 +3509,7 @@ export class SpaceReplica
       buildReads: (source, localSeq, identity) =>
         this.#buildReads(source, localSeq, identity),
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
-      refreshWatchSet: (entries, type, watchBranch) =>
-        this.#refreshWatchSet(entries, type, watchBranch),
+      refreshWatchSet: (entries, type) => this.#refreshWatchSet(entries, type),
       applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
         this.#waitForConflictReadRepair(rejection),
@@ -5225,7 +5223,6 @@ export class SpaceReplica
   async #refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
-    watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
     const refreshStart = performance.now();
     try {
@@ -5281,7 +5278,7 @@ export class SpaceReplica
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector, watchBranch),
+        id: watchIdForEntry(address, selector, ""),
         kind: "graph" as const,
         query: {
           roots: [{
@@ -6427,8 +6424,11 @@ export class SpaceReplica
   }
 
   /**
-   * How many of `absences` — addresses {@link unexaminedAbsences} returned
-   * — this replica now holds with a confirmed revision.
+   * How many of `absences` this replica now holds with a confirmed revision.
+   * `absences` is a list this replica's own {@link unexaminedAbsences}
+   * returned, not any address of that shape: a foreign instance is keyed by
+   * the `scopeKey` that call baked in, and an address from elsewhere would
+   * be counted against the replica's own instance.
    */
   presentCount(absences: readonly UnexaminedAbsence[]): number {
     let present = 0;

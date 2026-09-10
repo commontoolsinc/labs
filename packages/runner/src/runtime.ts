@@ -2761,7 +2761,6 @@ export class Runtime {
         return teardownResult();
       }
       if (present > 0) {
-        console.error(`MEASURE_RERUN present=${present}`);
         tx.abort(
           `editWithRetry re-run: ${present} document(s) read as absent ` +
             "are present; the action re-runs against them",
@@ -2801,8 +2800,8 @@ export class Runtime {
     }
     const spaces = new Set<MemorySpace>();
     for (const read of reads) spaces.add(read.space);
-    const absencesBySpace: {
-      provider: IStorageProvider;
+    const absencesPerProvider: {
+      presentCount: NonNullable<IStorageProvider["presentCount"]>;
       absences: readonly UnexaminedAbsence[];
     }[] = [];
     const keys: string[] = [];
@@ -2824,7 +2823,10 @@ export class Runtime {
         continue;
       }
       if (absences.length === 0) continue;
-      absencesBySpace.push({ provider, absences });
+      absencesPerProvider.push({
+        presentCount: provider.presentCount.bind(provider),
+        absences,
+      });
       for (const absence of absences) {
         // An absence naming a foreign instance carries its key; the rest are
         // this runtime's own instances, the way the loads were registered.
@@ -2833,17 +2835,17 @@ export class Runtime {
       }
     }
     if (keys.length === 0) return 0;
-    return manager.loadsSettled(keys).then(
-      () =>
-        absencesBySpace.reduce(
-          (total, { provider, absences }) =>
-            total + provider.presentCount!(absences),
-          0,
-        ),
-      // A failed load is reported by the sync-failure log; the commit's own
-      // verdict still decides what the absence claim was worth.
-      () => 0,
-    );
+    // `loadsSettled` settles only once every key has, and a load that failed
+    // leaves its document absent, so the count is taken the same way on
+    // either outcome: what landed is present, and a failure is the
+    // sync-failure log's to report while the commit's own verdict decides
+    // what that absence claim was worth.
+    const countPresent = () =>
+      absencesPerProvider.reduce(
+        (total, { presentCount, absences }) => total + presentCount(absences),
+        0,
+      );
+    return manager.loadsSettled(keys).then(countPresent, countPresent);
   }
 
   /**

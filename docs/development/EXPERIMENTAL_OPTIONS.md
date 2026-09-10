@@ -1160,10 +1160,9 @@ the per-epic implementation notes).
   responses to be applied before constructing that set. Later acquisitions
   remain behind the removal in wire order. Each removal therefore drains the
   in-flight window: acquisitions issued after it wait until every earlier
-  response has applied and the removal has been sent. The absence probes of
-  `editWithRetry` reconciliation and operation-watch cancellations each pay
-  that drain. Independent acquisitions still overlap, and same-tick microtask
-  coalescing is unchanged.
+  response has applied and the removal has been sent. Operation-watch
+  cancellations pay that drain. Independent acquisitions still overlap, and
+  same-tick microtask coalescing is unchanged.
 - **Current default and planned end state.** Off by default. It is a spike
   pending live measurement on a real (estuary-latency) load; the window size is
   a tuning value. End state is either graduation to always-on with a settled
