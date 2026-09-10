@@ -250,7 +250,9 @@ class VisitInProgress<Domain, ResultType> {
   visit(value: Domain): BaselineVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
       // deno-coverage-ignore-start
-      // This is a defense-in-depth protection against bugs in this file.
+
+      // This is a defense-in-depth protection against bugs in this file, and
+      // also serves as documentation for the intended use of this class.
       throw new Error(
         "Shouldn't happen: Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
       );
