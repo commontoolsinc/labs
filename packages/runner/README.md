@@ -49,6 +49,16 @@ Use access counts and run counts to test collection-size scaling after a
 single-element edit. Pair them with runtime benchmarks: these counters measure
 reactive read work, not the cost of arithmetic or maintaining an aggregate tree.
 
+### Worker read accounting
+
+`RuntimeClient.setReadStatsEnabled(true)` enables reactive action read counters
+in the addressed worker. Await the request before starting the measured
+interaction. Use `setTelemetryEnabled(true)` to receive completion events, or
+read the action statistics through the existing graph diagnostics. Turning read
+accounting off leaves cumulative statistics available and stops collecting new
+samples. This control applies to that worker; it does not configure a server or
+another browser's runtime.
+
 ## Architecture
 
 The Runner has been refactored to eliminate singleton patterns in favor of
