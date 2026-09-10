@@ -152,8 +152,13 @@ export default pattern(() => {
     wb.spawnPrompt.set("Work on topic #7, it's time.");
   });
   const assert_spawn_command = assert(() =>
-    wb.spawnCommand ===
-      "cd '/w/labs' && claude 'Work on topic #7, it'\\''s time.'"
+    wb.kickoff.startsWith(
+      'Work on topic #7, it\'s time.\n\nContext:\n- Topic #7, "Workbench topic". Its living document begins: The living document, which a session starts from.',
+    ) &&
+    wb.kickoff.includes("Links:\n- #1: https://github.com/o/r/pull/1") &&
+    wb.spawnCommand.startsWith(
+      "cd '/w/labs' && claude 'Work on topic #7, it'\\''s time.",
+    )
   );
 
   return {
