@@ -459,15 +459,20 @@ row weighed (session-scoped derivations as client-speculation-only,
 scoped state reclassified authored-adjacent) are rejected — scoped
 derived state stays derived and server-committed, keeping today's
 reload persistence. The persisted-state context ladder (row 60)
-stays tripwired. The Phase 0 review continues (README §6 Q7, was
-ledger L10). The 2026-08-02 scout pass verified scopes.md's anchors
+stays tripwired. The Phase 0 review is complete apart from the
+session-data GC design (README §6, was ledger L10): the run-supply
+half — a narrowed node runs once per demanding principal,
+materialized on demand — was RULED 2026-08-16 and landed by fan-out
+stages A and B (scopes.md §2; verification-coverage.md OW17, CLOSED as
+a row with its flagged residuals owed there).
+The 2026-08-02 scout pass verified scopes.md's anchors
 and recorded in scopes.md §7 the five assumptions of main's scope
 machinery that a SpaceServer breaks (M1–M5: per-identity scope
 discovery; scope-NAME in-memory keying; no all-principals write
 path; scope-NAME wake keys; no session-data GC); scopes.md §8 lists
-what the review still owes (after the batch-4 closures: basis-index
-DDL authoring + session-data GC design); row 57's identity
-remainder is RESOLVED (N57, R-Q6b).
+what the review still owes — the session-data GC design, the
+basis-index DDL having been authored in serving-loop.md §3b; row
+57's identity remainder is RESOLVED (N57, R-Q6b).
 
 **N57 (identity/authority) — RESOLVED 2026-08-02 (R-Q6b).** Today
 one runtime = one `userIdentityDID` (`runtime.ts:669`) and all
