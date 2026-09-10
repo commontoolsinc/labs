@@ -61,7 +61,7 @@ const _visit = handler<
   },
 );
 
-const removePiece = handler<
+export const removePiece = handler<
   Record<string, never>,
   {
     piece: Writable<MinimalPiece>;
@@ -138,7 +138,7 @@ const menuQuickCapture = handler<
 });
 
 // Menu: Daily Journal (singleton)
-const menuDailyJournal = handler<
+export const menuDailyJournal = handler<
   void,
   { menuOpen: Writable<boolean>; pieceRegistry: Writable<MinimalPiece[]> }
 >((_, { menuOpen, pieceRegistry }) => {

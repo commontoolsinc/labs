@@ -556,7 +556,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       query: "#pieceRegistry",
       headless: true,
     });
-    const pieceRegistry = resultOf(pieceRegistryWish.result);
+    const pieceRegistry: Writable<NotePiece[]> = resultOf(
+      pieceRegistryWish.result,
+    );
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);

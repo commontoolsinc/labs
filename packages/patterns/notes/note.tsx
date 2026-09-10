@@ -107,24 +107,27 @@ export interface NoteOutput extends NotePiece {
   closeMenu: Stream<void>;
   startEditingTitle: Stream<void>;
   stopEditingTitle: Stream<void>;
-  createBacklink: Stream<{
-    detail: {
-      piece: Writable<MentionablePiece>;
-      navigate: boolean;
-    };
-  }>;
 }
+
+export type BacklinkCreateEvent = {
+  detail: {
+    piece: Writable<MentionablePiece>;
+    navigate: boolean;
+  };
+};
+
+/** The backlink event binding installed on every note editor. */
+export const backlinkCreateProps = (
+  stream: Stream<BacklinkCreateEvent>,
+): { "onbacklink-create": Stream<BacklinkCreateEvent> } => ({
+  "onbacklink-create": stream,
+});
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
 /** Register a backlink created by the editor and optionally navigate to it. */
 export const handleNewBacklink = handler<
-  {
-    detail: {
-      piece: Writable<MentionablePiece>;
-      navigate: boolean;
-    };
-  },
+  BacklinkCreateEvent,
   {
     mentionable: Writable<MentionablePiece[]>;
     pieceRegistry: Writable<MinimalPiece[]>;
@@ -226,7 +229,9 @@ const Note = pattern<NoteInput, NoteOutput>(
       query: "#pieceRegistry",
       headless: true,
     });
-    const pieceRegistry = resultOf(pieceRegistryWish.result);
+    const pieceRegistry: Writable<MinimalPiece[]> = resultOf(
+      pieceRegistryWish.result,
+    );
     const mentionableWish = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     );
@@ -534,7 +539,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         $references={references!}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
-        onbacklink-create={createBacklink}
+        {...backlinkCreateProps(createBacklink)}
         language="text/markdown"
         mode="prose"
         wordWrap
@@ -750,7 +755,6 @@ const Note = pattern<NoteInput, NoteOutput>(
       closeMenu,
       startEditingTitle,
       stopEditingTitle,
-      createBacklink,
     };
   },
 );

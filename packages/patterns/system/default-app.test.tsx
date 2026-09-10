@@ -14,6 +14,7 @@
 import {
   action,
   assert,
+  computed,
   handler,
   pattern,
   type Stream,
@@ -35,6 +36,7 @@ const piecesLengthOf = (pieceRegistry: unknown[]) => [...pieceRegistry].length;
 
 export default pattern(() => {
   const subject = DefaultApp();
+  const currentUI = computed(() => subject[UI]);
 
   const note = Note({
     title: "Registered Note",
@@ -58,7 +60,7 @@ export default pattern(() => {
     piece: otherNote,
   });
   const action_remove_first_note = action(() => {
-    const button = findElementByExactText(subject[UI], "cf-button", "🗑️");
+    const button = findElementByExactText(currentUI, "cf-button", "🗑️");
     const onClick = propsOf(button)?.onClick;
     (onClick as { send: (event: Record<string, never>) => void }).send({});
   });

@@ -13,7 +13,6 @@
 import {
   action,
   assert,
-  equals,
   FS,
   handler,
   NAME,
@@ -26,7 +25,11 @@ import {
   Writable,
 } from "commonfabric";
 import { findNode, propsOf } from "../test/vnode-helpers.ts";
-import Note, { bareMentionId } from "./note.tsx";
+import Note, {
+  backlinkCreateProps,
+  bareMentionId,
+  handleNewBacklink,
+} from "./note.tsx";
 import Notebook from "./notebook.tsx";
 import {
   type MentionablePiece,
@@ -63,16 +66,6 @@ const editorHasReferences = (subject: { [UI]: unknown }): boolean => {
   return propsOf(editor)?.["$references"] !== undefined;
 };
 
-const editorUsesBacklinkCreate = (subject: ReturnType<typeof Note>) => {
-  const editor = findNode(
-    subject[UI],
-    (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
-  );
-  const editorStream = propsOf(editor)?.["onbacklink-create"];
-  return typeof editorStream === "object" && editorStream !== null &&
-    equals(editorStream, subject.createBacklink);
-};
-
 export default pattern(() => {
   const pieceRegistryRequest = wish<Writable<MinimalPiece[]>>({
     query: "#pieceRegistry",
@@ -84,6 +77,11 @@ export default pattern(() => {
 
     isHidden: false,
   });
+  const backlinkCreate = handleNewBacklink({
+    mentionable: new Writable<MentionablePiece[]>([]),
+    pieceRegistry,
+  });
+  const editorProps = backlinkCreateProps(backlinkCreate);
 
   // Create notebooks for parentNotebook testing
   const notebookA = Notebook({
@@ -206,7 +204,7 @@ export default pattern(() => {
   });
 
   const action_create_backlink = createBacklink({
-    stream: note.createBacklink,
+    stream: editorProps["onbacklink-create"],
     piece: backlinkTarget,
   });
 
@@ -220,10 +218,6 @@ export default pattern(() => {
   const assert_editor_has_references = assert(
     () => editorHasReferences(note),
   );
-  const assert_editor_uses_create_backlink = assert(
-    () => editorUsesBacklinkCreate(note),
-  );
-
   const assert_initial_title = assert(() => note.title === "Test Note");
   const assert_initial_content = assert(
     () => note.content === "Line one\nLine two\nLine three",
@@ -467,7 +461,6 @@ export default pattern(() => {
       // The editor is given the note's reference map, which is what selects
       // the reference form for mentions made from here.
       { assertion: assert_editor_has_references },
-      { assertion: assert_editor_uses_create_backlink },
 
       // === The filesystem projection ===
       { action: action_mention_in_projection },

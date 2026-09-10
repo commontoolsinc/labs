@@ -404,6 +404,10 @@ export function observeAvailability<T>(value: T): T {
   return value;
 }
 
+export function latestComplete<T>(value: T): T {
+  return value;
+}
+
 export function generateObject<T>(
   _params: Record<string, unknown>,
 ): T | UnavailableResult {
