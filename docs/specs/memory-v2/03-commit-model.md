@@ -324,10 +324,13 @@ candidate. The proof, per operation:
 
 - a `set` whose value equals the stored document;
 - a `patch` that, replayed on the document as the commit's read of that
-  document saw it (the confirmed read's `seq`, or the resolution of the
-  highest own layer a pending read names; the stored document itself when the
-  commit did not read it), yields the stored document, and that replayed on
-  the stored document leaves it unchanged. The second condition is for the
+  document saw it, yields the stored document, and that replayed on the
+  stored document leaves it unchanged. The basis is the resolution of the
+  highest own layer a pending read of the document names, since that read is
+  the view the value came through, even where the commit also carries a
+  confirmed read of the document; the confirmed read's `seq` where there is
+  no pending read; and the stored document itself when the commit did not
+  read the document at all. The second condition is for the
   writer's replica, which re-folds the patch over whatever confirmed base it
   holds when the accept arrives: a patch idempotent on the durable value
   lands on that value from any base between the read and the head, where a

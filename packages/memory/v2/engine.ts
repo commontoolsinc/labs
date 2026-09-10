@@ -5553,24 +5553,30 @@ const applyCommitTransaction = (
   const patchBasisSeq = (
     operation: { id: string; scope?: Parameters<typeof normalizeScope>[0] },
   ): number | undefined => {
-    const confirmed = commit.reads.confirmed.find((candidate) =>
+    const sameDocument = (candidate: { id: string; scope?: unknown }) =>
       candidate.id === operation.id &&
-      normalizeScope(candidate.scope) === normalizeScope(operation.scope)
-    );
-    if (confirmed !== undefined) return confirmed.seq;
-    const pending = commit.reads.pending.find((candidate) =>
-      candidate.id === operation.id &&
-      normalizeScope(candidate.scope) === normalizeScope(operation.scope)
-    );
-    if (pending === undefined) return undefined;
-    // The reader's view sat on its own pending layers; the highest one's
-    // resolution is the seq at which that view is durable, when it is.
-    const layers = pendingReadLayers(pending);
-    const row = engine.statements.selectPendingResolution.get({
-      session_id: sessionKey,
-      local_seq: Math.max(...layers),
-    }) as { seq: number } | undefined;
-    return row?.seq;
+      normalizeScope(
+          candidate.scope as Parameters<typeof normalizeScope>[0],
+        ) ===
+        normalizeScope(operation.scope);
+    // A pending read is the view the value came through: the reader's own
+    // layers stacked on its confirmed basis. Where a commit also carries a
+    // confirmed read of the same document (a shape-only read that names
+    // the non-speculative stack), replaying from that confirmed seq would
+    // drop the layers' effects and could match a stored document that
+    // lost them, so the pending read decides the basis whenever there is
+    // one. The highest layer's resolution is the seq at which the view is
+    // durable, when it is.
+    const pending = commit.reads.pending.find(sameDocument);
+    if (pending !== undefined) {
+      const layers = pendingReadLayers(pending);
+      const row = engine.statements.selectPendingResolution.get({
+        session_id: sessionKey,
+        local_seq: Math.max(...layers),
+      }) as { seq: number } | undefined;
+      return row?.seq;
+    }
+    return commit.reads.confirmed.find(sameDocument)?.seq;
   };
   // Proving the identity reads the stored document and, for a patch, the
   // document at the reader's basis, so it runs only once a staleness check

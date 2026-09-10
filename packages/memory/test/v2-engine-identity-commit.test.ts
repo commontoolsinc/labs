@@ -373,6 +373,90 @@ describe("applyCommit() with an identity commit", () => {
     ]);
   });
 
+  // Session a installs {a: 1}, stacks its own {b: 2} on it, and patches
+  // a to 2 from that view, intending {a: 2, b: 2}; session b replaced the
+  // document with {a: 2} in between. Returns the install's and the
+  // layer's seqs.
+  function installStackThenReplace(): { install: number; layer: number } {
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 1 })] }),
+    });
+    const layer = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        reads: {
+          confirmed: [{ id: "of:doc", path: [], seq: install.seq }],
+          pending: [],
+        },
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/b", value: 2 },
+        ])],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 2 })] }),
+    });
+    return { install: install.seq, layer: layer.seq };
+  }
+
+  it("refuses a patch whose replay from the reader's pending view differs from the stored document", () => {
+    const { install } = installStackThenReplace();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "of:doc",
+              path: [],
+              localSeq: 2,
+              basisSeq: install,
+            }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("takes the pending read as the basis when the commit also reads the document confirmed", () => {
+    // Replayed from the confirmed seq the patch would land on {a: 2}, the
+    // stored document, and pass as an identity; the reader's value came
+    // through its layer, where the same replay yields {a: 2, b: 2}.
+    const { install } = installStackThenReplace();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          reads: {
+            confirmed: [{
+              id: "of:doc",
+              path: [],
+              seq: install,
+              nonRecursive: true,
+            }],
+            pending: [{
+              id: "of:doc",
+              path: [],
+              localSeq: 2,
+              basisSeq: install,
+            }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
   it("refuses a commit with no operations over a stale confirmed read", () => {
     // Only the wave path admits an empty operation list, for a wave whose
     // outbound appends ride the transaction; a stale read on one is still
