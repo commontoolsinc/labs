@@ -2,9 +2,11 @@
 
 Status: A1/A2 instrumentation is shipped in
 [PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
-fixture, accounting and reporting regressions, and dashboard are being reconciled
-in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
-implementation requires adaptation to the shipped accounting API before review.
+fixture, accounting and reporting regressions, and dashboard are shipped in
+[PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3 read budgets are
+under review in [PR #7257](https://github.com/commontoolsinc/labs/pull/7257), and A4's
+browser benchmark is under review in
+[PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit

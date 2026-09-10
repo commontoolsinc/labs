@@ -139,7 +139,7 @@ async function refresh() {
           node("h3", `${run.voteCount.toLocaleString()} votes`),
           node(
             "p",
-            `${run.sample.accesses.toLocaleString()} body accesses · ${run.sample.runs} runs · ${run.sample.maxAccesses.toLocaleString()} largest run`,
+            `${run.sample.accesses.toLocaleString()} body accesses · ${run.sample.linkHops.toLocaleString()} link hops · ${run.sample.runs} runs · ${run.sample.maxAccesses.toLocaleString()} largest run`,
           ),
           node(
             "p",
