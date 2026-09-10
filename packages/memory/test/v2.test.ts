@@ -152,6 +152,7 @@ describe("memory v2 flags", () => {
       entityIdLookup: true,
       sessionHoldings: true,
       syncSchemaTableV2: false,
+      syncDocumentSchemasV1: true,
     });
 
     setModernCellRepConfig(true);
@@ -174,6 +175,7 @@ describe("memory v2 flags", () => {
       entityIdLookup: true,
       sessionHoldings: true,
       syncSchemaTableV2: true,
+      syncDocumentSchemasV1: true,
     });
 
     resetModernCellRepConfig();
@@ -190,6 +192,7 @@ describe("memory v2 flags", () => {
         commitPreconditions: true,
         applyOp: true,
         syncSchemaTableV2: true,
+        syncDocumentSchemasV1: true,
         messageCompressionV1: true,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
@@ -205,6 +208,7 @@ describe("memory v2 flags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         // A peer without commit-time sqlite row-label evaluation stays
         // compatible — the capability only gates the runner's write-gate
@@ -229,6 +233,7 @@ describe("parseMemoryProtocolFlags", () => {
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
+      syncDocumentSchemasV1: false,
       messageCompressionV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
@@ -244,6 +249,7 @@ describe("parseMemoryProtocolFlags", () => {
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
+      syncDocumentSchemasV1: false,
       messageCompressionV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
@@ -266,6 +272,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: true,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
@@ -307,6 +314,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: true,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sessionHoldings: false,
         sqliteCommitRowLabelEval: false,
@@ -328,6 +336,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: true,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
@@ -351,6 +360,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
@@ -382,6 +392,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
@@ -406,6 +417,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
@@ -427,6 +439,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
@@ -452,6 +465,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        syncDocumentSchemasV1: false,
         messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,

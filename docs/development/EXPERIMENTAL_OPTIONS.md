@@ -1043,9 +1043,13 @@ the per-epic implementation notes).
 - **Interaction with `contentAddressedSchemas`.** The two mechanisms
   compose (see that flag's entry): the table encoder skips
   reference-only positions, so it compresses exactly the stored links
-  that still carry inline schemas and approaches a no-op as
-  reference-bearing links take over. Runtime construction leaves the
-  table's negotiation untouched.
+  that still carry inline schemas. Its link-position work approaches a no-op
+  as reference-bearing links take over. Document-root result-schema metadata
+  remains inline at rest; peers additionally advertising the build capability
+  `syncDocumentSchemasV1` can share repeated metadata through the same table.
+  This use remains after links migrate to `cid:`. Runtime construction leaves
+  the table's negotiation untouched. Disabling `syncSchemaTableV2` disables
+  both uses.
 - **Current default and planned end state.** On by default, everywhere;
   negotiated, so it degrades safely against older peers. The end state is
   to retire the negotiation and the expanded form once every peer AND the

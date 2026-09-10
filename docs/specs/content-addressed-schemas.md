@@ -541,6 +541,15 @@ table (`schema-ref@2:`) skips reference-only schema positions. Schema
 document bodies travel once, as ordinary document upserts, and benefit from
 any document-level caching.
 
+Result-schema metadata at a piece document's root (`doc.schema`) remains
+inline at rest. It is separate from link and binding schemas, so enabling
+`contentAddressedSchemas` does not deduplicate that field, even on newly
+instantiated pieces. When peers also negotiate `syncDocumentSchemasV1`, the
+existing frame-local schema table can deduplicate repeated result metadata
+during delivery; the client restores the inline field before applying the
+sync. See [the protocol](memory-v2/04-protocol.md#negotiated-schema-table-encoding).
+Retiring the table's link-position use does not retire this metadata use.
+
 ### What this does not change
 
 - **Link identity**: `areNormalizedLinksSame` and `addressKey` exclude

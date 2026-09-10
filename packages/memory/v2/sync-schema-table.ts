@@ -8,6 +8,7 @@ import type {
   SessionEffectMessage,
   SessionSync,
 } from "../v2.ts";
+import { encodeMemoryBoundary } from "../v2.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   findSyncSchemaRef,
@@ -16,8 +17,18 @@ import {
 
 type SchemaTable = Record<string, JSONSchema>;
 
-export type SchemaTableSessionSync = SessionSync & {
+/** A wire upsert whose document-root schema is held in the sync's table. */
+export type SchemaTableUpsert = SessionSync["upserts"][number] & {
+  /** Tagged table hash, removed before the upsert reaches the session cache. */
+  documentSchemaRef?: string;
+};
+
+/** Wire sync carrying schema bodies shared by its link and metadata references. */
+export type SchemaTableSessionSync = Omit<SessionSync, "upserts"> & {
+  /** Schema bodies verified against their tagged hashes during expansion. */
   schemaTable?: SchemaTable;
+  /** Document updates with optional frame-local metadata references. */
+  upserts: SchemaTableUpsert[];
 };
 
 type RewriteState = {
@@ -116,16 +127,99 @@ const expandValue = (
     (schema) => expandSchemaValue(schema, schemas, onSchema),
   );
 
+/**
+ * Moves repeated document-root schemas into the existing frame-local table.
+ * References live on the upsert envelope, so schema-shaped application data
+ * never acquires another interpreted position. Small and unique schemas stay
+ * inline to keep the table from increasing their encoded size.
+ */
+const compressDocumentSchemas = (
+  upserts: SessionSync["upserts"],
+  state: RewriteState,
+): SchemaTableUpsert[] => {
+  const hashes = new Map<number, string>();
+  const counts = new Map<string, number>();
+  const schemas = new Map<string, JSONSchema>();
+  for (let index = 0; index < upserts.length; index++) {
+    const schema = upserts[index].doc?.schema;
+    if (!isCompressibleSchema(schema) || typeof schema === "boolean") {
+      continue;
+    }
+    const hash = internSchema(schema, true).taggedHashString;
+    hashes.set(index, hash);
+    counts.set(hash, (counts.get(hash) ?? 0) + 1);
+    schemas.set(hash, schema);
+  }
+  const repeated = new Set(
+    [...schemas].filter(([hash, schema]) =>
+      counts.get(hash)! >= 2 && encodeMemoryBoundary(schema).length >= 256
+    ).map(([hash]) => hash),
+  );
+  return upserts.map((upsert, index) => {
+    const hash = hashes.get(index);
+    if (hash === undefined || !repeated.has(hash)) return upsert;
+    const { schema, ...doc } = upsert.doc!;
+    schemaRefFor(schema as JSONSchema, state);
+    state.changed = true;
+    return { ...upsert, doc, documentSchemaRef: hash };
+  });
+};
+
+/**
+ * Restores document metadata before link-schema expansion sees its contents.
+ * A malformed envelope must fail before any partial document reaches a cache.
+ */
+const expandDocumentSchema = (
+  upsert: SchemaTableUpsert,
+  schemas: SchemaTable | undefined,
+  onSchema?: (schema: JSONSchema) => void,
+): SessionSync["upserts"][number] => {
+  if (!Object.hasOwn(upsert, "documentSchemaRef")) return upsert;
+  if (
+    typeof upsert.documentSchemaRef !== "string" ||
+    !isPlainObject(upsert.doc) || Object.hasOwn(upsert.doc, "schema")
+  ) {
+    throw new Error("Invalid document schema table reference");
+  }
+  const schema = expandSchemaRef(
+    `${SYNC_SCHEMA_REF_PREFIX}${upsert.documentSchemaRef}`,
+    schemas,
+    onSchema,
+  );
+  const { documentSchemaRef: _reference, ...rest } = upsert;
+  return { ...rest, doc: { ...upsert.doc, schema } };
+};
+
+/** Finds document-schema references only on sync upsert envelopes. */
+export const hasDocumentSchemaReferences = (message: unknown): boolean => {
+  if (!isPlainObject(message)) return false;
+  const sync = message.type === "session/effect"
+    ? message.effect
+    : message.type === "response" && isPlainObject(message.ok)
+    ? message.ok.sync
+    : undefined;
+  return isPlainObject(sync) && sync.type === "sync" &&
+    Array.isArray(sync.upserts) &&
+    sync.upserts.some((upsert) =>
+      isPlainObject(upsert) && Object.hasOwn(upsert, "documentSchemaRef")
+    );
+};
+
+/**
+ * Packs link schemas and, when additionally negotiated, repeated document
+ * metadata into a frame-local table. Schema interning may freeze its inputs.
+ */
 export const compressSessionSyncSchemas = (
   sync: SessionSync,
   onSchema?: (schema: JSONSchema) => void,
+  includeDocumentSchemas = false,
 ): SessionSync | SchemaTableSessionSync => {
   const state: RewriteState = {
     schemas: new Map(),
     changed: false,
     onSchema,
   };
-  const upserts = sync.upserts.map((upsert) => {
+  let upserts = sync.upserts.map((upsert) => {
     if (upsert.doc === undefined) {
       return upsert;
     }
@@ -135,6 +229,10 @@ export const compressSessionSyncSchemas = (
       doc: doc as typeof upsert.doc,
     };
   });
+
+  if (includeDocumentSchemas) {
+    upserts = compressDocumentSchemas(upserts, state);
+  }
 
   if (!state.changed) {
     return sync;
@@ -147,6 +245,7 @@ export const compressSessionSyncSchemas = (
   };
 };
 
+/** Restores verified inline schemas before a sync reaches the session cache. */
 export const expandSessionSyncSchemas = (
   sync: SessionSync | SchemaTableSessionSync,
   onSchema?: (schema: JSONSchema) => void,
@@ -154,6 +253,7 @@ export const expandSessionSyncSchemas = (
   const schemas = (sync as SchemaTableSessionSync).schemaTable;
   if (schemas === undefined || Object.keys(schemas).length === 0) {
     for (const upsert of sync.upserts) {
+      expandDocumentSchema(upsert, schemas, onSchema);
       const ref = findSyncSchemaRef(upsert.doc);
       if (ref !== undefined) {
         expandSchemaRef(ref, schemas, onSchema);
@@ -162,7 +262,8 @@ export const expandSessionSyncSchemas = (
     return sync;
   }
 
-  const upserts = sync.upserts.map((upsert) => {
+  const upserts = sync.upserts.map((wireUpsert) => {
+    const upsert = expandDocumentSchema(wireUpsert, schemas, onSchema);
     if (upsert.doc === undefined) {
       return upsert;
     }
@@ -192,6 +293,7 @@ export const expandSessionSyncSchemas = (
 const compressResponseSync = (
   message: ServerMessage,
   onSchema?: (schema: JSONSchema) => void,
+  includeDocumentSchemas = false,
 ): ServerMessage => {
   if (message.type !== "response" || message.ok === undefined) {
     return message;
@@ -211,6 +313,7 @@ const compressResponseSync = (
       sync: compressSessionSyncSchemas(
         sync as unknown as SessionSync,
         onSchema,
+        includeDocumentSchemas,
       ),
     },
   };
@@ -243,17 +346,23 @@ const expandResponseSync = (
   };
 };
 
+/** Compacts syncs in response and effect envelopes using negotiated capabilities. */
 export const compressServerMessageSchemas = (
   message: ServerMessage,
   onSchema?: (schema: JSONSchema) => void,
+  includeDocumentSchemas = false,
 ): ServerMessage => {
   if (message.type === "session/effect") {
     return {
       ...message,
-      effect: compressSessionSyncSchemas(message.effect, onSchema),
+      effect: compressSessionSyncSchemas(
+        message.effect,
+        onSchema,
+        includeDocumentSchemas,
+      ),
     } as SessionEffectMessage;
   }
-  return compressResponseSync(message, onSchema);
+  return compressResponseSync(message, onSchema, includeDocumentSchemas);
 };
 
 export const expandServerMessageSchemas = (

@@ -44,7 +44,10 @@ import {
 import type { AppliedCommit } from "./engine.ts";
 import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
-import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import {
+  expandServerMessageSchemas,
+  hasDocumentSchemaReferences,
+} from "./sync-schema-table.ts";
 import { logIncomingFrame, logOutgoingFrame } from "./frame-log.ts";
 import { memoryMessageFrameBytes } from "./message-compression.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
@@ -513,10 +516,13 @@ export class Client {
       logger.time(decodeStart, "receive", "decodeBoundary");
       logIncomingFrame(message, memoryMessageFrameBytes(payload));
       // A frame whose raw text lacks every reserved reference prefix cannot
-      // carry a schema reference (strings serialize verbatim — see the note
-      // on encodeMemoryBoundary), so the expansion walk over its upserts is
-      // skipped entirely.
-      if (containsReservedSchemaRefSubstring(payload)) {
+      // carry a link-schema reference (strings serialize verbatim — see the
+      // note on encodeMemoryBoundary). Document-schema references occupy the
+      // upsert envelope instead, so check those before skipping expansion.
+      if (
+        containsReservedSchemaRefSubstring(payload) ||
+        hasDocumentSchemaReferences(message)
+      ) {
         const schemaExpansionStart = performance.now();
         message = expandServerMessageSchemas(message);
         logger.time(schemaExpansionStart, "receive", "schemaExpansion");

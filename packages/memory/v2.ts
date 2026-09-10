@@ -1098,6 +1098,9 @@ export type MemoryProtocolFlags = {
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
 
+  /** Document-root schema metadata can share the frame-local schema table. */
+  syncDocumentSchemasV1: boolean;
+
   /** The peer can exchange versioned binary gzip message envelopes. */
   messageCompressionV1: boolean;
 
@@ -1181,6 +1184,8 @@ export type WireMemoryProtocolFlags = {
   applyOp?: boolean;
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
+  /** Additional opt-in for document-root schemas in the sync schema table. */
+  syncDocumentSchemasV1?: boolean;
   messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
@@ -1995,6 +2000,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // as the delivery diff base wherever they are sent.
   sessionHoldings: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
+  syncDocumentSchemasV1: true,
 });
 
 /**
@@ -2061,6 +2067,14 @@ export const parseMemoryProtocolFlags = (
   if (
     syncSchemaTableV2 !== undefined &&
     typeof syncSchemaTableV2 !== "boolean"
+  ) {
+    return null;
+  }
+
+  const syncDocumentSchemasV1 = value.syncDocumentSchemasV1;
+  if (
+    syncDocumentSchemasV1 !== undefined &&
+    typeof syncDocumentSchemasV1 !== "boolean"
   ) {
     return null;
   }
@@ -2138,6 +2152,7 @@ export const parseMemoryProtocolFlags = (
       ? {}
       : { operationCodecs: [...operationCodecs].sort() as string[] }),
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    syncDocumentSchemasV1: syncDocumentSchemasV1 === true,
     messageCompressionV1: messageCompressionV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
@@ -2173,6 +2188,7 @@ export const wireMemoryProtocolFlags = (
     ? {}
     : { operationCodecs: flags.operationCodecs }),
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  syncDocumentSchemasV1: flags.syncDocumentSchemasV1,
   messageCompressionV1: flags.messageCompressionV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,

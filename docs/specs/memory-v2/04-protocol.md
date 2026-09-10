@@ -221,6 +221,12 @@ when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
 shape.
 
+`syncDocumentSchemasV1` additionally permits repeated document-root `schema`
+metadata to use that table. It defaults to `false` when absent. The server
+requires both peers to advertise both capabilities before emitting document
+schema references; a peer supporting only `syncSchemaTableV2` receives inline
+document metadata and may still receive compact link schemas.
+
 `entityIdListing` advertises support for `entity-id.list`. It defaults to
 `false` when absent. A client must not send the request unless the server
 advertises the capability.
@@ -406,6 +412,7 @@ interface HelloMessage {
     stableExpressionResultIds?: boolean;
     messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
+    syncDocumentSchemasV1?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
     entityIdLookup?: boolean;
@@ -608,6 +615,25 @@ recognized schema position after expansion — a reference the client does not
 interpret must fail the frame rather than reach the session cache as data.
 After expansion, downstream consumers observe the historical `SessionSync`
 shape with inline schemas and no `schemaTable` field.
+
+When both peers also advertise `syncDocumentSchemasV1`, a sync upsert MAY omit
+its document's root `schema` field and instead carry
+`documentSchemaRef: "<tagged-hash>"` alongside `id`, `seq`, and `doc`. The hash
+names an entry in the same `schemaTable`. This reference belongs to the upsert
+envelope; fields with that name inside a stored document are ordinary data.
+The encoder moves only repeated schemas with an inline memory-wire representation
+of at least 256 characters into the table. Small, unique, and reference-only
+`{ "$ref": "cid:…" }` metadata stays inline.
+
+The client MUST verify the referenced entry's hash, restore `doc.schema`, and
+remove `documentSchemaRef` before applying the upsert. It MUST reject a missing
+table entry, a non-string or empty reference, a missing document, or an upsert
+carrying both `documentSchemaRef` and an own `doc.schema` field. Document schemas
+are restored before link-schema expansion, so link positions inside the restored
+metadata receive the same processing as inline metadata. Table and envelope
+references are frame-local and MUST NOT enter stored documents or the session
+cache. Document versions, watch coverage, and the stored representation are
+unchanged.
 
 Earlier revisions of this encoding also interned the `schema` field of
 `$alias` records. Those records are Pattern-binding vocabulary, not links —

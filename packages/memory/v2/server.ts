@@ -780,6 +780,7 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  #syncDocumentSchemas = false;
   #stableExpressionResultIds = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
@@ -802,7 +803,11 @@ class Connection {
   #send(message: ServerMessage): void {
     const schemaStart = performance.now();
     const prepared = this.#syncSchemaTable
-      ? compressServerMessageSchemas(message)
+      ? compressServerMessageSchemas(
+        message,
+        undefined,
+        this.#syncDocumentSchemas,
+      )
       : message;
     timing.time(schemaStart, "memory", "response", "prepareSchemas");
     const sendStart = performance.now();
@@ -1064,6 +1069,8 @@ class Connection {
         clientFlags?.stableExpressionResultIds === true;
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
+      this.#syncDocumentSchemas = clientFlags?.syncDocumentSchemasV1 === true &&
+        serverFlags?.syncDocumentSchemasV1 === true;
       this.#ready = true;
       return;
     }

@@ -146,6 +146,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Topics startup schema metadata](development/performance/2026-09-topics-startup-schema-metadata.md) — 2026-09-10: a 249-topic startup capture, fresh-piece confirmation of inline result-schema metadata despite content-addressed links, and a negotiated extension of the existing schema table reducing the largest compressed response by 40.6% in exact offline replay; deployed latency remains unmeasured.
+
 - [Pattern read accounting: first-batch baseline](development/performance/2026-09-pattern-read-accounting.md) — 2026-09-10: transaction-scoped read counters, generic reduction update costs, headless lunch-poll attribution, and instrumentation overhead measurements.
 - [Incremental aggregate comparison](development/performance/2026-09-incremental-aggregates.md) — 2026-09-10: compiled aggregate initialization costs, paired update timings, read-work scaling, and coordinator rescan findings.
 
