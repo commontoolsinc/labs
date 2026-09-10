@@ -9,6 +9,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  type CellScope,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -160,6 +161,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
+import { entityNameKey } from "./scheduler/keys.ts";
 import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -3256,9 +3258,11 @@ export class Runtime {
    * this replica never READ does not arrive with it — and a conflicted blind
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So the named doc is pulled
-   * too, and the retry's write carries its true version instead of
-   * re-asserting seq 0.
+   * docs the serving side was materializing). So every document named by the
+   * rejection is pulled concurrently in its scope, and the retry's writes
+   * carry their true versions instead of re-asserting seq 0. Entries without
+   * scope use the default space instance. If no array entry names a usable
+   * address, the singular conflict supplies the recovery target.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -3297,24 +3301,48 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const conflict = (error as {
-      conflict?: { space?: MemorySpace; of?: string };
-    })?.conflict;
-    if (
-      conflict?.space !== undefined &&
-      typeof conflict.of === "string" &&
-      conflict.of !== "of:unknown"
-    ) {
+    type ConflictAddress = { space: MemorySpace; of: URI; scope?: CellScope };
+    const isPullableConflict = (value: unknown): value is ConflictAddress => {
+      const conflict = value as Partial<ConflictAddress> | null | undefined;
+      return typeof conflict?.space === "string" &&
+        typeof conflict.of === "string" && conflict.of !== "of:unknown" &&
+        (conflict.scope === undefined || isCellScope(conflict.scope));
+    };
+    const rejection = error as { conflict?: unknown; conflicts?: unknown };
+    const listedConflicts = Array.isArray(rejection?.conflicts)
+      ? rejection.conflicts.filter(isPullableConflict)
+      : [];
+    const conflicts = listedConflicts.length > 0
+      ? listedConflicts
+      : isPullableConflict(rejection?.conflict)
+      ? [rejection.conflict]
+      : [];
+    const pulls: Promise<unknown>[] = [];
+    const seen = new Set<string>();
+    for (const conflict of conflicts) {
+      const key = entityNameKey({
+        space: conflict.space,
+        id: conflict.of,
+        scope: conflict.scope,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await waitUnlessTeardown(
-          this.storageManager.open(conflict.space).sync(
-            conflict.of as unknown as URI,
-            { path: [], schema: false },
-          ),
+        pulls.push(
+          Promise.resolve(
+            this.storageManager.open(conflict.space).sync(
+              conflict.of,
+              { path: [], schema: false },
+              conflict.scope,
+            ),
+          ).catch(() => undefined),
         );
       } catch {
-        // Pull failed — the retry's commit decides.
+        // A synchronous pull failure leaves the retry's commit to decide.
       }
+    }
+    if (pulls.length > 0) {
+      await waitUnlessTeardown(Promise.all(pulls));
     }
   }
 

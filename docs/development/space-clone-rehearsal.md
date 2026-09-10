@@ -305,6 +305,17 @@ These are all failures that actually happened, not hypotheticals:
   creates space stores on demand, so a link to another space silently
   manufactures an empty local one. A pattern with cross-space reads will look
   cleaner on a clone than in production.
+- **`setsrc --check` and `piece restore` refuse a clone whose links leave the
+  space.** A voter or member link into a home space the snapshot does not
+  carry reads as absent on the clone (the point above), and the review those two
+  commands run judges the stored value strictly: `votes: 0: voter: value does
+  not match type object`, for the deployed source as much as for the candidate.
+  The apply path's setup defers such a link as a placeholder instead, so
+  rehearse the update with `setsrc` itself and read its receipt; on a clone of
+  this shape `--check` vouches for nothing. Nor can the CLI plant the missing
+  link by hand — `cf cell set` of a link into a profile is refused with "source
+  has no durable schema contract" — so a rehearsal that needs a participant
+  with a profile creates one through the UI against the clone.
 - **A clone tests the store and the runtime, not the deployment.** CDN and shell
   versions, and concurrent human traffic, are all absent.
   [`staging-space-copy.md`](staging-space-copy.md) is what covers that gap, at

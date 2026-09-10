@@ -801,11 +801,10 @@ function withCompileCacheBuiltin<T>(
  * not a traversal edge — so this schema pulls exactly the doc plus its edge
  * element docs and stops. A schema-less `sync()` normalizes to the rejecting
  * selector and delivers only the root, leaving the element docs unknown to
- * the replica — then the re-write touches them blind and the engine reveals
- * the conflicts one per commit attempt (the CT-1824 loop; the write-back's
- * retry budget converges it, one round per edge doc). With the element docs
- * client-known up front, the re-write diffs against true state and commits
- * on the first attempt. Recursion is deliberately omitted: the write-target
+ * the replica — then the re-write touches them blind and needs a rejected
+ * commit plus conflict repair. With the element docs client-known up front,
+ * the re-write diffs against true state and commits on the first attempt.
+ * Recursion is deliberately omitted: the write-target
  * pre-sync enumerates every module doc itself, so each doc only needs its
  * own edges — nothing beyond the write set loads (the lazy-by-default
  * posture for code docs is untouched).
