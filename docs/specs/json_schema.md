@@ -199,8 +199,8 @@ validating it reports that content validation is not supported.
 
 The gap between the two matters where a value crosses from one to the other. A
 value that reads back through traversal is not thereby a value validation
-accepts, and a schema whose only constraint is one traversal ignores enforces
-nothing until something validates against it.
+accepts. Traversal ignores some keywords entirely, so a schema built only from
+those rejects nothing until something validates against it.
 
 ## TypeScript Type Mappings
 
