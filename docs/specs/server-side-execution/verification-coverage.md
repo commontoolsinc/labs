@@ -3402,7 +3402,7 @@ The current rollout posture is the
 [`serverExecution` registry](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution):
 first-party default OFF, ON soak paused. The following flip record describes
 #6535's changes, not a current gate verdict. OW28's direct acceptance coverage
-is recorded above; a renewed ON rollout requires the remaining ordered gates.
+is recorded above; the plan's gate dispositions govern a renewed ON rollout.
 
 **Flip record — PR #6535.** Its ON-skip registry and topology checks do not
 exercise fresh served `compileAndRun` completion. Its merge therefore does not

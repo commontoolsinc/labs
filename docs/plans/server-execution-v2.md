@@ -15,8 +15,8 @@ latencies, no latency quoted above load ~5, causation by ablation.
 The executor and its two execution postures are implemented in the current
 repository. The first-party default is OFF; explicit `true` selects ON.
 OW28's served `compileAndRun` path and scoped child lifecycle have direct
-acceptance coverage. The Phase 7 ordered gates are not all satisfied. The
-coverage register tracks that work and its independently scoped follow-ups.
+acceptance coverage. The coverage register tracks the Phase 7 gate evidence
+and independently scoped follow-ups.
 The initial stack inventory and stage records are historical evidence, not
 an inventory of current main.
 
@@ -26,9 +26,9 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Current work:** satisfy the remaining Phase 7 ordered gates, including the
-honest propagation benchmark, and investigate the separately scoped builtin
-follow-ups. OW28 covers fresh compilation through a real serving host,
+**Current work:** revalidate applicable Phase 7 ordered gates for a renewed
+rollout and investigate the separately scoped builtin follow-ups. OW28 covers
+fresh compilation through a real serving host,
 durable completion, child execution, recovery, supersession, and demanded
 instances. The
 [coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
@@ -37,8 +37,9 @@ records the current dispositions; the
 records the omission evidence and the bounded status investigation.
 The first-party default and flip records belong to the
 [`serverExecution` registry](../development/EXPERIMENTAL_OPTIONS.md#serverexecution).
-The ON soak is paused. A renewed ON rollout requires the remaining ordered
-gates; the flip record's earlier all-gates-met claim is insufficient.
+The ON soak is paused. A renewed ON rollout follows the Phase 7 gate
+dispositions and the owner's rollout decision; the flip record alone does not
+establish current readiness.
 
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
 via the rollback PR (#6840) — the first data-only flip:
@@ -746,7 +747,7 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   divergence and rejoining with graph-sharing assertions, clear and restart,
   accepted and withdrawn setup, and handler dispatch. Closing OW28 does not
   close its other-builtin or default-writable-handle follow-ups, or authorize
-  an ON rollout without the remaining ordered gates.
+  an ON rollout independently of the owner's rollout decision.
 - **The lunch gate (#5969) — RE-CHARACTERIZED, skip STAYS**: not
   `nowTick` timing (refuted; two positive pins) but a served-handler
   DOUBLE DISPATCH of one durable event (2–5× per click) plus a late
