@@ -98,19 +98,6 @@ const rowsSql = (): string =>
     "LIMIT 500",
   ].join("\n");
 
-/**
- * What a query reports about a failure, empty when it has not failed.
- *
- * The same narrowing the sqlite builtin applies before it writes one, so a
- * value that reaches here already a message passes through unchanged.
- */
-const errorText = (error: unknown): string =>
-  error === undefined || error === null
-    ? ""
-    : error instanceof Error
-    ? error.message
-    : String(error);
-
 /** `amount` as a signed figure in `code`, to the cent. */
 const money = (amount: number, code: string): string =>
   `${(amount || 0).toFixed(2)} ${code || "USD"}`;
@@ -145,7 +132,7 @@ export const LedgerMonthTransactions = pattern<
   const rowCount = computed(() => rows.length);
   const pending = computed(() => isPending(observedRowsRead));
   const errorMessage = computed(() =>
-    hasError(observedRowsRead) ? errorText(observedRowsRead.error) : ""
+    hasError(observedRowsRead) ? observedRowsRead.error.message : ""
   );
   const hasQueryError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>

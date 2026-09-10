@@ -7,6 +7,10 @@
 import {
   computed,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   resultOf,
@@ -91,12 +95,27 @@ export default pattern<Record<string, never>>((_) => {
   const journalResult = wish<Array<JournalEntry>>({
     query: "#journal",
   });
-  const journal = resultOf(journalResult.result);
+  const writableJournal = resultOf(journalResult.result);
+  const journal = computed(() => {
+    const value = journalResult.result;
+    if (
+      hasError(value) || isPending(value) || isSyncing(value) ||
+      hasSchemaMismatch(value)
+    ) return [];
+    return resultOf(value);
+  });
 
   // Current time, ticking every 60 seconds so relative-time labels
   // ("just now", "5m ago", ...) refresh as time passes.
   const nowCell = wish<number>({ query: "#now/60" });
-  const nowCellValue = resultOf(nowCell.result);
+  const nowCellValue = computed(() => {
+    const value = nowCell.result;
+    if (
+      hasError(value) || isPending(value) || isSyncing(value) ||
+      hasSchemaMismatch(value)
+    ) return 0;
+    return resultOf(value);
+  });
 
   // Debug: stringify raw result for the debug panel
   const debugRaw = computed(() => {
@@ -125,7 +144,7 @@ export default pattern<Record<string, never>>((_) => {
           <h2 style={{ margin: "0" }}>Activity Journal</h2>
           {entryCount > 0 && (
             <cf-button
-              onClick={clearJournal({ journal })}
+              onClick={clearJournal({ journal: writableJournal })}
               variant="secondary"
             >
               Clear Journal

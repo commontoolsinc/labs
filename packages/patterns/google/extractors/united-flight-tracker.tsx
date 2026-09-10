@@ -806,7 +806,9 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
   });
 
   // Next upcoming flight for preview
-  const nextFlight = computed(() => upcomingFlights[0]);
+  const nextFlight = computed(
+    (): TrackedFlight | undefined => upcomingFlights[0],
+  );
 
   // ==========================================================================
   // PREVIEW UI

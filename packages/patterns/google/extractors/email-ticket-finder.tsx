@@ -17,8 +17,13 @@
  */
 import {
   computed,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   JSONSchema,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   TILE_UI,
@@ -579,16 +584,29 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Convenience aliases from extractor
   const { rawAnalyses, emailCount, pendingCount, completedCount } = extractor;
-  const analysisDebugRows = computed(() =>
-    ((rawAnalyses || []) as TicketDebugAnalysisItem[]).map(
+  const observedRawAnalyses = observeAvailability(rawAnalyses);
+  const analysisDebugRows = computed(() => {
+    if (
+      hasError(observedRawAnalyses) || isPending(observedRawAnalyses) ||
+      isSyncing(observedRawAnalyses) || hasSchemaMismatch(observedRawAnalyses)
+    ) return [];
+    return ((rawAnalyses || []) as TicketDebugAnalysisItem[]).map(
       renderTicketAnalysisDebugRow,
-    )
-  );
+    );
+  });
 
   // Reactive current time, ticking each minute so the day-relative status
   // (today / days-until-event) refreshes as the day rolls over.
   const nowCell = wish<number>({ query: "#now/60" });
-  const nowCellValue = resultOf(nowCell.result);
+  const usableNowCellValue = resultOf(nowCell.result);
+  const observedNowCell = observeAvailability(nowCell.result);
+  const nowCellValue = computed(() => {
+    if (
+      hasError(observedNowCell) || isPending(observedNowCell) ||
+      isSyncing(observedNowCell) || hasSchemaMismatch(observedNowCell)
+    ) return 0;
+    return usableNowCellValue;
+  });
 
   // ==========================================================================
   // TICKET TRACKING
@@ -685,9 +703,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const upcomingCount = computed(() => upcomingTickets?.length || 0);
 
   // Next event for preview
-  const nextTicket = computed(() => {
+  const nextTicketName = computed(() => {
     const upcoming = [...(todayTickets || []), ...(upcomingTickets || [])];
-    return upcoming[0] || null;
+    return upcoming[0]?.eventName || "";
   });
 
   // Preview UI for compact display
@@ -753,11 +771,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
           </span>
           <span
             style={{
-              display: computed(() => nextTicket ? "inline" : "none"),
+              display: computed(() => nextTicketName ? "inline" : "none"),
             }}
           >
             {" - "}
-            {computed(() => nextTicket?.eventName || "")}
+            {nextTicketName}
           </span>
         </div>
       </div>

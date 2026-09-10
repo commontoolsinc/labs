@@ -1,10 +1,12 @@
 import {
-  Cell,
   computed,
   Default,
   generateText,
   handler,
+  hasError,
+  hasSchemaMismatch,
   isPending,
+  isSyncing,
   NAME,
   pattern,
   resultOf,
@@ -30,11 +32,16 @@ const handleSend = handler<
 export default pattern<Input>(({ title }) => {
   const topic = new Writable("");
 
-  const profile = wish<Cell<string>>({ query: "#learnedSummary" });
-  const profileCell = resultOf(profile.result);
+  const profile = wish<string>({ query: "#learnedSummary" });
+  const profileText = computed(() => {
+    if (
+      hasError(profile.result) || isPending(profile.result) ||
+      isSyncing(profile.result) || hasSchemaMismatch(profile.result)
+    ) return "";
+    return resultOf(profile.result);
+  });
 
   const systemPrompt = computed(() => {
-    const profileText = profileCell.get();
     const profileSection = profileText
       ? `\n\n--- About the User ---\n${profileText}\n---\n`
       : "";
@@ -46,7 +53,37 @@ Write content personalized to the user when appropriate.`;
     system: systemPrompt,
     prompt: topic,
   });
-  const result = resultOf(resultRequest);
+  const usableResult = resultOf(resultRequest);
+  const result = computed(() => {
+    if (
+      hasError(resultRequest) || isPending(resultRequest) ||
+      isSyncing(resultRequest) || hasSchemaMismatch(resultRequest)
+    ) return "";
+    return usableResult;
+  });
+  const resultUI = computed(() => {
+    if (isPending(resultRequest)) {
+      return (
+        <div style="margin-top: 16px;">
+          <cf-loader show-elapsed /> Generating personalized content...
+        </div>
+      );
+    }
+    if (
+      hasError(resultRequest) || isSyncing(resultRequest) ||
+      hasSchemaMismatch(resultRequest)
+    ) return null;
+    return usableResult
+      ? (
+        <div style="margin-top: 16px;">
+          <h3>Generated Text:</h3>
+          <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
+            {usableResult}
+          </div>
+        </div>
+      )
+      : null;
+  });
 
   return {
     [NAME]: title,
@@ -56,10 +93,7 @@ Write content personalized to the user when appropriate.`;
 
         <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
-          <cf-code-editor
-            $value={profileCell}
-            style={{ maxHeight: "256px" }}
-          />
+          <pre>{profileText}</pre>
         </cf-card>
 
         <div>
@@ -82,22 +116,7 @@ Write content personalized to the user when appropriate.`;
           )
           : null}
 
-        {isPending(resultRequest)
-          ? (
-            <div style="margin-top: 16px;">
-              <cf-loader show-elapsed /> Generating personalized content...
-            </div>
-          )
-          : result
-          ? (
-            <div style="margin-top: 16px;">
-              <h3>Generated Text:</h3>
-              <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
-                {result}
-              </div>
-            </div>
-          )
-          : null}
+        {resultUI}
       </div>
     ),
     topic,

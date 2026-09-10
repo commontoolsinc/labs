@@ -445,7 +445,7 @@ const searchGmailHandler = handler<
     debugLog: Writable<DebugLogEntry[]>;
     localQueries: Writable<LocalQuery[]>;
     communityQueryRefs: Writable<CommunityQueryRef[]>;
-    registryWish: Writable<any>;
+    registry: any;
     agentTypeUrl: Writable<string>;
     lastExecutedQueryIdCell: Writable<string | null>;
   }
@@ -688,8 +688,7 @@ const searchGmailHandler = handler<
         );
         if (matchingCommunityQuery) {
           // Get the registry to call upvoteQuery
-          const wishResult = state.registryWish.get();
-          const registry = wishResult?.result;
+          const registry = state.registry;
           if (registry?.upvoteQuery) {
             const typeUrl = state.agentTypeUrl.get();
             if (DEBUG_AGENT) {
@@ -1254,21 +1253,24 @@ const GmailAgenticSearch = pattern<
     const registryWish = wish<GmailSearchRegistryOutput>({
       query: "#gmailSearchRegistry",
     });
+    const registryResult = registryWish.result;
+    const usableRegistry = resultOf(registryResult);
+    const registry: any = computed(() => {
+      if (
+        hasError(registryResult) || isPending(registryResult) ||
+        isSyncing(registryResult) || hasSchemaMismatch(registryResult)
+      ) return null;
+      return usableRegistry;
+    });
 
     // Extract community queries for this agent type (with IDs for upvoting)
     // Conditional enablement is handled here, not in the wish call
     const communityQueryRefs = computed((): CommunityQueryRef[] => {
-      const wishResult = registryWish as any;
       const typeUrl = agentTypeUrl;
       const enabled = enableCommunityQueries;
       // Guard: skip if community queries disabled or no agent type URL
       if (!enabled || !typeUrl) return [];
-      if (!wishResult?.result) return [];
-      // wishResult.result is a Cell reference, use .key() for dynamic access
-      const registryCell = wishResult.result;
-      const registriesCell = registryCell?.key?.("registries");
-      if (!registriesCell) return [];
-      const agentRegistry = registriesCell.key(typeUrl)?.get?.();
+      const agentRegistry = registry?.registries?.[typeUrl];
       if (!agentRegistry) return [];
       // Return top queries sorted by score, keeping IDs for upvoting
       return [...(agentRegistry.queries || [])]
@@ -1346,7 +1348,7 @@ const GmailAgenticSearch = pattern<
             debugLog,
             localQueries,
             communityQueryRefs,
-            registryWish,
+            registry,
             agentTypeUrl,
             lastExecutedQueryIdCell,
           }),
@@ -1421,10 +1423,19 @@ When you're done searching, STOP calling tools and produce your final structured
         };
       }),
     });
-    const agentResult = resultOf(agentRequest);
+    const usableAgentResult = resultOf(agentRequest);
     // This presenter must emit stable booleans and UI before a scan starts, so
     // it explicitly observes every request state instead of waiting for T.
     const observedAgentRequest = observeAvailability(agentRequest);
+    const agentResult = computed(() => {
+      if (
+        isPending(observedAgentRequest) ||
+        hasError(observedAgentRequest) ||
+        isSyncing(observedAgentRequest) ||
+        hasSchemaMismatch(observedAgentRequest)
+      ) return null;
+      return usableAgentResult;
+    });
     const agentAvailability = computed(() => {
       const pending = isPending(observedAgentRequest) ||
         isSyncing(observedAgentRequest);
@@ -2700,12 +2711,11 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                     {/* Submit all approved button */}
                     {computed(() => {
                       const subs = pendingSubmissions as PendingSubmission[];
-                      const registry = registryWish as any;
                       const typeUrl = agentTypeUrl as string;
                       const approvedCount = (subs || []).filter((s) =>
                         s.userApproved && !s.submittedAt
                       ).length;
-                      const hasRegistry = !!registry?.result?.submitQuery;
+                      const hasRegistry = !!registry?.submitQuery;
 
                       return approvedCount > 0
                         ? (
@@ -2727,8 +2737,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 ) =>
                                   s.userApproved && !s.submittedAt
                                 );
-                                const submitHandler = registry?.result
-                                  ?.submitQuery;
+                                const submitHandler = registry?.submitQuery;
                                 const pendingWritable: Writable<
                                   PendingSubmission[]
                                 > = pendingSubmissions;

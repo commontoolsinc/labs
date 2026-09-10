@@ -25,7 +25,11 @@ import {
   Default,
   handler,
   hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type PerUser,
@@ -397,13 +401,36 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-
-    const profileName = hasError(profileNameWish.result)
-      ? ""
-      : resultOf(profileNameWish.result);
-    const profileAvatar = hasError(profileAvatarWish.result)
-      ? ""
-      : resultOf(profileAvatarWish.result);
+    const observedProfileName = observeAvailability(profileNameWish.result);
+    const observedProfileAvatar = observeAvailability(
+      profileAvatarWish.result,
+    );
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const profileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI ?? <></>;
+    });
+    const profileName = computed(() => {
+      if (
+        hasError(observedProfileName) || isPending(observedProfileName) ||
+        isSyncing(observedProfileName) ||
+        hasSchemaMismatch(observedProfileName)
+      ) return "";
+      return resultOf(observedProfileName);
+    });
+    const profileAvatar = computed(() => {
+      if (
+        hasError(observedProfileAvatar) || isPending(observedProfileAvatar) ||
+        isSyncing(observedProfileAvatar) ||
+        hasSchemaMismatch(observedProfileAvatar)
+      ) return "";
+      return resultOf(observedProfileAvatar);
+    });
     const hasProfile = computed(() => profileName.trim() !== "");
     const joinLabel = computed(() =>
       hasProfile ? `Join as ${profileName}` : "Create a profile to join"
@@ -630,7 +657,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         /* Built-in profile UI: create a profile when there is
                           none, pick between existing profiles otherwise. */
                       }
-                      <div>{profileWish[UI]}</div>
+                      <div>{profileSetupUI}</div>
                       <cf-button
                         onClick={boundJoin}
                         disabled={computed(() => !hasProfile)}

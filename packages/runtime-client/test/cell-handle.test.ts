@@ -6,6 +6,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import {
+  DataUnavailable,
   FabricError,
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
@@ -868,6 +869,19 @@ describe("cell-handle", () => {
       cell[$onCellUpdate](new FabricBytes(new Uint8Array([2])));
 
       expect(calls.length).toBe(after + 1);
+    });
+
+    it("applies `DataUnavailable` as an atomic control value", () => {
+      const cell = new CellHandle<unknown>(makeRuntime(), ref);
+      const calls: unknown[] = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+      const unavailable = DataUnavailable.pending();
+
+      cell[$onCellUpdate](unavailable);
+
+      expect(calls.at(-1)).toBe(unavailable);
     });
 
     it("refuses a `FabricInstance` rather than apply one", () => {
@@ -2362,6 +2376,19 @@ describe("cell-handle", () => {
       ).toBe(bytes);
     });
 
+    it("hydrates `DataUnavailable` as itself, not as a record", () => {
+      const unavailable = DataUnavailable.schemaMismatch();
+
+      expect(CellHandle.deserialize(makeHandle(), unavailable)).toBe(
+        unavailable,
+      );
+      expect(
+        (CellHandle.deserialize(makeHandle(), { a: [unavailable] }) as {
+          a: unknown[];
+        }).a[0],
+      ).toBe(unavailable);
+    });
+
     it("refuses a `FabricInstance` rather than hydrate one", () => {
       // A container, reached by its codec contents rather than by property
       // name, so a sigil link can sit inside one where this walk cannot see
@@ -2383,8 +2410,9 @@ describe("cell-handle", () => {
     // `serialize()` hands a `FabricPrimitive` on WHOLE rather than walking it:
     // rebuilding one from its enumerable own properties would put `{}` on the
     // wire in place of the bytes, which is what the ordering of the checks
-    // prevents. A `FabricInstance` is refused instead, being a container this
-    // walk cannot descend.
+    // prevents. `DataUnavailable` is the atomic control-value counterpart.
+    // Other `FabricInstance`s are refused instead, being containers this walk
+    // cannot descend.
 
     const makeRuntime = () =>
       ({
@@ -2429,6 +2457,14 @@ describe("cell-handle", () => {
       const wire = CellHandle.serialize([bytes]) as unknown[];
 
       expect(wire[0]).toBe(bytes);
+    });
+
+    it("returns `DataUnavailable` whole in either direction", () => {
+      const unavailable = DataUnavailable.syncing();
+      const handle = new CellHandle(makeRuntime(), makeRef());
+
+      expect(CellHandle.serialize(unavailable)).toBe(unavailable);
+      expect(CellHandle.deserialize(handle, unavailable)).toBe(unavailable);
     });
 
     it("hydrates a `FabricBytes` as itself, not as a record", () => {

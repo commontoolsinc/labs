@@ -267,8 +267,15 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
 
           <cf-vscroll flex showScrollbar>
             <cf-vstack style="padding: 16px; gap: 16px;">
-              {/* Embed the base searcher - provides auth + scan UI */}
-              {searcher as any}
+              {
+                /* Embed the base searcher's presentation without projecting its
+                  structured agent result into this pattern's view tree. */
+              }
+              {searcher.ui.auth}
+              {searcher.ui.controls}
+              {searcher.ui.progress}
+              {searcher.ui.stats}
+              {searcher.ui.extras}
 
               {/* Stats */}
               <div style={{ fontSize: "13px", color: "#666" }}>

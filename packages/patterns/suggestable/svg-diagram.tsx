@@ -2,9 +2,13 @@ import {
   computed,
   Default,
   generateText,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -50,7 +54,19 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
       prompt,
       context,
     });
-    const response = resultOf(responseRequest);
+    const observedResponse = observeAvailability(responseRequest);
+    const responseState = computed(() => {
+      if (isPending(observedResponse)) {
+        return { response: "", pending: true };
+      }
+      if (
+        hasError(observedResponse) || isSyncing(observedResponse) ||
+        hasSchemaMismatch(observedResponse)
+      ) {
+        return { response: "", pending: false };
+      }
+      return { response: resultOf(observedResponse), pending: false };
+    });
 
     return {
       [NAME]: computed(() => (topic ? `SVG Diagram: ${topic}` : "SVG Diagram")),
@@ -64,18 +80,18 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
 
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
-              isPending(responseRequest),
+              responseState.pending,
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating diagram...
               </div>,
-              <cf-svg content={response} />,
+              <cf-svg content={responseState.response} />,
             )}
           </cf-vstack>
         </cf-screen>
       ),
       topic,
-      diagram: computed(() => response || ""),
-      pending: isPending(responseRequest),
+      diagram: responseState.response,
+      pending: responseState.pending,
     };
   },
 );

@@ -117,19 +117,6 @@ const headersSql = (): string =>
     `LIMIT max(1, min(COALESCE(?, ${DEFAULT_LIMIT}), ${MAX_LIMIT}))`,
   ].join("\n");
 
-/**
- * What a query reports about a failure, empty when it has not failed.
- *
- * The same narrowing the sqlite builtin applies before it writes one, so a
- * value that reaches here already a message passes through unchanged.
- */
-const errorText = (error: unknown): string =>
-  error === undefined || error === null
-    ? ""
-    : error instanceof Error
-    ? error.message
-    : String(error);
-
 export const MailboxMonthHeaders = pattern<
   MailboxMonthHeadersInput,
   MailboxMonthHeadersOutput
@@ -161,7 +148,7 @@ export const MailboxMonthHeaders = pattern<
   const headerCount = computed(() => headers.length);
   const pending = computed(() => isPending(observedHeadersRead));
   const errorMessage = computed(() =>
-    hasError(observedHeadersRead) ? errorText(observedHeadersRead.error) : ""
+    hasError(observedHeadersRead) ? observedHeadersRead.error.message : ""
   );
   const hasQueryError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>

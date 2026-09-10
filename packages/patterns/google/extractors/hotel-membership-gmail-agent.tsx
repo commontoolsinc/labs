@@ -933,9 +933,6 @@ Report memberships as you find them. Don't wait until the end.`,
                     Agent Pending: {searcher.agentPending ? "Yes ⏳" : "No ✓"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
-                    Agent Result: {searcher.agentResult ? "Yes ✓" : "No"}
-                  </div>
-                  <div style={{ fontFamily: "monospace" }}>
                     Max Searches: {maxSearches}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
