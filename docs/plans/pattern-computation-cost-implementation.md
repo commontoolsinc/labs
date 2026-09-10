@@ -176,8 +176,10 @@ durations are used as performance evidence.
 ### Validation evidence for the A3 slice
 
 [PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
-checked A3 acceptance items. The full runner suite integrated with current main
-passed 1,417 tests / 8,843 steps;
+checked A3 acceptance items. The full runner suite integrated with main
+`c8a64af840` passed 1,417 tests / 8,843 steps. The integration with main
+`ce3602b18a` passes all 46 type-check groups and 50 focused event/accounting
+checks;
 [read-accounting.test.ts](../../packages/runner/test/read-accounting.test.ts)
 covers transaction ownership, aborted attempts, event/preflight failures,
 fan-out, and asynchronous writebacks. The
