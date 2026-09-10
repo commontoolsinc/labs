@@ -279,27 +279,31 @@ The current package provides:
   and compiled down the same path, and neither its source nor a compile
   diagnostic quoting it reaches model context — the diagnostic is retained in
   the run artifact instead. The run reports `instantiated` and then
-  `run_succeeded` or `run_failed` back to the index, best-effort, so a reporting
-  failure never bears on the tool result. It adds the `record_feedback` tool,
-  which votes a pattern up or down with an optional note, so the index learns
-  which of the patterns it holds were worth offering. And it closes the loop the
-  other way: source the model authored and ran successfully is recorded under
-  the identity the compile recorded for it, carrying the `description` and
-  `hashtags` the call named, the run's own task as the request the pattern
-  answers, the compiled argument and result schemas, and the published patterns
-  the source imports. Automatic publication records the entry without offering
-  it to search; discoverability is earned from later evidence. Curated seeding
-  may offer a passing run immediately by setting
+  `run_succeeded` or `run_failed` back to the index through the session's
+  pattern-index ledger: each write is sent behind the one before it, no tool
+  call waits for it, and the session flushes the whole chain before the process
+  exits, so a reporting failure never bears on the tool result and a write is
+  never cut off in flight. It adds the `record_feedback` tool, which votes a
+  pattern up or down with an optional note, so the index learns which of the
+  patterns it holds were worth offering. And it closes the loop the other way:
+  source the model authored and ran successfully is recorded under the identity
+  the compile recorded for it, carrying the `description` and `hashtags` the
+  call named, the run's own task as the request the pattern answers, the
+  compiled argument and result schemas, and the published patterns the source
+  imports. Automatic publication records the entry without offering it to
+  search; discoverability is earned from later evidence. Curated seeding may
+  offer a passing run immediately by setting
   `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`, while a render-gate failure
-  remains recorded and non-discoverable with the gate's reason. Publication is
-  best-effort in the same way — never awaited, never a failure of a run that
-  worked — and a run that names no `description` publishes nothing, since its
-  purpose could not be evaluated later. `--no-pattern-index-publish`, or
-  `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter only.
-  Without the index configuration `search_patterns` and `record_feedback` are
-  absent from the tool surface, for a `pattern-author`-profile subagent as much
-  as for the parent — a child searches through the one client the parent built —
-  and `run_pattern` refuses a `patternId`;
+  remains recorded and non-discoverable with the gate's reason. Publication
+  travels the same ledger — sent in order, waited for only at the session's
+  final flush, never a failure of a run that worked — and a run that names no
+  `description` publishes nothing, since its purpose could not be evaluated
+  later. `--no-pattern-index-publish`, or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`,
+  makes the run a reader and voter only. Without the index configuration
+  `search_patterns` and `record_feedback` are absent from the tool surface, for
+  a `pattern-author`-profile subagent as much as for the parent — a child
+  searches through the one client the parent built — and `run_pattern` refuses a
+  `patternId`;
 - composition over that index: source the model authors may import a published
   pattern by the specifier a search reported,
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` makes it
