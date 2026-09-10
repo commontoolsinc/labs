@@ -435,12 +435,15 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       try {
         await issued.promise;
         const frame = getTopFrame();
-        expect(frame?.runtime).toBe(runtime);
-        popFrame(frame);
-        reply.resolve({
-          rows: [{ id: 1 }],
-          columns: [{ output: "id", table: "items", column: "id" }],
-        });
+        try {
+          expect(frame?.runtime).toBe(runtime);
+        } finally {
+          popFrame(frame);
+          reply.resolve({
+            rows: [{ id: 1 }],
+            columns: [{ output: "id", table: "items", column: "id" }],
+          });
+        }
 
         await runtime.settled();
         expect(view.get()).toEqual({ rows: [{ id: 1 }] });
