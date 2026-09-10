@@ -615,10 +615,11 @@ content-addressed schema docs), state the default (everything else is
 consumed), and flag the invariant-12 revisit; §4.6.3 has the
 reference-without-dereference mapping and §8.9.2 makes trigger reads
 normatively INCLUDED. Remaining delta: (a) the implementation's
-`linkResolutionProbe` (coordinator link/slot scaffolding) and
-`schedulerDependencyRead` (dependency seeding) are machinery but not
-"verification machinery" — either generalize class 1 to runtime-internal
-machinery reads or add them as named classes; (b) state explicitly that
+`schedulerDependencyRead` (dependency seeding) and trusted coordinator
+bookkeeping are machinery but not "verification machinery" — either generalize
+class 1 to runtime-internal machinery reads or add them as named classes. A
+`linkResolutionProbe` alone is a consumed `followRef` observation; excluding
+bookkeeping requires a separate runtime-owned marker. (b) State explicitly that
 markers are attachable only by runtime code, never pattern-controlled; (c)
 state the asymmetry: over-exclusion is unsound (leak), under-exclusion merely
 coarsens J.

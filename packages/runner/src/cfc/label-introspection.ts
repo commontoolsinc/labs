@@ -189,9 +189,9 @@ type FieldObservation = readonly unknown[] | undefined;
  * CONCRETE metadata path:
  *
  * 1. Containment gate first (spec §4.6.4.2, merged via specs#14): only
- *    derived-containment entries (`derived`/`structure` — the §8.9.2
- *    conservative join) have observable source-bearing fields at all.
- *    Declared/authored, link, external-ingest and legacy entries stay
+ *    derived-containment entries (`derived`/`structure` and complete v2
+ *    `followRef` acquisitions) have observable source-bearing fields at all.
+ *    Declared/authored, external-ingest and legacy entries stay
  *    fail-closed UNOBSERVABLE — and a persisted template at the same path
  *    never re-opens them: the per-path metadata addressing conflates the
  *    entries stored at one payload path, so a template minted for a derived

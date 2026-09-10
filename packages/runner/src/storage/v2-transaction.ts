@@ -54,6 +54,7 @@ import type {
   IWriteOptions,
   MediaType,
   MemorySpace,
+  Metadata,
   NativeStorageCommit,
   NativeStorageCommitOperation,
   ReadError,
@@ -1566,6 +1567,19 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
+  /** Whether verifier values and their tracked paths use the durable view. */
+  #usesDurableVerifierView(
+    branch: SpaceBranch,
+    address: Pick<IMemorySpaceAddress, "id">,
+    meta: Metadata,
+  ): boolean {
+    return isInternalVerifierRead(meta) &&
+      (!isUiInputBlindWriteTx(this) || isAuthorizationRead(meta)) &&
+      !hasDataUriScheme(address.id) && !address.id.startsWith("cid:") &&
+      getBlindStructuralTarget(this) !== undefined &&
+      branch.replica.getNonSpeculativeDocument !== undefined;
+  }
+
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
@@ -1586,11 +1600,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       ? currentDocument(doc)
       : documentAtEpoch(doc, this.#readEpoch);
     const suppliedMeta = options?.meta ?? EMPTY_META;
-    const durableVerifierRead = isInternalVerifierRead(suppliedMeta) &&
-      (!isUiInputBlindWriteTx(this) || isAuthorizationRead(suppliedMeta)) &&
-      !hasDataUriScheme(address.id) && !address.id.startsWith("cid:") &&
-      getBlindStructuralTarget(this) !== undefined &&
-      branch.replica.getNonSpeculativeDocument !== undefined;
+    const durableVerifierRead = this.#usesDurableVerifierView(
+      branch,
+      address,
+      suppliedMeta,
+    );
     const readMeta = withAuthorizationReadBasis(
       suppliedMeta,
       durableVerifierRead
@@ -1602,14 +1616,12 @@ export class V2StorageTransaction implements IStorageTransaction {
         )
         : doc.initialReadBasis,
     );
-    // In a UI-input blind-leaf-write tx (a scalar `$value` overwrite), every read
-    // is recorded for CFC/scheduling but carries no value-equality commit
-    // precondition: tag each activity with `ignoreReadForCommit` (so buildReads
-    // downgrades it to a nonRecursive entity-root existence read instead of a
-    // leaf-value precondition) and skip marking the doc `validated` (so the client
-    // validate()/claim() pass skips it too). The mode is scoped to the user
-    // `set()` call only — CFC boundary-commit reads run after the tx is unmarked
-    // and keep their preconditions.
+    // During a blind scalar UI write, incidental reads remain recorded for
+    // CFC/scheduling but yield a structural commit precondition at the parent
+    // instead of a leaf-value dependency. Authorization reads preserve their
+    // preconditions, including inside this window: the verifier's durable
+    // evidence must remain valid when the write commits. After the user set()
+    // call unmarks the transaction, all reads keep their preconditions.
     const skipCommitPrecondition = isUiInputBlindWriteTx(this) &&
       !isAuthorizationRead(readMeta);
     const { space: _, ...memoryAddress } = address;
@@ -1831,9 +1843,17 @@ export class V2StorageTransaction implements IStorageTransaction {
     const { doc } = this.#document(branch, address);
     if (hasDataUriScheme(address.id)) return { ok: {} };
 
+    const suppliedMeta = options?.meta ?? EMPTY_META;
     const readMeta = withAuthorizationReadBasis(
-      options?.meta ?? EMPTY_META,
-      doc.initialReadBasis,
+      suppliedMeta,
+      this.#usesDurableVerifierView(branch, address, suppliedMeta)
+        ? branch.replica.getDocumentReadBasis?.(
+          address.id,
+          address.scope,
+          this.#scopeKeyIdentity,
+          true,
+        )
+        : doc.initialReadBasis,
     );
     const skipCommitPrecondition = isUiInputBlindWriteTx(this) &&
       !isAuthorizationRead(readMeta);

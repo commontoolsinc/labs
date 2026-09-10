@@ -4226,12 +4226,14 @@ export class SpaceReplica
     );
     return Object.freeze({
       seq: record?.confirmed.seq ?? 0,
-      localSeqs: Object.freeze(
-        record?.pending.filter((version) =>
-          !excludeSpeculative ||
-          !this.#speculativeLocalSeqs.has(version.localSeq)
-        ).map((version) => version.localSeq) ?? [],
-      ),
+      localSeqs: Object.freeze([
+        ...new Set(
+          record?.pending.filter((version) =>
+            !excludeSpeculative ||
+            !this.#speculativeLocalSeqs.has(version.localSeq)
+          ).map((version) => version.localSeq) ?? [],
+        ),
+      ].sort((left, right) => left - right)),
     });
   }
 

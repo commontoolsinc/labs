@@ -54,7 +54,9 @@ export type ResolvedFullLink = NormalizedFullLink & {
  * bearing one keeps carrying rather than adopting it. `false` is not one
  * of these — it selects nothing, which is information.
  */
-const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
+export const schemaConstrainsNothing = (
+  schema: JSONSchema | undefined,
+): boolean =>
   schema === undefined || ContextualFlowControl.isTrueSchema(schema);
 
 export const MAX_PATH_RESOLUTION_LENGTH = 100;
@@ -141,7 +143,7 @@ const recordDereferenceHop = (
  * leading segments. Caps at or below the hop are dropped (already enforced);
  * the rest move by `shift` so their depths still address the same segments.
  */
-const rebaseScopeCaps = (
+export const rebaseScopeCaps = (
   caps: readonly ScopeCapAtDepth[] | undefined,
   consumed: number,
   shift: number,
@@ -153,7 +155,8 @@ const rebaseScopeCaps = (
   return moved.length > 0 ? moved : undefined;
 };
 
-const schemaScopeForLinkAtDepth = (
+/** The effective follow cap for a stored link at one depth of a read path. */
+export const schemaScopeForLinkAtDepth = (
   link: NormalizedFullLink,
   depth: number,
 ): SchemaScope | undefined => {
@@ -678,6 +681,7 @@ export function resolveLinkTracingDereferences(
               tx,
               nextHop.source.space,
               schema,
+              { silentFailures: options.silentFailures },
             );
             schema = closureComplete
               ? ContextualFlowControl.getSchemaAtPath(schema, remainingPath)

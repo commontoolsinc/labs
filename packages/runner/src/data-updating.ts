@@ -408,6 +408,13 @@ export type DiffAndUpdateOptions = IReadOptions & {
    * marker on the containing document cannot cover them.
    */
   schemaRole?: "output";
+
+  /**
+   * The stored prefix carried unchanged by a mergeable append. Only the root
+   * array's identical slots are bookkeeping; newly supplied values still
+   * pass through reference and write-policy validation.
+   */
+  unchangedArrayPrefix?: readonly unknown[];
 };
 
 /**
@@ -424,6 +431,12 @@ export interface DiffWalkState {
    * counter; frameless writes leave it unset, and such elements store inline.
    */
   nextAnchorId?: () => string | number;
+
+  /** The root append value and its stored, unchanged prefix. */
+  unchangedArrayPrefix?: {
+    array: unknown;
+    values: readonly unknown[];
+  };
 }
 
 /**
@@ -473,16 +486,23 @@ export function diffAndUpdate(
   // names without reading a member of it. Each member read on one resolves
   // through this transaction and is recorded on it as a dependency the commit
   // has to check.
+  const normalizedValue = flattenBuilderArtifacts(newValue, {
+    isLeaf: isCellResultForDereferencing,
+  });
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
-    flattenBuilderArtifacts(newValue, {
-      isLeaf: isCellResultForDereferencing,
-    }),
+    normalizedValue,
     context,
     readOptions,
-    { seen: new Map(), nextAnchorId: anchorIds },
+    {
+      seen: new Map(),
+      nextAnchorId: anchorIds,
+      unchangedArrayPrefix: options?.unchangedArrayPrefix === undefined
+        ? undefined
+        : { array: normalizedValue, values: options.unchangedArrayPrefix },
+    },
   );
   diffLogger.debug(
     "diff",
@@ -1072,10 +1092,16 @@ export function normalizeAndDiff(
       runtime,
       tx,
       link,
-      runtime.cfcFlowLabels === "persist" &&
+      tx.getCfcState().flowLabelsMode === "persist" &&
         getCfcReferenceProvenance(newValue) !== undefined
-        ? runtime.getCellFromLink(newValue as CellLink, undefined, tx)
-          .getRawUntyped()
+        ? runtime.getCellFromLink(
+          carryCfcReferenceProvenance(
+            newValue,
+            parseLink(newValue as CellLink, link),
+          ),
+          undefined,
+          tx,
+        ).getRawUntyped()
         : findAndInlineDataUriLinks(newValue),
       context,
       options,
@@ -1497,6 +1523,16 @@ export function normalizeAndDiff(
       const inCur = currentArray ? i in currentArray : false;
 
       if (!inNew && !inCur) continue; // hole→hole: no change
+
+      const prefix = state.unchangedArrayPrefix;
+      if (
+        prefix?.array === newValue && i < prefix.values.length &&
+        i in prefix.values && inNew && inCur &&
+        Object.is(currentArray![i], prefix.values[i]) &&
+        Object.is(newValue[i], prefix.values[i])
+      ) {
+        continue;
+      }
 
       if (!inNew && inCur) {
         // value→hole: emit an explicit delete (a plain `undefined` write

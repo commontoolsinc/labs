@@ -6,6 +6,8 @@
 import { deepFreeze, hashStringOf } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { utf8Compare } from "@commonfabric/utils/utf8";
+import type { ScopeCapAtDepth } from "../link-types.ts";
+import { narrowerScopeCap } from "../scope.ts";
 import { joinCfcObservedConfidentiality } from "./observation.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
 import {
@@ -118,7 +120,18 @@ export function acquiredImmutableReference(
       cfcReferenceBindingMatches(entry.reference, actual)
     )
   ) return undefined;
-  const scopeCaps = entries.flatMap((entry) => entry.reference.scopeCaps ?? []);
+  const caps = new Map<number, ScopeCapAtDepth["scope"]>();
+  for (const entry of entries) {
+    for (const { depth, scope } of entry.reference.scopeCaps ?? []) {
+      caps.set(depth, narrowerScopeCap(caps.get(depth), scope)!);
+    }
+  }
+  const scopeCaps = [...caps].sort(([a], [b]) => a - b).map((
+    [depth, scope],
+  ) => ({
+    depth,
+    scope,
+  }));
   return {
     binding: cfcReferenceBinding(actual),
     confidentiality: joinCfcObservedConfidentiality(

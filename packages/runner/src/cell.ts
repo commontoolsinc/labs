@@ -1,4 +1,3 @@
-import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import type { ReadonlyCell } from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
@@ -24,6 +23,12 @@ import {
   isLinkRef,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
+import {
+  codecOf,
+  NULL_LIVE_ENVIRONMENT,
+} from "@commonfabric/data-model/codec-common";
+import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -78,6 +83,7 @@ import {
   type PatternFactory,
   type Reactive,
   type Schema,
+  type SchemaScope,
   SELF,
   type Stream,
   type StripDefaultBrand,
@@ -110,12 +116,14 @@ import {
   acquiredImmutableReference,
   immutableReferenceSourceAcquisition,
   immutableReferenceViewIdentity,
+  withImmutableReferenceTable,
 } from "./cfc/immutable-reference.ts";
 import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
 import {
   carryCfcReferenceProvenance,
   cfcReferenceBinding,
   cfcReferenceConfidentialityForView,
+  type CfcReferenceProvenance,
   getCfcReferenceProvenance,
   recordCfcReferenceObservation,
   registerCfcReferenceCarrier,
@@ -137,7 +145,12 @@ import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
 } from "./data-uri.ts";
-import { type LastNode, resolveLink } from "./link-resolution.ts";
+import {
+  type LastNode,
+  resolveLink,
+  schemaConstrainsNothing,
+  schemaScopeForLinkAtDepth,
+} from "./link-resolution.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
@@ -170,7 +183,12 @@ import {
   schemaHasIfc,
   validateAndTransform,
 } from "./schema.ts";
-import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
+import {
+  canFollowScopedLink,
+  isCellScope,
+  narrowerScopeCap,
+  normalizeCellScope,
+} from "./scope.ts";
 import {
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -2358,6 +2376,9 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
+    const unchangedArrayPrefix = Array.isArray(currentValue)
+      ? currentValue
+      : undefined;
     const cause = this.#frame?.cause;
 
     if (!Array.isArray(currentValue)) {
@@ -2417,7 +2438,7 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       combined,
       cause,
-      undefined,
+      { unchangedArrayPrefix },
       frameAnchorIds(this.#frame),
     );
 
@@ -2459,6 +2480,9 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
+    const unchangedArrayPrefix = Array.isArray(currentValue)
+      ? currentValue
+      : undefined;
     const cause = this.#frame?.cause;
 
     if (!Array.isArray(currentValue)) {
@@ -2549,7 +2573,7 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       [...existing, ...toAdd],
       cause,
-      undefined,
+      { unchangedArrayPrefix },
       frameAnchorIds(this.#frame),
     );
     this.tx.recordMergeableOp?.(resolvedLink, {
@@ -3124,7 +3148,7 @@ export class CellImpl<T extends FabricValue>
     this.#observeReference("dereference");
     const readTx = this.runtime.readTx(this.tx);
     const tracesBefore = readTx.getCfcState().dereferenceTraces.length;
-    let link: NormalizedFullLink = resolveLink(
+    const link: NormalizedFullLink = resolveLink(
       this.runtime,
       readTx,
       this.#link,
@@ -3137,14 +3161,19 @@ export class CellImpl<T extends FabricValue>
       this.#cfcLabelView,
     );
     const nonReactiveTx = createNonReactiveTransaction(readTx);
-    link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
+    const snapshot = maybeConvertArrayPathToDataURILink(
+      this.runtime,
+      nonReactiveTx,
+      link,
+      mergeCfcLabelViews([this.#cfcLabelView, dereferenceView]),
+    );
     return createCell(
       this.runtime,
-      link,
+      snapshot.link,
       this.tx,
       this.#synced,
       undefined,
-      mergeCfcLabelViews([this.#cfcLabelView, dereferenceView]),
+      snapshot.cfcLabelView,
     );
   }
 
@@ -3262,7 +3291,7 @@ export class CellImpl<T extends FabricValue>
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
-    const preciseImmutable = this.runtime.cfcFlowLabels === "persist" &&
+    const preciseImmutable = tx.getCfcState().flowLabelsMode === "persist" &&
       isFabricDataUri(resolved.id);
     // Decoded URI objects can be shared by equal-byte carriers. Each live
     // acquisition needs isolated objects before its private proofs attach.
@@ -3270,46 +3299,26 @@ export class CellImpl<T extends FabricValue>
       frozen: preciseImmutable ? false : frozen,
     });
     const acquireReference = (rawLink: SigilLink, path: readonly string[]) => {
-      const source = { ...resolved, path: [...resolved.path, ...path] };
-      const binding = parseLink(rawLink, source);
-      if (binding?.id === undefined || binding.space === undefined) {
-        throw new Error("Reference acquisition is unresolved");
-      }
-      const sourceAcquisition = immutableReferenceSourceAcquisition(
-        this.#cfcLabelView,
-        cfcReferenceBinding(source),
-      );
-      const view = mergeCfcLabelViews([
-        this.#cfcLabelView,
-        cfcLabelViewForDereferenceTraces(
-          tx,
-          tx.getCfcState().dereferenceTraces.slice(traceStart),
+      acquireRawReference(
+        tx,
+        { ...resolved, path: [...resolved.path, ...path] },
+        rawLink,
+        mergeCfcLabelViews([
           this.#cfcLabelView,
-        ),
-        cfcReferenceLabelViewForAddress(
-          tx,
-          cfcReferenceBinding(source),
-          sourceAcquisition,
-        ),
-      ]);
-      const captured = acquiredImmutableReference(
-        sourceAcquisition,
-        cfcReferenceBinding(source),
-        cfcReferenceBinding(binding as NormalizedFullLink),
+          cfcLabelViewForDereferenceTraces(
+            tx,
+            tx.getCfcState().dereferenceTraces.slice(traceStart),
+            this.#cfcLabelView,
+          ),
+        ]),
+        "read",
       );
-      const reference = {
-        binding: cfcReferenceBinding(binding as NormalizedFullLink),
-        confidentiality: cfcReferenceConfidentialityForView(view),
-        ...(captured?.scopeCaps !== undefined &&
-          { scopeCaps: captured.scopeCaps }),
-      };
-      registerCfcReferenceCarrier(rawLink, () => reference, () => view);
-      recordCfcReferenceObservation(tx, reference, "identity");
     };
     if (preciseImmutable) {
       // The URI contains bytes only. Restore each decoded reference from the
       // live immutable carrier's exact source slot, preserving mutable reads.
       convertCellsToLinks(result, {
+        allowLinkFreeFabricInstances: true,
         transformLink: (_cell, _link, path) => {
           const rawLink = path.reduce<FabricValue>(
             (value, key) => (value as Record<string, FabricValue>)[key],
@@ -3340,7 +3349,21 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.#synced) this.sync();
 
-    const inlined = findAndInlineDataUriLinks(value);
+    const inlined = findAndInlineDataUriLinks(
+      value,
+      this.tx.getCfcState().flowLabelsMode === "persist"
+        ? (link) =>
+          getCfcReferenceProvenance(link) === undefined ? undefined : {
+            value: this.runtime.getCellFromLink(
+              carryCfcReferenceProvenance(link, parseLink(link, this.#link)),
+              undefined,
+              this.tx,
+            )
+              .getRawUntyped(),
+          }
+        : undefined,
+      this.tx.getCfcState().flowLabelsMode === "persist",
+    );
 
     // When asked to write only on change, read the current raw value and bail
     // out if it already equals what we'd write. `readValueOrThrow` mirrors the
@@ -3366,8 +3389,9 @@ export class CellImpl<T extends FabricValue>
       this.#link.schema ?? this.schema,
       schemaRole,
     );
-    const stored = this.runtime.cfcFlowLabels === "persist"
+    const stored = this.tx.getCfcState().flowLabelsMode === "persist"
       ? convertCellsToLinks(inlined, {
+        allowLinkFreeFabricInstances: true,
         transformLink: (_cell, link, path) => {
           recordTrustedLinkValueWrite(this.tx!, {
             ...this.#link,
@@ -4083,12 +4107,96 @@ function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   }
 }
 
+/**
+ * Acquires one raw reference at the exact source slot that supplied it. Reads
+ * enforce the source handle's follow cap; snapshot copies preserve slot policy
+ * while the enclosing snapshot retains the source handle's restrictions.
+ */
+function acquireRawReference(
+  tx: IExtendedStorageTransaction,
+  source: NormalizedFullLink,
+  rawLink: SigilLink,
+  cfcLabelView: CfcLabelView | undefined,
+  mode: "read" | "copy",
+): void {
+  const binding = parseLink(rawLink, source);
+  if (binding?.id === undefined || binding.space === undefined) {
+    throw new Error("Reference acquisition is unresolved");
+  }
+  const readSource = mode === "read" &&
+    tx.getCfcState().flowLabelsMode === "persist";
+  if (
+    readSource &&
+    !canFollowScopedLink(
+      schemaScopeForLinkAtDepth(source, source.path.length),
+      binding.scope,
+    )
+  ) {
+    throw new Error("Reference acquisition exceeds its source scope cap");
+  }
+  const sourceAcquisition = immutableReferenceSourceAcquisition(
+    cfcLabelView,
+    cfcReferenceBinding(source),
+  );
+  let captured = acquiredImmutableReference(
+    sourceAcquisition,
+    cfcReferenceBinding(source),
+    cfcReferenceBinding(binding),
+  );
+  const view = mergeCfcLabelViews([
+    cfcLabelView,
+    cfcReferenceLabelViewForAddress(
+      tx,
+      cfcReferenceBinding(source),
+      sourceAcquisition,
+      (acquisition) => captured = acquisition,
+    ),
+  ]);
+  type ScopeCap = NonNullable<NormalizedFullLink["scopeCaps"]>[number];
+  const caps = new Map<number, ScopeCap["scope"]>();
+  for (const { depth, scope } of captured?.scopeCaps ?? []) {
+    caps.set(depth, narrowerScopeCap(caps.get(depth), scope)!);
+  }
+  // The resolver keeps the source schema when the stored link has no
+  // constraining schema. Raw acquisition must retain that same follow cap
+  // before a caller replaces the acquired handle's schema.
+  const carriedSchema = readSource && schemaConstrainsNothing(binding.schema)
+    ? source.schema
+    : binding.schema;
+  const schemaCap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(carriedSchema),
+    ContextualFlowControl.getAsCellFollowScopeCap(carriedSchema),
+  );
+  // A later projection can replace the stored value schema. Retain its
+  // follow cap at every hop the raw link's schema governs.
+  if (schemaCap !== undefined) {
+    for (let depth = 0; depth <= binding.path.length; depth++) {
+      caps.set(depth, narrowerScopeCap(caps.get(depth), schemaCap)!);
+    }
+  }
+  const scopeCaps = [...caps].sort(([a], [b]) => a - b).map((
+    [depth, scope],
+  ) => ({
+    depth,
+    scope,
+  }));
+  const reference = {
+    binding: cfcReferenceBinding(binding),
+    confidentiality: cfcReferenceConfidentialityForView(view),
+    ...(scopeCaps.length > 0 && { scopeCaps }),
+  };
+  registerCfcReferenceCarrier(rawLink, () => reference, () => view);
+  recordCfcReferenceObservation(tx, reference, "identity");
+}
+
 function maybeConvertArrayPathToDataURILink(
+  runtime: Runtime,
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
-): NormalizedFullLink {
+  cfcLabelView: CfcLabelView | undefined,
+): { link: NormalizedFullLink; cfcLabelView: CfcLabelView | undefined } {
   if (link.path.length === 0) {
-    return link;
+    return { link, cfcLabelView };
   }
 
   let rootValue: FabricValue;
@@ -4097,7 +4205,7 @@ function maybeConvertArrayPathToDataURILink(
       meta: ignoreReadForScheduling,
     });
   } catch {
-    return link;
+    return { link, cfcLabelView };
   }
 
   let current: FabricValue = rootValue;
@@ -4139,7 +4247,7 @@ function maybeConvertArrayPathToDataURILink(
   }
 
   if (candidate === undefined) {
-    return link;
+    return { link, cfcLabelView };
   }
 
   const baseLink: NormalizedFullLink = {
@@ -4147,10 +4255,104 @@ function maybeConvertArrayPathToDataURILink(
     path: candidate.path,
   };
 
+  const snapshot = snapshotValueAtAddress(
+    runtime,
+    tx,
+    baseLink,
+    candidate.value,
+    cfcLabelView,
+  );
   return {
-    ...link,
-    id: dataUriFromValueWithResolvedLinks(candidate.value, baseLink),
-    path: candidate.remainingPath,
+    link: { ...snapshot.link, path: candidate.remainingPath },
+    cfcLabelView: snapshot.cfcLabelView,
+  };
+}
+
+/** Captures a value at its source address with exact nested reference proofs. */
+export function snapshotValueAtAddress(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  value: FabricValue,
+  cfcLabelView: CfcLabelView | undefined,
+): { link: NormalizedFullLink; cfcLabelView: CfcLabelView | undefined } {
+  if (tx.getCfcState().flowLabelsMode === "persist") {
+    const references: Array<{
+      path: readonly string[];
+      reference: CfcReferenceProvenance;
+    }> = [];
+    const capturedValue = convertCellsToLinks(value, {
+      allowLinkFreeFabricInstances: true,
+      transformLink: (_cell, rawLink, path) => {
+        const source = { ...link, path: [...link.path, ...path] };
+        // The copied slot keeps its own policy. The snapshot below retains
+        // the source handle's schema and rebases its outer follow caps.
+        acquireRawReference(tx, source, rawLink, cfcLabelView, "copy");
+        references.push({
+          path,
+          reference: getCfcReferenceProvenance(rawLink)!,
+        });
+        return carryCfcReferenceProvenance(
+          rawLink,
+          createSigilLinkFromParsedLink(parseLink(rawLink, source), {
+            includeSchema: true,
+            keepAsCell: KeepAsCell.All,
+          }),
+        );
+      },
+    });
+    const immutable = runtime.getImmutableCell(
+      link.space,
+      capturedValue,
+      undefined,
+      tx,
+      cfcLabelView,
+    );
+    const immutableLink = immutable.getAsNormalizedFullLink();
+    const immutableView = getCarriedCfcLabelView(immutable);
+    // Boxing removes a path prefix without following a link at that prefix.
+    // Its covering caps therefore remain active at the new root.
+    const caps = new Map<number, SchemaScope>();
+    for (const cap of link.scopeCaps ?? []) {
+      const depth = Math.max(0, cap.depth - link.path.length);
+      caps.set(depth, narrowerScopeCap(caps.get(depth), cap.scope)!);
+    }
+    const scopeCaps = caps.size > 0
+      ? [...caps].sort(([a], [b]) => a - b).map(([depth, scope]) => ({
+        depth,
+        scope,
+      }))
+      : undefined;
+    return {
+      link: {
+        ...link,
+        id: immutableLink.id,
+        path: [],
+        scopeCaps,
+      },
+      cfcLabelView: link.scope === immutableLink.scope
+        ? immutableView
+        : withImmutableReferenceTable(
+          immutableView,
+          references.map(({ path, reference }) => ({
+            source: {
+              space: link.space,
+              id: immutableLink.id,
+              scope: link.scope,
+              path,
+            },
+            reference,
+          })),
+        ),
+    };
+  }
+  return {
+    link: {
+      ...link,
+      id: dataUriFromValueWithResolvedLinks(value, link),
+      path: [],
+    },
+    cfcLabelView,
   };
 }
 
@@ -4325,6 +4527,12 @@ export type CellLinkInput =
 
 /** The options by which a cell becomes the link that reaches it. */
 type CellLinkOptions = {
+  /**
+   * Whether immutable value conversion may rebuild link-free instance state
+   * through its codec. References inside instance state remain unsupported.
+   */
+  allowLinkFreeFabricInstances?: boolean;
+
   /** Whether the link carries the cell's schema. */
   includeSchema?: boolean;
 
@@ -4395,6 +4603,13 @@ export function convertCellsToLinks(
   );
 }
 
+/** Refuses references whose source slots live inside opaque instance state. */
+function refuseImmutableInstanceReference(): never {
+  throw new Error(
+    "References inside immutable `FabricInstance` state are unsupported",
+  );
+}
+
 /**
  * Recursive worker for {@link convertCellsToLinks}, carrying the state of the
  * walk in progress.
@@ -4424,6 +4639,7 @@ function convertOneToLinks(
   options: CellLinkOptions,
   stack: string[],
   ancestors: IndexTrackingStack<object>,
+  insideFabricInstance = false,
 ): FabricValue {
   switch (typeof value) {
     case "object": {
@@ -4455,6 +4671,9 @@ function convertOneToLinks(
 
   const depth = ancestors.indexOf(value);
 
+  if (insideFabricInstance && (depth >= 0 || isCellLink(value))) {
+    refuseImmutableInstanceReference();
+  }
   if (depth >= 0) {
     return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
   }
@@ -4543,6 +4762,31 @@ function convertOneToLinks(
         // it from its (empty) entries as a bare `{}`. It leaves whole instead.
         return layer;
       } else if (layer instanceof FabricInstance) {
+        if (options.allowLinkFreeFabricInstances) {
+          if (layer instanceof FabricLink) {
+            if (insideFabricInstance) refuseImmutableInstanceReference();
+            const link = carryCfcReferenceProvenance(
+              original,
+              cloneIfNecessary(layer, { frozen: false }) as SigilLink,
+            );
+            return deepFreeze(
+              options.transformLink?.(undefined, link, [...stack]) ?? link,
+            );
+          }
+          const codec = codecOf(layer);
+          const state = convertOneToLinks(
+            codec.encode(layer, NULL_LIVE_ENVIRONMENT),
+            options,
+            stack,
+            ancestors,
+            true,
+          );
+          return codec.decode(
+            codec.tagForValue(layer),
+            state,
+            NULL_LIVE_ENVIRONMENT,
+          );
+        }
         // Not a leaf: a container reached by its codec contents, which this
         // walk cannot do.
         refuseFabricInstance(layer, "when converting cells to links");
@@ -4573,6 +4817,7 @@ function convertOneToLinks(
           options,
           stack,
           ancestors,
+          insideFabricInstance,
         );
 
         stack.pop();
@@ -4595,6 +4840,7 @@ function convertOneToLinks(
           options,
           stack,
           ancestors,
+          insideFabricInstance,
         );
 
         stack.pop();

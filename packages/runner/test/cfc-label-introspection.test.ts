@@ -8,6 +8,7 @@ import {
   evaluateConfLabelQuery,
   parseConfLabelTargetPath,
 } from "../src/cfc/label-introspection.ts";
+import { deriveLabelMetadataTemplateEntries } from "../src/cfc/label-metadata-population.ts";
 import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
 
@@ -45,6 +46,27 @@ const derivedBodyEntry = (atom: CfcAtom = caveatAtom(SOURCE_A)) => ({
 });
 
 describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
+  it("keeps legacy link fields unavailable in an upgraded envelope", () => {
+    for (const complete of [false, true]) {
+      const entry = {
+        path: ["body"],
+        origin: "link" as const,
+        ...(complete && { observes: "followRef" as const }),
+        label: { confidentiality: [caveatAtom(SOURCE_A)] },
+      };
+      const templates = deriveLabelMetadataTemplateEntries([entry], 2);
+      expect(templates.length > 0).toBe(complete);
+      const metadata = {
+        ...metadataWith([entry, ...templates]),
+        version: 2 as const,
+      };
+      const evaluation = evaluateConfLabelQuery(metadata, ["body"], {
+        source: SOURCE_A,
+      });
+      expect(evaluation.result.status).toBe(complete ? "ok" : "notAvailable");
+    }
+  });
+
   it("protects an empty query below a privately selected structure", () => {
     const metadata = metadataWith([{
       path: [],

@@ -2725,8 +2725,10 @@ export class Runner {
     // conversion. That keeps the gate below comparing what a write would
     // actually store, which is the whole point of converting first.
     const flattened = flattenBuilderArtifacts(result);
-    const fabricResult = this.#runtime.cfcFlowLabels === "persist"
-      ? convertCellsToLinks(flattened as CellLinkInput)
+    const fabricResult = tx.getCfcState().flowLabelsMode === "persist"
+      ? convertCellsToLinks(flattened as CellLinkInput, {
+        allowLinkFreeFabricInstances: true,
+      })
       : fabricFromNativeValue(flattened);
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
@@ -3265,14 +3267,18 @@ export class Runner {
     ]);
 
     if (isCellLink(argument)) {
+      const parsedArgument = carryCfcReferenceProvenance(
+        argument,
+        parseLink(argument, resultCell),
+      );
       const acquired = getCfcReferenceProvenance(argument) !== undefined
-        ? this.#runtime.getCellFromLink(argument, undefined, tx)
+        ? this.#runtime.getCellFromLink(parsedArgument, undefined, tx)
           .getAsWriteRedirectLink()
         : undefined;
       argument = carryCfcReferenceProvenance(
         acquired,
         createSigilLinkFromParsedLink(
-          parseLink(argument),
+          parsedArgument,
           {
             base: resultCell.getAsNormalizedFullLink(),
             includeSchema: true,

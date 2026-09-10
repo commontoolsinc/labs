@@ -15,15 +15,25 @@ import type { Server } from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { SealedCommitVerdict } from "../src/storage/interface.ts";
 import {
   authorizationRead,
   excludeReadFromConflict,
+  getAuthorizationReadBasis,
   ignoreReadForCommit,
   internalVerifierRead,
+  markUiInputBlindWriteTx,
   mergeableOpRead,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
+import { getDirectTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { SpaceReplica } from "../src/storage/v2.ts";
+import {
+  createDefaultTraversalContext,
+  SchemaObjectTraverser,
+} from "../src/traverse.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -255,6 +265,136 @@ describe("cfc-reference-authorization", () => {
     await clock.settle();
     await holderStorage.synced();
     expect(holder.get()).toBeUndefined();
+  });
+
+  it("commits blind input after plain-schema authorization reads beneath a speculative layer", async () => {
+    const schema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const;
+    const listSchema = { type: "array", items: schema } as const;
+    const cause = "blind-plain-schema-authorization";
+    const target = holderRuntime.getCell(space, cause, schema);
+    const list = holderRuntime.getCell(space, `${cause}-list`, listSchema);
+    const address = target.getAsNormalizedFullLink();
+    const seed = holderRuntime.edit();
+    target.withTx(seed).set({ name: "durable" });
+    list.withTx(seed).set([target.withTx(seed)]);
+    expect((await seed.commit({ resolveAt: "verdict" })).error).toBeUndefined();
+    await server.flushSessions([space]);
+    await clock.settle();
+    await holderStorage.synced();
+
+    const replica = holderStorage.open(space).replica as SpaceReplica;
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const echo = replica.sealNative(
+      {
+        operations: [{
+          op: "set",
+          id: address.id,
+          scope: address.scope,
+          type: "application/json",
+          value: {
+            ...replica.getDocument(address.id, address.scope),
+            value: { name: "speculative" },
+          },
+        }],
+      },
+      undefined,
+      verdict.promise,
+      { speculative: true },
+    );
+    try {
+      expect(target.get()).toEqual({ name: "speculative" });
+      const tx = holderRuntime.edit();
+      markUiInputBlindWriteTx(tx);
+      setBlindStructuralTarget(tx, { ...address, path: [] });
+      const verified = tx.runWithAmbientReadMeta(
+        { ...authorizationRead, ...internalVerifierRead },
+        () => {
+          const valueAddress = {
+            ...list.getAsNormalizedFullLink(),
+            path: ["value"] as const,
+          };
+          const value = tx.readOrThrow(valueAddress);
+          return new SchemaObjectTraverser(
+            tx,
+            {
+              path: ["value"],
+              schema: listSchema,
+            },
+            createDefaultTraversalContext(
+              holderRuntime.scopeKeyIdentity,
+              false,
+            ),
+          )
+            .traverse({ address: valueAddress, value });
+        },
+      );
+      expect(verified).toEqual({ ok: [{ name: "durable" }] });
+      const tracked = [...(getDirectTransactionReadActivities(tx) ?? [])]
+        .filter((read) =>
+          read.id === address.id && read.nonRecursive &&
+          read.path.join("/") === "value/name" &&
+          getAuthorizationReadBasis(read.meta) !== undefined
+        );
+      expect(tracked.length).toBeGreaterThan(0);
+      target.withTx(tx).key("name").set("typed");
+      unmarkUiInputBlindWriteTx(tx);
+      holderRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit({ resolveAt: "verdict" })).error).toBeUndefined();
+      for (const read of tracked) {
+        expect(getAuthorizationReadBasis(read.meta)?.localSeqs).toEqual([]);
+      }
+
+      await server.flushSessions([space]);
+      await clock.settle();
+      const peer = writerRuntime.getCell(space, cause, schema);
+      await peer.sync();
+      await peer.pull();
+      expect(peer.get()).toEqual({ name: "typed" });
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await echo.settled;
+    }
+  });
+
+  it("exports one authorization dependency for a pending layer with repeated document operations", async () => {
+    const target = holderRuntime.getCell(space, targetCause);
+    const address = target.getAsNormalizedFullLink();
+    const replica = holderStorage.open(space).replica as SpaceReplica;
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const layer = replica.sealNative(
+      {
+        operations: ["first", "second"].map((value) => ({
+          op: "set" as const,
+          id: address.id,
+          scope: address.scope,
+          type: "application/json",
+          value: { ...replica.getDocument(address.id, address.scope), value },
+        })),
+      },
+      undefined,
+      verdict.promise,
+    );
+    try {
+      expect(replica.getDocumentReadBasis(address.id, address.scope).localSeqs)
+        .toEqual([layer.localSeq]);
+      const tx = holderRuntime.edit();
+      expect(tx.readOrThrow({ ...address, path: ["value"] }, {
+        meta: { ...authorizationRead, ...internalVerifierRead },
+      })).toBe("second");
+      const reads = replica.accessForTestingOnly.buildReads(
+        tx.tx,
+        layer.localSeq + 1,
+      );
+      expect(reads.pending).toHaveLength(1);
+      expect(reads.pending[0].localSeq).toBe(layer.localSeq);
+      tx.abort("inspection complete");
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await layer.settled;
+    }
   });
 
   it("commits a reference when its required evidence is unchanged", async () => {

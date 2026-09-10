@@ -307,6 +307,14 @@ describe("CFC projection claims", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
+      const entries = readPersistedEntries(
+        storageManager,
+        parseLink(cell.getAsLink()).id!,
+      );
+      const entry = entries?.find((entry) =>
+        entry.path.length === 1 && entry.path[0] === "firstLatitude"
+      );
+      expect(entry?.label.confidentiality).toEqual(["secret"]);
     } finally {
       await runtime.dispose();
       await storageManager.close();

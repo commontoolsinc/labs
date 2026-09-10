@@ -672,6 +672,12 @@ standard error and continues searching that piece and the rest of the space.
 
 ## Piece CFC labels
 
+The deployed CLI runtime persists flow labels and complete reference acquisition
+history in CFC envelope version 2, matching the shell's precise reference
+reader. CLI writes therefore require a deployment whose readers support that
+envelope. A stored legacy reference with incomplete acquisition history remains
+unresolved; reading its address does not reconstruct its missing history.
+
 `cf cell get-label` returns the effective CFC label view for a result path. Pass
 `--input` to select the input cell — a `--cell` value ending in `#argument`
 selects it too. The paths in the returned view are relative to the selected

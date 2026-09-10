@@ -1,13 +1,9 @@
 # CFC enforcement × propagation × write-floor × trigger gating — the deployment mode matrix
 
-_Epic H, stage H4 (first sub-step), of
-[`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
-Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
-the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
-**which combinations of the five CFC dials are conforming deployment states and
-in what order a deployment may advance them**, before H4 lands `enforce-strict`
-behavior and before H3a flips any shipped host — so the rollout ordering is
-written down first._
+This document defines conforming combinations of the five CFC dials and the
+order in which a deployment may advance them. The rollout constraints are tracked
+in SC-13 of [CFC spec changes](cfc-spec-changes.md); the current reference profile
+and reader compatibility requirements are in [CFC references](cfc-references.md).
 
 ## 1. The five dials (all runtime-configured, all orthogonal)
 
@@ -188,7 +184,7 @@ dial is not yet producing. The states a deployment is expected to pass through:
 | State | enforcement | flow | write-floor | trigger | Meaning |
 |---|---|---|---|---|---|
 | **Operator (explicitly disabled)** | `disabled` | `off` | `off` | `false` | CFC descriptive only; provenance mints run, nothing rejects. Requires explicitly passing `cfcEnforcementMode: "disabled"` — no shipped host does today. |
-| **Server hosts today (toolshed, background-piece-service)** | `enforce-explicit` | `off` | `off` | `false` | Neither host passes any CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts), [background-piece-service main.ts](../../packages/background-piece-service/src/main.ts)), so both inherit the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
+| **Server hosts (toolshed, background-piece-service)** | `enforce-explicit` | `persist` | `off` | `false` | The `productionServer` preset and toolshed's per-space serving Runtime persist reference acquisition history for precise readers. Flow propagation and explicit checks run in the trusted Runtime; storage admits the resulting revision dependencies. |
 | **Shell today** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
 | **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
 | **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects and credits persisted flow integrity; content assertions require evidence within the destination space. |
@@ -762,5 +758,7 @@ SC-13 rollout constraint in `cfc-spec-changes.md` and the current host
 postures: shell
 ([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
 `enforce-explicit` + flow `persist`, H2); toolshed and
-background-piece-service (no CFC options passed → `Runtime` defaults,
-`enforce-explicit` + flow `off`).
+background-piece-service (`productionServer` and the per-space serving Runtime:
+`enforce-explicit` + flow `persist`). The deployed CLI also selects persistent
+flow labels; embedding clients must select a writer profile compatible with
+their readers. See [CFC references](cfc-references.md).

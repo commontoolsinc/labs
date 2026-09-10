@@ -2218,6 +2218,9 @@ export class Runtime {
         if (acquisition === undefined) return undefined;
         return {
           binding: cfcReferenceBinding(actual),
+          ...(acquisition.scopeCaps !== undefined && {
+            scopeCaps: acquisition.scopeCaps,
+          }),
           confidentiality: joinCfcObservedConfidentiality([
             acquisition.confidentiality,
             sourceAcquisition?.confidentiality ?? [],
@@ -3477,8 +3480,11 @@ export class Runtime {
     const flattened = flattenBuilderArtifacts(data, {
       replaceOther: cellAsLink,
     });
-    const value = this.cfcFlowLabels === "persist"
+    const precise =
+      (tx?.getCfcState().flowLabelsMode ?? this.cfcFlowLabels) === "persist";
+    const value = precise
       ? convertCellsToLinks(flattened, {
+        allowLinkFreeFabricInstances: true,
         transformLink: (_cell, link, path) => {
           const reference = getCfcReferenceProvenance(link);
           if (reference !== undefined) {
@@ -3503,7 +3509,7 @@ export class Runtime {
       })
       : fabricFromNativeValue(flattened);
     const asDataURI = dataUriFromValue(inlineExternalSchemaRefsInValue(value));
-    if (this.cfcFlowLabels === "persist") {
+    if (precise) {
       const inherited = carryImmutableReferenceTables(
         [cfcLabelView, ...nestedViews],
         cfcLabelView,

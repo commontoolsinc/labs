@@ -494,10 +494,9 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     ]);
     const listId = await buildList(rt, "tp-list-rb", criteriaA, ["tp-el-rb"]);
 
-    // The reconcile: reads the new criteria AND its own container's slot
-    // (the diff readback — a standalone probe at the slot plus a raw slot
-    // read), then re-declares. Without the exclusion the readback would
-    // resolve the old templates and mint old ∪ new.
+    // Reading the new criteria and the existing slot consumes both selection
+    // histories. Restamping membership retains the old and new criteria in
+    // the templates, including the standalone reference observation.
     const reconcile = rt.edit();
     reconcile.readOrThrow(readAddress(criteriaB, []));
     reconcile.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });

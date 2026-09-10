@@ -458,10 +458,8 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const templates = entriesOf(listId).filter(
       (e) => e.origin === "label-metadata",
     );
-    // Container-anchored entries (enumerate + frozen shape at []) and the
-    // three `*`-child twins each carry the caveat J: one whole-atom + one
-    // `source` template per target path — 4 total, the slot pair with the
-    // `*` target segment.
+    // The container, wildcard child, and concrete slot each carry the caveat
+    // J through three metadata templates: base shape, whole atom, and source.
     expect(templates.map((e) => e.path.join("/")).sort()).toEqual([
       "cfc/labels/value",
       "cfc/labels/value/*",
@@ -806,8 +804,9 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("unreachable");
     expect(result.atoms).toHaveLength(1);
-    // The templates are the label CARRIER now: the consumed labels come from
-    // them, not from the in-hand fallback (the entry's own confidentiality).
+    // Field and atom templates label their respective consultations. The
+    // base metadata-shape observation also consumes the entry's own
+    // confidentiality.
     expect(consumedConfidentiality).toContainEqual("tmpl-source-label");
     expect(consumedConfidentiality).toContainEqual("tmpl-atom-label");
     expect(consumedConfidentiality).toContainEqual("secret");

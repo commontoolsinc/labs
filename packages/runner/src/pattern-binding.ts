@@ -24,6 +24,7 @@ import {
   withCfcReferenceConfidentiality,
 } from "./cfc/reference-provenance.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { joinCfcObservedConfidentiality } from "./cfc/observation.ts";
 import { diffAndUpdate, recordTrustedLinkValueWrite } from "./data-updating.ts";
 import {
   areNormalizedLinksSame,
@@ -278,6 +279,7 @@ function sendValueToBindingInner<T>(
   // cells. This and `unwrapOneLevelAndBindToDoc` below are the only two
   // places that do.
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    let bindingSource: unknown = binding;
     if (isAliasBinding(binding)) {
       const alias = binding.$alias;
       if ((alias.defer ?? 0) > 0) {
@@ -317,6 +319,7 @@ function sendValueToBindingInner<T>(
         if (link === undefined) {
           throw new Error("Invalid pseudo-alias path: " + alias.path);
         }
+        bindingSource = link;
         const path = alias.path;
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(link, path, alias.schema),
@@ -338,9 +341,24 @@ function sendValueToBindingInner<T>(
       source: NormalizedFullLink,
     ) => {
       const sigil = createSigilLinkFromParsedLink(source, { base: target });
-      if (cell.runtime.cfcFlowLabels === "persist") {
+      if (tx.getCfcState().flowLabelsMode === "persist") {
+        const acquired = cell.runtime.getCellFromLink(
+          source,
+          undefined,
+          tx,
+          withCfcReferenceConfidentiality(
+            undefined,
+            joinCfcObservedConfidentiality(
+              [cell, bindingSource, value].map((carrier) =>
+                getCfcReferenceProvenance(carrier)?.confidentiality ?? []
+              ),
+            ),
+          ),
+        );
         carryCfcReferenceProvenance(
-          cell.runtime.getCellFromLink(source, undefined, tx).getAsLink(),
+          source.overwrite === "redirect"
+            ? acquired.getAsWriteRedirectLink()
+            : acquired.getAsLink(),
           sigil,
         );
         recordTrustedLinkValueWrite(tx, target, sigil);

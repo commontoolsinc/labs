@@ -24,10 +24,10 @@ type StoredEntry = {
 describe("CFC flow labels: pointwise structure (phase B)", () => {
   // S16 phase B: pointwise label precision is a structural fact of the
   // per-element transaction decomposition (design D4), not a trusted claim.
-  // These tests pin the split: element results carry only their element's
-  // taint; the result container carries only structure-level taint — and for
-  // filter, the membership decision's taint (§8.5.6.1) arrives via the
-  // predicate outputs the coordinator consumes.
+  // These tests distinguish element content from coordinator observations.
+  // Result references retain acquisition and reselection history; for filter,
+  // membership taint (§8.5.6.1) also includes the predicate outputs the
+  // coordinator consumes.
 
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
@@ -91,14 +91,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .flatMap((e) => e.label.confidentiality ?? []);
 
   it("map: reconciled references retain coordinator selection confidentiality", async () => {
-    // Element ops run in their own transactions reading only their element,
-    // so per-element precision is structural — for elements that arrive in
-    // separate reconciles. A batch first-instantiation evaluates all new
-    // element ops inline in ONE pattern-run transaction, whose J is then the
-    // join of every new element (coarse but sound; it refines as elements
-    // are touched individually). This test exercises the incremental path:
-    // el0 instantiates first, el1 arrives later, and each element's result
-    // carries exactly its own taint.
+    // Element ops read their own elements, while their result references
+    // retain the confidentiality of each selection. Here el0 instantiates
+    // first and el1 arrives later. Reconciliation consumes el0's acquired
+    // result reference as well as Bob's new result, so both references it
+    // writes carry the two selection dependencies.
 
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -167,9 +164,17 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await result.pull();
     await runtime.idle();
 
+    const mappedId = result.key("mapped").resolveAsCell()
+      .getAsNormalizedFullLink().id;
+    expect(
+      entriesOf(mappedId).find((entry) =>
+        entry.origin === "link" && entry.path.join("/") === "0"
+      )?.label.confidentiality,
+    ).toEqual(["alice-secret"]);
+
     // Second element arrives in its own reconcile: the update transaction
     // only shuffles links (no content reads), and el1's op instantiates in
-    // a transaction that never read el0.
+    // a transaction that never read el0's content.
     const grow = runtime.edit();
     const el0Again = runtime.getCell(space, "pointwise-el-0", undefined, grow);
     const el1 = runtime.getCell(space, "pointwise-el-1", undefined, grow);
@@ -188,9 +193,24 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(mapped.map((m) => m?.doubled)).toEqual([2, 4]);
 
     // Reference slots retain the selection confidentiality of every write.
-    // Reconciliation reselects the existing first reference under Bob's
-    // influence, so its history includes both inputs. The fresh second
-    // reference is selected by that reconcile alone.
+    // Reconciliation consumes the first result reference's Alice history
+    // before writing either output slot. The forwarded input references stay
+    // public: reading their identities never copies their target content labels.
+    const inputId = listCell.getAsNormalizedFullLink().id;
+    const inputReferences = entriesOf(inputId).filter((entry) =>
+      entry.origin === "link"
+    );
+    expect(inputReferences.map((entry) => entry.path)).toEqual([["0"], ["1"]]);
+    expect(
+      inputReferences.flatMap((entry) => entry.label.confidentiality ?? []),
+    ).toEqual([]);
+    expect(
+      entriesOf(mappedId).filter((entry) => entry.origin === "link")
+        .map((entry) => entry.label.confidentiality),
+    ).toEqual([
+      ["alice-secret", "bob-secret"],
+      ["alice-secret", "bob-secret"],
+    ]);
     const probe = async (index: number, cause: string): Promise<string[]> => {
       const ptx = runtime!.edit();
       const value = (result.key("mapped") as any).key(index).withTx(ptx)
@@ -207,7 +227,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(conf0).toContainEqual("alice-secret");
     expect(conf0).toContainEqual("bob-secret");
     expect(conf1).toContainEqual("bob-secret");
-    expect(conf1).not.toContainEqual("alice-secret");
+    expect(conf1).toContainEqual("alice-secret");
   });
 
   //

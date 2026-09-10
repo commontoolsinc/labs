@@ -524,13 +524,10 @@ const collapseRedundantEntries = (
 //
 // `consumes` selects entries by observation class (C1, C0 §4/§6): a read
 // consumes only the entries whose class matches what it actually observed.
-// This subsumes the old `excludeLinkOrigin` pointer/content split (SC-8):
-// link-origin entries label the *reference* as transport (so links carry
-// their target's sensitivity to wherever they land), but reading a value is
-// not reading the pointer — value/shape reads skip them (the implicit
-// `followRef` class of the C0 §3 carve-out), while followRef observations
-// now consume exactly them. Content taint still arrives when the target is
-// actually dereferenced, as an ordinary read of the target document.
+// Link-origin entries describe reference acquisition and selection. A value
+// observation consumes those restrictions alongside its content classes;
+// following a reference consumes each hop's followRef entries. Target content
+// labels enter when that content is observed in the target document.
 // Covering (class-less) entries conflate the content channels and are
 // consumed by every content read class (value/shape/enumerate) — over-taint,
 // fail-safe — but never by followRef observations (C0 §6.1).
@@ -781,7 +778,8 @@ const metadataAppliesToPath = (
   return metadata.labelMap.entries.some((entry) =>
     entry.origin !== "derived" && entry.origin !== "structure" &&
     !isLabelMetadataTemplateEntry(entry) &&
-    !(metadata.version === 2 && entry.origin === "link") &&
+    !(metadata.version === 2 && entry.origin === "link" &&
+      entry.observes === "followRef") &&
     (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
   );
 };
@@ -4376,8 +4374,12 @@ const assertionOutcomeIsCovered = (
         address.scope,
         "application/json",
       );
-    } catch {
-      return false;
+    } catch (error) {
+      if (
+        error instanceof UnknownCfcMetadataVersionError ||
+        error instanceof UnreadableCfcMetadataError
+      ) return false;
+      throw error;
     }
     if (!assertionMetadataIsCovered(metadata, address.path, confidentiality)) {
       return false;
@@ -5099,7 +5101,11 @@ const derivePersistedLinkLabel = (
   return { label, ...withMetadata };
 };
 
-/** Resolves a written reference while retaining its acquired scope limits. */
+/**
+ * Resolves a written reference while retaining its acquired scope limits.
+ * Content evidence must remain in the destination commit's space so its reads
+ * can be bound atomically; acquiring a cross-space reference alone is allowed.
+ */
 const resolveWrittenReferenceTarget = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,

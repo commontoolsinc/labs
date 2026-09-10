@@ -1,4 +1,7 @@
-import { immutableReferenceSourceAcquisition } from "./cfc/immutable-reference.ts";
+import {
+  immutableReferenceSourceAcquisition,
+  immutableReferenceViewIdentity,
+} from "./cfc/immutable-reference.ts";
 import {
   AnyCellWrapping,
   type JSONSchemaObj,
@@ -10,6 +13,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  hashStringOf,
   isDeepFrozen,
   isWalkableObjectOrArray,
   shallowMutableClone,
@@ -21,7 +25,10 @@ import {
 } from "@commonfabric/data-model-schema";
 import {
   readMaybeLink,
+  rebaseScopeCaps,
   resolveLink,
+  resolveLinkTracingDereferences,
+  schemaScopeForLinkAtDepth,
   undefinedDataLink,
 } from "./link-resolution.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -51,7 +58,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
-import { createCell, isCell } from "./cell.ts";
+import { createCell, isCell, snapshotValueAtAddress } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -75,8 +82,11 @@ import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
-import { canFollowScopedLink, isCellScope } from "./scope.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import { canFollowScopedLink, isCellScope, narrowerScopeCap } from "./scope.ts";
+import {
+  internalVerifierRead,
+  linkResolutionProbe,
+} from "./storage/reactivity-log.ts";
 import {
   canBranchMatch,
   combineOptionalSchema,
@@ -99,6 +109,35 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   scope: link.scope,
   path: [...link.path],
 });
+
+/** Retains a link's follow restrictions before replacing its value schema. */
+function linkWithRetainedScopeCaps(
+  link: NormalizedFullLink,
+  inheritedCaps?: NormalizedFullLink["scopeCaps"],
+): NormalizedFullLink {
+  const caps = new Map<number, SchemaScope>();
+  for (
+    const { depth, scope } of [
+      ...(link.scopeCaps ?? []),
+      ...(inheritedCaps ?? []),
+    ]
+  ) {
+    caps.set(depth, narrowerScopeCap(caps.get(depth), scope)!);
+  }
+  for (let depth = 0; depth <= link.path.length; depth++) {
+    const cap = schemaScopeForLinkAtDepth(link, depth);
+    if (cap !== undefined) {
+      caps.set(depth, narrowerScopeCap(caps.get(depth), cap)!);
+    }
+  }
+  return caps.size === 0 ? link : {
+    ...link,
+    scopeCaps: [...caps].sort(([a], [b]) => a - b).map(([depth, scope]) => ({
+      depth,
+      scope,
+    })),
+  };
+}
 
 // Creation-only: stamp the asCell entry's declared scope onto a newly created
 // cell's link. Never use this on a link that was followed/resolved during a
@@ -1195,7 +1234,17 @@ export function validateAndTransform(
       const mergedSchema = (next.schema !== undefined)
         ? combineSchemaForLink(effectiveSchema!, next.schema)
         : effectiveSchema!;
-      link = { ...next, schema: mergedSchema };
+      link = {
+        ...linkWithRetainedScopeCaps(
+          next,
+          rebaseScopeCaps(
+            link.scopeCaps,
+            link.path.length,
+            next.path.length - link.path.length,
+          ),
+        ),
+        schema: mergedSchema,
+      };
     }
     recordCfcReferenceObservation(tx, {
       binding: cfcReferenceBinding(link),
@@ -1228,6 +1277,10 @@ export function validateAndTransform(
   if (schemaHasIfc(resolvedValueLink.schema)) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
+  recordCfcReferenceObservation(tx, {
+    binding: cfcReferenceBinding(resolvedValueLink),
+    confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+  }, "dereference");
   objectCreator.setBase(resolvedValueLink, cfcLabelView);
 
   // Link paths don't include value, but doc address should
@@ -1398,6 +1451,9 @@ class TransformObjectCreator
   #synced: boolean;
   #baseLink: NormalizedFullLink;
   #cfcLabelView: CfcLabelView | undefined;
+  #referenceContext = 0;
+  #nextReferenceContext = 1;
+  #referenceContexts = new Map<string, number>();
 
   constructor(
     runtime: Runtime,
@@ -1423,6 +1479,170 @@ class TransformObjectCreator
 
   #labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
     return labelViewForLink(this.#baseLink, this.#cfcLabelView, link);
+  }
+
+  referenceContextKey(): number {
+    return this.#referenceContext;
+  }
+
+  #enterContext(
+    link: NormalizedFullLink,
+    view: CfcLabelView | undefined,
+  ): () => void {
+    const previousLink = this.#baseLink;
+    const previousView = this.#cfcLabelView;
+    const previousContext = this.#referenceContext;
+    this.#baseLink = link;
+    this.#cfcLabelView = view;
+    const key = hashStringOf({
+      link,
+      view,
+      immutableReferences: immutableReferenceViewIdentity(view),
+    });
+    let context = this.#referenceContexts.get(key);
+    if (context === undefined) {
+      context = this.#nextReferenceContext++;
+      this.#referenceContexts.set(key, context);
+    }
+    this.#referenceContext = context;
+    return () => {
+      this.#baseLink = previousLink;
+      this.#cfcLabelView = previousView;
+      this.#referenceContext = previousContext;
+    };
+  }
+
+  #linkWithInheritedCaps(link: NormalizedFullLink): NormalizedFullLink {
+    if (
+      this.#baseLink.space !== link.space || this.#baseLink.id !== link.id ||
+      this.#baseLink.scope !== link.scope ||
+      !isPrefix(this.#baseLink.path, link.path)
+    ) return link;
+    const baseCap = narrowerScopeCap(
+      ContextualFlowControl.getSchemaScopeCap(this.#baseLink.schema),
+      ContextualFlowControl.getAsCellFollowScopeCap(this.#baseLink.schema),
+    );
+    if (baseCap === undefined && this.#baseLink.scopeCaps === undefined) {
+      return link;
+    }
+    const caps = new Map<number, SchemaScope>();
+    for (
+      const cap of [
+        ...(this.#baseLink.scopeCaps ?? []),
+        ...(link.scopeCaps ?? []),
+      ]
+    ) {
+      caps.set(cap.depth, narrowerScopeCap(caps.get(cap.depth), cap.scope)!);
+    }
+    if (baseCap !== undefined) {
+      const depth = this.#baseLink.path.length;
+      caps.set(depth, narrowerScopeCap(caps.get(depth), baseCap)!);
+    }
+    return {
+      ...link,
+      scopeCaps: [...caps].sort(([a], [b]) => a - b).map(([depth, scope]) => ({
+        depth,
+        scope,
+      })),
+    };
+  }
+
+  enterReference(
+    source: NormalizedFullLink,
+    kind: "value" | "cell",
+  ): { restore: () => void; blocked?: NormalizedFullLink } | undefined {
+    if (this.#tx.getCfcState().flowLabelsMode !== "persist") return;
+    source = this.#linkWithInheritedCaps(source);
+    const sourceView = this.#labelViewFor(source);
+    let blocked = false;
+    const resolved = resolveLinkTracingDereferences(
+      this.#runtime,
+      this.#tx,
+      source,
+      kind === "cell" ? "writeRedirect" : "value",
+      { onScopeBlocked: () => blocked = true },
+    );
+    const traces = [...resolved.traces];
+    let target: NormalizedFullLink = resolved.link;
+    let blockedView: CfcLabelView | undefined;
+    if (kind === "cell" && !blocked) {
+      const next = this.#tx.runWithAmbientReadMeta(
+        linkResolutionProbe,
+        () => readMaybeLink(this.#tx, target),
+      );
+      if (next !== undefined) {
+        if (
+          !canFollowScopedLink(
+            schemaScopeForLinkAtDepth(target, target.path.length),
+            next.scope,
+          )
+        ) {
+          blockedView = cfcReferenceLabelViewForAddress(
+            this.#tx,
+            cfcAddressFromLink(target),
+            immutableReferenceSourceAcquisition(
+              sourceView,
+              cfcAddressFromLink(target),
+            ),
+          );
+          target = undefinedDataLink(target);
+          blocked = true;
+        } else {
+          const trace = {
+            source: cfcAddressFromLink(target),
+            target: cfcAddressFromLink(next),
+            kind: "value" as const,
+          };
+          this.#tx.recordCfcDereferenceTrace(trace);
+          traces.push(trace);
+          target = {
+            ...linkWithRetainedScopeCaps(
+              next,
+              rebaseScopeCaps(
+                target.scopeCaps,
+                target.path.length,
+                next.path.length - target.path.length,
+              ),
+            ),
+            schema: target.schema === undefined
+              ? next.schema
+              : combineSchemaForLink(target.schema, next.schema ?? true),
+          };
+        }
+      }
+    }
+    const view = mergeCfcLabelViews([
+      sourceView,
+      blockedView,
+      cfcLabelViewForDereferenceTraces(this.#tx, traces, sourceView),
+    ]);
+    recordCfcReferenceObservation(this.#tx, {
+      binding: cfcReferenceBinding(target),
+      confidentiality: cfcReferenceConfidentialityForView(view),
+    }, "dereference");
+    return {
+      restore: this.#enterContext(target, view),
+      ...(blocked && { blocked: target }),
+    };
+  }
+
+  enterArrayElementSnapshot(
+    source: NormalizedFullLink,
+    value: FabricValue,
+  ): { link: NormalizedFullLink; restore: () => void } | undefined {
+    if (this.#tx.getCfcState().flowLabelsMode !== "persist") return;
+    source = this.#linkWithInheritedCaps(source);
+    const snapshot = snapshotValueAtAddress(
+      this.#runtime,
+      this.#tx,
+      source,
+      value,
+      this.#labelViewFor(source),
+    );
+    return {
+      link: snapshot.link,
+      restore: this.#enterContext(snapshot.link, snapshot.cfcLabelView),
+    };
   }
 
   /**
@@ -1515,6 +1735,7 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: T | undefined,
   ): T | undefined {
+    link = this.#linkWithInheritedCaps(link);
     return processDefaultValue(
       this.#runtime,
       this.#tx,
@@ -1540,6 +1761,7 @@ class TransformObjectCreator
   createOpaquePresence(
     link: NormalizedFullLink,
   ): AnyCellWrapping<FabricValue> {
+    link = this.#linkWithInheritedCaps(link);
     return createOpaqueReference(
       this.#runtime,
       link,
@@ -1559,6 +1781,7 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,
   ): AnyCellWrapping<FabricValue> {
+    link = this.#linkWithInheritedCaps(link);
     return annotateWithBackToCellSymbols(
       value,
       this.#runtime,
@@ -1577,6 +1800,7 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,
   ): AnyCellWrapping<FabricValue> {
+    link = this.#linkWithInheritedCaps(link);
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.

@@ -112,6 +112,11 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
     presets: DEPLOYMENT_FACING,
     value: { apiUrl },
   },
+  cfcFlowLabels: {
+    treat: "pinned-in",
+    presets: ["productionServer"],
+    value: "persist",
+  },
   // Everything below rides the constructor default unless a preset's
   // declared delta param supplies it (covered by the routing tests).
   spaceHostMap: { treat: "absent" },
@@ -121,7 +126,6 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   pieceCreatedCallback: { treat: "absent" },
   debug: { treat: "absent" },
   telemetry: { treat: "absent" },
-  cfcFlowLabels: { treat: "absent" },
   cfcWriteFloor: { treat: "absent" },
   cfcTriggerReadGating: { treat: "absent" },
   cfcDecomposedEnvelopes: { treat: "absent" },

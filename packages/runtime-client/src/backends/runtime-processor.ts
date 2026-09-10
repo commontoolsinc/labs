@@ -48,6 +48,7 @@ import {
   type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
+  ContextualFlowControl,
   convertCellsToLinks,
   encodeSqliteParams,
   entityIdFrom,
@@ -60,6 +61,8 @@ import {
   isCell,
   isCellResult,
   markDurableReadTx,
+  narrowerScopeCap,
+  type NormalizedFullLink,
   normalizeSpaceHost,
   PatternCoverageCollector,
   popFrame,
@@ -81,6 +84,7 @@ import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
   createRuntimeSpaceMembershipProvider,
+  getCarriedCfcLabelView,
   redactCaveatSourcesForDisplay,
   type RenderConfidentialityResolver,
   type SpaceMembershipProvider,
@@ -103,6 +107,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
 import { getMetaLink, KeepAsCell, parseLink } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
+  type AcquireCellRequest,
   type ActionRunTraceResponse,
   BooleanResponse,
   type CellGetCfcLabelRequest,
@@ -385,6 +390,48 @@ function cellValueForClient(
       transformLink: (cell, link) => registry.exportLink(link, cell),
     },
   );
+}
+
+/** Projects a metadata target while retaining the caller's follow caps. */
+function metadataTargetWithScopeCaps(
+  source: NormalizedFullLink,
+  target: NormalizedFullLink,
+  projectPath: boolean,
+): NormalizedFullLink {
+  const path = projectPath ? [...target.path, ...source.path] : target.path;
+  type ScopeCap = NonNullable<NormalizedFullLink["scopeCaps"]>[number];
+  const caps = new Map<number, ScopeCap["scope"]>();
+  const addCap = (depth: number, scope: ScopeCap["scope"] | undefined) => {
+    const cap = narrowerScopeCap(caps.get(depth), scope);
+    if (cap !== undefined) caps.set(depth, cap);
+  };
+  for (const { depth, scope } of target.scopeCaps ?? []) addCap(depth, scope);
+  let schemaCap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(source.schema),
+    ContextualFlowControl.getAsCellFollowScopeCap(source.schema),
+  );
+  for (const { depth, scope } of source.scopeCaps ?? []) {
+    if (projectPath) {
+      addCap(target.path.length + depth, scope);
+    } else if (depth <= source.path.length) {
+      // A manifest entry starts a new path domain. Its inherited restrictions
+      // apply at every hop onto the returned target.
+      schemaCap = narrowerScopeCap(schemaCap, scope);
+    }
+  }
+  // The caller's leaf schema caps ancestor hops too. Keep that floor as
+  // private caps while the metadata target retains its own value schema.
+  for (let depth = 0; depth <= path.length; depth++) addCap(depth, schemaCap);
+  return {
+    ...target,
+    path,
+    ...(caps.size > 0 && {
+      scopeCaps: [...caps].sort(([a], [b]) => a - b).map(([depth, scope]) => ({
+        depth,
+        scope,
+      })),
+    }),
+  };
 }
 
 function sqliteParamsForRuntime(
@@ -1202,31 +1249,47 @@ export class RuntimeProcessor {
     }
     let cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
     if (request.meta !== undefined) {
-      const rootCell = getCell(
-        this.#runtime,
-        { ...request.cell, path: [] },
-        this.#referenceRegistry,
-      );
+      const referenceView = getCarriedCfcLabelView(cell);
+      const source = cell.getAsNormalizedFullLink();
       if (
         request.meta === "pattern" || request.meta === "argument" ||
         request.meta === "result"
       ) {
         // For the meta link fields, use the meta linked cell instead
-        const rootCell = getCell(
-          this.#runtime,
-          { ...request.cell, path: [] },
-          this.#referenceRegistry,
-        );
-        const link = getMetaLink(rootCell, request.meta);
+        const link = getMetaLink(cell, request.meta);
         if (link === undefined) return { value: undefined };
-        cell = this.#runtime.getCellFromLink({
-          ...link,
-          path: [...link.path, ...request.cell.path],
-        });
+        cell = this.#runtime.getCellFromLink(
+          metadataTargetWithScopeCaps(source, link, true),
+          undefined,
+          undefined,
+          referenceView,
+        );
       } else {
-        // For meta cells that aren't link cells, return the raw data
+        // Metadata reads are host acquisitions. Issue references in manifests
+        // under the requesting handle's history so their client handles can
+        // be used without fabricating a token or discarding that selection.
         return {
-          value: rootCell.getMetaRaw(request.meta) as FabricValue,
+          value: convertCellsToLinks(cell.getMetaRaw(request.meta), {
+            transformLink: (_source, link) => {
+              const target = this.#runtime.getCellFromLink(
+                metadataTargetWithScopeCaps(
+                  source,
+                  parseLink(link, cell),
+                  false,
+                ),
+                undefined,
+                undefined,
+                referenceView,
+              );
+              return this.#referenceRegistry.exportLink(
+                target.getAsLink({
+                  includeSchema: true,
+                  keepAsCell: KeepAsCell.All,
+                }),
+                target,
+              );
+            },
+          }),
         };
       }
     }
@@ -1946,6 +2009,20 @@ export class RuntimeProcessor {
     return {
       cell: createCellRef(cell, request.schema, this.#referenceRegistry),
     };
+  }
+
+  /** Acquires a fresh host address without accepting serialized provenance. */
+  handleAcquireCell(request: AcquireCellRequest): CellResponse {
+    const { space, id, scope, path, schema, overwrite } = request.address;
+    const cell = this.#runtime.getCellFromLink({
+      space,
+      id,
+      scope,
+      path,
+      ...(schema !== undefined && { schema }),
+      ...(overwrite !== undefined && { overwrite }),
+    });
+    return { cell: createCellRef(cell, undefined, this.#referenceRegistry) };
   }
 
   handleGetHomeSpaceCell(_request: GetHomeSpaceCellRequest): CellResponse {
@@ -2868,6 +2945,8 @@ export class RuntimeProcessor {
         return await this.handleSqliteExec(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
+      case RequestType.AcquireCell:
+        return this.handleAcquireCell(request);
       case RequestType.GetHomeSpaceCell:
         return this.handleGetHomeSpaceCell(request);
       case RequestType.EnsureHomePatternRunning:

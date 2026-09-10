@@ -405,26 +405,26 @@ async function seedAccountHolder(
   seed.writeOrThrow({ space, scope: "space", id: notesId, path: [] }, {
     value: { text: "unlabeled" },
   });
-  const linkTo = (id: string) => ({
-    "/": { "link@1": { id, path: [], scope: "space", space } },
-  });
-  const holderCell = runtime.getCell(space, `${cause}-holder`, undefined, seed);
-  seed.writeOrThrow(
-    {
-      space,
-      scope: "space",
-      id: holderCell.getAsNormalizedFullLink().id,
-      path: [],
-    },
-    {
-      value: shape === "root-link"
-        ? linkTo(accountId)
-        : shape === "two-fields"
-        ? { account: linkTo(accountId), notes: linkTo(notesId) }
-        : { account: linkTo(accountId) },
-    },
-  );
   expect((await seed.commit()).ok).toBeDefined();
+
+  const attach = runtime.edit();
+  const holderCell = runtime.getCell(
+    space,
+    `${cause}-holder`,
+    undefined,
+    attach,
+  );
+  // Runtime-issued references preserve the public selection of each target;
+  // the account's confidentiality is observed when its contents are read.
+  holderCell.set(
+    shape === "root-link"
+      ? accountCell.withTx(attach)
+      : shape === "two-fields"
+      ? { account: accountCell.withTx(attach), notes: notesCell.withTx(attach) }
+      : { account: accountCell.withTx(attach) },
+  );
+  attach.prepareCfc();
+  expect((await attach.commit()).ok).toBeDefined();
   return {
     account: createLLMFriendlyLink(
       holderCell.key("account").getAsNormalizedFullLink(),

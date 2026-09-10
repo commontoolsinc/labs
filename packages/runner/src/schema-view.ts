@@ -48,13 +48,12 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { toCell } from "./back-to-cell.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell, createCell, snapshotValueAtAddress } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { isSigilLink, type NormalizedFullLink } from "./link-utils.ts";
 import { type Runtime } from "./runtime.ts";
 import {
@@ -865,16 +864,19 @@ function createArrayView(
       // the element's own document is all that is registered, and a write into
       // the array never reaches the reader.
       tx.readValueOrThrow(slotLink);
+      const snapshot = snapshotValueAtAddress(
+        runtime,
+        tx,
+        slotLink,
+        item,
+        rebaseCfcLabelView(cfcLabelView, [key]),
+      );
       return readChildAt(
         runtime,
         tx,
-        {
-          ...slotLink,
-          id: dataUriFromValueWithResolvedLinks(item, slotLink),
-          path: [],
-        },
-        [key],
-        cfcLabelView,
+        snapshot.link,
+        [],
+        snapshot.cfcLabelView,
         synced,
       );
     }

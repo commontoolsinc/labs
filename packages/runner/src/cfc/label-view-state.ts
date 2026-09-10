@@ -147,6 +147,7 @@ export const cfcReferenceLabelViewForAddress = (
   tx: IExtendedStorageTransaction,
   source: CfcAddress,
   sourceAcquisition?: CfcReferenceProvenance,
+  onAcquisition?: (acquisition: CfcReferenceProvenance) => void,
 ): CfcLabelView | undefined => {
   const metadata = cfcMetadataForAddress(tx, source);
   const complete = metadata?.version === 2 && metadata.labelMap.entries.some(
@@ -182,6 +183,7 @@ export const cfcReferenceLabelViewForAddress = (
     if (acquisition === undefined) {
       throw new Error("Reference acquisition lacks complete legacy provenance");
     }
+    onAcquisition?.(acquisition);
     return withCfcReferenceConfidentiality(
       undefined,
       acquisition.confidentiality,

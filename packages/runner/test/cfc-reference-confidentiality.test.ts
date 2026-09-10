@@ -11,6 +11,7 @@ import { createSigilLinkFromParsedLink } from "../src/link-utils.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { sendValueToBinding } from "../src/pattern-binding.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -85,6 +86,127 @@ describe("CFC reference confidentiality", () => {
     expect(selected.withTx(tx).get()).toBe("public constant");
     expect(deriveFlowJoin(tx).confidentiality).toContainEqual(secret);
     tx.abort();
+  });
+
+  it("retains selection confidentiality through a shaped scalar read", async () => {
+    const target = await seed("shaped-target", "public constant");
+    const selected = await seed("shaped-reference", target.getAsLink(), [{
+      path: [],
+      origin: "link",
+      observes: "followRef",
+      label: { confidentiality: [secret] },
+    }]);
+    const tx = runtime.edit();
+    expect(selected.withTx(tx).asSchema({ type: "string" }).get())
+      .toBe("public constant");
+    expect(deriveFlowJoin(tx).confidentiality).toContainEqual(secret);
+    tx.abort();
+  });
+
+  it("retains acquired selection on a scope-narrowing redirect", async () => {
+    const target = await seed("scoped-target", "public constant");
+    const selected = await seed("scoped-reference", target.getAsLink(), [{
+      path: [],
+      origin: "link",
+      observes: "followRef",
+      label: { confidentiality: [secret] },
+    }]);
+    const acquire = runtime.edit();
+    const held = selected.withTx(acquire).resolveAsCell();
+    acquire.abort();
+    const tx = runtime.edit();
+    const output = runtime.getCell(space, "scoped-output", undefined, tx);
+    sendValueToBinding(
+      tx,
+      output,
+      undefined,
+      output.getAsWriteRedirectLink(),
+      held,
+      { narrowestReadScope: "user" },
+    );
+    tx.prepareCfc();
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(
+      metadata(output).labelMap.entries.filter((entry) =>
+        entry.origin === "link" && entry.observes === "followRef"
+      ).flatMap((entry) => entry.label.confidentiality ?? []),
+    )
+      .toContainEqual(secret);
+  });
+
+  it("retains argument selection when an alias narrows its write scope", async () => {
+    const target = await seed("argument-target", "public constant");
+    const selected = await seed("argument-reference", target.getAsLink(), [{
+      path: [],
+      origin: "link",
+      observes: "followRef",
+      label: { confidentiality: [secret] },
+    }]);
+    const acquire = runtime.edit();
+    const held = selected.withTx(acquire).resolveAsCell()
+      .getAsNormalizedFullLink();
+    acquire.abort();
+    const tx = runtime.edit();
+    const output = runtime.getCell(space, "alias-output", undefined, tx);
+    sendValueToBinding(
+      tx,
+      output,
+      held,
+      { $alias: { cell: "argument", path: [] } },
+      "new public",
+      { narrowestReadScope: "user" },
+    );
+    tx.prepareCfc();
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(
+      metadata(target).labelMap.entries.filter((entry) =>
+        entry.origin === "link" && entry.observes === "followRef"
+      ).flatMap((entry) => entry.label.confidentiality ?? []),
+    ).toContainEqual(secret);
+  });
+
+  it("retains immutable references when a transaction strengthens flow persistence", async () => {
+    const target = await seed("strengthened-target", "public constant");
+    const selected = await seed("strengthened-reference", target.getAsLink(), [{
+      path: [],
+      origin: "link",
+      observes: "followRef",
+      label: { confidentiality: [secret] },
+    }]);
+    const acquire = runtime.edit();
+    const held = selected.withTx(acquire).resolveAsCell();
+    acquire.abort();
+    const writer = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storage,
+      cfcFlowLabels: "off",
+    });
+    try {
+      const tx = writer.edit();
+      tx.setCfcFlowLabelsMode("persist");
+      const literal = writer.getImmutableCell(
+        space,
+        { selected: held },
+        undefined,
+        tx,
+      );
+      const output = writer.getCell(
+        space,
+        "strengthened-output",
+        undefined,
+        tx,
+      );
+      output.set(literal.getAsLink({ base: output }));
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+      expect(
+        metadata(output).labelMap.entries.filter((entry) =>
+          entry.origin === "link" && entry.path.at(-1) === "selected"
+        ).flatMap((entry) => entry.label.confidentiality ?? []),
+      ).toContainEqual(secret);
+    } finally {
+      await writer.dispose();
+    }
   });
 
   it("keeps an independently acquired reference free of target content labels", async () => {

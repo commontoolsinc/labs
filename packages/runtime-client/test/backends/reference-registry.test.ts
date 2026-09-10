@@ -16,6 +16,7 @@ import {
   readStoredCfcMetadata,
 } from "@commonfabric/runner/cfc";
 import { linkRefPayload } from "@commonfabric/runner/shared";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { ReferenceRegistry } from "@/backends/reference-registry.ts";
@@ -492,5 +493,276 @@ describe("reference-registry", () => {
         value: "changed",
       })
     ).toThrow("missing or expired");
+  });
+
+  it("acquires an existing host address without admitting tokenless ordinary requests", async () => {
+    const target = await seed("address-bootstrap", { public: "existing" });
+    const address = wireCopy(target.key("public").getAsNormalizedFullLink());
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const issued = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address,
+    }).cell;
+    expect(issued.id).toBe(address.id);
+    expect(issued.path).toEqual(["public"]);
+    expect(issued.cfcReferenceToken).toBeDefined();
+    expect(
+      processor.handleCellGet({ type: RequestType.CellGet, cell: issued })
+        .value,
+    ).toBe("existing");
+    const { cfcReferenceToken: _token, ...stripped } = wireCopy(issued);
+    expect(() =>
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: stripped,
+      })
+    ).toThrow("missing or expired");
+    expect(() =>
+      processor.handleCellResolveAsCell({
+        type: RequestType.CellResolveAsCell,
+        cell: stripped,
+      })
+    ).toThrow("missing or expired");
+    expect(() =>
+      processor.applyCellSet({
+        type: RequestType.CellSet,
+        cell: stripped,
+        value: "changed",
+      })
+    ).toThrow("missing or expired");
+  });
+
+  it("reads child metadata while retaining selection and refusing parent widening", async () => {
+    const selectedTarget = await acquireSelected();
+    const argument = await seed("metadata-argument", {
+      public: "argument value",
+    });
+    const setup = runtime.edit();
+    selectedTarget.withTx(setup).setMetaRaw(
+      "argument",
+      argument.getAsLink(),
+      rawMetaWriteAuthorization,
+    );
+    expect((await setup.commit()).error).toBeUndefined();
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const source = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: runtime.getCell(space, "selection").key("public")
+        .getAsNormalizedFullLink(),
+    }).cell;
+    const child = processor.handleCellResolveAsCell({
+      type: RequestType.CellResolveAsCell,
+      cell: source,
+    }).cell;
+    expect(child.path).toEqual(["public"]);
+    expect(() =>
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: { ...wireCopy(child), path: [] },
+      })
+    ).toThrow("does not match its binding");
+    const response = processor.handleCellGet({
+      type: RequestType.CellGet,
+      cell: wireCopy(child),
+      meta: "argument",
+      includeRef: true,
+    });
+    expect(response.value).toBe("argument value");
+    expect(response.cell?.path).toEqual(["public"]);
+    expect(response.cell?.cfcReferenceToken).toBeDefined();
+    const output = await seed("metadata-forward", {});
+    const outputRef = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: output.getAsNormalizedFullLink(),
+    }).cell;
+    expect(
+      (await processor.applyCellSet({
+        type: RequestType.CellSet,
+        cell: outputRef,
+        value: wireCopy(response.cell!),
+      })).error,
+    ).toBeUndefined();
+    const labels = readStoredCfcMetadata(
+      runtime.readTx(),
+      output.getAsNormalizedFullLink(),
+    );
+    expect(
+      labels?.labelMap.entries.filter((entry) => entry.observes === "followRef")
+        .flatMap((entry) => entry.label.confidentiality ?? []),
+    )
+      .toContainEqual(selection);
+    expect(output.get()).toBe("argument value");
+  });
+
+  it("retains acquired scope caps when reading linked metadata", async () => {
+    const piece = await seed("capped-metadata-piece", { child: {} });
+    const setup = runtime.edit();
+    const session = runtime.getCell(
+      space,
+      "metadata-session",
+      undefined,
+      setup,
+      "session",
+    );
+    session.set("private session");
+    const argument = runtime.getCell(
+      space,
+      "capped-metadata-argument",
+      undefined,
+      setup,
+    );
+    argument.set({ nested: { child: session } });
+    piece.withTx(setup).setMetaRaw(
+      "argument",
+      argument.key("nested").getAsLink(),
+      rawMetaWriteAuthorization,
+    );
+    piece.withTx(setup).setMetaRaw(
+      "result",
+      argument.key("nested").asSchema({ scope: "space" }).getAsLink({
+        includeSchema: true,
+      }),
+      rawMetaWriteAuthorization,
+    );
+    expect((await setup.commit()).error).toBeUndefined();
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const address = piece.key("child").getAsNormalizedFullLink();
+    const capped = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: { ...address, schema: { type: "object", scope: "space" } },
+    }).cell;
+    const uncapped = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: { ...address, schema: { type: "object" } },
+    }).cell;
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: uncapped,
+        meta: "argument",
+      }).value,
+    ).toBe("private session");
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: uncapped,
+        meta: "result",
+      }).value,
+    ).toBeUndefined();
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: {
+          ...wireCopy(capped),
+          schema: { type: "object", scope: "session" },
+        },
+        meta: "argument",
+      }).value,
+    ).toBeUndefined();
+  });
+
+  it("returns importable references from an internal metadata manifest", async () => {
+    const piece = await seed("manifest-piece", { public: "piece" });
+    const internal = await seed("manifest-internal", true);
+    const setup = runtime.edit();
+    piece.withTx(setup).setMetaRaw("internal", [{
+      partialCause: "showNewNotePrompt",
+      link: internal.getAsLink(),
+    }], rawMetaWriteAuthorization);
+    expect((await setup.commit()).error).toBeUndefined();
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const issued = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: piece.getAsNormalizedFullLink(),
+    }).cell;
+    const response = processor.handleCellGet({
+      type: RequestType.CellGet,
+      cell: wireCopy(issued),
+      meta: "internal",
+    });
+    const client = {
+      [$conn]: () => ({
+        request: (
+          request: { type: RequestType.CellGet; cell: CellRef },
+        ) => Promise.resolve(processor.handleCellGet(request)),
+      }),
+    } as unknown as RuntimeClient;
+    const manifest = CellHandle.deserialize(
+      new CellHandle(client, issued),
+      wireCopy(response.value),
+    ) as Array<{ partialCause: string; link: CellHandle<boolean> }>;
+    expect(manifest).toHaveLength(1);
+    expect(manifest[0].partialCause).toBe("showNewNotePrompt");
+    expect(manifest[0].link.ref().cfcReferenceToken).toBeDefined();
+    expect(await manifest[0].link.sync()).toBe(true);
+    const { cfcReferenceToken: _token, ...stripped } = manifest[0].link.ref();
+    expect(() =>
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: stripped,
+      })
+    ).toThrow("missing or expired");
+  });
+
+  it("retains acquired scope caps on references returned in metadata manifests", async () => {
+    const piece = await seed("capped-manifest-piece", {});
+    const setup = runtime.edit();
+    const session = runtime.getCell(
+      space,
+      "manifest-session",
+      undefined,
+      setup,
+      "session",
+    );
+    session.set("private session");
+    const internal = runtime.getCell(
+      space,
+      "capped-manifest-internal",
+      undefined,
+      setup,
+    );
+    internal.set(session);
+    piece.withTx(setup).setMetaRaw("internal", [{
+      partialCause: "session-state",
+      link: internal.getAsLink(),
+    }], rawMetaWriteAuthorization);
+    expect((await setup.commit()).error).toBeUndefined();
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const client = {
+      [$conn]: () => ({
+        request: (
+          request: { type: RequestType.CellGet; cell: CellRef },
+        ) => Promise.resolve(processor.handleCellGet(request)),
+      }),
+    } as unknown as RuntimeClient;
+    for (const scope of [undefined, "space"] as const) {
+      const issued = processor.handleAcquireCell({
+        type: RequestType.AcquireCell,
+        address: {
+          ...piece.getAsNormalizedFullLink(),
+          schema: { type: "object", ...(scope !== undefined && { scope }) },
+        },
+      }).cell;
+      const response = processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: {
+          ...wireCopy(issued),
+          schema: { type: "object", scope: "session" },
+        },
+        meta: "internal",
+      });
+      const manifest = CellHandle.deserialize(
+        new CellHandle(client, issued),
+        wireCopy(response.value),
+      ) as Array<{ partialCause: string; link: CellHandle<string> }>;
+      expect(manifest[0].link.ref().cfcReferenceToken).toBeDefined();
+      const projected = manifest[0].link.asSchema({
+        type: "string",
+        scope: "session",
+      });
+      expect(await projected.sync()).toBe(
+        scope === undefined ? "private session" : undefined,
+      );
+    }
   });
 });

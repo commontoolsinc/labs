@@ -77,24 +77,20 @@ export const isLabelMetadataTemplateEntry = (
 ): boolean => entry.origin === LABEL_METADATA_TEMPLATE_ORIGIN;
 
 /**
- * Whether the entry's own effective confidentiality is a sound population
- * label for its source-bearing fields: true exactly for the components
- * produced by the §8.9.2 conservative join — `derived` (the per-tx flow
- * stamp) and `structure` (the same join stamped on container shape,
- * §8.5.6.1) — whose label contains each influencing source's confidentiality
- * by construction. Declared/authored entries, link-carried pointer labels,
- * the external-ingest mark, label-metadata templates themselves and legacy
- * (component-less) entries carry no such containment guarantee and stay
- * fail-closed (spec §4.6.4.2, merged via specs#14). Shared by the mint
- * (which entries GET templates) and the introspection surface (which entries'
- * fields are observable at all) so the two cannot drift.
+ * Whether an entry contains the restrictions on the sources it describes.
+ * Derived and structure entries carry the conservative flow join. Version-2
+ * link entries with an explicit followRef class carry complete acquisition
+ * history. Untouched legacy links in an upgraded envelope do not qualify.
+ * The mint and introspection surface share this gate, so a sibling template
+ * cannot make fields from an unauthenticated entry observable.
  */
 export const cfcEntryHasDerivedContainment = (
-  entry: Pick<LabelMapEntry, "origin">,
+  entry: Pick<LabelMapEntry, "origin" | "observes">,
   metadataVersion: 1 | 2 = 1,
 ): boolean =>
   entry.origin === "derived" || entry.origin === "structure" ||
-  (metadataVersion === 2 && entry.origin === "link");
+  (metadataVersion === 2 && entry.origin === "link" &&
+    entry.observes === "followRef");
 
 /**
  * The §4.6.4.2 public/protected split for one atom field, shared by the mint
