@@ -161,19 +161,19 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     return derivedConfidentiality(out.getAsNormalizedFullLink().id);
   };
 
-  it("value reads: legacy covering join is byte-identical; link-origin entries stay excluded", async () => {
-    // C0 §6 parity, scoped: a recursive VALUE read joins the covering root
-    // entry and the descendant derived entry — byte-identical to the pre-C1
-    // join — and still never consumes the link-origin pointer label (the
-    // §3 carve-out: origin:"link" with absent observes is followRef-only,
-    // never covering).
+  it("consumes reference identities when materializing a subtree", async () => {
+    // Materialization exposes stored links as well as inline values.
 
     const rt = makeRuntime();
     const id = await seedMixedDoc(rt, "occ-value-read");
     const join = await flowJoinOf(rt, "occ-value-out", (tx) => {
       tx.readOrThrow(readAddress(id, []));
     });
-    expect(tagsOf(join)).toEqual(["root-covering", "field-derived"]);
+    expect(tagsOf(join)?.sort()).toEqual([
+      "field-derived",
+      "pointer-label",
+      "root-covering",
+    ]);
   });
 
   it("shape reads consume enumerate + covering at the node only; value-class entries are skipped", async () => {
@@ -246,11 +246,8 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     expect(tagsOf(join)).toEqual(["pointer-label"]);
   });
 
-  it("probes covered by a dereference trace are machinery: no followRef consumption", async () => {
-    // C0 §4's dereference row stays unchanged: a probe that belongs to a
-    // dereference this tx performed (a recorded trace source at-or-above the
-    // probed path) is resolution machinery, not a followRef observation — the
-    // taint of what was read arrives via ordinary reads of the target.
+  it("retains an explicit reference observation when a later trace covers it", async () => {
+    // A trace cannot erase a reference identity the application observed.
 
     const rt = makeRuntime();
     const id = await seedMixedDoc(rt, "occ-deref-read");
@@ -267,12 +264,12 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
         kind: "value",
       });
     });
-    expect(join).toBeUndefined();
+    expect(tagsOf(join)).toEqual(["pointer-label"]);
   });
 
-  it("explicit followRef entries are consumed by probes only", async () => {
-    // Explicit `observes:"followRef"` entries behave like the implicit link
-    // carve-out: consumed by probes only, never as covering entries.
+  it("consumes followRef entries during probes and subtree materialization", async () => {
+    // Both operations expose reference identity; neither treats it as a
+    // target-content observation.
 
     const rt = makeRuntime();
     const seed = (cause: string) =>
@@ -289,7 +286,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     const valueJoin = await flowJoinOf(rt, "occ-explicit-value-out", (tx) => {
       tx.readOrThrow(readAddress(valueId, []));
     });
-    expect(valueJoin).toBeUndefined();
+    expect(tagsOf(valueJoin)).toEqual(["ref-secret"]);
 
     const probeId = await seed("occ-explicit-followref-probe");
     const probeJoin = await flowJoinOf(rt, "occ-explicit-probe-out", (tx) => {

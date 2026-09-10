@@ -17,9 +17,14 @@ import {
   type JSONValue,
 } from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
-import { type AnyCell } from "./cell.ts";
+import { type AnyCell, isCell } from "./cell.ts";
+import {
+  carryCfcReferenceProvenance,
+  getCfcReferenceProvenance,
+  withCfcReferenceConfidentiality,
+} from "./cfc/reference-provenance.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import { diffAndUpdate, recordTrustedLinkValueWrite } from "./data-updating.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -328,6 +333,20 @@ function sendValueToBindingInner<T>(
       "writeRedirect",
       { preserveOverwrite: true },
     );
+    const writeScopeReference = (
+      target: NormalizedFullLink,
+      source: NormalizedFullLink,
+    ) => {
+      const sigil = createSigilLinkFromParsedLink(source, { base: target });
+      if (cell.runtime.cfcFlowLabels === "persist") {
+        carryCfcReferenceProvenance(
+          cell.runtime.getCellFromLink(source, undefined, tx).getAsLink(),
+          sigil,
+        );
+        recordTrustedLinkValueWrite(tx, target, sigil);
+      }
+      tx.writeValueOrThrow(target, sigil);
+    };
     const outputScope = options.narrowestReadScope;
     if (
       outputScope !== undefined &&
@@ -360,18 +379,8 @@ function sendValueToBindingInner<T>(
         scopeRank(ref.scope) < scopeRank("user")
       ) {
         const userRef = { ...ref, scope: "user" as const };
-        tx.writeValueOrThrow(
-          userRef,
-          createSigilLinkFromParsedLink(scopedRef, {
-            base: userRef,
-          }),
-        );
-        tx.writeValueOrThrow(
-          bindingLink,
-          createSigilLinkFromParsedLink(userRef, {
-            base: bindingLink,
-          }),
-        );
+        writeScopeReference(userRef, scopedRef);
+        writeScopeReference(bindingLink, userRef);
         return;
       }
       if (
@@ -390,18 +399,10 @@ function sendValueToBindingInner<T>(
         // one-hop shape below) would repoint the SHARED space slot at
         // `session` and every other principal's next read would resolve
         // a session instance of a node that is user-scoped for them.
-        tx.writeValueOrThrow(
-          ref,
-          createSigilLinkFromParsedLink(scopedRef, { base: ref }),
-        );
+        writeScopeReference(ref, scopedRef);
         return;
       }
-      tx.writeValueOrThrow(
-        bindingLink,
-        createSigilLinkFromParsedLink(scopedRef, {
-          base: bindingLink,
-        }),
-      );
+      writeScopeReference(bindingLink, scopedRef);
       return;
     }
     if (options.preserveLinkOutput) {
@@ -426,6 +427,11 @@ function sendValueToBindingInner<T>(
           meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
         });
         if (!valueEqual(current, newValue)) {
+          carryCfcReferenceProvenance(
+            isCell(value) ? value.getAsLink() : value,
+            newValue,
+          );
+          recordTrustedLinkValueWrite(tx, bindingLink, newValue);
           tx.writeValueOrThrow(bindingLink, newValue);
         }
         return;
@@ -593,10 +599,52 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
+  const argumentSource = argumentCellLink;
   const resultCellLink = canonicalSchemaLink(
     resultCell.getAsNormalizedFullLink(),
   )!;
   argumentCellLink = canonicalSchemaLink(argumentCellLink);
+
+  const bindReference = (
+    link: NormalizedFullLink,
+    source: NormalizedFullLink | AnyCell<unknown>,
+  ) => {
+    const sigil = createSigilLinkFromParsedLink(link, {
+      includeSchema: true,
+      overwrite: "redirect",
+    });
+    if (resultCell.runtime.cfcFlowLabels === "persist") {
+      const sourceCell = resultCell.runtime.getCellFromLink(
+        source,
+        undefined,
+        resultCell.tx,
+      );
+      const sourceLink = sourceCell.getAsNormalizedFullLink();
+      const underSource = sourceLink.path.every((part, index) =>
+        link.path[index] === part
+      );
+      const projected = (underSource
+        ? sourceCell.key(...link.path.slice(sourceLink.path.length))
+        : sourceCell).asSchema(link.schema);
+      const reference = getCfcReferenceProvenance(projected)!;
+      if (
+        reference.scopeCaps?.length &&
+        (!underSource || reference.scopeCaps.some((cap) =>
+          cap.scope !== "any" && scopeRank(link.scope) > scopeRank(cap.scope)
+        ))
+      ) {
+        throw new Error("Reference alias exceeds its acquired scope cap");
+      }
+      const acquired = resultCell.runtime.getCellFromLink(
+        { ...link, scopeCaps: reference.scopeCaps },
+        undefined,
+        resultCell.tx,
+        withCfcReferenceConfidentiality(undefined, reference.confidentiality),
+      ).getAsWriteRedirectLink({ includeSchema: true });
+      carryCfcReferenceProvenance(acquired, sigil);
+    }
+    return sigil;
+  };
 
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
@@ -685,9 +733,9 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           : link.schema !== undefined
           ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return bindReference(
           scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
-          { includeSchema: true, overwrite: "redirect" },
+          resultCell,
         );
       } else {
         // Resolve the special values for "argument" and "result" — the only
@@ -711,13 +759,13 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const authoredRootSchema = alias.cell === "argument"
           ? options?.sourceSchemas?.argument
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return bindReference(
           foldDeclaredScopeIntoLinkSchema(
             scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
           ),
-          { includeSchema: true, overwrite: "redirect" },
+          alias.cell === "argument" ? argumentSource! : resultCell,
         );
       }
     } else if (binding instanceof FabricPrimitive) {

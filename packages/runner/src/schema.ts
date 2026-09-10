@@ -1,3 +1,4 @@
+import { immutableReferenceSourceAcquisition } from "./cfc/immutable-reference.ts";
 import {
   AnyCellWrapping,
   type JSONSchemaObj,
@@ -57,12 +58,18 @@ import {
 } from "./cfc.ts";
 import {
   type CfcLabelView,
-  cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
+  cfcReferenceLabelViewForAddress,
   cloneCfcLabelView,
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import {
+  cfcReferenceBinding,
+  cfcReferenceConfidentialityForView,
+  recordCfcReferenceObservation,
+  registerCfcReferenceCarrier,
+} from "./cfc/reference-provenance.ts";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import type { CfcAddress } from "./cfc/types.ts";
@@ -937,6 +944,11 @@ export function annotateWithBackToCellSymbols(
   });
 
   Object.freeze(value);
+  registerCfcReferenceCarrier(value, () => ({
+    binding: cfcReferenceBinding(link),
+    confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+    ...(link.scopeCaps !== undefined && { scopeCaps: link.scopeCaps }),
+  }));
   return value;
 }
 
@@ -960,11 +972,13 @@ function deriveDereferenceLabelView(
   tx: IExtendedStorageTransaction,
   traceStart: number,
   viewChild: boolean,
+  carriedView?: CfcLabelView,
 ): CfcLabelView | undefined {
   const derive = () =>
     cfcLabelViewForDereferenceTraces(
       tx,
       tx.getCfcState().dereferenceTraces.slice(traceStart),
+      carriedView,
     );
   return viewChild
     ? tx.runWithAmbientReadMeta(ignoreReadForScheduling, derive)
@@ -1056,6 +1070,10 @@ export function validateAndTransform(
   let cfcLabelView = cloneCfcLabelView(
     isCellViewRef(sourceRef) ? sourceRef.cfcLabelView : undefined,
   );
+  recordCfcReferenceObservation(tx!, {
+    binding: cfcReferenceBinding(link),
+    confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+  }, "dereference");
 
   // For opaque cells, create the cell directly from the current link.
   // We intentionally avoid traversing redirect chains or reading through the
@@ -1091,6 +1109,7 @@ export function validateAndTransform(
       tx,
       writeRedirectTraceStart,
       options?.viewChild === true,
+      cfcLabelView,
     ),
   ]);
 
@@ -1145,30 +1164,6 @@ export function validateAndTransform(
     return createQueryResultProxy(runtime, tx, link, 0, cfcLabelView);
   }
 
-  // Now resolve further links until we get the actual value.
-  // We'll use this for the value, and potentially merge the schema
-  // This gets me the result of following all the links, so I can get the value
-  const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
-  const resolvedValueLink = resolveLink(runtime, tx, link, "value", {
-    markIfcCrossings: true,
-  });
-  cfcLabelView = mergeCfcLabelViews([
-    cfcLabelView,
-    deriveDereferenceLabelView(
-      tx,
-      valueTraceStart,
-      options?.viewChild === true,
-    ),
-  ]);
-  // The write-redirect pass the gate above resolved cannot see a plain
-  // value link at the entry path; the full resolution can. Same cheap
-  // schema check, same marking — reader precedence keeps the crossing's
-  // `ifc` off the combined schema, so the marking must not depend on it.
-  if (schemaHasIfc(resolvedValueLink.schema)) {
-    tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
-  }
-  objectCreator.setBase(resolvedValueLink, cfcLabelView);
-
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
   if (SchemaObjectTraverser.hasAsCell(effectiveSchema)) {
@@ -1186,10 +1181,13 @@ export function validateAndTransform(
       // (#5230).
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
-        cfcLabelViewForDereference(
+        cfcReferenceLabelViewForAddress(
           tx,
           cfcAddressFromLink(link),
-          cfcAddressFromLink(next),
+          immutableReferenceSourceAcquisition(
+            cfcLabelView,
+            cfcAddressFromLink(link),
+          ),
         ),
       ]);
       // We leave the asCell/asStream in the schema, so that createObject
@@ -1199,28 +1197,38 @@ export function validateAndTransform(
         : effectiveSchema!;
       link = { ...next, schema: mergedSchema };
     }
-    // The fully value-resolved link is the last crossing of the chain, so
-    // its schema combines onto the result preserved above under the same
-    // reader precedence as every other hop: an agnostic reader adopts the
-    // final target's schema under its own asCell wrapper, a shaped reader
-    // stands (inheriting only the crossing's `default`), and the handle
-    // must never carry the link's wider schema past the reader's — a
-    // stored `required` the reader did not ask for would void the read
-    // through the handle. The result stays a cell (the reader's asCell
-    // survives every arm); the effectiveSchema fallback guards the
-    // combination ever losing it.
-    if (resolvedValueLink.schema !== undefined) {
-      const combined = combineSchemaForLink(
-        link.schema ?? effectiveSchema!,
-        resolvedValueLink.schema,
-      );
-      link.schema = SchemaObjectTraverser.hasAsCell(combined)
-        ? combined
-        : effectiveSchema!;
-    }
+    recordCfcReferenceObservation(tx, {
+      binding: cfcReferenceBinding(link),
+      confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+    }, "identity");
     objectCreator.setBase(link, cfcLabelView);
     return objectCreator.createObject(link, undefined);
   }
+
+  // Now resolve further links until we get the actual value.
+  // We'll use this for the value, and potentially merge the schema
+  // This gets me the result of following all the links, so I can get the value
+  const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
+  const resolvedValueLink = resolveLink(runtime, tx, link, "value", {
+    markIfcCrossings: true,
+  });
+  cfcLabelView = mergeCfcLabelViews([
+    cfcLabelView,
+    deriveDereferenceLabelView(
+      tx,
+      valueTraceStart,
+      options?.viewChild === true,
+      cfcLabelView,
+    ),
+  ]);
+  // The write-redirect pass the gate above resolved cannot see a plain
+  // value link at the entry path; the full resolution can. Same cheap
+  // schema check, same marking — reader precedence keeps the crossing's
+  // `ifc` off the combined schema, so the marking must not depend on it.
+  if (schemaHasIfc(resolvedValueLink.schema)) {
+    tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
+  }
+  objectCreator.setBase(resolvedValueLink, cfcLabelView);
 
   // Link paths don't include value, but doc address should
   const address: IMemorySpaceValueAddress = toMemorySpaceAddress(

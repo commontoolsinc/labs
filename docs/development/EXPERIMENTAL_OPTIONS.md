@@ -762,7 +762,16 @@ the per-epic implementation notes).
   integrity, which no store policy states, so its value entries are kept and a
   labeled collection an attributed writer maintains still grows per element.
   Propagation runs only when the enforcement mode is at least `observe`; it
-  derives and stores labels but never rejects on its own.
+  derives and stores labels. Unresolved reference provenance records a refusal;
+  the enforcement mode determines whether that refusal rejects the attempt.
+- **Reference profile.** `persist` writes independently labeled references in
+  CFC envelope version 2. Acquisition and selection confidentiality travel with
+  the binding; following it consumes every hop and current target restrictions.
+  Runtime and worker readers must support the profile before it is enabled.
+  Opaque worker transfer tokens preserve acquisition; serialized display labels
+  and raw addresses cannot recreate it. Legacy references with incomplete
+  acquisition history require trusted re-acquisition. See
+  [CFC references](../specs/cfc-references.md) for verification and rollout limits.
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `persist` as the downstream egress gates (render ceiling, sink
   ceilings, and the LLM path) come online.
@@ -786,6 +795,11 @@ the per-epic implementation notes).
   `enforce` records a rejection reason when a write's integrity falls below the
   floor. The floor tests the integrity of the written value, not of the reads
   that produced it.
+- **Linked contents.** Runtime resolves current target evidence for a floor,
+  including concrete wildcard contributions. A relationship endorsement on the
+  receiving reference cannot satisfy a content floor. Storage retains ordinary
+  revision preconditions for evidence reads; it does not interpret CFC policy.
+  Unsupported atomic verification across spaces fails closed.
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `enforce` once field testing confirms the floor does not
   over-reject legitimate writes.

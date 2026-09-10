@@ -13,6 +13,7 @@ import { CFC_LABEL_READ_FAILED_ATOM } from "./observation.ts";
 import {
   type CfcLabelView,
   type CfcLabelViewEntry,
+  cfcLabelViewForDereferenceTraces,
   cfcLabelViewFromMetadata,
   getCarriedCfcLabelView,
   mergeCfcLabelViews,
@@ -74,6 +75,7 @@ const storedMetadataForCell = (
         {
           space: link.space,
           id: link.id,
+          scope: link.scope,
         },
       ),
       readFailed: false,
@@ -164,6 +166,7 @@ export const cfcLabelViewForCell = (
 type ResolvedMetadataResult = StoredMetadataResult & {
   /** The resolved doc's path, which the view is rebased against. */
   path: readonly string[];
+  referenceView?: CfcLabelView;
 };
 
 /**
@@ -187,6 +190,7 @@ const resolvedMetadataForCell = (
   }
   try {
     const tx = cell.runtime.readTx(cell.tx);
+    const traceStart = tx.getCfcState().dereferenceTraces.length;
     // `markIfcCrossings` is what a read entry point passes. On the CLI's path
     // it changes nothing observable: the cell carries no transaction, so
     // `readTx` mints a throwaway that is never committed and the marks die
@@ -204,6 +208,11 @@ const resolvedMetadataForCell = (
       }),
       readFailed: false,
       path: resolved.path,
+      referenceView: cfcLabelViewForDereferenceTraces(
+        tx,
+        tx.getCfcState().dereferenceTraces.slice(traceStart),
+        getCarriedCfcLabelView(cell),
+      ),
     };
   } catch {
     return { metadata: undefined, readFailed: true, path: link.path };
@@ -249,6 +258,7 @@ export const cfcLabelViewForResolvedCellWithStatus = (
   return {
     view: mergeCfcLabelViews([
       unresolved.view,
+      resolved.referenceView,
       cfcLabelViewFromMetadata(resolved.metadata, resolved.path),
     ]),
     readFailed: unresolved.readFailed || resolved.readFailed,

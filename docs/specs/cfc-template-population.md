@@ -29,7 +29,7 @@ escape them:
    observed by materializing the reference scalar without dereferencing, is
    per spec §4.6.3's ref-container rule a `value` observation of the
    reference scalar at the slot. A `followRef` read consumes only the
-   per-slot link entry (the *target's* transport label); the coordinator
+   per-slot reference entry (acquisition and selection confidentiality); the coordinator
    `J` that *assigned* the slot lives only in the container-anchored
    structure entries — wrong path, wrong class, never consumed. Recorded as
    the SC-7 implementation note's residual.
@@ -114,10 +114,10 @@ before merge.
 
 - Class filtering is `readConsumesEntry`, unchanged: `shape`-class reads
   consume `shape`+`enumerate` entries; `value` reads consume
-  `value`+`shape`+`enumerate`; `followRef` reads consume only `followRef` —
-  so slot templates never taint blind pass-through resolution (the
-  types.ts:194-199 property, preserved by class rather than by path
-  anchoring).
+  `value`+`shape`+`enumerate`+`followRef`; `followRef` reads consume only `followRef` —
+  so semantic reference traversal consumes slot-selection templates without
+  consuming target content. Trusted coordinator machinery can exclude its own
+  bookkeeping observations; a generic reference write cannot claim that exemption.
 - Within one origin and class, `labelAtPath` replace-down applies with
   concrete-more-specific-than-`*`: a concrete entry at `/items/3` replaces
   the `*` template for that slot (§4.6.3: "a more specific template
@@ -204,14 +204,14 @@ per labeled target path:
 Shown for illustration only.
 /cfc/labels/value/body/…/clauses/*/alternatives/*/source   → source-field label (per §4.6.4.2 rule)
 /cfc/labels/value/body/…/clauses/*/alternatives/*          → whole-atom projection label (join of fields)
-/cfc/labels/value/body                                     → presence/type/kind (public unless policy says else)
+/cfc/labels/value/body                                → selection/control label for presence/type/kind/count/order
 ```
 
 populated at the same persist seam that writes the payload entries,
 consumed by the Stage-2 introspection surface (`inspectConfLabel`'s reads
 land at concrete metadata paths and resolve templates like any other
-read). The interim rule (entry's-own-label fallback for derived
-components) remains the label *source*; templates are the label *carrier*
+read). The interim rule (entry's-own-label fallback for derived and
+structure components, and version 2 reference entries) remains the label *source*; templates are the label *carrier*
 — upgrading precision later (true per-source labels) changes the labels
 minted into the same entries, not the mechanism.
 
@@ -265,10 +265,9 @@ minted into the same entries, not the mechanism.
      coordinators' container scaffolding (the `probeScoped` scopes,
      `exposedResultCell`'s identity reads) — carry the marker via ambient
      read-meta scopes and are excluded from `*`-template consumption in
-     `deriveFlowJoin` ONLY: marked reads keep their ordinary consumption
-     (link-origin pointer labels, concrete structure/derived entries), so
-     their flow contribution is byte-identical to pre-template behavior
-     and the exclusion cannot under-taint relative to before. The
+     `deriveFlowJoin` only. Marked bookkeeping reads omit reference entries
+     and runtime membership templates; ordinary content restrictions remain.
+     The
      seam placement mirrors `schedulerDependencyRead` (flow derivation
      only; the egress/observation-gate consumed sets stay deliberately
      over-inclusive — screens keep the fail-safe direction). Stamp
@@ -281,21 +280,13 @@ minted into the same entries, not the mechanism.
      the non-coordinator closures and the marked-reads-consume-nothing
      asymmetry are pinned in `cfc-template-population.test.ts` ("SC-8
      remainder" block).
-  2. **Two machinery boundaries on template consumption**, both
-     inherited-from-existing disciplines rather than new semantics: a
-     transaction re-deriving a container's membership stamps does not
-     consume the very entries it replaces (`ownRestampContainerPaths` —
-     otherwise an incremental reconciler's readback of its own previous
-     output turns §8.12.8 replace-from-criteria into accumulate-forever,
-     measured on the no-write re-stamp test), and reads covered by a
-     same-tx dereference trace skip templates (the C0 §6.1 row-4
-     machinery rule extended to the plain reads resolution journals at
-     followed slots; standalone observations — the row-3 SC-8 closures —
-     consume in full). Consequence of the second: a full dereference
-     consumes the target's content but not the slot's membership `J`;
-     §2's "probe **or dereference**" overstated what the shipped row-3/
-     row-4 boundary distinguishes, and the probe/standalone-read half is
-     what landed.
+  2. **Application observations remain dependencies.** Restamping a container
+     or recording a covering dereference trace does not prove that earlier
+     observations were irrelevant. Generic reference-container writes use the
+     complete observation/control join. Trusted coordinators mark only their
+     bookkeeping reads with `machineryRead`; predicate and operation outputs
+     stay application observations. Dereferencing a selected slot consumes its
+     membership confidentiality and the current target's applicable labels.
 - **Stage B (Stage-2 full population; one PR, after A):** the
   `/cfc/labels/...` template mints per §5 + `inspectConfLabel` consuming
   them (upgrading WP7's computed-in-hand labels to persisted templates),

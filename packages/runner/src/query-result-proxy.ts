@@ -1,3 +1,4 @@
+import { immutableReferenceViewIdentity } from "./cfc/immutable-reference.ts";
 import {
   FabricPrimitive,
   isWalkableObjectOrArray,
@@ -22,6 +23,12 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import {
+  cfcReferenceBinding,
+  cfcReferenceConfidentialityForView,
+  recordCfcReferenceObservation,
+  registerCfcReferenceCarrier,
+} from "./cfc/reference-provenance.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -97,6 +104,7 @@ const proxyCacheKey = (
     link.id,
     link.path,
     cfcLabelView ?? null,
+    immutableReferenceViewIdentity(cfcLabelView) ?? null,
     epoch ?? null,
   ]);
 
@@ -259,6 +267,10 @@ function createViewProxy<T>(
   // written; this is the schema-LESS path, which a lift's argument does not
   // take, and the shape of these traps makes the by-hand form a worse trade.
   const atEpoch = <T>(body: () => T): T => {
+    recordCfcReferenceObservation(readTx(), {
+      binding: cfcReferenceBinding(link),
+      confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+    }, "dereference");
     if (epoch === undefined || !viewTx.hasWrites()) return body();
     const previous = viewTx.enterReadEpoch(epoch);
     try {
@@ -329,8 +341,12 @@ function createViewProxy<T>(
   link = resolved.link;
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
-    cfcLabelViewForDereferenceTraces(viewTx, resolved.traces),
+    cfcLabelViewForDereferenceTraces(viewTx, resolved.traces, cfcLabelView),
   ]);
+  recordCfcReferenceObservation(viewTx, {
+    binding: cfcReferenceBinding(link),
+    confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+  }, "dereference");
   const value = viewTx.readValueOrThrow(link, SHAPE_READ) as any;
 
   // The SHAPE_READ above only tracks the container's shape, but the stream
@@ -765,6 +781,12 @@ function createViewProxy<T>(
       );
     },
   }) as T;
+
+  registerCfcReferenceCarrier(proxy as object, () => ({
+    binding: cfcReferenceBinding(link),
+    confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+    ...(link.scopeCaps !== undefined && { scopeCaps: link.scopeCaps }),
+  }));
 
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);

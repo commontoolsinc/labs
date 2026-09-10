@@ -1,6 +1,13 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  cfcReferenceConfidentialityForView,
+  joinCfcReferenceConfidentiality,
+  withCfcReferenceConfidentiality,
+} from "./reference-provenance.ts";
+
+import { carryImmutableReferenceTables } from "./immutable-reference.ts";
 
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { CfcConfClause } from "./clause.ts";
@@ -151,7 +158,20 @@ export const redactCaveatSourcesForDisplay = (
   view: CfcLabelView,
 ): CfcLabelView => ({
   version: 1,
-  entries: view.entries.map((entry) => {
+  // A display view crosses structured-clone boundaries. Project retained
+  // acquisition restrictions onto the displayed content so class-aware v1
+  // consumers enforce them without access to the runtime's private carrier.
+  entries: [
+    ...view.entries,
+    ...(cfcReferenceConfidentialityForView(view).length > 0
+      ? [{
+        path: [],
+        label: {
+          confidentiality: [...cfcReferenceConfidentialityForView(view)],
+        },
+      }]
+      : []),
+  ].map((entry: CfcLabelViewEntry) => {
     const label: IFCLabel = {};
     for (const key of LABEL_KEYS) {
       const value = entry.label[key];
@@ -229,7 +249,13 @@ export const cloneCfcLabelView = (
       ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
     })).filter((entry) => hasCfcLabelValues(entry.label)),
   );
-  return entries.length > 0 ? { version: 1, entries } : undefined;
+  return carryImmutableReferenceTables(
+    [view],
+    withCfcReferenceConfidentiality(
+      entries.length > 0 ? { version: 1, entries } : undefined,
+      cfcReferenceConfidentialityForView(view),
+    ),
+  );
 };
 
 export const mergeCfcLabelViews = (
@@ -258,7 +284,13 @@ export const mergeCfcLabelViews = (
   const entries = sortEntries(
     [...byKey.values()].filter((entry) => hasCfcLabelValues(entry.label)),
   );
-  return entries.length > 0 ? { version: 1, entries } : undefined;
+  return carryImmutableReferenceTables(
+    views,
+    withCfcReferenceConfidentiality(
+      entries.length > 0 ? { version: 1, entries } : undefined,
+      joinCfcReferenceConfidentiality(views),
+    ),
+  );
 };
 
 export const rebaseCfcLabelView = (
@@ -306,9 +338,15 @@ export const rebaseCfcLabelView = (
     }
   }
 
-  return mergeCfcLabelViews([
-    entries.length > 0 ? { version: 1, entries } : undefined,
-  ]);
+  return carryImmutableReferenceTables(
+    [view],
+    withCfcReferenceConfidentiality(
+      mergeCfcLabelViews([
+        entries.length > 0 ? { version: 1, entries } : undefined,
+      ]),
+      cfcReferenceConfidentialityForView(view),
+    ),
+  );
 };
 
 /**

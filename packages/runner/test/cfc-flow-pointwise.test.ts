@@ -90,7 +90,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .filter((e) => e.origin === "structure" && e.path.length === 0)
       .flatMap((e) => e.label.confidentiality ?? []);
 
-  it("map: incrementally added elements get pointwise derived labels", async () => {
+  it("map: reconciled references retain coordinator selection confidentiality", async () => {
     // Element ops run in their own transactions reading only their element,
     // so per-element precision is structural — for elements that arrive in
     // separate reconciles. A batch first-instantiation evaluates all new
@@ -187,18 +187,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     >;
     expect(mapped.map((m) => m?.doubled)).toEqual([2, 4]);
 
-    // Reader-visible pointwise check: a consumer of mapped[i] picks up
-    // exactly element i's taint. (Asserting on specific internal docs is
-    // brittle — content lands in different docs on the inline-first-run vs
-    // steady-state paths; what matters is what a reader's derivation
-    // joins.) The blind-passing split (link-resolution probes and
-    // link-origin pointer labels stay out of J; link-covered writes aren't
-    // stamped; pure-link-structure writes get exact-path `structure`
-    // stamps that slot reads below them never join) keeps the
-    // coordinator's scaffolding from smearing one element's taint onto
-    // the other — this test also pins that the batch first-run's coarse J
-    // landing on the container as shape taint does NOT leak back into
-    // later per-element results.
+    // Reference slots retain the selection confidentiality of every write.
+    // Reconciliation reselects the existing first reference under Bob's
+    // influence, so its history includes both inputs. The fresh second
+    // reference is selected by that reconcile alone.
     const probe = async (index: number, cause: string): Promise<string[]> => {
       const ptx = runtime!.edit();
       const value = (result.key("mapped") as any).key(index).withTx(ptx)
@@ -213,7 +205,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const conf0 = await probe(0, "pointwise-probe-0");
     const conf1 = await probe(1, "pointwise-probe-1");
     expect(conf0).toContainEqual("alice-secret");
-    expect(conf0).not.toContainEqual("bob-secret");
+    expect(conf0).toContainEqual("bob-secret");
     expect(conf1).toContainEqual("bob-secret");
     expect(conf1).not.toContainEqual("alice-secret");
   });

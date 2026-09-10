@@ -53,6 +53,8 @@ export type MessageId = number;
  * becomes on the wire, and what one is rebuilt from at the other end.
  */
 export type CellRef = NormalizedFullLink & {
+  /** Opaque acquisition issued by this connection's worker. */
+  cfcReferenceToken?: string;
   /**
    * The cell's display label, present only where the read that produced
    * this ref asked for one.

@@ -20,7 +20,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-write-floor");
 // Epic D3 (§8.12.4.1 / SC-18): the write-side `requiredIntegrity` FLOOR. The
 // read-side gate (verifyInputRequirements) quantifies over consumed reads; the
 // floor tests the WRITTEN VALUE's integrity — schema `addIntegrity` mints,
-// carried link-view integrity, the flow hereditary meet — against the declared
+// current linked-content integrity, the flow hereditary meet — against the declared
 // floor. Dial `cfcWriteFloor: off | observe | enforce`. Each case names the
 // rung it drives, so the arm under test is the one that decides it.
 const ADMIN_ATOM = "admin-approved";
@@ -69,7 +69,7 @@ const makeRuntime = (opts: {
   });
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[] full-document
-// write (how the runtime persists it), so a later link to it carries the label.
+// write, so linked-content floor verification can resolve its current label.
 const seedLabeledDoc = async (
   runtime: Runtime,
   id: string,
@@ -391,7 +391,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("a link whose source carries the floor atom passes (carried link-view integrity)", async () => {
+  it("accepts a link whose current target carries the floor atom", async () => {
     // The D2 by-reference contract on the write side: a floor-protected slot
     // accepts a REFERENCE to a value that genuinely carries the endorsement.
     const storageManager = StorageManager.emulate({ as: signer });
@@ -491,12 +491,10 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("a wildcard (*) floor entry is not enforced by the write floor (read-gate only, v1)", async () => {
+  it("rejects an unendorsed value at a wildcard floor", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
     try {
-      // Array items produce a `*` floor entry path (walkIfcSchema), which the
-      // write floor skips in v1 — the per-element read gate still covers it.
       const schema = {
         type: "object",
         properties: {
@@ -519,11 +517,9 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       sink.set({ items: ["unendorsed"] });
       tx.prepareCfc();
       const result = await tx.commit();
-      // The wildcard floor is skipped by verifyWriteFloor (v1 scope), so no
-      // write-floor rejection.
       expect(
         String((result.error as Error | undefined)?.message ?? ""),
-      ).not.toContain("write floor failed");
+      ).toContain("write floor failed at /items/0");
     } finally {
       await runtime.dispose();
       await storageManager.close();

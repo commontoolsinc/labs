@@ -5,12 +5,20 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../storage/interface.ts";
-import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import {
+  authorizationRead,
+  internalVerifierRead,
+} from "../storage/reactivity-log.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import type { CfcMetadata } from "./types.ts";
 
 const INTERNAL_VERIFIER_META = {
+  ...internalVerifierRead,
+};
+
+const AUTHORIZATION_META = {
+  ...authorizationRead,
   ...internalVerifierRead,
 };
 
@@ -43,7 +51,7 @@ export class UnknownCfcMetadataVersionError extends Error {
 // without growing `CfcMetadata["version"]` (or the reverse) is a compile
 // error — the predicate below narrows to `CfcMetadata` on the strength of
 // this list.
-const KNOWN_CFC_METADATA_VERSIONS: readonly CfcMetadata["version"][] = [1];
+const KNOWN_CFC_METADATA_VERSIONS: readonly CfcMetadata["version"][] = [1, 2];
 
 const isKnownMetadataVersion = (value: unknown): boolean =>
   KNOWN_CFC_METADATA_VERSIONS.some((version) => version === value);
@@ -108,6 +116,10 @@ export const readStoredCfcMetadata = (
     id: string;
     scope?: NormalizedFullLink["scope"];
   },
+  options?: {
+    /** Whether the result is required evidence for an authorization decision. */
+    authorization?: boolean;
+  },
 ): CfcMetadata | undefined => {
   const document = tx.readOrThrow({
     space: target.space,
@@ -116,7 +128,9 @@ export const readStoredCfcMetadata = (
     type: "application/json",
     path: ["cfc"],
   }, {
-    meta: INTERNAL_VERIFIER_META,
+    meta: options?.authorization === false
+      ? INTERNAL_VERIFIER_META
+      : AUTHORIZATION_META,
   });
   if (isCfcMetadata(document)) {
     return document;
@@ -137,7 +151,7 @@ export const storedCfcMetadataAppliesToPath = (
 ): boolean => {
   let metadata: CfcMetadata | undefined;
   try {
-    metadata = readStoredCfcMetadata(tx, target);
+    metadata = readStoredCfcMetadata(tx, target, { authorization: false });
   } catch (error) {
     // An envelope this build cannot interpret still marks the document as
     // policy-carrying: "applies" is the fail-closed answer, and the write

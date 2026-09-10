@@ -135,6 +135,18 @@ path of `v2-transaction.ts`, and the local rejection is
 retryable. The two forms are equivalent in what reaches the server; they
 differ in when a change under an open transaction is discovered.
 
+A client may retain stricter revision preconditions alongside this coherent
+content check. The runner's authorization reads preserve the confirmed basis
+and pending layers on which their evidence was observed. Equal current content
+MUST NOT replace that captured basis: a policy change followed by restoration of
+the same value must still conflict. These historical dependencies supplement
+the claim check; they do not permit mixing different observed contents.
+
+A server-judged precondition can exempt its document from the local claim check
+without removing these authorization dependencies. In particular, an
+`entity-value-hash` pin checks the document's value and does not replace a
+revision precondition on its CFC metadata or schema.
+
 ## 3.4 Commit Structure
 
 A client commit explicitly separates dependencies on confirmed state from

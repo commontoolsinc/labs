@@ -1,5 +1,6 @@
 import type {
   Activity,
+  CommitReadBasis,
   IMemorySpaceAddress,
   Metadata,
   StorageTransactionRejected,
@@ -43,6 +44,14 @@ const internalVerifierReadMarker: unique symbol = Symbol(
   "internalVerifierReadMarker",
 );
 
+const authorizationReadMarker: unique symbol = Symbol(
+  "authorizationReadMarker",
+);
+
+const authorizationReadBasisMarker: unique symbol = Symbol(
+  "authorizationReadBasisMarker",
+);
+
 const linkResolutionProbeMarker: unique symbol = Symbol(
   "linkResolutionProbeMarker",
 );
@@ -70,6 +79,39 @@ export const allowMutableTransactionRead: Metadata = {
 export const internalVerifierRead: Metadata = {
   [internalVerifierReadMarker]: true,
 };
+
+/**
+ * Runtime verification evidence whose revision must remain valid at commit.
+ * Orthogonal to handler taint and scheduling: callers also mark internal
+ * verification reads with `internalVerifierRead`.
+ */
+export const authorizationRead: Metadata = {
+  [authorizationReadMarker]: true,
+};
+
+/** Returns whether a read carries mandatory authorization evidence. */
+export function isAuthorizationRead(meta?: Metadata): boolean {
+  return meta?.[authorizationReadMarker] === true;
+}
+
+/** Binds required evidence to the revisions the verifier actually observed. */
+export function withAuthorizationReadBasis(
+  meta: Metadata,
+  basis: CommitReadBasis | undefined,
+): Metadata {
+  if (!isAuthorizationRead(meta)) return meta;
+  if (basis === undefined) {
+    throw new Error("Authorization read has no commit revision basis");
+  }
+  return { ...meta, [authorizationReadBasisMarker]: basis };
+}
+
+/** Returns the runtime-captured revision basis for required evidence. */
+export function getAuthorizationReadBasis(
+  meta?: Metadata,
+): CommitReadBasis | undefined {
+  return meta?.[authorizationReadBasisMarker] as CommitReadBasis | undefined;
+}
 
 /**
  * Marks the "is there a link here?" probe reads issued by link resolution.

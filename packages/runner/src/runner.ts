@@ -66,6 +66,8 @@ import {
 } from "./cancel.ts";
 import {
   type Cell,
+  type CellLinkInput,
+  convertCellsToLinks,
   createCell,
   isCell,
   markCellDocumentSynced,
@@ -190,6 +192,10 @@ import {
 } from "./compilation-cache/cell-cache.ts";
 import { createRef } from "./create-ref.ts";
 import { diffAndUpdate } from "./data-updating.ts";
+import {
+  carryCfcReferenceProvenance,
+  getCfcReferenceProvenance,
+} from "./cfc/reference-provenance.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
@@ -2718,7 +2724,10 @@ export class Runner {
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
     // actually store, which is the whole point of converting first.
-    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
+    const flattened = flattenBuilderArtifacts(result);
+    const fabricResult = this.#runtime.cfcFlowLabels === "persist"
+      ? convertCellsToLinks(flattened as CellLinkInput)
+      : fabricFromNativeValue(flattened);
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -3256,13 +3265,20 @@ export class Runner {
     ]);
 
     if (isCellLink(argument)) {
-      argument = createSigilLinkFromParsedLink(
-        parseLink(argument),
-        {
-          base: resultCell.getAsNormalizedFullLink(),
-          includeSchema: true,
-          overwrite: "redirect",
-        },
+      const acquired = getCfcReferenceProvenance(argument) !== undefined
+        ? this.#runtime.getCellFromLink(argument, undefined, tx)
+          .getAsWriteRedirectLink()
+        : undefined;
+      argument = carryCfcReferenceProvenance(
+        acquired,
+        createSigilLinkFromParsedLink(
+          parseLink(argument),
+          {
+            base: resultCell.getAsNormalizedFullLink(),
+            includeSchema: true,
+            overwrite: "redirect",
+          },
+        ),
       ) as T;
     }
 

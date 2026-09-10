@@ -55,10 +55,12 @@ import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellWithStatus,
 } from "../cfc/label-view.ts";
 import {
   cfcConfidentialityForObservationNode,
   type CfcFloorTrustContext,
+  cfcIntegrityForObservationNode,
   cfcIntegritySatisfiesFloor,
   cfcObservationFitsCeiling,
   type CfcObservationResult,
@@ -2176,8 +2178,14 @@ function toolInputValueIntegrity(
   if (!isCell(cellified)) {
     return [];
   }
-  const view = cfcLabelViewForCellFailClosed(cellified);
-  return (view?.entries ?? []).flatMap((entry) => entry.label.integrity ?? []);
+  try {
+    const { view, readFailed } = cfcLabelViewForCellWithStatus(
+      cellified.resolveAsCell(),
+    );
+    return readFailed ? [] : [...cfcIntegrityForObservationNode(view)];
+  } catch {
+    return [];
+  }
 }
 
 // Walk a tool's `inputSchema` for fields declaring `ifc.requiredIntegrity` and

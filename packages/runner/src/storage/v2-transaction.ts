@@ -37,6 +37,7 @@ import type {
   Activity,
   ChangeGroup,
   CommitError,
+  CommitReadBasis,
   IAttestation,
   IMemoryAddress,
   IMemorySpaceAddress,
@@ -83,6 +84,7 @@ import {
 import {
   getBlindStructuralTarget,
   ignoreReadForCommit,
+  isAuthorizationRead,
   isDurableReadTx,
   isInternalVerifierRead,
   isMutableTransactionReadAllowed,
@@ -91,6 +93,7 @@ import {
   isUiInputBlindWriteTx,
   registerCommitRejectionListener,
   takeCoverageWaits,
+  withAuthorizationReadBasis,
 } from "./reactivity-log.ts";
 import {
   ReadOnlyAddressError,
@@ -130,6 +133,7 @@ type DisplacedRoot = {
 
 type ReadDocumentEntry = {
   initial: RootAttestation;
+  initialReadBasis?: CommitReadBasis;
   validated: boolean;
   current?: RootAttestation;
   frozenReads?: PathKeyMap<FabricValue | undefined>;
@@ -143,6 +147,7 @@ type ReadDocumentEntry = {
 
 type WritableDocumentEntry = {
   initial: RootAttestation;
+  initialReadBasis?: CommitReadBasis;
   current: RootAttestation;
   validated: boolean;
   frozenReads: PathKeyMap<FabricValue | undefined>;
@@ -1139,6 +1144,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#readActivities;
   }
 
+  currentActivityIndex(): number {
+    return this.#activityClock;
+  }
+
   getWriteAttemptLog(): readonly IWriteAttempt[] {
     return this.#writeAttemptLog;
   }
@@ -1576,7 +1585,23 @@ export class V2StorageTransaction implements IStorageTransaction {
     const current = this.#readEpoch === undefined
       ? currentDocument(doc)
       : documentAtEpoch(doc, this.#readEpoch);
-    const readMeta = options?.meta ?? EMPTY_META;
+    const suppliedMeta = options?.meta ?? EMPTY_META;
+    const durableVerifierRead = isInternalVerifierRead(suppliedMeta) &&
+      (!isUiInputBlindWriteTx(this) || isAuthorizationRead(suppliedMeta)) &&
+      !hasDataUriScheme(address.id) && !address.id.startsWith("cid:") &&
+      getBlindStructuralTarget(this) !== undefined &&
+      branch.replica.getNonSpeculativeDocument !== undefined;
+    const readMeta = withAuthorizationReadBasis(
+      suppliedMeta,
+      durableVerifierRead
+        ? branch.replica.getDocumentReadBasis?.(
+          address.id,
+          address.scope,
+          this.#scopeKeyIdentity,
+          true,
+        )
+        : doc.initialReadBasis,
+    );
     // In a UI-input blind-leaf-write tx (a scalar `$value` overwrite), every read
     // is recorded for CFC/scheduling but carries no value-equality commit
     // precondition: tag each activity with `ignoreReadForCommit` (so buildReads
@@ -1585,7 +1610,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     // validate()/claim() pass skips it too). The mode is scoped to the user
     // `set()` call only — CFC boundary-commit reads run after the tx is unmarked
     // and keep their preconditions.
-    const skipCommitPrecondition = isUiInputBlindWriteTx(this);
+    const skipCommitPrecondition = isUiInputBlindWriteTx(this) &&
+      !isAuthorizationRead(readMeta);
     const { space: _, ...memoryAddress } = address;
 
     if (!hasDataUriScheme(address.id)) {
@@ -1628,51 +1654,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
     }
 
-    // A CFC internal-verifier read of a blind UI-input write transaction
-    // bases on the doc's NON-speculative stack (RULED 2026-08-21;
-    // verification-coverage.md OW47, second producer — the name-draft
-    // triage): the verifier verifies the durable policy state the server
-    // will enforce against — a client speculation layer never reaches
-    // the wire, so deriving from it verified state the server can never
-    // see, and the basis it contributed made the §6 export refusal
-    // terminal on the user's own typed input. `SpaceReplica.#buildReads`
-    // (storage/v2.ts) names the same durable layer set for these reads,
-    // so verify-durable and name-durable travel together. Scoped tight:
-    // only the blind-write tx shape (the structural target survives the
-    // unmark), and only reads issued AFTER the blind window closes —
-    // CFC prepare's own reads. In-window reads keep the transaction's
-    // ordinary view (they are machinery reads the commit set drops via
-    // `ignoreReadForCommit`), value-consuming reads keep their overlay
-    // view and the ruled §6 refusal, and every other transaction is
-    // byte-identical to before. CFC prepare consults the transaction's
-    // own writes through its write set (`writeValueForTarget`) before
-    // falling back to this read, so serving replica state here loses
-    // nothing the verifier needs. Served fresh and cache-bypassed: the
-    // frozen-reads cache describes the transaction's checkout view, and
-    // a durable-view value must neither take from it nor land in it.
-    if (
-      !skipCommitPrecondition &&
-      isInternalVerifierRead(readMeta) &&
-      !hasDataUriScheme(address.id) &&
-      // Content-addressed documents are EXEMPT from durable serving:
-      // their content is identical on every layer (the replica refuses
-      // a cid: doc whose content does not hash to its id), so the
-      // ordinary view IS the durable content — while the client's own
-      // durable copy may not exist yet during an echo's arrival window
-      // (the echo's staging carries the schema docs its writes
-      // reference, and the covering SERVED commit already persisted the
-      // same docs server-side). Serving "durably absent" here turned
-      // the user's fill into the silent stored-schemaHash-missing
-      // prepare failure. Their layers stay excluded from the blind tx's
-      // verifier basis in `SpaceReplica.#buildReads` — consistent by
-      // construction: the value equals the durable content whichever layer
-      // serves it.
-      !address.id.startsWith("cid:") &&
-      getBlindStructuralTarget(this) !== undefined &&
-      // A replica without a speculation overlay serves no separate
-      // durable view — fall through then: the ordinary read IS it.
-      branch.replica.getNonSpeculativeDocument !== undefined
-    ) {
+    // Internal verification in a blind UI write uses the non-speculative
+    // view. Required authorization reads use that view even inside the blind
+    // value-write window, and their captured revision basis describes it.
+    // Content-addressed documents keep their ordinary immutable view.
+    //
+    // The verifier consults its own staged writes separately. This fallback
+    // bypasses the frozen-read cache, which describes the transaction's
+    // original snapshot rather than the current durable view.
+    if (durableVerifierRead && branch.replica.getNonSpeculativeDocument) {
       const durable = branch.replica.getNonSpeculativeDocument(
         address.id,
         address.scope,
@@ -1841,8 +1831,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     const { doc } = this.#document(branch, address);
     if (hasDataUriScheme(address.id)) return { ok: {} };
 
-    const readMeta = options?.meta ?? EMPTY_META;
-    const skipCommitPrecondition = isUiInputBlindWriteTx(this);
+    const readMeta = withAuthorizationReadBasis(
+      options?.meta ?? EMPTY_META,
+      doc.initialReadBasis,
+    );
+    const skipCommitPrecondition = isUiInputBlindWriteTx(this) &&
+      !isAuthorizationRead(readMeta);
     const activityMeta = skipCommitPrecondition
       ? { ...readMeta, ...ignoreReadForCommit }
       : readMeta;
@@ -3077,6 +3071,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       const loaded = this.#loadRoot(branch, address);
       doc = {
         initial: loaded,
+        initialReadBasis: branch.replica.getDocumentReadBasis?.(
+          address.id,
+          address.scope,
+          this.#scopeKeyIdentity,
+          isDurableReadTx(this),
+        ),
         validated: false,
       };
       branch.docs.set(key, doc);

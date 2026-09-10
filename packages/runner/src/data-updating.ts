@@ -51,13 +51,21 @@ import {
   type CfcAddress,
   runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
+import {
+  carryCfcReferenceProvenance,
+  cfcReferenceBindingMatches,
+  type CfcReferenceProvenance,
+  getCfcReferenceProvenance,
+} from "./cfc/reference-provenance.ts";
 import { createRef } from "./create-ref.ts";
+import { assertSerializableReferenceScope } from "./cfc/reference-scope.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
   areNormalizedLinksSame,
+  type CellLink,
   createSigilLinkFromParsedLink,
   isCellLink,
   isPrimitiveCellLink,
@@ -236,44 +244,68 @@ const recordLinkWritePolicyInput = (
   target: NormalizedFullLink,
   source: NormalizedFullLink,
   cfcLabelView?: CfcLabelView,
+  reference?: CfcReferenceProvenance,
 ): void => {
   if (tx.getCfcState().enforcementMode === "disabled") {
     return;
   }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
-  let sourceMetadata: ReturnType<typeof readStoredCfcMetadata>;
-  let sourceEnvelopeUninterpretable = false;
-  try {
-    sourceMetadata = readStoredCfcMetadata(tx, source);
-  } catch (error) {
-    // A source envelope this build cannot interpret still makes the link
-    // CFC-relevant (fail closed): recording the policy input routes the
-    // write to prepare, where the unreadable envelope rejects it in
-    // enforcing modes instead of the labels silently not carrying.
-    if (!(error instanceof UnknownCfcMetadataVersionError)) throw error;
-    sourceEnvelopeUninterpretable = true;
+  if (tx.getCfcState().flowLabelsMode !== "persist") {
+    let sourceRelevant = false;
+    try {
+      sourceRelevant = readStoredCfcMetadata(tx, source, {
+        authorization: false,
+      }) !== undefined;
+    } catch (error) {
+      if (!(error instanceof UnknownCfcMetadataVersionError)) throw error;
+      sourceRelevant = true;
+    }
+    if (
+      !sourceRelevant && !schemaIfcOverlapsPath(source.schema, [], []) &&
+      !hasPendingSchemaPolicyInput(tx, source) &&
+      !cfcLabelViewHasValues(carriedCfcLabelView) &&
+      !storedCfcMetadataAppliesToPath(tx, target) &&
+      !hasPendingSchemaPolicyInput(tx, target)
+    ) return;
   }
-  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
-    sourceMetadata !== undefined || sourceEnvelopeUninterpretable ||
-    hasPendingSchemaPolicyInput(tx, source) ||
-    cfcLabelViewHasValues(carriedCfcLabelView);
-  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||
-    hasPendingSchemaPolicyInput(tx, target);
-  if (!sourceRelevant && !targetRelevant) {
-    return;
+  const acquisition = reference !== undefined &&
+      cfcReferenceBindingMatches(reference, source)
+    ? reference
+    : undefined;
+  if (tx.getCfcState().flowLabelsMode === "persist") {
+    assertSerializableReferenceScope(source.schema, acquisition?.scopeCaps);
   }
-
   tx.markCfcRelevant(`link-write:${target.id}`);
   tx.recordCfcWritePolicyInput({
     kind: "link-write",
     target: cfcAddressFromLink(target),
     source: cfcAddressFromLink(source),
+    ...(acquisition !== undefined && { reference: acquisition }),
     ...(source.schema !== undefined && { linkSchema: source.schema }),
     ...(carriedCfcLabelView !== undefined && {
       cfcLabelView: carriedCfcLabelView,
     }),
-  });
+  }, runtimeWritePolicyAuthorization);
 };
+
+/** Records a trusted raw-output reference at the slot receiving its link. */
+export function recordTrustedLinkValueWrite(
+  tx: IExtendedStorageTransaction,
+  target: NormalizedFullLink,
+  value: unknown,
+): void {
+  const reference = getCfcReferenceProvenance(value);
+  if (reference === undefined) return;
+  const source = parseLink(value, target);
+  if (source === undefined) return;
+  recordLinkWritePolicyInput(
+    tx,
+    target,
+    source,
+    cfcLabelViewForPrimitiveLink(value),
+    reference,
+  );
+}
 
 const cfcLabelViewForPrimitiveLink = (
   value: unknown,
@@ -585,7 +617,10 @@ function anchorValueAsEntity(
       runtime,
       tx,
       link,
-      createSigilLinkFromParsedLink(newEntryLink, { base: link }),
+      carryCfcReferenceProvenance(
+        runtime.getCellFromLink(newEntryLink, undefined, tx),
+        createSigilLinkFromParsedLink(newEntryLink, { base: link }),
+      ),
       context,
       options,
       state,
@@ -733,7 +768,10 @@ export function normalizeAndDiff(
           runtime,
           tx,
           seenLink,
-          createSigilLinkFromParsedLink(promotedLink, { base: seenLink }),
+          carryCfcReferenceProvenance(
+            runtime.getCellFromLink(promotedLink, undefined, tx),
+            createSigilLinkFromParsedLink(promotedLink, { base: seenLink }),
+          ),
           context,
           options,
           state,
@@ -797,9 +835,10 @@ export function normalizeAndDiff(
           runtime,
           tx,
           userLink,
-          createSigilLinkFromParsedLink(scopedLink, {
-            base: userLink,
-          }) as unknown,
+          carryCfcReferenceProvenance(
+            runtime.getCellFromLink(scopedLink, undefined, tx),
+            createSigilLinkFromParsedLink(scopedLink, { base: userLink }),
+          ),
           context,
           options,
           state,
@@ -809,7 +848,10 @@ export function normalizeAndDiff(
           runtime,
           tx,
           link,
-          createSigilLinkFromParsedLink(userLink, { base: link }) as unknown,
+          carryCfcReferenceProvenance(
+            runtime.getCellFromLink(userLink, undefined, tx),
+            createSigilLinkFromParsedLink(userLink, { base: link }),
+          ),
           context,
           options,
           state,
@@ -837,7 +879,10 @@ export function normalizeAndDiff(
         runtime,
         tx,
         link,
-        createSigilLinkFromParsedLink(scopedLink, { base: link }) as unknown,
+        carryCfcReferenceProvenance(
+          runtime.getCellFromLink(scopedLink, undefined, tx),
+          createSigilLinkFromParsedLink(scopedLink, { base: link }),
+        ),
         context,
         options,
         state,
@@ -860,7 +905,7 @@ export function normalizeAndDiff(
       () =>
         `[BRANCH_QUERY_RESULT] Converted query result to sigil link at path=${pathStr} link=${sigilLink} parsedLink=${parsedLink}`,
     );
-    newValue = sigilLink;
+    newValue = carryCfcReferenceProvenance(getCellOrThrow(newValue), sigilLink);
   }
 
   // Track whether this link originates from a Cell value (either a cycle we
@@ -870,6 +915,19 @@ export function normalizeAndDiff(
   // self-links.
   let linkOriginFromCell = false;
   if (isCell(newValue)) {
+    if (isFabricDataUri(newValue.getAsNormalizedFullLink().id)) {
+      // Reading the trusted cell acquires references at their source slots;
+      // decoding its URI after serialization would lose that provenance.
+      return normalizeAndDiff(
+        runtime,
+        tx,
+        link,
+        newValue.withTx(tx).getRawUntyped(),
+        context,
+        options,
+        state,
+      );
+    }
     diffLogger.debug(
       "diff",
       () => `[BRANCH_CELL] Converting cell to link at path=${pathStr}`,
@@ -886,7 +944,9 @@ export function normalizeAndDiff(
     // the write, so seed the target doc here, only if it has no value yet —
     // re-derivations serialize the same cell again but find the doc present
     // and leave user edits alone.
-    const cellSchema = newValue.schema;
+    // The seed belongs to this handle's schema. Looking up an inherited
+    // schema would observe the referenced document during serialization.
+    const cellSchema = newValue.getAsNormalizedFullLink().schema;
     const seedDefault = isObjectOrArray(cellSchema)
       ? cellSchema.default
       : undefined;
@@ -982,12 +1042,15 @@ export function normalizeAndDiff(
         }
       }
     }
-    newValue = attachCfcLabelViewToSigilLink(
-      createSigilLinkFromParsedLink(newValue.getAsNormalizedFullLink(), {
-        base: link,
-        includeSchema: true,
-      }),
-      carriedCfcLabelView,
+    newValue = carryCfcReferenceProvenance(
+      newValue,
+      attachCfcLabelViewToSigilLink(
+        createSigilLinkFromParsedLink(newValue.getAsNormalizedFullLink(), {
+          base: link,
+          includeSchema: true,
+        }),
+        carriedCfcLabelView,
+      ) as object,
     );
   }
 
@@ -1009,7 +1072,11 @@ export function normalizeAndDiff(
       runtime,
       tx,
       link,
-      findAndInlineDataUriLinks(newValue),
+      runtime.cfcFlowLabels === "persist" &&
+        getCfcReferenceProvenance(newValue) !== undefined
+        ? runtime.getCellFromLink(newValue as CellLink, undefined, tx)
+          .getRawUntyped()
+        : findAndInlineDataUriLinks(newValue),
       context,
       options,
       state,
@@ -1046,8 +1113,17 @@ export function normalizeAndDiff(
         "diff",
         () => `[BRANCH_WRITE_REDIRECT] Same redirect, no-op at path=${pathStr}`,
       );
-      if (cfcLabelViewHasValues(carriedCfcLabelView)) {
-        recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      if (
+        tx.getCfcState().flowLabelsMode === "persist" ||
+        cfcLabelViewHasValues(carriedCfcLabelView)
+      ) {
+        recordLinkWritePolicyInput(
+          tx,
+          link,
+          parsedLink,
+          carriedCfcLabelView,
+          getCfcReferenceProvenance(newValue),
+        );
       }
       return [];
     } else {
@@ -1056,7 +1132,13 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`,
       );
-      recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      recordLinkWritePolicyInput(
+        tx,
+        link,
+        parsedLink,
+        carriedCfcLabelView,
+        getCfcReferenceProvenance(newValue),
+      );
       changes.push({
         location: link,
         value: stripCfcLabelViewFromPrimitiveLink(newValue) as FabricValue,
@@ -1178,8 +1260,17 @@ export function normalizeAndDiff(
         "diff",
         () => `[BRANCH_CELL_LINK] Same cell link, no-op at path=${pathStr}`,
       );
-      if (cfcLabelViewHasValues(carriedCfcLabelView)) {
-        recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      if (
+        tx.getCfcState().flowLabelsMode === "persist" ||
+        cfcLabelViewHasValues(carriedCfcLabelView)
+      ) {
+        recordLinkWritePolicyInput(
+          tx,
+          link,
+          parsedLink,
+          carriedCfcLabelView,
+          getCfcReferenceProvenance(newValue),
+        );
       }
       return [];
     } else {
@@ -1253,7 +1344,13 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_CELL_LINK] Different cell link, updating at path=${pathStr}`,
       );
-      recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
+      recordLinkWritePolicyInput(
+        tx,
+        link,
+        parsedLink,
+        carriedCfcLabelView,
+        getCfcReferenceProvenance(newValue),
+      );
       return [
         // TODO(seefeld): Normalize the link to a sigil link?
         {
@@ -1739,9 +1836,10 @@ export function normalizeAndDiff(
               runtime,
               tx,
               userLink,
-              createSigilLinkFromParsedLink(scopedLink, {
-                base: userLink,
-              }) as unknown,
+              carryCfcReferenceProvenance(
+                runtime.getCellFromLink(scopedLink, undefined, tx),
+                createSigilLinkFromParsedLink(scopedLink, { base: userLink }),
+              ),
               context,
               options,
               state,
@@ -1750,9 +1848,10 @@ export function normalizeAndDiff(
               runtime,
               tx,
               childLink,
-              createSigilLinkFromParsedLink(userLink, {
-                base: childLink,
-              }) as unknown,
+              carryCfcReferenceProvenance(
+                runtime.getCellFromLink(userLink, undefined, tx),
+                createSigilLinkFromParsedLink(userLink, { base: childLink }),
+              ),
               context,
               options,
               state,
@@ -1767,9 +1866,10 @@ export function normalizeAndDiff(
             runtime,
             tx,
             childLink,
-            createSigilLinkFromParsedLink(scopedLink, {
-              base: childLink,
-            }) as unknown,
+            carryCfcReferenceProvenance(
+              runtime.getCellFromLink(scopedLink, undefined, tx),
+              createSigilLinkFromParsedLink(scopedLink, { base: childLink }),
+            ),
             context,
             options,
             state,

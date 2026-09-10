@@ -40,6 +40,7 @@ import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   atomsOutsideCeiling,
   CFC_LABEL_READ_FAILED_ATOM,
+  cfcIntegrityForObservationNode,
   type CfcLabelView,
   cfcLabelViewForCell,
   clauseAlternatives,
@@ -209,6 +210,8 @@ export class WorkerReconciler {
   #rootCancel: Cancel | null = null;
 
   readonly #onOps: (ops: VDomOp[]) => number | void;
+  readonly #exportCellRef: WorkerReconcilerOptions["exportCellRef"];
+  readonly #transformLink: WorkerReconcilerOptions["transformLink"];
   readonly #onError?: (error: Error) => void;
   readonly #renderDeclassificationPolicy: RenderDeclassificationPolicy;
 
@@ -237,6 +240,8 @@ export class WorkerReconciler {
 
   constructor(options: WorkerReconcilerOptions) {
     this.#onOps = options.onOps;
+    this.#exportCellRef = options.exportCellRef;
+    this.#transformLink = options.transformLink;
     this.#onError = options.onError;
     this.#resolveRenderConfidentiality = options.resolveRenderConfidentiality;
     this.#membershipProvider = options.membershipProvider;
@@ -900,7 +905,7 @@ export class WorkerReconciler {
     } catch {
       labelView = undefined;
     }
-    return {
+    const ref: CellRef = {
       id: link.id,
       space: link.space,
       scope: link.scope,
@@ -909,6 +914,7 @@ export class WorkerReconciler {
       ...(link.overwrite !== undefined && { overwrite: link.overwrite }),
       ...(labelView !== undefined && { cfcLabelView: labelView }),
     };
+    return this.#exportCellRef?.(cell, ref) ?? ref;
   }
 
   #bindingSchema(schema: CellRef["schema"] | undefined): CellRef[
@@ -1530,18 +1536,19 @@ export class WorkerReconciler {
       return false;
     }
 
-    const integrity = this.#integrityLabels(labelView);
+    try {
+      labelView = cfcLabelViewForCell(cell.resolveAsCell());
+    } catch {
+      return false;
+    }
+    const integrity = cfcIntegrityForObservationNode(labelView);
     return textIntegrity.requiredIntegrity.every((required) =>
       integrity.some((atom) => deepEqual(atom, required))
     );
   }
 
   #integrityLabels(labelView: CfcLabelView): readonly CfcAtom[] {
-    return ContextualFlowControl.uniqueAtoms(
-      labelView.entries.flatMap((entry) =>
-        entry.path.length === 0 ? [...(entry.label.integrity ?? [])] : []
-      ),
-    );
+    return cfcIntegrityForObservationNode(labelView);
   }
 
   #readCellValue(cell: Cell<unknown>): unknown {
@@ -2542,6 +2549,9 @@ export class WorkerReconciler {
     value: unknown,
   ): Cell<unknown> {
     const propCell = propsCell.key(key).asSchema(true);
+    if (propsCell.runtime.cfcFlowLabels === "persist") {
+      return propCell.resolveAsCell();
+    }
     const rawValue = this.#readRawBindingPropValue(propsCell, propCell, key);
     let base:
       | ReturnType<Cell<WorkerProps>["getAsNormalizedFullLink"]>
@@ -3220,6 +3230,7 @@ export class WorkerReconciler {
       doNotConvertCellResults: true,
       includeSchema: true,
       keepAsCell: KeepAsCell.OnlyStream,
+      transformLink: this.#transformLink,
     });
   }
 

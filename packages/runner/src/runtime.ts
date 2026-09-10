@@ -4,7 +4,10 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
+import {
+  dataUriFromValue,
+  isFabricDataUri,
+} from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
@@ -64,6 +67,7 @@ import type {
 import { registerBuiltins } from "./builtins/index.ts";
 import {
   type Cell,
+  convertCellsToLinks,
   createCell,
   internCellLinkSchema,
   isCell,
@@ -94,7 +98,8 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { addressKey } from "./link-types.ts";
+import { resolveLinkTracingDereferences } from "./link-resolution.ts";
+import { addressKey, toMemorySpaceAddress } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
   buildCfcReadCeiling,
@@ -115,12 +120,33 @@ import {
   type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  joinCfcObservedConfidentiality,
   linkCfcLabelView,
+  mergeCfcLabelViews,
   type PolicySnapshot,
   resolveCfcDials,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
+import {
+  cfcReferenceBinding,
+  cfcReferenceBindingMatches,
+  cfcReferenceConfidentialityForView,
+  getCfcReferenceProvenance,
+  getCfcReferenceView,
+  withCfcReferenceConfidentiality,
+} from "./cfc/reference-provenance.ts";
+import {
+  acquiredImmutableReference,
+  carryImmutableReferenceTables,
+  type CfcImmutableReference,
+  withImmutableReferenceTable,
+} from "./cfc/immutable-reference.ts";
+import { assertSerializableReferenceScope } from "./cfc/reference-scope.ts";
+import {
+  deriveFlowJoin,
+  pendingReferenceSlotConfidentiality,
+} from "./cfc/prepare.ts";
 import {
   cfcPolicyManifestDocId,
   type PolicyArtifactManifestV1,
@@ -2172,6 +2198,72 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
+      acquireReference: (source, sourceAcquisition, tx) => {
+        const value = tx.readValueOrThrow({ ...source, id: source.id as URI });
+        if (!isCellLink(value)) return undefined;
+        const actual = parseLink(value, { ...source, id: source.id as URI });
+        const input = tx.getCfcState().writePolicyInputs.findLast((input) =>
+          input.kind === "link-write" && input.reference !== undefined &&
+          tx.isRuntimeWritePolicyInput(input) &&
+          deepEqual(input.target, source) &&
+          cfcReferenceBindingMatches(input.reference, actual)
+        );
+        const reference = input?.kind === "link-write"
+          ? input.reference
+          : undefined;
+        const literalAcquisition = isFabricDataUri(source.id)
+          ? acquiredImmutableReference(sourceAcquisition, source, actual)
+          : undefined;
+        const acquisition = reference ?? literalAcquisition;
+        if (acquisition === undefined) return undefined;
+        return {
+          binding: cfcReferenceBinding(actual),
+          confidentiality: joinCfcObservedConfidentiality([
+            acquisition.confidentiality,
+            sourceAcquisition?.confidentiality ?? [],
+            pendingReferenceSlotConfidentiality(tx, source),
+            deriveFlowJoin(tx).confidentiality,
+          ]),
+        };
+      },
+      resolveContentTarget: (
+        address,
+        destinationSpace,
+        lastNode,
+        tx,
+        projectionPath,
+      ) => {
+        if (address.space !== destinationSpace) return undefined;
+        const source = this.getCellFromLink(
+          { ...address, id: address.id as URI },
+          undefined,
+          tx,
+        ).key(...projectionPath).getAsNormalizedFullLink();
+        let blocked = false;
+        const { link, traces } = resolveLinkTracingDereferences(
+          this,
+          tx,
+          source,
+          lastNode,
+          {
+            onScopeBlocked: () => blocked = true,
+            silentFailures: true,
+            requestMissingDocs: false,
+          },
+        );
+        // Storage can bind these reads atomically only within the write space.
+        if (
+          blocked || link.pendingHopDoc ||
+          traces.some((trace) => trace.target.space !== destinationSpace)
+        ) return undefined;
+        const result = tx.read(toMemorySpaceAddress(link));
+        if (!result.ok) return undefined;
+        return {
+          address: link,
+          value: result.ok.value,
+          references: [source, ...traces.map((trace) => trace.source)],
+        };
+      },
       resolvePolicyManifest: (
         reference,
         tx,
@@ -3242,7 +3334,7 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    const carriedLabelView = cfcLabelView ??
+    let carriedLabelView = cfcLabelView ??
       (isSigilLink(cellLink)
         ? linkCfcLabelView(cellLink)
         : isNormalizedFullLink(cellLink)
@@ -3262,6 +3354,27 @@ export class Runtime {
       }
       : undefined;
     if (!link) throw new Error("Invalid cell link");
+    const reference = getCfcReferenceProvenance(cellLink);
+    if (reference !== undefined) {
+      if (!cfcReferenceBindingMatches(reference, link as NormalizedFullLink)) {
+        throw new Error("Reference acquisition does not match its binding");
+      }
+      const referenceView = getCfcReferenceView(cellLink);
+      const mergedView = mergeCfcLabelViews([carriedLabelView, referenceView]);
+      carriedLabelView = carryImmutableReferenceTables(
+        [carriedLabelView, referenceView],
+        withCfcReferenceConfidentiality(
+          mergedView,
+          joinCfcObservedConfidentiality([
+            cfcReferenceConfidentialityForView(mergedView),
+            reference.confidentiality,
+          ]),
+        ),
+      );
+      if (reference.scopeCaps !== undefined) {
+        link = { ...link, scopeCaps: reference.scopeCaps };
+      }
+    }
     if ("cfcLabelView" in link) {
       const { cfcLabelView: _cfcLabelView, ...cleanLink } = link as
         & NormalizedLink
@@ -3356,13 +3469,65 @@ export class Runtime {
     // (see inlineExternalSchemaRefsInValue): the document is its id, so a
     // content-addressed reference inside it has no carrying write to install
     // its closure.
-    const asDataURI = dataUriFromValue(
-      inlineExternalSchemaRefsInValue(
-        fabricFromNativeValue(
-          flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+    const captured: Array<{
+      path: readonly string[];
+      reference: CfcImmutableReference["reference"];
+    }> = [];
+    const nestedViews: Array<CfcLabelView | undefined> = [];
+    const flattened = flattenBuilderArtifacts(data, {
+      replaceOther: cellAsLink,
+    });
+    const value = this.cfcFlowLabels === "persist"
+      ? convertCellsToLinks(flattened, {
+        transformLink: (_cell, link, path) => {
+          const reference = getCfcReferenceProvenance(link);
+          if (reference !== undefined) {
+            const actual = parseLink(link, {
+              space,
+              id: reference.binding.id as URI,
+              scope: reference.binding.scope,
+              path: [],
+            });
+            if (!cfcReferenceBindingMatches(reference, actual)) {
+              throw new Error("Reference acquisition is unresolved");
+            }
+            assertSerializableReferenceScope(
+              actual.schema,
+              reference.scopeCaps,
+            );
+            captured.push({ path, reference });
+            nestedViews.push(getCfcReferenceView(link));
+          }
+          return link;
+        },
+      })
+      : fabricFromNativeValue(flattened);
+    const asDataURI = dataUriFromValue(inlineExternalSchemaRefsInValue(value));
+    if (this.cfcFlowLabels === "persist") {
+      const inherited = carryImmutableReferenceTables(
+        [cfcLabelView, ...nestedViews],
+        cfcLabelView,
+      );
+      const selected = carryImmutableReferenceTables(
+        [inherited],
+        withCfcReferenceConfidentiality(
+          inherited,
+          joinCfcObservedConfidentiality([
+            cfcReferenceConfidentialityForView(inherited),
+            tx === undefined ? [] : deriveFlowJoin(tx).confidentiality,
+          ]),
         ),
-      ),
-    );
+      );
+      cfcLabelView = withImmutableReferenceTable(
+        selected,
+        captured.map(
+          ({ path, reference }) => ({
+            source: { space, id: asDataURI, scope: "space", path },
+            reference,
+          }),
+        ),
+      );
+    }
     return createCell(
       this,
       {

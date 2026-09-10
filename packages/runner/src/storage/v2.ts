@@ -90,6 +90,7 @@ import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import {
+  type CommitReadBasis,
   IMemoryAddress,
   IMergedChanges,
   IOperationStorageCapability,
@@ -133,7 +134,9 @@ import {
   getTransactionWriteAttempts,
 } from "./transaction-inspection.ts";
 import {
+  getAuthorizationReadBasis,
   getBlindStructuralTarget,
+  isAuthorizationRead,
   isDurableReadTx,
   isInternalVerifierRead,
   isMergeableOpRead,
@@ -4211,6 +4214,27 @@ export class SpaceReplica
     return this.#visibleDocument(uri, scope, identity);
   }
 
+  /** @inheritDoc */
+  getDocumentReadBasis(
+    uri: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    excludeSpeculative = false,
+  ): CommitReadBasis {
+    const record = this.#docs.get(
+      docKey(uri, this.instanceKey(scope, identity)),
+    );
+    return Object.freeze({
+      seq: record?.confirmed.seq ?? 0,
+      localSeqs: Object.freeze(
+        record?.pending.filter((version) =>
+          !excludeSpeculative ||
+          !this.#speculativeLocalSeqs.has(version.localSeq)
+        ).map((version) => version.localSeq) ?? [],
+      ),
+    });
+  }
+
   /** ISpaceReplica.getNonSpeculativeDocument (RULED 2026-08-21;
    * verification-coverage.md OW47, second producer): the doc's view
    * over confirmed state plus only its DURABLE pending layers,
@@ -6336,6 +6360,7 @@ export class SpaceReplica
 
     const commitReads: IReadActivity[] = [];
     for (const read of reads) {
+      const authorization = isAuthorizationRead(read.meta);
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
@@ -6345,14 +6370,15 @@ export class SpaceReplica
         read.id.startsWith("cid:") ||
         // Blind UI-input write-target reads are replaced by one structural
         // parent read after buildReads' main loop.
-        isReadIgnoredForCommit(read.meta) ||
+        (!authorization && isReadIgnoredForCommit(read.meta)) ||
         // Reference-resolution shape reads stay reactive but do not constrain
         // the commit; recursive reads remain value dependencies.
-        (isReadExcludedFromConflict(read.meta) &&
+        (!authorization && isReadExcludedFromConflict(read.meta) &&
           read.nonRecursive === true) ||
-        // Runtime verifier reads of the CFC label are point-in-time policy
-        // observations, not consumed values.
-        (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path))
+        // Label lookups used only for bookkeeping carry no authorization
+        // decision. Required evidence keeps its revision precondition.
+        (!authorization && isInternalVerifierRead(read.meta) &&
+          isCfcLabelPath(read.path))
       ) {
         continue;
       }
@@ -6364,7 +6390,7 @@ export class SpaceReplica
       const readsMergeableOpArrayLength = opPaths !== undefined &&
         opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
       if (
-        opPaths !== undefined &&
+        !authorization && opPaths !== undefined &&
         !readsMergeableOpArrayLength &&
         (isMergeableOpRead(read.meta) ||
           isReadMarkedAsAttemptedWrite(read.meta) ||
@@ -6503,15 +6529,17 @@ export class SpaceReplica
     // carries its own `meta.seq`). Shared by the per-read loop below and the blind
     // write's structural precondition so the two emission sites stay in lockstep.
     //
-    // Both the layers and the confirmed seq are read from the replica as the
-    // commit is built, not from the transaction's own snapshot of the doc,
-    // and a frame can land between the two. What the transaction owes this
-    // site (03-commit-model.md §3.3.4) is its commit-time claim check,
-    // passed before its reads are built: `claim()` in
-    // transaction/attestation.ts re-reads every doc the transaction
-    // snapshotted from this replica, and a differing value rejects the
-    // transaction locally as `StorageTransactionInconsistent`. So the
-    // content the transaction read is the content at the basis named here.
+    // Ordinary reads take their layers and confirmed seq from the replica
+    // when the commit is built. The transaction's immediate claim check
+    // (03-commit-model.md §3.3.4) establishes that their snapshotted content
+    // still matches that view, rejecting changed values locally as
+    // `StorageTransactionInconsistent` before the read set reaches the wire.
+    //
+    // Authorization reads supply the stricter `readBasis` captured when their
+    // evidence was observed. Equal content does not rebase that dependency:
+    // an intervening policy change that restores the same value must still
+    // conflict. These revision preconditions remain even when a server-judged
+    // value-hash or absence pin exempts a document from the local claim check.
     //
     // `excludeSpeculativeLayers` (verification-coverage.md OW47, the client
     // own-write durability seam): the blind write's structural read passes
@@ -6532,10 +6560,9 @@ export class SpaceReplica
     // internal-verifier read of the write-target doc, whose VALUE the
     // transaction read path serves from the same non-speculative stack
     // (v2-transaction.ts) — the verifier verifies durable policy state
-    // and names the durable basis, together. A verifier read AT the CFC
-    // metadata path leaves the conflict set in the loop below and never
-    // reaches this emission, so the producer here is a verifier read at
-    // another path, a document's ["schema"] member among them.
+    // and names the durable basis, together. Required verifier reads include
+    // CFC metadata and schema bindings; their admission basis matches the
+    // durable state used to verify them.
     // Content-addressed (cid:)
     // reads keep their ordinary overlay value there — identical to the
     // durable content by construction — while this exclusion still
@@ -6554,6 +6581,7 @@ export class SpaceReplica
       nonRecursive: boolean,
       confirmedSeq?: number,
       excludeSpeculativeLayers = false,
+      readBasis?: CommitReadBasis,
     ) => {
       const record = this.#docs.get(
         docKey(id, this.instanceKey(scope, identity)),
@@ -6569,7 +6597,7 @@ export class SpaceReplica
       // servers base staleness at the highest element only — a lower-layer
       // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
-      const layers = [
+      const layers = readBasis?.localSeqs ?? [
         ...new Set(
           record?.pending
             .filter((version) => version.localSeq < localSeq)
@@ -6586,10 +6614,11 @@ export class SpaceReplica
           id,
           scope,
           path,
-          localSeq: layers.length === 1 ? layers[0] : layers,
+          localSeq: layers.length === 1 ? layers[0] : [...layers],
           // The true confirmed basis this doc's view sat on — the same value
           // the confirmed branch below emits (CT-1910).
-          basisSeq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          basisSeq: readBasis?.seq ?? confirmedSeq ?? record?.confirmed.seq ??
+            0,
           ...shape,
         });
       } else {
@@ -6597,7 +6626,7 @@ export class SpaceReplica
           id,
           scope,
           path,
-          seq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          seq: readBasis?.seq ?? confirmedSeq ?? record?.confirmed.seq ?? 0,
           ...shape,
         });
       }
@@ -6619,12 +6648,11 @@ export class SpaceReplica
         // verify-durable and name-durable travel together. Confined to
         // the blind-write tx shape: `structuralTarget` survives the
         // unmark exactly so commit-time emission can recognize it, and
-        // a verifier read in any other tx keeps naming every layer. The
-        // verifier reads that arrive here are the ones outside the CFC
-        // metadata path, which the loop above drops outright.
+        // a verifier read in any other tx keeps naming every layer.
         (source !== undefined && isDurableReadTx(source)) ||
           (structuralTarget !== undefined &&
             isInternalVerifierRead(read.meta)),
+        getAuthorizationReadBasis(read.meta),
       );
     }
     // The blind UI-input write's single structural existence/shape precondition: a

@@ -13,6 +13,10 @@ import type {
   LabelObservationClass,
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
+import type {
+  CfcReferenceObservation,
+  CfcReferenceProvenance,
+} from "./reference-provenance.ts";
 import type { CfcRefusalDetail } from "./refusal-detail.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 import type { CfcTrustConfig } from "./trust.ts";
@@ -341,7 +345,7 @@ export type LabelMapEntry = {
  * the document as unlabeled.
  */
 export type CfcMetadata = {
-  version: 1;
+  version: 1 | 2;
   schemaHash: string;
   labelMap: {
     version: 1;
@@ -512,6 +516,7 @@ export type WritePolicyInput =
     readonly source: CfcAddress;
     readonly linkSchema?: JSONSchema;
     readonly cfcLabelView?: CfcLabelView;
+    readonly reference?: CfcReferenceProvenance;
   }
   | {
     readonly kind: "sink-request";
@@ -598,6 +603,7 @@ export type PreparedDigestInput = {
   // discipline as writePolicyInputs. Absent when none were recorded, so
   // pre-Stage-2 digests are unchanged; canonicalized address-sorted.
   readonly labelMetadataObservations?: readonly CfcLabelMetadataObservation[];
+  readonly referenceObservations?: readonly CfcReferenceObservation[];
 };
 
 export type PostCommitSideEffect = {
@@ -871,6 +877,7 @@ export type CfcTxState = {
   // PreparedDigestInput. Only labeled observations are recorded (empty =
   // public = nothing to derive, gate, or bind).
   labelMetadataObservations: CfcLabelMetadataObservation[];
+  referenceObservations: CfcReferenceObservation[];
   // Structured descriptions of the refusals this transaction's gates
   // recorded (`cfc/refusal-detail.ts`): which boundary refused, which atoms
   // it refused, and which reads carried them. Recorded in every enforcement

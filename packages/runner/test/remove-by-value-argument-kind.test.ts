@@ -95,7 +95,7 @@ describe("removeByValue argument kind, for object elements", () => {
       const cell = rt.getCell<Row[]>(space, "add-unique", rowListSchema, tx);
       const row = cell.get().find((r) => r.name === "alice");
       cell.addUnique(row!);
-      await tx.commit();
+      expect((await tx.commit()).error).toBeUndefined();
 
       const after = rt.getCell<Row[]>(space, "add-unique", rowListSchema).get();
       expect(after.map((r) => r.name)).toEqual(["alice", "bob", "alice"]);

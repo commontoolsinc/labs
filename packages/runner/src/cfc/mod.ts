@@ -4,6 +4,15 @@ export type {
   CfcLabelViewStatus,
 } from "./label-view.ts";
 export {
+  carryCfcReferenceProvenance,
+  cfcReferenceBindingMatches,
+  getCfcReferenceProvenance,
+} from "./reference-provenance.ts";
+export type {
+  CfcReferenceObservation,
+  CfcReferenceProvenance,
+} from "./reference-provenance.ts";
+export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
   setLinkCfcLabelView,
@@ -246,6 +255,7 @@ export type {
   StoredCfcEnvelope,
 } from "./prepare.ts";
 export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
+export { assertSerializableReferenceScope } from "./reference-scope.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
 export {
@@ -328,6 +338,7 @@ export {
   CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
   type CfcFloorTrustContext,
+  cfcIntegrityForObservationNode,
   cfcIntegritySatisfiesFloorCoherently,
   cfcIntegrityWitnessKey,
   cfcJsonPointerForPath,
@@ -372,3 +383,5 @@ export {
   describeRefusalInputs,
   renderCfcAtom,
 } from "./refusal-detail.ts";
+
+export { immutableReferenceViewIdentity } from "./immutable-reference.ts";

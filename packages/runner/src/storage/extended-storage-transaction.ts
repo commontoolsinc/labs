@@ -72,6 +72,8 @@ import {
   cfcMetadataPresent,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
+  type CfcReferenceObservation,
+  type CfcReferenceProvenance,
   CfcRefusalDetail,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
@@ -132,6 +134,7 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   allowMutableTransactionRead,
+  authorizationRead,
   clearSchemaRefusalTx,
   ignoreReadForCommit,
   internalVerifierRead,
@@ -185,6 +188,25 @@ const createOnlyMarkKey = (
   `${normalizeCellScope(link.scope as CellScope | undefined)}\0${link.id}`;
 
 type CfcInstrumentationHooks = {
+  acquireReference?(
+    source: CfcAddress,
+    sourceAcquisition: CfcReferenceProvenance | undefined,
+    tx: IExtendedStorageTransaction,
+  ): CfcReferenceProvenance | undefined;
+
+  /** Resolves a current content subject with Runtime scope enforcement. */
+  resolveContentTarget?(
+    address: CfcAddress & Pick<NormalizedFullLink, "schema" | "scopeCaps">,
+    destinationSpace: MemorySpace,
+    lastNode: "value" | "top",
+    tx: IExtendedStorageTransaction,
+    projectionPath: readonly string[],
+  ): {
+    address: CfcAddress;
+    value: FabricValue;
+    references: readonly CfcAddress[];
+  } | undefined;
+
   onRelevantTx?(): void;
 
   /** Stage C tuning T1: one flow-label probe was evaluated (`computed`) or
@@ -445,6 +467,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     consultedGrants: [],
     consultedPolicyManifests: [],
     labelMetadataObservations: [],
+    referenceObservations: [],
     refusalDetails: [],
   };
 
@@ -1381,6 +1404,55 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** Resolves trusted content evidence while retaining authorization reads. */
+  resolveCfcContentTarget(
+    address: CfcAddress & Pick<NormalizedFullLink, "schema" | "scopeCaps">,
+    destinationSpace: MemorySpace,
+    authorization?: RuntimeWritePolicyAuthorization,
+    lastNode: "value" | "top" = "value",
+    projectionPath: readonly string[] = [],
+  ): {
+    address: CfcAddress;
+    value: FabricValue;
+    references: readonly CfcAddress[];
+  } | undefined {
+    if (!runtimeWritePolicyAuthorized(authorization)) return undefined;
+    try {
+      return this.runWithAmbientReadMeta(
+        { ...internalVerifierRead, ...authorizationRead },
+        () =>
+          this.#cfcInstrumentation.resolveContentTarget?.(
+            address,
+            destinationSpace,
+            lastNode,
+            this,
+            projectionPath,
+          ),
+      );
+    } catch {
+      // Resolution failures share the unavailable-evidence result so the
+      // verifier cannot expose protected topology through its failure kind.
+      return undefined;
+    }
+  }
+
+  acquireCfcReference(
+    source: CfcAddress,
+    sourceAcquisition?: CfcReferenceProvenance,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): CfcReferenceProvenance | undefined {
+    if (!runtimeWritePolicyAuthorized(authorization)) return undefined;
+    return this.runWithAmbientReadMeta(
+      { ...internalVerifierRead, ...authorizationRead },
+      () =>
+        this.#cfcInstrumentation.acquireReference?.(
+          source,
+          sourceAcquisition,
+          this,
+        ),
+    );
+  }
+
   #withAmbientReadMeta(options?: IReadOptions): IReadOptions | undefined {
     if (this.#ambientReadMeta === undefined) {
       return options;
@@ -1851,6 +1923,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcReferenceObservation(observation: CfcReferenceObservation): void {
+    if (observation.confidentiality.length === 0) return;
+    this.#cfcState.referenceObservations.push(deepFreeze(observation));
+    this.markCfcRelevant("reference-observation");
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("reference-observation-added");
+    }
+  }
+
   recordCfcLabelMetadataObservation(
     observation: CfcLabelMetadataObservation,
   ): void {
@@ -2048,6 +2129,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     for (const attempt of rawAttempts) {
       rawRanks.push(attempt.journalIndex);
     }
+    for (const observation of this.#cfcState.referenceObservations) {
+      rawRanks.push(observation.journalIndex);
+    }
     const rankByRaw = new Map<number, number>();
     rawRanks.sort((a, b) => a - b).forEach((raw, rank) => {
       rankByRaw.set(raw, rank);
@@ -2110,6 +2194,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       attemptedWrites,
       writes,
       writeAttemptLog,
+      ...(this.#cfcState.referenceObservations.length > 0
+        ? {
+          referenceObservations: this.#cfcState.referenceObservations.map(
+            (observation) => ({
+              ...observation,
+              journalIndex: rankByRaw.get(observation.journalIndex)!,
+            }),
+          ),
+        }
+        : {}),
       dereferenceTraces: [...this.#cfcState.dereferenceTraces],
       triggerReads: [...this.#cfcState.triggerReads],
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
@@ -2644,6 +2738,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   getReadActivities(): Iterable<IReadActivity> {
     return getTransactionReadActivities(this.tx);
+  }
+
+  currentActivityIndex(): number | undefined {
+    return this.tx.currentActivityIndex?.();
   }
 
   getWriteAttemptLog(): readonly IWriteAttempt[] {
@@ -3471,6 +3569,39 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.#wrapped.runWithAmbientReadMeta(meta, fn);
   }
 
+  /** Resolves content evidence through the wrapped transaction. */
+  resolveCfcContentTarget(
+    address: CfcAddress & Pick<NormalizedFullLink, "schema" | "scopeCaps">,
+    destinationSpace: MemorySpace,
+    authorization?: RuntimeWritePolicyAuthorization,
+    lastNode: "value" | "top" = "value",
+    projectionPath: readonly string[] = [],
+  ): {
+    address: CfcAddress;
+    value: FabricValue;
+    references: readonly CfcAddress[];
+  } | undefined {
+    return this.#wrapped.resolveCfcContentTarget(
+      address,
+      destinationSpace,
+      authorization,
+      lastNode,
+      projectionPath,
+    );
+  }
+
+  acquireCfcReference(
+    source: CfcAddress,
+    sourceAcquisition?: CfcReferenceProvenance,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): CfcReferenceProvenance | undefined {
+    return this.#wrapped.acquireCfcReference(
+      source,
+      sourceAcquisition,
+      authorization,
+    );
+  }
+
   markLazyMaterialize(enabled = true): void {
     // Mark this layer as well as what it wraps: a reader holding the wrapper
     // asks the wrapper, and a reader holding the inner transaction asks that.
@@ -3622,6 +3753,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.#wrapped.recordCfcLabelMetadataObservation(observation);
   }
 
+  recordCfcReferenceObservation(observation: CfcReferenceObservation): void {
+    this.#wrapped.recordCfcReferenceObservation(observation);
+  }
+
   recordCfcRefusalDetail(detail: CfcRefusalDetail): void {
     this.#wrapped.recordCfcRefusalDetail(detail);
   }
@@ -3723,6 +3858,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReadActivities(): Iterable<IReadActivity> {
     return this.#wrapped.getReadActivities?.() ??
       getTransactionReadActivities(this.#wrapped.tx);
+  }
+
+  currentActivityIndex(): number | undefined {
+    return this.#wrapped.currentActivityIndex?.();
   }
 
   getWriteAttemptLog(): readonly IWriteAttempt[] {

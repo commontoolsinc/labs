@@ -63,6 +63,8 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcReferenceObservation,
+  CfcReferenceProvenance,
   CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
@@ -1335,6 +1337,9 @@ export interface IStorageTransaction {
    */
   getReadActivities?(): Iterable<IReadActivity>;
 
+  /** The next position on the transaction's shared activity clock. */
+  currentActivityIndex?(): number | undefined;
+
   /**
    * Optional ordered log of every applied write attempt, in transaction
    * order, stamped on the same per-transaction activity clock as read
@@ -1813,6 +1818,32 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
+  /**
+   * Resolves a content assertion through the Runtime's scoped link resolver.
+   * Evidence must already be loaded in this snapshot; verification schedules no
+   * document pulls.
+   * Unavailable evidence or a traversal outside `destinationSpace` returns
+   * `undefined`; storage binds authorization revisions within one space.
+   */
+  resolveCfcContentTarget(
+    address: CfcAddress & Pick<NormalizedFullLink, "schema" | "scopeCaps">,
+    destinationSpace: MemorySpace,
+    authorization?: RuntimeWritePolicyAuthorization,
+    lastNode?: "value" | "top",
+    projectionPath?: readonly string[],
+  ): {
+    address: CfcAddress;
+    value: FabricValue;
+    references: readonly CfcAddress[];
+  } | undefined;
+
+  /** Acquires a reference from trusted writes staged in this attempt. */
+  acquireCfcReference(
+    source: CfcAddress,
+    sourceAcquisition?: CfcReferenceProvenance,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): CfcReferenceProvenance | undefined;
+
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
@@ -2085,6 +2116,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   recordCfcLabelMetadataObservation(
     observation: CfcLabelMetadataObservation,
   ): void;
+
+  /** Records confidentiality consumed by an acquired reference observation. */
+  recordCfcReferenceObservation(observation: CfcReferenceObservation): void;
 
   /**
    * Records a structured description of a refusal one of this transaction's
@@ -2673,6 +2707,15 @@ export type EventAppendDeliveryOutcome =
   | { delivered: true; deduped?: boolean }
   | { delivered: false; refused: string };
 
+/** Revisions composing a document snapshot used by a commit dependency. */
+export interface CommitReadBasis {
+  /** Authoritative revision below the snapshot's pending layers. */
+  readonly seq: number;
+
+  /** Own-session pending layers actually included in the snapshot. */
+  readonly localSeqs: readonly number[];
+}
+
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
@@ -2696,6 +2739,14 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /** Captures the revisions composing the corresponding document view. */
+  getDocumentReadBasis?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    excludeSpeculative?: boolean,
+  ): CommitReadBasis;
 
   /**
    * The doc's NON-speculative document: confirmed state plus only the

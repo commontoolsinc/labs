@@ -74,21 +74,11 @@ type LabelMapEntry = {
 - **`origin` stays the update-discipline axis; `observes` is the consumption
   axis.** They are independent: a `derived` entry can be `observes:"value"`, a
   `structure` entry `observes:"shape"`, etc.
-- **Absent `observes` = a covering entry** consumed by *every* read class. Every
-  legacy (pre-C) entry is therefore covering, so a class-unaware reader
-  over-taints (fail-safe) and old persisted data needs no migration. This is the
-  same wire-compat move as the clause `anyOf` wrapper in Epic A.
-- **One carve-out, forced by the §6 parity contract: legacy `origin:"link"`
-  entries.** Read literally, "absent = covering" would make a plain value read
-  start consuming link-origin entries — but today `deriveFlowJoin` *drops*
-  them via `excludeLinkOrigin`, so the literal reading would break §6's
-  byte-identity contract for `value`/`shape`/`enumerate` reads on day one.
-  Normative rule: **an entry with `origin:"link"` and absent `observes` is
-  implicitly `observes:"followRef"`** — consumed by `followRef` reads only,
-  never as a covering entry. This reproduces today's behavior exactly
-  (dropped for value reads), and the followRef consumption it enables is the
-  new SC-8 behavior, arriving under §9's reader-first rollout. Every other
-  origin keeps the plain covering rule.
+- An entry without `observes` covers the content observation classes.
+- A legacy `origin:"link"` entry without `observes` has the `followRef`
+  consumption class. Materializing a subtree exposes its contained references
+  and consumes this class too. Precise reference acquisition requires the
+  provenance and compatibility rules in [CFC references](cfc-references.md).
 
 **Alternative considered and rejected:** a single `PathLabelTemplate`-shaped
 entry carrying per-class label fields (`{ value?, shape?, enumerate? }`). It
@@ -104,10 +94,10 @@ A read consumes the join of every entry whose class is in its consumed set:
 
 | Runtime read | Consumes classes | Notes |
 |---|---|---|
-| recursive value read | `value` + `shape` + `enumerate` | reading content also reveals presence/type and, for containers, membership |
+| recursive value read | `value` + `shape` + `enumerate` + `followRef` | materializing a subtree exposes contained values and reference identities |
 | `nonRecursive` read (key-add, length) | `shape` + `enumerate` | observes presence/cardinality, not element content |
 | `linkResolutionProbe` / slot-pointer read (no deref) | `followRef` | which reference sits here — **stops being excluded**; consumes the link-origin entry's `followRef` class |
-| dereference (follow a ref to its target) | the dereference trace pair it already is | unchanged; target read classified at the target path |
+| dereference (follow a ref to its target) | reference restrictions at every hop, then the target observation classes | traces record topology; actual reads and held-reference observations determine consumption |
 
 The load-bearing change is the third row: the `followRef` observation, today
 dropped from the flow join, becomes a consumed class carrying the link entry's
@@ -195,25 +185,17 @@ against the spec (§8.12.8 as amended on specs branch
 
 ## 6. What `deriveFlowJoin` consumes per read shape
 
-`forEachFlowObservation` (`prepare.ts`) already visits each read with its
-`nonRecursive` flag. C1 extends it to classify each observation (value / shape
-via `nonRecursive` / followRef via `linkResolutionProbe`) and select entries by
-class-compatibility rather than the boolean. `excludeLinkOrigin` becomes class
-selection: link-origin entries are consumed by `followRef` reads.
+`forEachFlowObservation` (`prepare.ts`) classifies application reads as value,
+shape, enumeration, or reference observations and selects compatible entries.
+Reference probes consume the slot's reference confidentiality. Materializing a
+value through a reference consumes both that restriction and the current target
+content labels. Explicit identity observations and held-reference history also
+contribute to the join; a later dereference trace does not erase them.
 
-Parity contract for C1 — **scoped, because SC-8 is an intentional behavioral
-change, not a refactor.** Today `forEachFlowObservation` *skips*
-`linkResolutionProbe` reads and `deriveFlowJoin` *drops* `origin==="link"`
-entries via `excludeLinkOrigin: true` (`prepare.ts`). Two distinct effects:
-
-- **value / shape / enumerate reads** must stay **byte-identical** on legacy
-  covering entries — every such read consumes every covering entry, the current
-  behavior. This is the real parity test.
-- **the `followRef` path** deliberately **changes**: making a slot-pointer read
-  consume the link-origin entry is exactly the SC-8 fix, so the derived join for
-  that path is *wider* than today by design. The parity test must exempt this
-  path (or assert the new, wider result) — it is not, and must not be, claimed
-  byte-identical.
+Trusted coordinator machinery may exclude its own bookkeeping reads. This
+exemption follows the runtime-owned marker, not the shape of the resulting write.
+A generic pass-through or container rewrite therefore retains semantic selection
+observations even when all of its written leaves are references.
 
 ### 6.1 C1 code-validation refinements (2026-07-03)
 
@@ -230,23 +212,17 @@ normative from C1 on:
   followRef observation reads a pointer, not content: letting it consume
   covering entries would taint the terminal resolution probe of every blind
   pass-through with the target doc's content label, re-smearing the §2
-  pointer/content substrate. Still strictly wider than pre-C1, which
-  consumed nothing for probes.
-- **The §4 row 3 / row 4 boundary is the dereference trace.** A probe issued
-  while *following* a reference — its slot path covered at-or-above by a
-  same-tx recorded trace source — is resolution machinery (row 4,
-  unchanged); the follow's taint arrives via the ordinary reads of the
-  target. Only standalone probes (no covering trace: `lastNode:"top"` link
-  reads, raw link handles, unfollowed redirect checks) are row-3 followRef
-  observations. Without this boundary every value read's own traversal
-  probes consume each hop's pointer label, and a list coordinator's J joins
-  every slot's transport label — the same pointwise re-smear.
-- **followRef observations contribute confidentiality only.** The §8.9.3
-  hereditary integrity meet quantifies over the transformation's *content*
-  inputs; standalone probes rarely resolve any label, and admitting them
-  would empty the weakest-link meet on virtually every transaction,
-  silently ending TransformedBy / PolicyCertified propagation. Pointer
-  integrity evidence stays on the link entry (the LinkReference chain).
+  pointer/content distinction.
+- **A dereference trace does not erase a semantic observation.** A pointer
+  comparison remains a dependency when a later read follows the same reference.
+  Application traversal consumes each hop's reference restrictions. Trusted
+  wiring can mark its own bookkeeping reads as machinery; application code
+  does not execute in that scope.
+- **Reference evidence does not endorse content.** Reference probes contribute
+  confidentiality without crediting their relationship integrity as content
+  evidence. A confidential held-reference observation contributes a dependency
+  with no content endorsement to the hereditary integrity meet. Relationship
+  evidence remains on the reference component.
 
 ## 7. Observation ceiling (LLM path) and render
 
@@ -256,7 +232,8 @@ instead of the flow join:
 
 - **LLM observation ceiling (`llm.ts` / llm-dialog).** Serializing a value
   into a prompt or tool context is a **recursive value read**: the ceiling
-  fit consumes `value + shape + enumerate` entries at each serialized path.
+  fit consumes `value + shape + enumerate + followRef` entries at each serialized
+  path, including held-reference restrictions.
   The genuinely new case is **opaque link handles**
   (`cfcOpaqueLinkForPath`): rendering WHICH reference sits at a slot without
   dereferencing it is a `followRef` observation, so an opaque handle

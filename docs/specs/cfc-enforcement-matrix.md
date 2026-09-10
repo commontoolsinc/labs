@@ -81,6 +81,34 @@ false — including the audit-S3 anti-downgrade floor, which therefore never
 rises — while the commit gate, which asks only whether the name is one of
 `disabled` and `observe`, reads the same name as enforcing.
 
+### Linked value subjects
+
+The write-floor dial applies to the subject required by the declaring path. A
+floor governing linked contents resolves the current target field through the
+Runtime's scoped link resolver. A receiving reference's `addIntegrity`, a
+relationship endorsement, or a carried reader schema does not certify that
+content. Wildcard floors enumerate concrete written slots, including slots below
+ancestor links, and unresolved evidence rejects under `cfcWriteFloor: enforce`.
+Inline values receive their authorized schema integrity and, only with
+`cfcFlowLabels: persist`, their hereditary flow integrity. Setup writes obey the
+same floor; pure deletion is outside its value requirement.
+
+Explicit `exactCopyOf` and `projection` claims are independent of the write-floor
+dial. They resolve ancestor links to current fields. Inline fields compare by
+Fabric value equality; reference fields compare their full normalized bindings,
+including overwrite mode. Missing evidence, mixed inline/reference subjects, and
+wildcard copy claims reject. Reader schemas on handles remain views rather than
+general payload-validation certificates.
+
+The Runtime performs content verification before storage submission. Its reads
+remain authorization dependencies even though verifier reads do not become
+handler content inputs. Storage's revision checks bind this evidence within the
+destination space. A content assertion that traverses another space rejects,
+because those target revisions cannot be bound atomically to the write.
+Reference-only forwarding and identity-copy checks may still name another
+space without observing its contents. The focused checks are in
+[cfc-linked-content-floor.test.ts](../../packages/runner/test/cfc-linked-content-floor.test.ts).
+
 ## 2. Rollout ordering (the partial order)
 
 Two hard ordering constraints (SC-13), plus one that D3 adds and one that H5
@@ -163,7 +191,7 @@ dial is not yet producing. The states a deployment is expected to pass through:
 | **Server hosts today (toolshed, background-piece-service)** | `enforce-explicit` | `off` | `off` | `false` | Neither host passes any CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts), [background-piece-service main.ts](../../packages/background-piece-service/src/main.ts)), so both inherit the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
 | **Shell today** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
 | **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
-| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects; complete on flow-endorsed writes (flow persists). |
+| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects and credits persisted flow integrity; content assertions require evidence within the destination space. |
 | **Strict** | `enforce-strict` | `persist` | `enforce` | `true` | Writer-fit fail-closed (H4); render ceiling consumes derived labels (H3b); trigger reads gated, multi-hop complete since flow persists. The end state. |
 
 Trigger gating may flip to `true` at any of these states (ordering constraint
@@ -206,7 +234,7 @@ posture (anti-fail-closed).
 The strict-only delta is:
 
 - **Writer-fit reject (SC-18b) — implemented (H4 code step).** The per-tx flow
-  join landing as a target's `derived` value component is measured against the
+  join landing in a target's value, structure, or reference component is measured against the
   target's DECLARED store-policy component (declared + legacy entries, resolved
   by the same per-component longest-prefix rule reads use; absent declarations
   are the empty "public" ceiling, fail-closed) joined with the target's
@@ -230,10 +258,10 @@ The strict-only delta is:
   bit-for-bit on stored metadata. The reason string is stable and names the
   rule id, target, path, and offending clause(s) (SC-18c):
   `writer-fit confidentiality misfit for <doc> at /<path> (canWrite, §8.12.4):
-  <clauses>`. Scope note (v1): link-covered writes carry per-slot link labels
-  instead of the join and are outside the check, as is the pure-link-structure
-  shape channel; grown existence atoms (SC-4) are historical and deliberately
-  never measured — only the current join is; `Space` is the only principal
+  <clauses>`. Reference writes include their retained acquisition restrictions
+  and current selection join in the measurement. Pure-link containers also
+  measure their structure stamp. Grown existence atoms (SC-4) retain historical
+  restrictions; the check measures the current write's confidentiality; `Space` is the only principal
   form residency admits, because `User` and the bare DID-string spelling gate
   by equality against one acting reader, making their audience narrower than
   the set of principals a space grants reader roles to, while
