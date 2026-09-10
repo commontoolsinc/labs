@@ -2689,11 +2689,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /**
-   * Helper for the per-space close loops, which re-runs the claim check
-   * for `space`, the `index`th space to close, over the documents its
-   * `preconditions` leave to it, and logs a failure the way
-   * a later space's rejected close is logged: the earlier spaces stay
-   * closed, and this one and the rest are left unclosed.
+   * Helper for the per-space close loops, which re-runs the claim check on
+   * `space`, the `index`th space to close, over the documents its
+   * `preconditions` leave to it. A failure is logged the way any later
+   * space's rejected close is: the earlier spaces stay closed, and this one
+   * and the rest are left unclosed.
    */
   #revalidateLaterSpace(
     space: MemorySpace,
@@ -2722,11 +2722,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /**
-   * Helper for {@link #revalidateLaterSpace}, which names the documents
-   * `preconditions` pins — this space's commit as it will be sent, so both
-   * the pins a caller attached and the create-only marks it carries — for
-   * the server to evaluate against durable state before applying
-   * anything.
+   * Helper for `#revalidateLaterSpace()`, which names the documents pinned
+   * by `preconditions` — the space's commit as it will be sent, so the pins
+   * a caller attached and the create-only marks it carries alike — for the
+   * server to evaluate against durable state before it applies anything.
    *
    * Such a document needs no local claim check, and must not get one: an
    * `entity-absent` pin fails as `PreconditionFailedError`, which callers
@@ -3237,6 +3236,10 @@ export class V2StorageTransaction implements IStorageTransaction {
    * is built (03-commit-model.md §3.3.4).
    */
   #validate(): Result<Unit, IStorageTransactionInconsistent> {
+    const routes = this.validateReplicaRoutes();
+    if (routes.error) {
+      return routes;
+    }
     for (const [space, branch] of this.#branches) {
       const result = this.#validateBranch(space, branch);
       if (result.error) {
