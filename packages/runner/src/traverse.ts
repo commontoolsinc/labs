@@ -2490,6 +2490,7 @@ function followPointer(
     logger.warn("traverse", () => ["Encountered cycle!", doc.value]);
     return [notFound(doc.address), selector];
   }
+  recordLinkResolution(tx);
   // Attempt to read the actual link location. This will often fail because
   // there is an intermediate link, but we'll handle that below
   // Load the data from the manager.
@@ -2497,7 +2498,6 @@ function followPointer(
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
   // We use a nonRecursive read, since we may not need everything at the target.
-  recordLinkResolution(tx);
   const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {

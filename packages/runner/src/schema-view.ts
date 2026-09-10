@@ -765,9 +765,9 @@ function createObjectView(
   // Every read this view takes goes through here, so this is where it steps
   // into the instant it describes. Before the transaction's first write there
   // is nothing to step into — every epoch names the same root — so the common
-  // case pays one boolean and no more. Entered by hand rather than around a
-  // callback: a reader walking a large value touches this per property, and a
-  // callback would allocate a closure each time.
+  // case pays the accounting probe and one epoch-check boolean. Entered by hand
+  // rather than around a callback: a reader walking a large value touches this
+  // per property, and a callback would allocate a closure each time.
   const childOrAbsent = (key: string): unknown => {
     recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveChild(key);

@@ -1563,8 +1563,11 @@ export async function runTestPattern(
       // step is transparent — it produces no result. A settle timeout propagates
       // to the outer handler and fails the whole run (a stuck settle is fatal).
       if (isSettle) {
-        if (!stepValue.skip) await settleFully(i);
-        printReadCost(`settle step ${i + 1}`, itemStart);
+        try {
+          if (!stepValue.skip) await settleFully(i);
+        } finally {
+          printReadCost(`settle step ${i + 1}`, itemStart);
+        }
         continue;
       }
 
@@ -1575,16 +1578,19 @@ export async function runTestPattern(
       if (isRender) {
         renderCount++;
         const renderName = `render_${renderCount}`;
-        if (!stepValue.skip) {
-          await materializeTestVDOM(
-            stepCell.key("render") as Cell<unknown>,
-            () => settleRuntime(i, renderName, 20),
-          );
-          if (options.verbose) console.log(`  ◇ ${renderName}`);
-        } else if (options.verbose) {
-          console.log(`  ⊘ ${renderName} (skipped)`);
+        try {
+          if (!stepValue.skip) {
+            await materializeTestVDOM(
+              stepCell.key("render") as Cell<unknown>,
+              () => settleRuntime(i, renderName, 20),
+            );
+            if (options.verbose) console.log(`  ◇ ${renderName}`);
+          } else if (options.verbose) {
+            console.log(`  ⊘ ${renderName} (skipped)`);
+          }
+        } finally {
+          printReadCost(`${renderName} (step ${i + 1})`, itemStart);
         }
-        printReadCost(`${renderName} (step ${i + 1})`, itemStart);
         continue;
       }
 

@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { type Stub, stub } from "@std/testing/mock";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -350,6 +351,47 @@ describe("read-accounting", () => {
     expect(runtime.scheduler.getActionStats(action)!.reads!.last.proxyAccesses)
       .toBe(2);
     runtime.scheduler.unsubscribe(action);
+  });
+
+  it("keeps the initial accounting setting across fan-out instances", async () => {
+    using _demanders = stub(runtime, "serverRunDemandersFor", () => [
+      { principal: space },
+      { principal: otherSpace },
+    ]);
+    const scopeStubs: Stub[] = [];
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let runs = 0;
+    const action = Object.assign(async (tx: IExtendedStorageTransaction) => {
+      scopeStubs.push(stub(tx, "getNarrowestReadScope", (): "user" => "user"));
+      const value = runtime.getCell<{ value: number }>(
+        space,
+        "source",
+        undefined,
+        tx,
+      ).get();
+      expect(value.value).toBe(7);
+      if (++runs === 1) {
+        entered.resolve();
+        await release.promise;
+      }
+    }, { schedulerObservationIdentity: { pieceRootId: "read-accounting" } });
+    runtime.scheduler.setReadAccountingEnabled(true);
+    const running = runtime.scheduler.run(action);
+    try {
+      await entered.promise;
+      runtime.scheduler.setReadAccountingEnabled(false);
+      release.resolve();
+      await running;
+      expect(runs).toBe(2);
+      const stats = runtime.scheduler.getActionStats(action)!;
+      expect(stats.reads!.runCount).toBe(2);
+      expect(stats.reads!.total.proxyAccesses).toBe(2);
+    } finally {
+      release.resolve();
+      await running;
+      for (const scope of scopeStubs) scope.restore();
+    }
   });
 
   it("records each enabled scheduler run and preserves unmeasured run counts", async () => {
