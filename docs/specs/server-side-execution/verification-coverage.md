@@ -25,7 +25,7 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
+| OW28-supersession-family / OW28-instance-family | Served `llm`, `generateText`, and direct `generateObject` supersession and user/session isolation are covered. Other effect callers and the OW53 residuals remain open. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
@@ -2617,26 +2617,41 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   CFC-disabled calls share compilation without issuing replication. This cache
   boundary is shared by OFF and the served compiler; closing it does not
   discharge OW28's serving port.
-- OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
-  inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
-  reports that run-counter cancellation abandons a completion to which the
-  final A attaches through outbox deduplication. Current `llm.ts` retains
-  run-counter cancellation, but the family has no fresh reproduction in the
-  coverage audit. Reproduce the current request/partial/completion lifecycle
-  before choosing a fix; completion must either land for the current request
-  or release the superseded effect. Trigger: the next served LLM supersession
-  scenario. This is an investigation obligation, not a confirmed-current
-  claim that every LLM or fetch builtin wedges.
-- OW28-instance-family — INVESTIGATE with OW53's residuals:
-  `effectTargetKey` accepts an explicit resolution identity. Served
-  `compileAndRun` supplies it, and its completion reads and child selection
-  use the same user or session instance. The other builtin callers retain
-  their scope-name keys unless they explicitly supply that identity. OW53
-  closes SQLite's served acting-identity/clearance fixes and separately names
-  non-SQLite unstamped hash-guard reads, non-clearance instance keys, and the
-  provider READ partition. Owed: one- and two-demander regressions for those
-  narrowed requests, without reopening fixed SQLite cases or counting the
-  compile regression twice.
+- OW28-supersession-family — PARTIALLY CLOSED: served `llm`, `generateText`,
+  and direct `generateObject` accept completions by the selected request hash
+  in the resolved output instance. Returning from A to B to A while the original
+  A remains in flight attaches to that A through outbox deduplication; a local
+  run generation does not discard its result. A pending request hash is a
+  selection marker, not a settled memo hit.
+
+  `executor-llm-supersession.test.ts` drives controlled responses through a real
+  serving host and outbox, covering A→B and A→B→A, stale responses, model errors,
+  and suppression of durable partial writes. `llm-served-lifecycle.test.ts`
+  covers withdrawn contributions, reissue after withdrawal, and initial and
+  superseded dispatch refusals, including the result announcement. It also
+  proves space→user→space result rebinding with serving both on and off,
+  retirement of settled state, retention across uncommitted staging, and
+  delayed refusals after withdrawal or instance retirement. These are
+  no-network direct-provider controls; they do not establish tool-loop,
+  `llmDialog`, or other effect-family supersession. Those remain investigation
+  obligations rather than claims that every caller has this failure.
+- OW28-instance-family — PARTIALLY CLOSED; reconcile remaining callers with
+  OW53: served `compileAndRun`, `llm`, `generateText`, and `generateObject`
+  supply the explicit issuing identity to `effectTargetKey`. LLM lifecycle
+  state is partitioned by the resolved output instance, and completion reads
+  bind that identity before checking the selected request or its live input
+  label basis. `served-llm-instances.test.ts` covers deterministic same-user
+  keys, separate user/session keys, and two users sharing one builtin closure.
+  `executor-llm-supersession.test.ts` covers concurrent responses landing in
+  distinct user and session instances, with no service-instance result.
+
+  Other builtin callers require their own key and completion-read evidence.
+  OW53 closes SQLite's served acting-identity/clearance fixes and separately
+  names non-SQLite unstamped hash-guard reads, non-clearance instance keys,
+  and the provider READ partition. The direct LLM response controls do not
+  discharge the provider/tool READ partition. Owed: one- and two-demander
+  regressions for the remaining narrowed requests, without reopening fixed
+  SQLite cases or counting the compile regression twice.
 
   A separate child-input residual remains: passing an uninitialized
   `PerUser<Writable<Default<0>>>` value into a child can give both users the
