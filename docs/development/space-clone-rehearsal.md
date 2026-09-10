@@ -114,6 +114,15 @@ deno task cf inspect churn $DB --bucket 60 \
 deno task cf space reset $CLONE
 ```
 
+Run `cf piece setsrc --check` against the clone before applying, with the same
+source package and target flags. The check issues no storage writes and grants
+no new module authority. Its normal reads can demand server-side materialization
+when server execution is active, so use the clone's fingerprint to establish
+whether the baseline remains pristine. Apply can persist compilation artifacts
+even when setup refuses, so reset before repeating an apply rehearsal. A
+compatible check still needs the apply, render, and content verification below:
+it cannot prove future source currency or the running pattern's behavior.
+
 Add one `cf test` command and one `--test` flag for every authored test entry,
 and one `--datafile` flag for every attached data file. Run `setsrc` once per
 piece with the complete flag set: a rehearsal that omits part of the source

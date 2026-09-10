@@ -131,7 +131,10 @@ import type { CompiledModuleArtifact } from "./harness/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import { PatternManager } from "./pattern-manager.ts";
+import {
+  PatternManager,
+  type PreparedSourceUpdate,
+} from "./pattern-manager.ts";
 import { SourceReconciler } from "./source-reconciler.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
@@ -1171,7 +1174,7 @@ export class Runtime {
     }
   }
 
-  #moduleDelegationSnapshot(): Map<
+  #moduleDelegationSnapshot(sourceUpdate?: PreparedSourceUpdate): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>
   > {
@@ -1179,7 +1182,24 @@ export class Runtime {
       MemorySpace,
       ReadonlyMap<string, readonly string[]>
     >();
-    for (const [space, spaceDelegations] of this.#moduleDelegations) {
+    const delegations = new Map(this.#moduleDelegations);
+    if (sourceUpdate !== undefined) {
+      const proposal = this.patternManager.sourceUpdateDelegations(
+        sourceUpdate,
+      );
+      const combined = new Map(delegations.get(proposal.space));
+      for (const [identity, predecessors] of proposal.delegations) {
+        combined.set(
+          identity,
+          new Set([
+            ...(combined.get(identity) ?? []),
+            ...predecessors,
+          ]),
+        );
+      }
+      delegations.set(proposal.space, combined);
+    }
+    for (const [space, spaceDelegations] of delegations) {
       const spaceSnapshot = new Map<string, readonly string[]>();
       for (const identity of spaceDelegations.keys()) {
         const inherited = new Set<string>();
@@ -2160,7 +2180,10 @@ export class Runtime {
    * multiple spaces but writing only to one space.
    */
   edit(
-    options: { changeGroup?: ChangeGroup } = {},
+    options: {
+      changeGroup?: ChangeGroup;
+      sourceUpdate?: PreparedSourceUpdate;
+    } = {},
   ): IExtendedStorageTransaction {
     const tx = this.storageManager.edit();
     if (options.changeGroup !== undefined) {
@@ -2257,7 +2280,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
-    wrapped.setCfcModuleDelegations(this.#moduleDelegationSnapshot());
+    wrapped.setCfcModuleDelegations(
+      this.#moduleDelegationSnapshot(options.sourceUpdate),
+    );
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
@@ -2665,6 +2690,7 @@ export class Runtime {
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries: number = DEFAULT_MAX_RETRIES,
+    options: { sourceUpdate?: PreparedSourceUpdate } = {},
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
@@ -2679,7 +2705,7 @@ export class Runtime {
       },
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
-    const tx = this.edit();
+    const tx = this.edit(options);
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2714,7 +2740,7 @@ export class Runtime {
               this.#writeTeardown.signal,
             );
             if (this.#tearingDownWrites) return teardownResult();
-            return this.editWithRetry<T>(fn, maxRetries - 1);
+            return this.editWithRetry<T>(fn, maxRetries - 1, options);
           } else {
             return { error };
           }
@@ -2765,7 +2791,7 @@ export class Runtime {
           `editWithRetry re-run: ${present} document(s) read as absent ` +
             "are present; the action re-runs against them",
         );
-        return this.editWithRetry<T>(fn, maxRetries - 1);
+        return this.editWithRetry<T>(fn, maxRetries - 1, options);
       }
       return commitPrepared();
     });
