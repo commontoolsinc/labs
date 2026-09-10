@@ -126,13 +126,21 @@ and one number damages most of them.
 | `catches`, `lastCatch` | unbounded; `freshness` does the discounting |
 | `sources` | unbounded, counted only over catches |
 | `churn` | decayed with a `CHURN_HALF_LIFE_DAYS` half-life, read over `CHURN_WINDOW_DAYS` |
-| `flakeRate` | `FLAKE_WINDOW_DAYS` |
+| `flakeRate` | decayed with a `FLAKE_HALF_LIFE_RUNS` half-life in runs, read over `FLAKE_WINDOW_DAYS` |
 | `cost` | `COST_WINDOW_DAYS` |
 
-The counts behind `churn` are decayed rather than cut off. A ratio over a
-long undecayed window measures total historical brokenness rather than the
-current rate, and a week of failures eight months ago would otherwise
-outrank a test that is failing right now.
+The counts behind `churn` and `flakeRate` are decayed rather than cut off.
+A ratio over a long undecayed window measures total historical brokenness
+rather than the current rate, and a week of failures eight months ago
+would otherwise outrank a test that is failing right now. What they decay
+against differs, because they ask different questions. Churn asks how much
+trouble is here lately, which is a question about time. The flake share
+asks whether a test still disagrees with itself, and what answers that is
+runs that did not.
+
+One set of run counts serves both `churn` and `flakeRate`, so it is kept
+for the longer of the two windows and each term reads back only as far as
+its own.
 
 `cost` is the largest of the days' ninetieth percentiles inside its
 window: the ninetieth rather than the maximum, because one unlucky runner
@@ -142,21 +150,192 @@ the time budget.
 
 ## Flakes
 
-A flake is a test that disagrees with itself. Above
-`FLAKE_EXCLUSION_RATE` an identity leaves the selectable set entirely: it
-is too noisy to judge a change by. It keeps running on the default branch,
-it appears on the wall, and the exclusion reverses on its own the moment
-the test is fixed, which is what makes this better than a quarantine list
-somebody has to remember to empty.
+A flake is a test that disagrees with itself. `flakeRate` is how often it
+was seen doing so, as a share of the runs it took part in inside
+`FLAKE_WINDOW_DAYS`, weighted toward what it has done lately.
 
-Below that rate, an identity may be run more than once inside one run, at
-the bands `FLAKE_REPEAT_RATES` names, up to `MAX_REPEATS`. Every band
-stays under the exclusion rate, or an identity would be excluded before it
-reached the band and the band would never fire.
+A share of runs rather than a share of failures. What the rate decides is
+whether running the test once fails somebody's change for something its
+author cannot act on, and that is a chance per run. The two quantities
+differ by everything a test's passes say. A test that failed once in ten
+thousand runs, and passed when the commit was run again, has every one of
+its failures a flake: a share of failures reads it as wholly unreliable,
+and a share of runs reads it as one part in ten thousand. Counting runs is
+also what lets an exclusion reverse, since a run that does not disagree
+lowers a share of runs and leaves a share of failures exactly where it
+was.
 
-**A repeat is not a retry.** Every repeat must pass, and any failure among
-them fails the run. Three runs of a test is strictly stricter than one,
-never laxer. Nothing is retried and nothing is masked.
+The share is a lower bound on how often a test fails on its own. The only
+spurious failure it can count is one with a pass beside it at the same
+commit, and a test run once per commit produces none. What raises the
+bound is repeats, and a rising share is what buys those, so the measure
+sharpens itself on exactly the tests it is least sure of.
+
+Nothing is charged against the count, and no belief about how tests
+usually behave survives into it. **A disagreement is a proof rather than a
+sample**: a test that is deterministic cannot pass and fail at one commit,
+so an observation of one rules out the possibility the share would
+otherwise be shrunk toward. A test seen twice that disagreed once reads a
+half, and a test that disagreed once in ten thousand runs reads a
+ten-thousandth; what separates them is how much each has been run, not how
+much either is believed.
+
+So the exclusion is the plain comparison it looks like, and what it says
+is that a disagreement holds a test out until about one over the exclusion
+rate runs stand behind it. A test that has just been seen to disagree, and
+has nothing else on its record, is held out until it has shown otherwise.
+
+That cuts the other way for a disagreement the environment caused rather
+than the test. Nothing here separates the two, so a bad runner that makes
+several tests disagree at one commit holds out the ones with few runs
+behind them. The rule that reads a failure across many sources as the
+environment covers catches and not disagreements, and extending it is what
+would fix this.
+
+Both counts are published beside the share, because a share cannot be
+weighed without them: one disagreement in two runs and a thousand in two
+thousand are the same ratio and not the same claim. Everything that shows
+a person this figure shows the counts with it. They are counted flat, so
+they are not what the share divides: the share weights a day by the runs
+that have followed it, and a test reads flakier when its disagreements are
+the recent part of its counts.
+
+Above `FLAKE_EXCLUSION_RATE` an identity leaves the selectable set
+entirely: it is too noisy to judge a change by. It keeps running on the
+default branch, it appears on the wall, and the exclusion reverses on its
+own as those runs stop disagreeing, which is what makes this better than a
+quarantine list somebody has to remember to empty. Reversing on evidence
+takes one thing of the default branch in return, which [what the default
+branch does with an excluded
+identity](#what-the-default-branch-does-with-an-excluded-identity) sets
+out.
+
+A disagreement's weight halves every `FLAKE_HALF_LIFE_RUNS` runs that
+follow it, because a sum cannot tell two histories apart that nobody would
+confuse. A test that disagreed twice and then passed two hundred times has
+settled; a test that passed two hundred times and then disagreed twice has
+just started. Those are the same counts and not the same test, and an
+undecayed share gives them the same number.
+
+**Runs rather than days.** What shows a test has settled is running
+without disagreeing. A test that has sat untouched for three weeks has
+shown nothing, and a calendar that cleared it would be clearing it for
+having been left alone. So an exclusion reverses on evidence: what falls
+is the weight of what a test did against the weight of what it has done
+since, and a test that is not running does not work its way back.
+
+That is also how much evidence the share is measured over, which is what
+stops the half-life going much below one over `FLAKE_EXCLUSION_RATE`.
+Below that there are not enough runs in view to tell the rate the
+exclusion turns on from nothing.
+
+`FLAKE_WINDOW_DAYS` still bounds what is read at all. It is a bound on
+what is remembered rather than a point where the weight has faded, so a
+test that runs rarely can be carrying weight when its days fall off the
+end.
+
+### How many times a lane runs one test
+
+A test that has never disagreed with itself runs once. Any share at all
+puts it on the line through `FLAKE_MIN_EXECUTIONS` at a share of nothing
+and `FLAKE_ANCHOR_EXECUTIONS` at `FLAKE_ANCHOR_RATE`, which carries on
+past that anchor until `MAX_EXECUTIONS` stops it. So a test that has been
+seen to disagree at all is run at least twice, because one execution
+cannot tell a pass from a lucky pass.
+
+Zero is the one point the count steps at, between running a test once and
+running it at least twice, which is why the manifest records a share as
+it was measured rather than to a few places. A share written to four
+places reaches zero once a test has twenty thousand runs behind one
+disagreement, and the step would then be taken on how often the test ran
+rather than on whether it had ever disagreed.
+
+The line runs past `FLAKE_EXCLUSION_RATE`, which the exclusion rule makes
+sensible rather than contradictory. A test that flaky is not selected, so
+the only way it reaches a lane is a change that edits it or that its suite
+maps onto its unit — very likely a fix, and the execution count is what
+makes it prove itself.
+
+The exclusion threshold is per execution, and a test appears once per
+execution, so a test run five times fails a lane spuriously about five
+times as often as its share says. That cost is deliberate, and the
+exclusion is what bounds which tests pay it.
+
+**An execution is not a retry.** Every one must pass, and any failure
+among them fails the run. Five runs of a test is strictly stricter than
+one, never laxer. Nothing is retried and nothing is masked. Where a
+consumer takes the second rule below, an excluded identity's runs on the
+default branch are laxer than the one gating run it would otherwise get.
+They are still not retries, since no run is re-attempted and no result is
+discarded.
+
+### What the default branch does with an excluded identity
+
+An identity run once per commit is seen to disagree with itself only when
+somebody re-runs the job, so every run an excluded identity gets on the
+default branch lowers its share and almost none can raise it. Left there,
+the exclusion reverses on runs that were incapable of keeping it in place,
+and each of the identity's spurious failures, judged by the next run that
+passed at a later commit, is credited as a catch. The identity returns to
+changes with a share near nothing and a score raised by its own noise. Two
+rules answer this, and a consumer may apply the first without the second.
+
+**An excluded identity that may be run without its neighbours runs as many
+times as its share asks for.** The count is the one the line already gives
+that share, which runs past the exclusion rate. Several runs at one commit
+are what let a share rise as well as fall, and they also put a pass beside
+a spurious failure at its own commit, which classifies it as a
+disagreement rather than crediting it as a catch.
+
+Every run of it at that commit takes one invocation shape, since a
+consumer that runs the identity once beside its neighbours and again on
+its own has arranged for a test sensitive to that difference to disagree
+with itself at every commit, and the exclusion would then never reverse.
+An identity that may not be run without its neighbours therefore keeps its
+single run: running its whole unit several times would run every
+neighbour several times, and a neighbour that is not flaky would fail the
+run several times as often for it.
+
+What several runs at one commit cannot separate is a bad machine. A
+consumer that runs them together runs them on one machine, so a machine
+that fails one fails all, which is no disagreement at all. The rule that
+reads a failure across many sources as the environment covers catches
+rather than disagreements, and a default branch offers one source to read.
+
+**A failure of an excluded identity does not fail the run.** This is a
+separate decision and it is the one that carries risk: the branch already
+fails for these identities once per commit, and the first rule multiplies
+that. A consumer decides it per identity and never per invocation, since
+one invocation reports one status for many identities.
+
+It is a rule for tests. An identity that is a repository gate goes on
+failing the run whatever its share, because a gate's failure is a
+statement about the tree rather than about one change. A consumer reads
+the withheld entry's reason rather than its membership of the set, so a
+reason added later does not become non-gating without anybody deciding it.
+
+An invocation is excused only when it accounted for every identity it was
+asked to run, since one that recorded a withheld failure and then stopped
+has run almost nothing while satisfying any weaker test. That is the rule
+under [what a run owes the change behind
+it](#what-a-run-on-the-default-branch-owes-the-change-behind-it) applied
+here, that a conclusion rests on a record that is there and never on one
+that is missing. A consumer with no manifest has no withheld set, so it
+runs nothing more than once and gates on everything.
+
+Two things follow for a consumer that takes the second rule. A run
+carrying a non-gating failure reports success, so whatever that success
+releases is released, and a measurement taken through the failing unit —
+coverage among them — is reported rather than compared. And a failure that
+waits for a later run to judge it now waits without a red branch to
+prompt anybody, so whatever holds those waiting failures is bounded rather
+than left to grow.
+
+Nothing is masked by either rule. Every run is recorded, every failure is
+classified by the rules under [what the score
+measures](#what-the-score-measures), and a non-gating failure is named in
+what the run reports. The failure no longer fails the run, and only for
+identities already held to be unable to say whether a change is good.
 
 ## What must run, and what must not
 
@@ -167,7 +346,10 @@ its author cannot act on.
 
 It comes back the moment the change edits the test itself, or its suite
 maps the change onto its unit, since that is very likely a fix and has to
-be allowed to prove itself.
+be allowed to prove itself. Under the full policy it is not kept out at
+all; [what the default branch does with an excluded
+identity](#what-the-default-branch-does-with-an-excluded-identity) says
+how it runs there.
 
 Two rules force a test in.
 
@@ -208,7 +390,8 @@ under the dataset area
 schema version, the generation time, the exploration seed, the commit
 whose tree was enumerated, how many runs the aggregate saw, every dial it
 was built with, the fitted calibration numbers, every identity with its
-score and the inputs behind it, the withheld set with its reason, the
+score and its flake share and the inputs and counts behind both, the
+withheld set with its reason, the
 tests a configuration deliberately does not run, a reference packing into
 lanes, the unschedulable list, a count and digest of known identities, and
 the per-package coverage baselines.
@@ -293,10 +476,14 @@ known about, and in particular is not a run that skipped every test.
 
 A test that both passed and failed at one commit is that test
 disagreeing with itself, which is flake evidence rather than a catch, and
-it is not a first failure. That a test is new is likewise a claim about
-the store rather than about one run: an identity the store has never seen
-is new, and an identity absent from one run's records is only absent from
-that run.
+it is not a first failure. An excluded identity that failed every one of
+its runs at a commit and passed every one at the parent is the one
+statement about such a test that several runs at one commit make
+available, and a consumer reporting it says that the test is a known flaky
+one and that the run was not failed by it. That a test is new is likewise
+a claim about the store rather than about one run: an identity the store
+has never seen is new, and an identity absent from one run's records is
+only absent from that run.
 
 Whether a change's own run ran a test is settled by that run's records
 and by nothing else. The manifest it resolved answers the next question,
@@ -315,9 +502,10 @@ test's score, so the next change in that area runs it.
 A report addresses the change and never a person. No author is named, no
 figure is counted per author or per team, and no history of such reports
 is kept anywhere: a report is a pure function of one run, and nothing
-rolls a series of them up. A test the store holds a flake rate for is
-labelled as one, so nobody is told they broke something that breaks on
-its own.
+rolls a series of them up. A test the store has seen disagreeing with
+itself is labelled as one, with the counts behind the label, so nobody is
+told they broke something that breaks on its own and nobody is asked to
+take that on trust.
 
 Nothing gates on any of this. A report is best-effort, and a run on the
 default branch is never failed by it.
@@ -343,10 +531,12 @@ The policy is an input because one function serves both the run on the
 default branch and the run on a change. It takes two values. The budgeted
 policy spends a bounded amount on the tests worth the most, by the rules
 under [what must run](#what-must-run-and-what-must-not) and the score
-above them. The full policy requires every identity, so the rule that
-keeps a test out has nothing to act on and the discretionary part of the
-packing finds nothing left to take; everything after that behaves the
-same for both. A consumer that packs the two runs through different code
+above them. The full policy requires every identity, so the discretionary
+part of the packing finds nothing left to take; everything after that
+behaves the same for both. The rule that keeps a test out still names a
+set under the full policy, but it names the identities that are run
+several times and cannot fail the run rather than identities left out of
+it. A consumer that packs the two runs through different code
 will drift, and what it drifts into is running different sets of tests in
 the two places that are meant to agree.
 

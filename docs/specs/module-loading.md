@@ -570,17 +570,18 @@ document.
 
 `delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
 identity, that records predecessor module hashes whose writer authority the
-current module may exercise. Since content addressing does not authenticate
-that mutable field, source documents carry the compiler integrity stamp on the
+current module may exercise. Since content addressing does not authenticate that
+mutable field, source documents carry the compiler integrity stamp on the
 delegation field alone. Compiled documents authenticate it with their existing
 root compiler stamp. Loaders discard delegation metadata without the applicable
-stamp. The general source and compiled save path
-([`writeSourceAndCompiledDocs`][c14]) computes one union of newly derived entries
-and authenticated entries already stored in either document set under
-`editWithRetry`. It writes that same union to both sets and registers the union
-from the successful commit under the attesting space in the active runtime. It
-never replaces entries, because one content-addressed successor can be shared by
-patterns updated from different predecessors.
+stamp. The source-update transaction computes a union of proposed entries and
+authenticated entries already stored in either document set under
+`editWithRetry`. It writes the same union to both sets with the source pointer
+and revision, and registers it in the active runtime only after the durable
+commit succeeds. General cache saves ([`writeSourceAndCompiledDocs`][c14])
+preserve authenticated authority already present in either set. Entries
+accumulate because one content-addressed successor can be shared by patterns
+updated from different predecessors.
 
 Because `identity` is a one-way Merkle hash, internal source links are
 load-bearing and stored explicitly. The parent hash commits to those children's
@@ -605,36 +606,57 @@ model).
 ### Module update delegation (`piece setsrc`)
 
 `piece setsrc` is the temporary authority handoff while pattern files remain
-local, content-addressed modules. Before compiling the replacement it loads the
-current entry's verified recursive source closure. After compilation it matches
-old and new modules by their canonical full authored filename (resolved relative
-imports therefore meet at the same stored path; basenames are never matched).
-For every unambiguous match, the successor records the direct predecessor plus
-the predecessor's cumulative delegation list ([`deriveModuleDelegations`][c14]).
-This makes an update chain cold-reload-stable.
+local, content-addressed modules. Compilation persists artifacts without
+granting update authority. Setup prepares a proposal from the current and
+candidate entries' verified recursive source closures, matching their modules by
+canonical full authored filename (resolved relative imports meet at the same
+stored path; basenames are never matched). For every unambiguous match, the
+successor inherits the direct predecessor plus the predecessor's cumulative
+delegation list ([`deriveModuleDelegations`][c14]). Each setup attempt pins the
+proposal alongside committed authority in its own transaction; ordinary
+transactions cannot observe it. The authority fields commit atomically with the
+source transition. Rejection publishes no proposed authority, while success
+registers the committed union before the updated pattern starts. This makes an
+update chain cold-reload-stable.
 
-Verified source loads register only field-integrity-authenticated lists;
-integrity-valid compiled-cache loads register lists from their root-authenticated
-documents. Registration and transitive closure are scoped by the space carrying
-that attestation. Each transaction snapshots the resulting per-space maps, and
+A source update carrying proposed authority requires an owned setup transaction
+that commits to storage. A serving wave's withdrawable acceptance cannot publish
+runtime authority and is refused at this boundary.
+
+`piece setsrc --check` compiles and reviews the candidate without saving it or
+repairing the current source's compiled cache. It issues no storage writes and
+creates no module update authority. Verified byte caches and in-memory compiler
+state may be reused by later operations. Normal storage reads can demand
+materialization by an active server executor; preflight does not freeze the
+space or suppress other actors' writes.
+
+Asynchronous source and compiled closure loads register authority only when the
+transaction carries no uncommitted writes (`tx.hasWrites()` is false). Source
+loads register only field-integrity-authenticated lists; integrity-valid
+compiled-cache loads register lists from their root-authenticated documents.
+Loads in a transaction with writes still return the verified closure but do not
+publish its delegation metadata ahead of a commit verdict. Synchronous source
+verification within setup retains transaction reads without registering authority.
+
+Registration and transitive closure are scoped by the space carrying that
+attestation. Each transaction snapshots the resulting per-space maps, and
 `writeAuthorizedBy` consults only the map for the target document's space. It may
 then match the live writer's module hash directly or through that space's
 snapshot, while its binding path must still match exactly. Delegation metadata
-loaded from another space grants no authority. Source and compiled closure
-loaders reject a cache graph containing any cross-space import link, so a child
-document's local attestation cannot be flattened into the root's space.
-Source-file spelling is diagnostic at verification because it is
-resolver-dependent; a rename still receives no delegation because old and new
-modules no longer match by canonical authored filename.
-Ambiguous canonical filenames and unauthenticated metadata fail closed by
-receiving no delegation. If a runtime-version miss recompiles from source, the
-compiled-cache repair carries the authenticated map forward so later warm loads
-retain the same authority chain. Cross-space closure replication copies code and
-imports but omits the origin space's delegation metadata; the destination save
-preserves only authority already authenticated in the destination. When multiple
-patterns converge on one successor within a space across restarts, save-time
-unioning preserves every predecessor in both cache sets and in the runtime that
-performed the later update.
+loaded from another space grants no authority. Source and compiled closure loaders
+reject a cache graph containing any cross-space import link, so a child document's
+local attestation cannot be flattened into the root's space. Source-file spelling
+is diagnostic at verification because it is resolver-dependent; a rename still
+receives no delegation because old and new modules no longer match by canonical
+authored filename. Ambiguous canonical filenames and unauthenticated metadata
+fail closed by receiving no delegation. If a runtime-version miss recompiles
+from source, the compiled-cache repair carries the authenticated map forward so
+later warm loads retain the same authority chain. Cross-space closure
+replication copies code and imports but omits the origin space's delegation
+metadata; the destination save preserves only authority already authenticated in
+the destination. When multiple patterns converge on one successor within a space
+across restarts, save-time unioning preserves every predecessor in both cache
+sets and in the runtime that performed the later update.
 
 ## Verifiable Execution
 

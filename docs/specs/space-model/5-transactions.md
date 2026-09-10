@@ -150,23 +150,37 @@ This system does not implement SQL-style transaction isolation. Key differences:
 
 ### Retry Semantics
 
-The `editWithRetry()` helper provides automatic retry on a **retryable** commit
-failure:
+The `editWithRetry()` helper runs a callback in a transaction and can re-run it
+both before commit and after a **retryable** commit rejection:
 
 ```typescript
 // Shown for illustration only.
-const result = await runtime.editWithRetry(async (tx) => {
+const result = await runtime.editWithRetry((tx) => {
   const current = cell.withTx(tx).get();
   cell.withTx(tx).set(current + 1);
   return current + 1;
 });
 ```
 
-- On a retryable commit rejection, re-runs the entire function with a fresh
-  transaction
-- On any other commit rejection, returns the error immediately — the first
-  attempt is the only attempt
-- Returns success or error after exhausting retries
+- Before commit, while retry budget remains, may load documents the callback
+  read as absent that the replica has not examined. If any exist, aborts the
+  staged attempt and re-runs the entire callback with a fresh transaction,
+  without sending that attempt to the server.
+- On a retryable commit rejection, re-runs the entire callback with a fresh
+  transaction while budget remains.
+- Shares one `maxRetries` budget between those two paths, in addition to the
+  initial callback invocation. With no budget left, skips reconciliation and
+  submits the current transaction to ordinary commit validation; any rejection
+  is returned without another retry.
+- On any other commit rejection, returns the error without another retry,
+  even if earlier reconciliation already re-ran the callback.
+- Returns `{ ok }` when a transaction commits, carrying that invocation's
+  callback result, or `{ error }` when it cannot commit.
+
+Either retry path can repeat effects the callback performs outside its own
+transaction. Aborting an attempt discards only its staged operations, so effects
+committed through another channel need a stable identity or another way to make
+them idempotent.
 
 Retryability is an **allow-list**: `isRetryableCommitRejection`, defined in the
 shared rejection vocabulary (`packages/runner/src/storage/rejection.ts`) and
@@ -182,13 +196,13 @@ outcome:
 
 | Class | Why a re-run can converge |
 | --- | --- |
-| `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
+| `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls every document in the scope named by the conflict list. Repeated addresses share one pull; entries without scope retain the default space-scoped pull. |
 | `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
 | `ConnectionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, and the memory client re-establishes the link on its own (a transport close schedules `reconnect()`; a `transact` issued while disconnected queues and calls `restoreConnection()`), so a retry can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
 | `StorageTransactionAborted` | The attempt was discarded before storage, and a re-run is a genuinely new attempt that costs no round-trip. Producers: the callback called `tx.abort()`; a prepared CFC transaction's inputs drifted before the verdict (`cfc-prepared-digest-mismatch`, and the `invalidateCfc` drift reasons such as `read-after-prepare`); or a CFC refusal that is not wholly a verdict (`cfc-refusal-not-a-verdict`) — prepare could not evaluate an input it needed, or a resolution failed. Those clear on a fresh attempt once the input is there. |
 | `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
 
-Everything else is **terminal on the first attempt**: a `ProtocolError` (the
+Every other rejection is **terminal when encountered**: a `ProtocolError` (the
 server refused the commit's shape), an unmarked `AuthorizationError` (the server
 evaluated the request and denied it), a `PreconditionFailedError` (permanent by
 definition — the client must not retry), a `RowLabelCommitError` (a commit-time

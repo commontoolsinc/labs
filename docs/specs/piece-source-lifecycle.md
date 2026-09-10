@@ -52,9 +52,12 @@ rejected until the checked source-replication path exists.
 
 Following an origin is ONE mechanism, triggered by opening a piece — which a
 user does for most pieces and the runtime does for the surfaces it supplies. No
-kind of piece has a path of its own, nothing reconciles a piece nobody opened,
-and a serving tenure — which opens none — owes a space the existence of its
-root and nothing more. What that mechanism follows is a `system:` ref and a
+kind of piece has a path of its own, and nothing reconciles a piece nobody
+opened. Tenure activation owes a space the existence of its root without
+following the root's source. A served wish explicitly opens its runtime-supplied
+sidecars, so those pieces follow their origins on the serving runtime; the ON
+client only references the served sidecars. What that mechanism follows is a
+`system:` ref and a
 fabric URL, and those are the only two things it will follow. The candidate a
 `system:` origin resolves to is adopted as it stands, because the release that
 produced it was gated by golden replays; a candidate from any other origin has
@@ -609,7 +612,31 @@ that its producer contract was checked when it was created.
 The runtime can compare the previous and candidate argument schemas, result
 schemas, and retained input links. Before a manual source replacement, the
 caller compiles and verifies the candidate and runs these structural
-comparisons. An incompatible pattern contract or retained link becomes an
+comparisons. Descriptions, titles, examples, and listing annotations do not
+change a contract, including inside defaulted unions. Defaults, reference
+targets, value constraints, and capability and CFC metadata remain part of the
+proof. The unconstrained schemas `true`, `{}`, and `{ type: "unknown" }`
+accept the same values; constraints beside `type: "unknown"` still apply.
+Adding an optional `unknown` read to an open producer contract is compatible,
+while adding an optional typed read requires the producer to guarantee that
+type whenever the property is present.
+
+Link materialization fills valid target defaults before validating the consumer
+view. Its subset proof can therefore accept an unconstrained producer (`true`)
+against `{ required: ["count"], properties: { count: { default: 1 } } }`:
+the member accepts any present value, and materialization fills an absent one.
+This allowance requires every ancestor constraint to remain valid under default
+insertion. Pattern evolution judges defaults as a migration; it does not use
+this link-materialization allowance. Its policy permitting new optional or
+defaulted fields on open argument objects is disabled inside the unconstrained
+schema proof and conjunction proofs.
+
+Union comparisons check defaults on the complete schemas before comparing
+alternatives, then omit the root default from both sides of each alternative
+comparison. Descendant defaults remain checked. This applies to both pattern
+evolution and link proofs, under their respective default policies.
+
+An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line
 tooling requires an explicit flag, before applying it. A materialized retained
 input that does not satisfy the candidate argument schema is not confirmable.
@@ -1179,8 +1206,9 @@ the owner of the piece. How that reaches a person is open design work.
 
 Reconciliation is triggered by opening the piece — which a user does for most
 pieces, and the runtime does for the surfaces it instantiates for itself.
-Nothing reconciles a piece nobody opened: a serving tenure owes a space the
-existence of its root, not the freshness of anyone's source. A root follows its
+Nothing reconciles a piece nobody opened. Tenure activation ensures root
+existence without following source; a served wish's explicit sidecar open
+invokes reconciliation just as another opener does. A root follows its
 origin on that same trigger and through that same sequence, and receives no
 narrower repair contract and skips no check when prior source is unavailable.
 Retained compatibility descriptors let this sequence replace an obsolete

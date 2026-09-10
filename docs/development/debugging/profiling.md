@@ -66,11 +66,13 @@ Two traps in the output itself:
 many per-step scheduler action deltas print.
 
 The counts this rung prints are exact. Its milliseconds are not the product's:
-[`test-runner.ts`](../../../packages/cli/lib/test-runner.ts) calls
-`runtime.enableIdempotencyCheck()` unconditionally, so every computation runs a
-second time and subscription registers differently. On a fifty-create topics run
-that was 16% of the wall clock and 58% of the action time, and it changed no
-count. Gate the call off before quoting a duration from here.
+[`test-runner.ts`](../../../packages/cli/lib/test-runner.ts) enables idempotency
+verification by default, adding a verification replay. Use
+`--no-idempotency-check` for timing experiments; keep the default for correctness
+checks. The read-cost report excludes the verification transaction. It includes
+work demanded by assertions and render steps, which may be more expensive than
+the preceding action. [The CLI reference](../../../packages/cli/README.md#pattern-test-read-costs)
+defines the four counters and their measurement boundaries.
 
 ## 2. Bracket the phase — in the process you are going to profile
 

@@ -469,23 +469,32 @@ live in the governing detail docs — offline discharge and
 conflict-dropped events in events.md §5 + speculation.md §5, the
 durable event shape (complete as specced) and its
 integrity-provenance follow-up in events.md §1, reconciliation UX in
-speculation.md §4, sqlite clearance in builtins.md §2. Two former
-questions dropped outright: the 34× suite-context mechanism (v1-run
-minutiae; the flat-accumulation requirement stands — plan Phase 6)
-and cross-space read clearance (Phase 5 builds it by construction).
-Still open:
+speculation.md §4, sqlite clearance in builtins.md §2, and cell
+scopes (Q7 — who derives and commits user- and session-scoped
+derived state) in scopes.md: the SpaceServer derives EVERY instance
+of every scoped node, and scope keys instances, never authority
+(RULED 2026-08-02, batch 3; runtime-mapping.md N56). Its run-supply
+half — a node narrowed to `user` runs once per demanding principal,
+`session` once per session-deep principal, materialized on demand —
+was RULED 2026-08-16 and landed by fan-out stages A and B (scopes.md
+§2; verification-coverage.md OW17, CLOSED as a row, its flagged
+residuals owed there as refinements). Q6's non-quota remainder,
+which that review had inherited (was ledger L10), is ruled — R-Q6b
+(§3.8; protocol.md §1, §7). Two former questions dropped outright:
+the 34× suite-context mechanism (v1-run minutiae; the
+flat-accumulation requirement stands — plan Phase 6) and cross-space
+read clearance (Phase 5 builds it by construction). Still open:
 
 1. **Quota attribution for server-run effects (Q6 residual — later).**
    §3.8 settles authority and identity (R-Q6b) and cell scopes settle
    run cardinality; the one deferred question is whose quota a served
    effect's run is charged against.
-2. **Cell scopes (`user`/`session`), end to end (Q7).** Who derives
-   and commits user- and session-scoped derived state under the flag
-   (runtime-mapping.md N56)? Plan Phase 0 carries an owner + spec
-   review of cell scopes end to end — v1's scope confusion must not
-   carry into v2; that review blocks this question. Q6's non-quota
-   remainder, which the review had inherited (was ledger L10), is
-   now ruled — R-Q6b (§3.8; protocol.md §1, §7).
+2. **Session-data GC (scopes.md §8 item 2).** The mechanism that
+   retires a retired session's scoped instances, which must also
+   cover the basis rows narrowing strands at `space` and `user:<p>`
+   keys. A deferred design, not a gap in the built mechanism
+   (verification-coverage.md §1); the mechanism's own flagged
+   residuals are OW17's, in the register.
 
 ## 7. Relationship to prior documents
 

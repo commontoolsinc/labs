@@ -1,10 +1,11 @@
 # Choosing which tests a pull request runs
 
 Status: in progress. Part one is built. Part two is built apart from its
-continuous-integration configuration and the coverage work; part three has
-the reporter and nothing else. [The work](#the-work) carries the detail.
-The record store this plan consumes is live and holds the data the design
-needs; the gaps it does not yet hold are listed under [What the store is
+continuous-integration configuration, the coverage work and the full run's
+treatment of flaky tests; part three has the reporter and nothing else.
+[The work](#the-work) carries the detail. The record store this plan
+consumes is live and holds the data the design needs; the gaps it does not
+yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
 work.
 
@@ -170,7 +171,11 @@ belong.
    being covered.
 5. Tests that need the same setup are grouped so the setup is paid once
    for the group.
-6. A push to `main` still runs every test.
+6. A push to `main` still runs every test, and every failure fails the
+   run, apart from the tests measurement has shown too noisy to judge a
+   change by, which report rather than fail. Those of them that can be
+   run without their neighbours run there more often than anywhere else,
+   which is what keeps their measurement going.
 7. Selection is recomputed every few hours, and what it produces is not
    stored in git.
 8. Adding a test, a kind of test, or a configuration of existing tests
@@ -187,7 +192,10 @@ belong.
     introduced it, without turning that into a record of who broke what.
 11. Flaky tests are found, and the finding is used: to run intermittent
     things more often where that catches more, and to keep tests too
-    noisy to judge from blocking anybody.
+    noisy to judge from blocking anybody. A test kept out of pull
+    requests for being flaky goes on being measured on `main`, and where
+    it can be run without its neighbours it is measured there often
+    enough that its share can rise as well as fall.
 12. Every dial is in one documented place, and a pull request can opt out
     of selection entirely and run everything.
 
@@ -913,6 +921,173 @@ being imposed.
 - A repeat names an identity and invokes its file with every other
   identity in that file skipped.
 
+### What the specifier resolves to when the module goes away
+
+Sending the specifier through one module of ours turns the migration off
+a deprecated `@std/testing/bdd` into an edit of one file, as
+[two interception points](#two-interception-points-and-no-test-file-changed)
+says. What that file should become is a `describe` and `it` written
+here, which build the chain themselves and register under it, keeping
+one `Deno.test` per suite with a step for each leaf. Nothing a test file
+written in the bdd style has to change: the import map already resolves
+the specifier to our module, and this is a change behind it. What that
+buys, beyond the identity faults below, is a registrar the rest of the
+test machinery can hook into instead of replacing `Deno.test` behind
+each other's backs.
+
+#### What it fixes
+
+Every fault the re-export has produced is a recorded name disagreeing
+with a reported name. A wrapper with nothing to do stood between the
+test file and the registrar and took the class name, so almost no record
+carried a file (#7126). The leaves of a file declaring a hook outside
+every `describe` carried none, since the runner reports those beneath a
+root suite it invents while the tracked chain opened at the file's own
+outermost `describe` (#7173). A leaf whose call names its suite by
+handle was the same shape (#7184), and a leaf named after its body was
+the same again (#7195).
+
+The name map is a join, and a join fails on a wrong key whatever carries
+the key. Each of those entries was written and filed under a name no
+leaf had. A module that builds the chain and registers under it is
+handed both halves of what the runner will report, so there is no rule
+left for it to predict and no name for it to get wrong. That is the
+whole of what this changes and the whole of what has been going wrong.
+
+The clock harness gains the same thing. `installFakeClock` replaces
+`Deno.test` as well, and tells a test that wants the real clock from one
+that wants the fake one by asking whether a stack string contains any of
+twenty-four file basenames. A registrar of ours is handed the file and
+the leaf already, so that choice becomes an option on the `describe`
+making it, and the twenty-four names and the reasons recorded beside
+them move to the tests they are about. Nothing currently checks that
+such a name still matches a file, and a rename would quietly move a test
+onto the fake clock. What this does not reach is the harness's other
+reader, which classifies who armed a `setTimeout` on every timer and
+needs a stack because that caller is arbitrary source; auto-advance
+rests on it and it stays as it is.
+
+#### Why this shape and not another
+
+The deprecation notice points at `node:test`, which cannot carry this
+tree's tests: a `node:test` suite takes no `sanitizeOps`,
+`sanitizeResources` or `permissions`, and the tree passes those 109
+times.
+
+Registering each leaf as its own `Deno.test` fails on group teardown.
+Measured against Deno 2.9.4, `Deno.test.beforeAll` and its siblings take
+the module as their scope and do not nest, the scope is not positional,
+and a call inside a test body is accepted and then never runs. The
+runner brackets its own hooks around whatever a filter leaves, and
+around a file whose every test is ignored, but it never says which leaf
+runs last and `afterEach` takes no argument naming one. So a module
+holding a nested group's `afterAll` would have nothing to trigger it on.
+One `Deno.test` per suite makes that hook ordinary code in the group's
+body, owing the runner nothing.
+
+Nothing is lost by putting the leaves in steps. `t.step` takes `ignore`,
+reports an ignored step as a case carrying `<skipped/>` under its full
+joined name, which is what the skip list asks for, and takes the
+sanitizer options per step, defaulting to the enclosing test's.
+
+Letting each test file call `Deno.test` itself was measured and
+rejected. A case's class name follows the lexical call site, so a helper
+may compute `ignore` and may even build the whole `TestDefinition` while
+the report still names the test file; that would free the file
+attribution and retire the name map, the spool, the stack read and the
+container case with it. It costs a line in each of 2,241 test files, and
+a file missing that line runs no tests and reports none. Trading a
+silent green run of nothing, in the system whose whole purpose is to
+notice, against the deletion of machinery that works and has caused none
+of the faults, is the wrong way round.
+
+#### Nothing else needs to replace `Deno.test`
+
+Three things sit between a test file and the registrar, and each got
+there by replacing or shadowing `Deno.test`, because a global is the
+only thing there is to reach for. The records preload replaces it to
+apply the skip list and to capture which file a registration came from.
+The fake-clock harness replaces it to wrap each body in `freezeAround`,
+and to decide per test whether to wrap at all. The fixture runner does
+not replace it, but stands between the file and the registrar lexically,
+which costs the same class name and puts it on the same list.
+
+Five things a registrar of ours can offer are the whole of what those
+three do. A callback told of each leaf as it registers, with its file
+and its identity. A predicate consulted at registration, so that a
+listed leaf registers as ignored. Options carried from a `describe` or
+an `it` through to the test. A wrapper a suite installs once and the
+registrar runs around every leaf's body. And a way for a helper that
+builds tests to say which file it builds them for.
+
+That holds only while the registrar is the only caller of `Deno.test`,
+which it is not today: 553 test files call it directly, at 7,327 sites.
+Every one of those is the plain entry point, since `Deno.test.only`,
+`Deno.test.ignore` and `Deno.test.each` appear nowhere in the tree, so
+each site is a rename onto the registrar's own `test`. A file the rename
+misses keeps its tests and keeps its file, since nothing wraps
+`Deno.test` any more and a class name names the file that called it;
+what it loses is its skippability, which is the direction to fail in. A
+lint rule of the kind the tree already carries for self-imports holds
+the invariant afterwards.
+
+What goes with the replacements is the machinery for seeing around them,
+which is two registries of the modules in the way, kept in step by hand.
+`MACHINERY_MODULE_SUFFIXES` is an array of path tails that ingestion
+reads to refuse a class name naming machinery rather than a test file.
+`registerFrameworkModule` is a function each such module calls on
+itself, adding its URL to a set the stack walk reads to step past its
+frames. A module that stands in the way has to appear in both, and one
+registrar leaves neither anything to name.
+
+Three readers of the call stack become one with them, and that one can
+raise `Error.stackTraceLimit` around its own capture and take the
+repository root from `Deno.cwd()` or its own `import.meta.url` rather
+than climbing to a `.git` directory.
+
+The name map stays, because the file has to reach the process that
+writes the record and that is not the process that knows it. A record's
+file is what the topology places it by, and an identity the topology
+cannot place is one the publisher leaves out of the manifest, which
+makes every lane run it forever and score it never: of the 3,660
+identities one reproduction of the publisher could not claim, 3,648 had
+no file at all. The report cannot carry it, since Deno puts a bdd leaf's
+describe chain in the class name rather than a path, and a class name
+names whichever module called `Deno.test` in any case. The registrar
+knows the file and does not write the record; `ingestJUnit` writes it in
+another process after `deno test` has exited. The map is what passes
+between the two.
+
+What does get simpler is the lookup. `fileForName` walks the whole map
+for each leaf and takes the longest registered name that leaf's own name
+extends, because a bare `Deno.test` registers a container and its leaves
+extend that container's name with the separator. A registrar writes an
+entry per leaf under the whole identity, so the lookup is an exact one.
+A name two files both register stops being two files that share a
+top-level `describe` title and becomes two tests holding one identity,
+which the store cannot tell apart either, so dropping it is then the
+right answer rather than a loss.
+
+#### What it leaves standing
+
+The reconstruction goes: the root suite the runner invents, the suite a
+call names by handle, the name a body carries, and the overload sniffing
+that feeds them. Everything else stays as it is, that being the name
+map, the spool, the preload's wrapper for a bare `Deno.test`, the JUnit
+ingestion and the skip list.
+
+Two things this does not reach are worth naming so they are not mistaken
+for solved. A run killed at its bound writes no JUnit report at all, so
+every case it had already passed is lost, which the specification's
+claim that a killed run's records are worth reading does not currently
+hold for. And `Error.stackTraceLimit` is 10, which eight wrapper frames
+would exhaust; fourteen nested `describe` levels do not, because the
+innermost frame that is not machinery is the test file whatever the
+nesting, so this is a hazard rather than a live fault.
+
+Not measured: `it.only`, parallel execution, a step inside a leaf, and
+what a `beforeAll` that throws should do to the rest of its group.
+
 ### The work this adds
 
 - [x] The preload reads a skip list keyed by registering file and name,
@@ -1442,10 +1617,14 @@ too noisy to judge a change by. `main` still runs it, the dashboard still
 shows it, and it appears on a work queue. This replaces the usual
 quarantine list, and it is better than one in three ways: it is derived
 from measurement rather than from somebody's judgement at one moment, it
-needs no owner or expiry to stop it rotting, and it reverses on its own
-once the test is fixed. The exception is a change that edits the test
-itself, or that the test's suite maps onto its unit, which is very likely
-a fix and has to be allowed to prove itself.
+needs no owner or expiry to stop it rotting, and it reverses on its own as
+the test goes back to passing. That last property is the one the exclusion
+would otherwise take away from itself, since a test it holds out of pull
+requests is left with runs that can only lower its share; [An excluded test
+still runs on `main`](#an-excluded-test-still-runs-on-main) is what keeps
+it. The exception is a change that edits the test itself, or that the
+test's suite maps onto its unit, which is very likely a fix and has to be
+allowed to prove itself.
 
 **The rule reaches a repository gate as well.** Formatting, linting and
 the drift guard are tests of the tree, and the rule says nothing about
@@ -1661,15 +1840,44 @@ expect that to bound the over-crediting, because a test flaky enough on
 `main` to matter is being run far more often on pull requests, but nothing
 here measures it.
 
-`flakeRate` is the share of a test's failures that fall under either rule.
+`flakeRate` is how often a test was seen falling under either rule, as a
+share of the runs it took part in rather than of the failures among them.
+What the rate decides is whether running the test once fails somebody's
+change for something its author cannot act on, and that is a chance per
+run: a test that failed once in ten thousand runs and passed on the rerun
+has every one of its failures a flake, and a share of failures would read
+it as wholly unreliable. Counting runs is also what lets an exclusion
+reverse, since a run that does not disagree lowers the share.
+
+Nothing is charged against the count. A disagreement is a proof rather
+than a sample, since a deterministic test cannot pass and fail at one
+commit, so shrinking the share toward zero would shrink it toward what
+the observation has already ruled out. A test seen twice that disagreed once
+reads a half; one that disagreed once in ten thousand runs reads a
+ten-thousandth. What separates them is how much each has been run.
+
+A disagreement's weight halves every `FLAKE_HALF_LIFE_RUNS` runs that
+follow it. A test that disagreed twice and then passed two hundred times
+has settled; one that passed two hundred times and then disagreed twice
+has just started. Those are the same counts and not the same test, and a
+flat sum over the window gives them the same number. Runs rather than
+days, because what shows a test has settled is running without
+disagreeing, and a test left untouched for three weeks has shown nothing.
+
+Both counts are published beside the share. A share cannot be weighed
+without them, and everything that shows a person this figure — the wall
+and the report a red `main` leaves — shows the counts with it. They are
+counted flat, so they are not what the share divides.
 
 Two things follow from knowing it.
 
 **Too flaky to judge by, so not selected.** Above the threshold, an item
 leaves the pull-request selectable set entirely, for the reason in [The
 rule that keeps a test out](#the-rule-that-keeps-a-test-out). It keeps
-running on `main`, and it keeps appearing on the deflake work queue until
-somebody fixes it.
+running on `main`, repeated there and unable to turn the run red, and it
+keeps appearing on the deflake work queue until somebody fixes it. [An
+excluded test still runs on `main`](#an-excluded-test-still-runs-on-main)
+says what that costs and what it buys.
 
 **Below the threshold, some items are run more than once.** Repeats raise
 the chance of catching something intermittent: a regression that shows up
@@ -1694,7 +1902,11 @@ repository bans retry loops, because a retry lets something that should
 have failed pass on a later attempt, and the error is then missed. Repeats
 run the other way: every repeat must pass, and any failure among them
 fails the lane. Three runs of a test is strictly stricter than one, never
-laxer. Nothing is retried and nothing is masked.
+laxer. Nothing is retried and nothing is masked. The identities [an
+excluded test still runs on `main`](#an-excluded-test-still-runs-on-main)
+covers are laxer than one gating run rather than stricter, which is the
+trade that section argues; they are still not retries, since no run is
+re-attempted and no result is discarded.
 
 That does mean a flaky item below the threshold fails pull requests more
 often in proportion to how often it is repeated. That is the honest cost,
@@ -1704,6 +1916,166 @@ tests too noisy to be worth it.
 Repeats also generate the cleanest flake data there is — several
 observations at one commit in one environment — so the measurement
 sharpens itself.
+
+### An excluded test still runs on `main`
+
+The exclusion takes a test out of pull requests, and pull requests are
+where a test is run more than once. What is left is one run per `main`
+push, and a test run once per commit is seen to disagree with itself only
+when somebody re-runs the job, since the pass and the failure have to sit
+at one commit. So its share falls with almost every run it gets and rises
+almost never. The exclusion is meant to reverse as a test goes back to
+passing, and for the tests it holds the evidence points one way by
+construction.
+
+The score moves at the same time. A `main` failure that the next `main`
+run passes at a later commit is credited as a catch, and with nothing
+beside it at its own commit that is what each of an excluded test's
+spurious failures becomes. So the test returns to pull requests with a
+share near nothing and a score raised by its own noise.
+
+Two rules answer this. They are separable, and only the second carries any
+risk, so they are argued separately.
+
+**An excluded identity whose independence is established runs on `main` as
+many times as its share asks for.** [The line that decides the
+count](#flakes-and-repeats) already runs past the exclusion rate, so
+nothing new decides anything; what changes is that the mandatory pass
+places such an identity with that count rather than with the single run it
+gives every mandatory identity. Any share above the threshold asks for at
+least four runs, so this is at least three further runs at each commit.
+
+Those further runs are what let a share rise as well as fall. They also
+put a pass beside a spurious failure at its own commit, which classifies
+it as a disagreement rather than crediting it as a catch, so both
+paragraphs above close on one mechanism.
+
+**The independence flag is a precondition and not a detail.** A repeat
+invokes the identity's file with every other identity skipped, and an
+identity without the flag may not have its siblings skipped, so its file
+would have to be invoked whole several times. Every sibling in that file
+would then run several times, and every sibling still gates, so a file
+holding one flaky test would fail lanes several times as often for tests
+that are not flaky at all. So an identity without the flag keeps its
+single run, and gains the measurement when the flag is established. [The
+`main`-side check that establishes it](#establishing-it) is already part
+of this design, and this gives it a second thing to be worth.
+
+With the flag, the identity is skipped in its file's own invocation and
+run alone the whole count of times. Every run of it at that commit is then
+the same shape, and the same shape the independence check uses. Without
+that, an identity would run once beside its siblings and again alone, and
+a test sensitive to the difference would be recorded as disagreeing with
+itself at every commit, which would pin its exclusion in place for good.
+
+**What these runs cannot separate is a bad machine.** All of an identity's
+runs at one commit go in one lane, so they run on one runner, and a runner
+that fails one of them fails all of them. That is not a disagreement, and
+the rule that reads a failure across many sources as the environment
+covers catches rather than disagreements and has one source to read on
+`main` anyway. So a bad lane and a genuine regression produce the same
+record here. That is the gap [flakes and repeats](#flakes-and-repeats)
+already names, and these runs sit inside it rather than widening it.
+
+What this costs is runner time. Each run is an invocation of its own, so
+the cost model charges every one its invocation rather than charging the
+file once, and the floor `--lane-count` starts its search from has to
+count them as well, which today it does not. Most of the cost then arrives
+as more lanes. Not all of it: one identity's runs go in one lane, so an
+expensive identity multiplied past the bound its job is killed at cannot
+be helped by adding lanes. The mandatory pass has to give up runs until
+what is left fits, down to one, which is what the discretionary passes
+already do and what the mandatory pass does not.
+
+**A failure of an excluded test does not fail the run.** This is the
+second rule and it is a different question, which is what a `main` failure
+of a test nobody can act on should do. `main` already goes red for these
+tests, once per commit; the first rule multiplies that by the count. A
+`main` build that goes red for a test too noisy to judge a change by tells
+nobody anything they did not already know, and several times per commit it
+tells them nothing several times.
+
+The rule is for tests and not for repository gates. Formatting, linting,
+the cycle check and the drift guard are withheld from pull requests by the
+same threshold as everything else, and a gate is exactly where this must
+not reach: a gate's failure is a statement about the tree rather than
+about one change, and the drift guard is what this design leans on to
+notice a suite that has silently stopped running. So the lane reads a
+`reason` of `flaky` on a withheld entry whose unit is a test, and every
+other withheld entry gates as it does today. Reading membership of the
+withheld set instead would make every reason somebody adds later
+non-gating without anybody deciding it.
+
+The lane sorts a batch's failures by identity rather than by batch,
+because a batch holds many identities and its runner reports one exit
+status for all of them, and it has the batch's records by the time it
+decides, since it gathers them immediately after the batch.
+
+**A batch is excused only when it accounted for every identity it was
+asked to run.** "No gating failure among the ones that recorded" is not
+the condition, because a batch that runs a withheld test, records its
+failure and then dies satisfies it while having run almost nothing. So the
+lane compares the batch's records against the identities it planned for
+that batch, and a batch missing any of them fails the lane whatever its
+failures were. That is the record spec's own rule, that a conclusion rests
+on a record that is there and never on one that is missing. A lane that
+could not read a manifest has no withheld set, so nothing is run more than
+once and every failure gates.
+
+The plan a lane receives gains a `nonGating` list rather than reporting
+these in `withheld`. `withheld` means the plan declined to run something,
+and a run that ran a test ten times should not say in its own summary that
+no lane chose it.
+
+Three things elsewhere have to move with this rule.
+
+- **Coverage.** A covered package whose lane held a non-gating failure is
+  reported rather than having a baseline published from it, which is the
+  rule the per-package gate already applies to a package with a failing
+  test. Coverage measured through a failing suite says nothing either way.
+- **The pending-failure list.** A `main` failure waits in `pendingMain`
+  until a later `main` run judges it, and nothing ages that list. Today a
+  broken test turns `main` red and somebody fixes it; under this rule an
+  excluded test can stay broken indefinitely and its pending failures
+  accumulate without bound. `pendingMain` joins the windows `trimWindows`
+  ages.
+- **Re-runs.** A red `main` is what prompts somebody to re-run a job, and
+  a re-run is one of the two ways a same-commit observation happens at
+  all. Taking the red away takes that path away with it. The first rule
+  more than replaces what it produced, but the loss is real, and it is one
+  the first rule has to cover for the second to be affordable.
+
+Nothing is masked. Every run is recorded, every failure is scored by the
+same rules as any other, the job summary names each non-gating failure and
+the identity it belongs to, and the wall and the deflake work queue read
+exactly these records. The failure no longer fails the build, and only for
+tests whose measured share says they cannot tell a good change from a bad
+one.
+
+**The first rule alone is a real option, and it is worth saying why it was
+not taken.** Running an excluded identity several times on `main` and
+still failing the run for it buys the whole measurement fix: the share can
+rise, and a spurious failure stops being credited as a catch. It needs no
+exception to "an execution is not a retry", no sorting of failures, and it
+puts nothing at risk. What it costs is `main` going red several times as
+often for tests nobody can act on, which is the thing this is being asked
+to stop. That is the trade, stated plainly, and the second rule is the
+side of it this design takes.
+
+The second rule gives up more than whether the build is red. The build,
+attestation, coverage and deploy jobs depend on `full-tests`, so a full run
+that stays green ships. A test that is both too flaky for pull
+requests and genuinely broken therefore deploys, where its failure would
+otherwise have held the deploy.
+
+The reporter is what carries that case to a person: an excluded identity
+that failed every one of its runs at this commit and passed every one at
+the parent. The comment says what the observation is and what it is not,
+because a bad lane produces the same record, and only a person looking can
+say which it was. That is weak evidence and it is the only evidence there
+is, which is the honest position for a test whose failures nobody could
+act on before this rule either.
+
 
 ## Packing
 
@@ -2302,7 +2674,8 @@ What the runner does, in order:
    values are the whole of the difference between the two runs.
 5. Print the plan to the job summary: which batches, which items, what
    each is expected to cost, why each was chosen, which items were
-   withheld and why, and which manifest the plan came from.
+   withheld and why, which of them a failure would not fail the lane for,
+   and which manifest the plan came from.
 6. Set up the union of the capabilities the batches need, recording each
    one's duration.
 7. Run each batch execution with fresh spool and JUnit output paths,
@@ -2314,12 +2687,24 @@ What the runner does, in order:
    variant before another execution can reuse any runner-owned path. Then
    convert the coverage this lane produced into one report per workspace
    member and upload it for `Status` to join.
-9. Exit non-zero if any batch failed, or if any repeat of any item failed.
+9. Exit non-zero if any batch failed, or if any repeat of any item
+   failed. A failure the full run's non-gating rule covers is left out of
+   that, and a batch that did not account for every identity it was asked
+   to run is never left out of it. [An excluded test still runs on
+   `main`](#an-excluded-test-still-runs-on-main) says which failures those
+   are and how the runner tells them apart.
 
 ## The full run on `main`
 
 A push to `main` still runs everything, and it runs it through the same
 topology so that the two paths cannot drift.
+
+The full run does one thing a pull request does not. An identity too flaky
+for pull requests is run here as many times as its share asks for, and its
+failures do not fail the run, so the measurement that decides whether it is
+still flaky keeps going while the test is out of pull requests. [An
+excluded test still runs on `main`](#an-excluded-test-still-runs-on-main)
+is the whole of that rule.
 
 `deno.yml` gains a small `plan-full` job that runs on push and emits one
 integer: how many lanes the run needs. It gets that from `deno run -A
@@ -2433,6 +2818,16 @@ excludes both, a future edit that gets an `if:` wrong — reports a green
 `Status` on a pull request that ran no tests at all. That is the one
 failure mode of this whole design that would be silent, so it is asserted
 directly rather than reasoned about.
+
+A labelled pull request gets the full run's treatment of a flaky test as
+well, since it is the same job: the excluded identities are run several
+times on it and cannot fail it. That follows from the label running what
+`main` runs, and it has one edge worth knowing about. The label runs the
+full jobs instead of the five lanes rather than beside them, so a change
+that fixes a flaky test and also carries the label gets no gating run of
+the test it fixes. The ordinary five-lane path is where that fix proves
+itself, because there the exception for a change that edits a test makes
+it mandatory and gating.
 
 The natural users are a change nobody wants to be wrong about, a change to
 the topology or to the test machinery itself, and the moment somebody
@@ -2825,6 +3220,13 @@ pull request's own run could not have:
   the three.
 - **A new test that turned out to be flaky**, when a test the pull request
   added has since disagreed with itself.
+- **A test too flaky for pull requests that failed every one of its runs
+  at this commit and passed every one at the parent.** Those failures do
+  not fail the run, so the lane's job summary is the only other place they
+  appear, and nobody reads the summary of a run that passed. It says the
+  test is a known flaky one, that the run stayed green, and that the same
+  record is what one bad runner produces, since every run of an identity at
+  a commit shares a lane. Weak evidence, named as weak, is what there is.
 - **A rename that discarded history**, with the alias line to append and
   the number of catches it would bring back. See [Renames, and the alias
   file](#renames-and-the-alias-file).
@@ -2851,9 +3253,10 @@ observation about it:
   When a test was not selected, the honest statement is that this design
   traded that coverage away, and the comment says so in those words. The
   author did not miss anything; the selector did.
-- **It is accurate about flakes.** A test with a known flake rate is
-  labelled as one, so nobody is told they broke something that breaks on
-  its own.
+- **It is accurate about flakes.** A test the store has seen disagreeing
+  with itself is labelled as one, with the counts behind the label, so
+  nobody is told they broke something that breaks on its own and nobody
+  is asked to take that on trust.
 - **It is actionable and it ends.** Every comment says what to do, and it
   is edited in place rather than repeated when the same thing recurs.
 
@@ -2876,6 +3279,19 @@ score so the next change in that area runs it. If the rate turns out to be
 intolerable, the escape hatch is a merge queue, which restores the
 guarantee at the cost of merge latency. This plan does not propose one; it
 notes that the option exists and that nothing here forecloses it.
+
+**A test too flaky for pull requests cannot turn `main` red, so a real
+regression inside one is missed and a green run ships.** The test still
+runs, more often than it did before, and every result is recorded and
+scored. What no longer happens is the build stopping for it, and the build
+is what the deploy depends on. The reporter carries the one observation
+that is left, and names what it cannot tell apart. I'd guess this is the
+better trade, on two grounds neither of which is measured here: a failure
+of a test whose share says it fails on its own says very little about the
+commit it failed at, and a `main` that goes red for tests nobody can act
+on is one people learn to read past, which costs the signal for everything
+else on it. Running these tests several times and keeping every failure
+gating is the alternative, and it is set out beside the rule.
 
 **Outside a covered package, a change to a source file does not pull in
 the tests that execute it.** Selection knows which test files a change
@@ -2961,6 +3377,11 @@ is pinned to the commit's date. And if none of that settles it,
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
+| A test too flaky for pull requests fails on `main` | The run stays green and the job summary names the failure and its identity. The records are scored as any others, so the failure feeds the share, the wall, and the deflake work queue. |
+| A batch on `main` does not account for every identity it was asked to run | The lane fails. Nothing has shown the failures it did record to be the whole of what went wrong, and missing evidence is read as a real failure. |
+| A test too flaky for pull requests genuinely regresses | `main` stays green and the change ships. The regression is found when somebody deflakes the test, or from the reporter's comment where every run failed at the commit and every run passed at its parent. That comment says a bad runner produces the same record. |
+| A repository gate goes above the flake threshold | It leaves pull requests as any test does, and it goes on failing `main`. The non-gating rule is for tests, so a gate never stops gating the branch it is a gate on. |
+| A bad runner fails every run of an excluded identity at one commit | No disagreement is recorded, the failure waits for the next `main` run, and a pass at a later commit credits a catch the test did not earn. This is the environmental gap the flake rules already carry, and these runs sit inside it. |
 | `main` is broken and stays broken | Nothing holds a test back for having failed on `main`, so a pull request that selects the broken test fails on it. The failure belongs to the default branch, and fixing it there is what clears it. |
 | The reporter cannot find the pull request behind a `main` commit | It logs the commit and posts nothing. A direct push to `main` with no pull request behind it is the ordinary case for this. |
 | The reporter would comment on a test that is known flaky | It says so in the comment rather than implying the change caused it. |
@@ -3068,6 +3489,20 @@ three. And the baseline walk is tested against recorded chains of `main`
 commits: a rise against an ancestor fails, a rise against a run the merge
 base does not contain reports, and a package with no baseline reports.
 
+The full run's treatment of a flaky test is tested at both ends. In
+`plan()`, a withheld and independent identity is placed under the
+`everything` policy with the count its share asks for and named in
+`nonGating`; a withheld identity without the independence flag is placed
+once; a withheld gate is named in neither; and an identity whose runs do
+not fit gives them up until they do rather than putting its lane past the
+bound. In the lane runner, a fixture of batch results and records proves
+four cases: a batch failing only on non-gating identities does not fail the
+lane, a batch failing on one other identity does, a batch failing on a
+non-gating identity in one run and not another does not, and a batch that
+recorded no outcome for some identity it was asked to run fails the lane
+whatever its failures were. The last is the one worth writing first,
+because getting it wrong turns a batch that died early into a green run.
+
 The reporter's attribution is where a bug would be most costly, because a
 wrong comment lands on a person. It is tested against recorded pairs of
 consecutive `main` runs, and the property that matters is the negative
@@ -3092,7 +3527,8 @@ test-selection`. Its modes are also how the system is tested by hand.
   with their dates and sources, its flake rate, and which item it maps to.
   A suite-level measurement instead says that it is not selectable. For an
   item identity, the output says whether the current manifest selects it,
-  withholds it, or repeats it. The argument accepts the canonical three- or
+  how many runs it gives it, and whether it withholds it from pull
+  requests. The argument accepts the canonical three- or
   four-part identity key, and the output always names a present variant.
   This is what somebody uses to answer "why did my test not run?", which
   is the question this system will be asked most often and the one it
@@ -3349,6 +3785,33 @@ exercised on the branch on its own.
       and repeats.
 - [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
+- [ ] The full run's treatment of a test too flaky for pull requests.
+      `tasks/test-selection/plan.ts` places a withheld, independent
+      identity with the count `executionsFor` already returns for its
+      share rather than the single run the mandatory pass gives, skips it
+      in its file's own invocation so every run of it at one commit shares
+      one shape, gives up runs until what is left fits rather than putting
+      a lane past its bound, and returns a `nonGating` list beside
+      `withheld` naming the identities whose failures do not fail the run.
+      A withheld identity without the independence flag keeps its single
+      run, and a withheld repository gate is in neither list.
+      `tasks/ci-lane.ts` reads each batch's gathered records, exits
+      non-zero only where a failing identity is outside `nonGating`, fails
+      the lane whenever a batch did not account for every identity it was
+      asked to run, and names every non-gating failure in the job summary.
+      The manifest gains no field and `executionsFor` needs no change: its
+      line already runs past the exclusion rate. `fullLaneCount`'s work
+      sum counts the extra runs, which it does not today, so the floor its
+      search starts from is not an underestimate.
+- [ ] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
+      waits there until a later run judges it, and an excluded test that
+      stays broken no longer turns `main` red, so nothing bounds what
+      accumulates.
+- [ ] A covered package whose lane held a non-gating failure is reported
+      rather than having a baseline published from it, the same way the
+      per-package gate already reports a package with a failing test.
+- [ ] `explain <identity>` gains the runs it is given and whether it is
+      withheld, replacing the three-way answer that no longer partitions.
 - [ ] Repository-wide coverage measurement moves to the full run and stops
       failing anything.
 - [ ] `tasks/write-coverage-lcov.ts` converts each workspace member's
@@ -3419,6 +3882,11 @@ exercised on the branch on its own.
       selected run only samples. The gate publishes that figure, so the
       note is silent until the gate lands and needs nothing further
       then.
+- [ ] The reporter's note for a test too flaky for pull requests that
+      failed every one of its runs at this commit and passed every one at
+      the parent. It needs the full run's extra runs to exist before it can
+      say anything, and it says the test is a known flaky one and that the
+      run stayed green.
 - [ ] The per-package coverage gate, in two halves. `tasks/ci-lane.ts`
       makes every item of a covered package the diff touches mandatory,
       keeps those items out of later passes and out of repeats, and

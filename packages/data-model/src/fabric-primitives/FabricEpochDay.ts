@@ -50,7 +50,7 @@ export class FabricEpochDay extends BaseFabricPrimitive
 
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
-    return FABRIC_PRIMITIVE_VALUE_TAGS.EpochDay;
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricEpochDay;
   }
 
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */

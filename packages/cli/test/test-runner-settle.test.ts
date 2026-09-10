@@ -7,6 +7,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { resolve } from "@std/path";
 import { runTests } from "../lib/test-runner.ts";
 
@@ -20,6 +21,36 @@ describe(
   "`{ settle: true }` test step",
   { sanitizeOps: false, sanitizeResources: false },
   () => {
+    it("prints separate initialization, action, assertion, and settle read reports", async () => {
+      const output: string[] = [];
+      using _log = stub(console, "log", (...args: unknown[]) => {
+        output.push(args.map(String).join(" "));
+      });
+      const result = await runTests(fixture("settle-step.test.tsx"), {
+        root: FIXTURES,
+        verbose: true,
+        statsThreshold: 0,
+      });
+      expect(result.failed).toBe(0);
+      const reports = output.filter((line) => line.includes("Read cost ("));
+      for (
+        const interval of [
+          "initialization",
+          "action_1",
+          "settle_1",
+          "assertion_1",
+          "settle_3",
+        ]
+      ) {
+        expect(
+          reports.some((line) => line.includes(`Read cost (${interval})`)),
+        ).toBe(true);
+      }
+      expect(reports.find((line) => line.includes("settle_3"))).toContain(
+        "0 runs, 0 accesses",
+      );
+    });
+
     it("runs a full settle between steps and is transparent to results", async () => {
       const { passed, failed, results } = await runTests(
         fixture("settle-step.test.tsx"),

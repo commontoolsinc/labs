@@ -251,6 +251,10 @@ export type SlowQuery = {
   roots?: number;
   watches?: number;
 
+  /** session.watch.refresh only: the refreshed session's principal, so a
+   * slow refresh names whose watch set cost it. */
+  principal?: string;
+
   /** transact only: milliseconds the commit waited for the space
    * publication lock before evaluation began. Flush passes hold the same
    * lock, so a large value is head-of-line blocking behind fan-out rather
@@ -776,6 +780,7 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  #stableExpressionResultIds = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -803,6 +808,11 @@ class Connection {
     const sendStart = performance.now();
     this.#sendRaw(prepared);
     timing.time(sendStart, "memory", "response", "sendRaw");
+  }
+
+  /** Whether the peer declared the expression result identity contract. */
+  get stableExpressionResultIds(): boolean {
+    return this.#stableExpressionResultIds;
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -1050,6 +1060,8 @@ class Connection {
       }
       const clientFlags = parseMemoryProtocolFlags(parsed.flags);
       const serverFlags = parseMemoryProtocolFlags(response.flags);
+      this.#stableExpressionResultIds =
+        clientFlags?.stableExpressionResultIds === true;
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#ready = true;
@@ -3125,6 +3137,18 @@ export class Server {
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
       const authContext = connection.sessionOpenAuthContext(message);
+      // Refuse at session admission: reconnecting peers understand this verdict
+      // as terminal for the session and discard its pending commits and watches.
+      if (!connection.stableExpressionResultIds) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError(
+            "SessionRevokedError",
+            "This runtime uses incompatible expression result identities. " +
+              "Reload the browser tab or update the CLI checkout.",
+          ),
+        );
+      }
       const principal = await this.options.authorizeSessionOpen(
         message,
         authContext,
@@ -4038,6 +4062,13 @@ export class Server {
           );
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
+          }
+          if (
+            error instanceof Engine.ConflictError &&
+            error.conflicts !== undefined &&
+            error.conflicts.length > 0
+          ) {
+            responseError.conflicts = [...error.conflicts];
           }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
@@ -5300,213 +5331,313 @@ export class Server {
             // branch).
             const batchDirtyIds = dirtyIds;
             const startedAt = performance.now();
-            let touched = false;
-            for (const dirtyId of batchDirtyIds) {
-              if (session.trackedIds.has(dirtyId)) {
-                touched = true;
-                break;
+            // Per-session refresh rows (`memory/refresh/session/{untouched,
+            // touched}`) and, for a touched session, the phase rows
+            // (`memory/refresh/phase/{walk,diff,tracked,frame}` with the
+            // tracked-set rebuild split further): `memory/flush/refresh`
+            // is a whole pass over every session, so this is what says
+            // which sessions a commit cost and where in one session the
+            // time went. Every row closes in a `finally`: a refresh that
+            // throws is skipped and requeued by the caller, and an
+            // expensive failure is the one most worth attributing.
+            let sessionKind: "untouched" | "touched" = "untouched";
+            try {
+              let touched = false;
+              for (const dirtyId of batchDirtyIds) {
+                if (session.trackedIds.has(dirtyId)) {
+                  touched = true;
+                  break;
+                }
               }
-            }
-            span.setAttribute("ct.touched", touched);
-            if (!touched) {
-              return await emptyCatchUp();
-            }
+              span.setAttribute("ct.touched", touched);
+              if (!touched) {
+                return await emptyCatchUp();
+              }
+              sessionKind = "touched";
 
-            const engine = await this.#openEngine(space);
-            const fromSeq = session.lastSyncedSeq;
-            const identity = this.#sessionScopeIdentity(session);
-            const updates = new Map<string, SessionCacheEntry>();
+              const engine = await this.#openEngine(space);
+              const fromSeq = session.lastSyncedSeq;
+              const identity = this.#sessionScopeIdentity(session);
+              const updates = new Map<string, SessionCacheEntry>();
+              const walkStartedAt = performance.now();
 
-            // Evaluation exceptions — schema-closure corruption included —
-            // propagate to refreshDirty's catch, which logs, skips this
-            // session's frame, and marks it for a full re-evaluation.
-            for (const graph of session.graphs.values()) {
-              const refreshed = tracer.startActiveSpan(
-                "memory.watch.refresh",
-                (watchSpan) => {
-                  watchSpan.setAttribute("space.did", space);
-                  try {
-                    return refreshTrackedGraph(
-                      space,
-                      engine,
-                      graph,
-                      batchDirtyIds,
-                    );
-                  } finally {
-                    watchSpan.end();
+              // Evaluation exceptions — schema-closure corruption included —
+              // propagate to refreshDirty's catch, which logs, skips this
+              // session's frame, and marks it for a full re-evaluation.
+              try {
+                for (const graph of session.graphs.values()) {
+                  const refreshed = tracer.startActiveSpan(
+                    "memory.watch.refresh",
+                    (watchSpan) => {
+                      watchSpan.setAttribute("space.did", space);
+                      try {
+                        return refreshTrackedGraph(
+                          space,
+                          engine,
+                          graph,
+                          batchDirtyIds,
+                        );
+                      } finally {
+                        watchSpan.end();
+                      }
+                    },
+                  );
+                  if (refreshed === null) {
+                    continue;
                   }
-                },
-              );
-              if (refreshed === null) {
-                continue;
-              }
-              for (const [docKey, entity] of refreshed.updates) {
-                const { scopeKey } = fromDocKey(docKey);
-                const entry = toCacheEntry(entity, identity, scopeKey);
-                updates.set(
-                  cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
-                  entry,
+                  for (const [docKey, entity] of refreshed.updates) {
+                    const { scopeKey } = fromDocKey(docKey);
+                    const entry = toCacheEntry(entity, identity, scopeKey);
+                    updates.set(
+                      cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
+                      entry,
+                    );
+                  }
+                }
+              } finally {
+                timing.time(
+                  walkStartedAt,
+                  "memory",
+                  "refresh",
+                  "phase",
+                  "walk",
                 );
               }
-            }
-
-            if (updates.size === 0) {
-              return await emptyCatchUp();
-            }
-
-            // The lease-holder exemption was judged on CURRENT holdership
-            // above, once per pass: a former holder's foreign instances
-            // are filtered like any other session's (protocol.md §2's
-            // read row is live-lease admission).
-            const filteredKeys: string[] = [];
-            const upserts: SessionCacheEntry[] = [];
-            for (const [key, entry] of updates) {
-              const previous = session.entities.get(key);
-              if (!sameSnapshot(previous, entry)) {
-                // protocol.md §3's applicable-set filter, as
-                // defense-in-depth: a session's graph evaluates under
-                // its own identity, so an inapplicable instance here is
-                // structurally unreachable — unless the session is a
-                // CURRENT lease holder with explicit-instance reads
-                // admitted (protocol.md §2's read row), which is exempt
-                // by design (the server legitimately receives every
-                // instance it serves).
-                if (
-                  !leaseHolderExempt &&
-                  !scopeKeyApplicableTo(entry.scopeKey, identity)
-                ) {
-                  // Never cache a filtered entry as delivered: a later
-                  // re-admission must still see the client's cache as
-                  // NOT holding it, or the withheld update is elided
-                  // forever.
-                  filteredKeys.push(key);
-                  continue;
-                }
-                const dirtyKey = toDirtyKey(entry.id, entry.scopeKey);
-                const origin = dirtyOrigins?.get(dirtyKey);
-                // Include the doc unless the writer provably holds it
-                // (CT-1965). An origin matching this session AND the head seq
-                // means the head is exactly this session's own accepted
-                // write; under the per-space publication lock nothing can
-                // have moved it since, so `entry.doc` IS that commit's
-                // post-apply document. A `set`/`delete` head is then elided —
-                // the client supplied the bytes (or the absence) and the
-                // verdict + marker promote them — while a `patch` head is
-                // delivered in full: its post-apply state can contain merged
-                // foreign content the writer's own ops cannot reproduce.
-                const held = origin !== undefined &&
-                  origin.sessionId === sessionId &&
-                  origin.seq === entry.seq &&
-                  (origin.op !== "patch" || !getOwnWriteEchoConfig());
-                if (!held) {
-                  upserts.push(entry);
-                }
+              if (updates.size === 0) {
+                return await emptyCatchUp();
               }
-            }
-            for (const key of filteredKeys) {
-              updates.delete(key);
-            }
-            // The session cache commits only after the frame is fully
-            // built: a throw during marker/adoption attachment must leave
-            // the diff recomputable, or the requeued batch would elide the
-            // lost frame's docs as already-snapshotted (CT-1927 review,
-            // round 6).
-            const commitEntities = () => {
-              // (d′) — design §2.8 flag 2: a push pass that changes the
-              // session's tracked set is a demand change; notify so the
-              // demand pass sees it without waiting for the next input.
-              // The set is rebuilt rather than grown, so the change can
-              // be a same-size swap (a link retargeted from one absent
-              // document to another) or a shrink — compared by
-              // membership, exactly as the full-evaluation branch below
-              // does, and like there the O(tracked) scan runs only when
-              // a demand observer is attached (the serving posture; its
-              // NIT-6 note covers the `push-growth` reason on a shrink).
-              const wantsDemandNotify =
-                this.#serverExecutionObserver?.demandChanged !== undefined;
-              const previous = session.trackedIds;
-              for (const [key, entry] of updates) {
-                session.entities.set(key, entry);
-              }
-              // Rebuilt from provenance rather than grown in place: the
-              // refresh above may have RETIRED interests (a link edited
-              // away releases its miss), and a retired interest must
-              // leave the wake set with it — while a re-walk's new absent
-              // dead-ends are wake-reactivity the next commit needs.
-              session.trackedIds = addOperationWatchTrackedIds(
-                trackedIdsFromEntries(session.entities.values()),
-                session.watches,
-                {
-                  principal: session.principal,
-                  sessionId: session.id,
-                },
-              );
-              this.#addMissedToTrackedIds(
-                session.trackedIds,
-                session.graphs.values(),
-              );
-              let changed = false;
-              if (wantsDemandNotify) {
-                changed = previous.size !== session.trackedIds.size;
-                if (!changed) {
-                  for (const key of session.trackedIds) {
-                    if (!previous.has(key)) {
-                      changed = true;
-                      break;
+
+              const diffStartedAt = performance.now();
+              const filteredKeys: string[] = [];
+              const upserts: SessionCacheEntry[] = [];
+              try {
+                // The lease-holder exemption was judged on CURRENT holdership
+                // above, once per pass: a former holder's foreign instances
+                // are filtered like any other session's (protocol.md §2's
+                // read row is live-lease admission).
+                for (const [key, entry] of updates) {
+                  const previous = session.entities.get(key);
+                  if (!sameSnapshot(previous, entry)) {
+                    // protocol.md §3's applicable-set filter, as
+                    // defense-in-depth: a session's graph evaluates under
+                    // its own identity, so an inapplicable instance here is
+                    // structurally unreachable — unless the session is a
+                    // CURRENT lease holder with explicit-instance reads
+                    // admitted (protocol.md §2's read row), which is exempt
+                    // by design (the server legitimately receives every
+                    // instance it serves).
+                    if (
+                      !leaseHolderExempt &&
+                      !scopeKeyApplicableTo(entry.scopeKey, identity)
+                    ) {
+                      // Never cache a filtered entry as delivered: a later
+                      // re-admission must still see the client's cache as
+                      // NOT holding it, or the withheld update is elided
+                      // forever.
+                      filteredKeys.push(key);
+                      continue;
+                    }
+                    const dirtyKey = toDirtyKey(entry.id, entry.scopeKey);
+                    const origin = dirtyOrigins?.get(dirtyKey);
+                    // Include the doc unless the writer provably holds it
+                    // (CT-1965). An origin matching this session AND the head seq
+                    // means the head is exactly this session's own accepted
+                    // write; under the per-space publication lock nothing can
+                    // have moved it since, so `entry.doc` IS that commit's
+                    // post-apply document. A `set`/`delete` head is then elided —
+                    // the client supplied the bytes (or the absence) and the
+                    // verdict + marker promote them — while a `patch` head is
+                    // delivered in full: its post-apply state can contain merged
+                    // foreign content the writer's own ops cannot reproduce.
+                    const held = origin !== undefined &&
+                      origin.sessionId === sessionId &&
+                      origin.seq === entry.seq &&
+                      (origin.op !== "patch" || !getOwnWriteEchoConfig());
+                    if (!held) {
+                      upserts.push(entry);
                     }
                   }
                 }
-              }
-              if (changed) {
-                this.#notifyDemandChanged(
-                  space,
-                  "push-growth",
-                  session.principal,
+                for (const key of filteredKeys) {
+                  updates.delete(key);
+                }
+              } finally {
+                timing.time(
+                  diffStartedAt,
+                  "memory",
+                  "refresh",
+                  "phase",
+                  "diff",
                 );
               }
-            };
-            const toSeq = Engine.serverSeq(engine);
-            if (upserts.length === 0) {
-              // The watched set was re-evaluated current as of toSeq even though it
-              // produced no net upserts; advance the watermark so a later default
-              // fromSeq is not stale. emptyCatchUp receives the original fromSeq
-              // explicitly, so this does not mutate the bounds of this sync (the
-              // Cubic fix keeps fromSeq pinned to the pre-refresh value).
+              // The session cache commits only after the frame is fully
+              // built: a throw during marker/adoption attachment must leave
+              // the diff recomputable, or the requeued batch would elide the
+              // lost frame's docs as already-snapshotted (CT-1927 review,
+              // round 6).
+              const commitEntities = () => {
+                const trackedStartedAt = performance.now();
+                try {
+                  // (d′) — design §2.8 flag 2: a push pass that changes the
+                  // session's tracked set is a demand change; notify so the
+                  // demand pass sees it without waiting for the next input.
+                  // The set is rebuilt rather than grown, so the change can
+                  // be a same-size swap (a link retargeted from one absent
+                  // document to another) or a shrink — compared by
+                  // membership, exactly as the full-evaluation branch below
+                  // does, and like there the O(tracked) scan runs only when
+                  // a demand observer is attached (the serving posture; its
+                  // NIT-6 note covers the `push-growth` reason on a shrink).
+                  const wantsDemandNotify =
+                    this.#serverExecutionObserver?.demandChanged !== undefined;
+                  const previous = session.trackedIds;
+                  for (const [key, entry] of updates) {
+                    session.entities.set(key, entry);
+                  }
+                  // Rebuilt from provenance rather than grown in place: the
+                  // refresh above may have RETIRED interests (a link edited
+                  // away releases its miss), and a retired interest must
+                  // leave the wake set with it — while a re-walk's new absent
+                  // dead-ends are wake-reactivity the next commit needs.
+                  const entriesAt = performance.now();
+                  const fromEntries = trackedIdsFromEntries(
+                    session.entities.values(),
+                  );
+                  const watchesAt = performance.now();
+                  timing.time(
+                    entriesAt,
+                    watchesAt,
+                    "memory",
+                    "refresh",
+                    "tracked",
+                    "entries",
+                  );
+                  session.trackedIds = addOperationWatchTrackedIds(
+                    fromEntries,
+                    session.watches,
+                    {
+                      principal: session.principal,
+                      sessionId: session.id,
+                    },
+                  );
+                  const missedAt = performance.now();
+                  timing.time(
+                    watchesAt,
+                    missedAt,
+                    "memory",
+                    "refresh",
+                    "tracked",
+                    "watches",
+                  );
+                  this.#addMissedToTrackedIds(
+                    session.trackedIds,
+                    session.graphs.values(),
+                  );
+                  timing.time(
+                    missedAt,
+                    "memory",
+                    "refresh",
+                    "tracked",
+                    "missed",
+                  );
+                  let changed = false;
+                  if (wantsDemandNotify) {
+                    changed = previous.size !== session.trackedIds.size;
+                    if (!changed) {
+                      for (const key of session.trackedIds) {
+                        if (!previous.has(key)) {
+                          changed = true;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                  if (changed) {
+                    this.#notifyDemandChanged(
+                      space,
+                      "push-growth",
+                      session.principal,
+                    );
+                  }
+                } finally {
+                  timing.time(
+                    trackedStartedAt,
+                    "memory",
+                    "refresh",
+                    "phase",
+                    "tracked",
+                  );
+                }
+              };
+              const toSeq = Engine.serverSeq(engine);
+              if (upserts.length === 0) {
+                // The watched set was re-evaluated current as of toSeq even though it
+                // produced no net upserts; advance the watermark so a later default
+                // fromSeq is not stale. emptyCatchUp receives the original fromSeq
+                // explicitly, so this does not mutate the bounds of this sync (the
+                // Cubic fix keeps fromSeq pinned to the pre-refresh value).
+                commitEntities();
+                session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
+                return await emptyCatchUp(fromSeq, toSeq);
+              }
+              recordSlowQueryDuration(
+                "session.watch.refresh",
+                space,
+                startedAt,
+                {
+                  watches: session.watches.length,
+                  upserts: upserts.length,
+                  principal: session.principal,
+                },
+              );
+              const frameStartedAt = performance.now();
+              let message: SessionEffectMessage;
+              try {
+                message = await finishCatchUp({
+                  type: "sync",
+                  fromSeq,
+                  toSeq,
+                  upserts: upserts.toSorted((left, right) =>
+                    left.branch.localeCompare(right.branch) ||
+                    left.id.localeCompare(right.id)
+                  ).map((entry) =>
+                    // Keyed by the session's wire vocabulary (stage A, OW17's
+                    // wire leg — see `keyed` above): the key is what keeps
+                    // two instances of one (branch, id, scope) apart in the
+                    // serving replica. Unkeyed frames are byte-identical to
+                    // before.
+                    toWireUpsert(entry, keyed)
+                  ),
+                  removes: [],
+                });
+                // An unkeyed wire frame strips instance keys; retain the
+                // frame's true instance-keyed entries so a delivery failure
+                // rolls back the EXACT instances (rollbackUndeliveredSync).
+                this.#deliveredFrameEntries.set(message, {
+                  upserts: [...upserts],
+                  removes: [],
+                });
+              } finally {
+                timing.time(
+                  frameStartedAt,
+                  "memory",
+                  "refresh",
+                  "phase",
+                  "frame",
+                );
+              }
               commitEntities();
-              session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
-              return await emptyCatchUp(fromSeq, toSeq);
+              session.lastSyncedSeq = toSeq;
+              return message;
+            } finally {
+              timing.time(
+                startedAt,
+                "memory",
+                "refresh",
+                "session",
+                sessionKind,
+              );
             }
-            recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
-              watches: session.watches.length,
-              upserts: upserts.length,
-            });
-            const message = await finishCatchUp({
-              type: "sync",
-              fromSeq,
-              toSeq,
-              upserts: upserts.toSorted((left, right) =>
-                left.branch.localeCompare(right.branch) ||
-                left.id.localeCompare(right.id)
-              ).map((entry) =>
-                // Keyed by the session's wire vocabulary (stage A, OW17's
-                // wire leg — see `keyed` above): the key is what keeps
-                // two instances of one (branch, id, scope) apart in the
-                // serving replica. Unkeyed frames are byte-identical to
-                // before.
-                toWireUpsert(entry, keyed)
-              ),
-              removes: [],
-            });
-            // An unkeyed wire frame strips instance keys; retain the
-            // frame's true instance-keyed entries so a delivery failure
-            // rolls back the EXACT instances (rollbackUndeliveredSync).
-            this.#deliveredFrameEntries.set(message, {
-              upserts: [...upserts],
-              removes: [],
-            });
-            commitEntities();
-            session.lastSyncedSeq = toSeq;
-            return message;
           }
 
           const { serverSeq, graphs, entities } = await this.evaluateWatchSet(

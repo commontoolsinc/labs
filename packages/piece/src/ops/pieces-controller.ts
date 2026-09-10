@@ -30,6 +30,7 @@ import {
   getPatternSetupIdentityRef,
   getPatternSource,
   getPieceSourceSnapshot,
+  idStringForEntityAddress,
   isCell,
   isLink,
   isStoredArgumentSchemaRefusal,
@@ -466,10 +467,21 @@ export class PiecesController<T = unknown> {
       );
   }
 
+  /**
+   * Whether this space's identifier index holds the entity `id` addresses,
+   * without reading what it holds there. `undefined` where the server does not
+   * advertise the lookup, which is neither a yes nor a no.
+   *
+   * The address takes either spelling of an unkinded entity, as
+   * {@link PiecesController.getPieceCell} takes one. Both spellings are in
+   * circulation here: a registered piece reports its own id as the bare tagged
+   * hash, and the index keys on the `of:` id over it, so an address read back
+   * off a listing asks about the piece that listing named.
+   */
   async entityIdExists(id: string): Promise<boolean | undefined> {
     await this.ready;
     return await this.runtime.storageManager.open(this.#space).entityIdExists?.(
-      id,
+      idStringForEntityAddress(id),
     );
   }
 
@@ -2344,6 +2356,9 @@ export class PiecesController<T = unknown> {
         this.getSpace(),
       );
       if (pattern === undefined) return root;
+      // The re-stage writes over the stored setup's cells, which are named
+      // before the transaction that writes them opens.
+      await this.runtime.runner.syncStoredPieceCells(root, pattern);
       const result = await timePiecePhase(
         "ensureDefaultPattern.restageRootSetup",
         () =>

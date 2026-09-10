@@ -55,8 +55,8 @@ export type TraverseFixtureInvocation = {
   /** Index into the fixture's `links` table, when traverse() got a link. */
   link?: number;
 
-  /** `TraversalContext.includeMeta` (true on the query path). */
-  includeMeta: boolean;
+  /** `TraversalContext.traverseCells` (true on the query path). */
+  traverseCells: boolean;
 
   /** Invocations sharing this id shared one `TraversalContext`. */
   context: number;
@@ -66,7 +66,9 @@ export type TraverseFixtureInvocation = {
 };
 
 export type TraverseFixture = {
-  version: 1;
+  /** Format version; 2 is the one whose invocations carry `traverseCells`. */
+  version: 2;
+
   meta: {
     name: string;
     source: string;
@@ -156,7 +158,7 @@ export class TraverseCaptureRecorder {
     doc: { address: IMemorySpaceAddress },
     selector: SchemaPathSelector,
     link: NormalizedFullLink | undefined,
-    context: { includeMeta: boolean },
+    context: { traverseCells: boolean },
     memo: object | undefined,
   ): void {
     if (this.#invocations.length >= this.#maxInvocations) {
@@ -180,7 +182,7 @@ export class TraverseCaptureRecorder {
       },
       selector: this.#internSelector(selector),
       ...(link !== undefined && { link: this.#internLink(link) }),
-      includeMeta: context.includeMeta,
+      traverseCells: context.traverseCells,
       context: this.#idFor(
         this.#contextIds,
         context,
@@ -265,7 +267,7 @@ export class TraverseCaptureRecorder {
 
   toFixture(name: string, source: string): TraverseFixture {
     return {
-      version: 1,
+      version: 2,
       meta: {
         name,
         source,
@@ -362,7 +364,7 @@ export function recordTraverseInvocation(
   doc: { address: IMemorySpaceAddress },
   selector: SchemaPathSelector,
   link: NormalizedFullLink | undefined,
-  context: { includeMeta: boolean },
+  context: { traverseCells: boolean },
   memo: object | undefined,
 ): void {
   active?.recordInvocation(doc, selector, link, context, memo);

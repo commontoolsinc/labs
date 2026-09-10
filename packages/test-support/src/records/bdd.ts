@@ -75,15 +75,24 @@ const chains = new WeakMap<object, readonly string[]>();
  */
 const ROOT_SUITE_NAME = "global";
 
-/** The name a bdd call was given, whichever way it was called. */
+/**
+ * The name a bdd call was given, whichever way it was called: a name
+ * argument, a definition's own `name`, or the name of the body, which is
+ * what the runner falls back to. A name the call carries stands even
+ * where it is empty, so such a call names an empty element of the chain
+ * rather than nothing. A call carrying neither a name nor a body is what
+ * this has no name for.
+ */
 export function nameOf(args: readonly unknown[]): string | undefined {
   for (const arg of args) {
     if (typeof arg === "string") return arg;
     if (typeof arg === "object" && arg !== null) {
       const named = (arg as { name?: unknown }).name;
-      if (typeof named === "string" && named.length > 0) return named;
+      if (typeof named === "string") return named;
+      const fn = (arg as { fn?: unknown }).fn;
+      if (typeof fn === "function") return fn.name;
     }
-    if (typeof arg === "function" && arg.name.length > 0) return arg.name;
+    if (typeof arg === "function") return arg.name;
   }
   return undefined;
 }
@@ -195,7 +204,7 @@ function withBody(
 export function wrapDescribe(through: AnyFunction): AnyFunction {
   return (...args: unknown[]): unknown => {
     const found = bodyOf(args);
-    const name = nameOf(args) ?? found?.body.name;
+    const name = nameOf(args);
     if (name === undefined) return through(...args);
     const own = [...enclosing(args), name];
     const result = found === undefined
@@ -215,6 +224,9 @@ export function wrapDescribe(through: AnyFunction): AnyFunction {
  * which is what the store speaks in, and the file is read from the
  * registration stack the same way the preload reads it — the two
  * together, because the same test name occurs in more than one file.
+ *
+ * The body reaches the real function unchanged, so the runner names the
+ * leaf from the same function `nameOf` read it from.
  *
  * The preload's wrapper around `Deno.test` sees only the container the
  * describe chain registers, so without this the map holds one entry per

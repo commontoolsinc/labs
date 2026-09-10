@@ -345,15 +345,15 @@ describe("FabricRegExp", () => {
 
   describe("tag functions", () => {
     describe("tagFromNativeValueElseNull()", () => {
-      it("returns the `RegExp` tag for `RegExp` instances", () => {
-        expect(tagFromNativeValueElseNull(/abc/)).toBe(VALUE_TAGS.RegExp);
+      it("returns the `JsRegExp` tag for `RegExp` instances", () => {
+        expect(tagFromNativeValueElseNull(/abc/)).toBe(VALUE_TAGS.JsRegExp);
       });
     });
 
     describe("tagFromNativeBuiltinClassElseNull()", () => {
-      it("returns the `RegExp` tag for the `RegExp` constructor", () => {
+      it("returns the `JsRegExp` tag for the `RegExp` constructor", () => {
         expect(tagFromNativeBuiltinClassElseNull(RegExp)).toBe(
-          VALUE_TAGS.RegExp,
+          VALUE_TAGS.JsRegExp,
         );
       });
     });

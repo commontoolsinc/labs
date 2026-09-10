@@ -17,7 +17,10 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { tagFromNativeValueElseNull } from "@commonfabric/data-model";
+import {
+  tagFromNativeValueElseNull,
+  VALUE_TAGS,
+} from "@commonfabric/data-model";
 import { restoreErrorIsError } from "../src/sandbox/error-taming.ts";
 import {
   ensureSESLockdown,
@@ -117,7 +120,7 @@ describe("Error.isError under SES lockdown", () => {
       ensureSESLockdown();
       const severed = new Error("severed");
       Object.setPrototypeOf(severed, null);
-      expect(tagFromNativeValueElseNull(severed)).toBe("Error");
+      expect(tagFromNativeValueElseNull(severed)).toBe(VALUE_TAGS.JsError);
     });
   });
 });

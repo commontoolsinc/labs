@@ -94,9 +94,15 @@ describe("reading the shape of a bdd call", () => {
     expect(nameOf(["a name", body])).toBe("a name");
     expect(nameOf([{ name: "from options" }, body])).toBe("from options");
     expect(nameOf([function named() {}])).toBe("named");
-    // An anonymous body names nothing, and a call this cannot name goes
+    expect(nameOf([{ fn: body }])).toBe("body");
+    // A name the call carries stands in place of the body's, whatever
+    // its length, and a body with no name of its own gives the empty
+    // string. The runner reads both the same way.
+    expect(nameOf([{ name: "", fn: body }])).toBe("");
+    expect(nameOf([{}, () => {}])).toBe("");
+    // A call carrying neither a name nor a body names nothing, and goes
     // to the real function untouched rather than being dropped.
-    expect(nameOf([{}, () => {}])).toBeUndefined();
+    expect(nameOf([{ no: "name" }])).toBeUndefined();
     expect(nameOf([])).toBeUndefined();
   });
 
@@ -222,6 +228,36 @@ describe("what the wrappers do once a capture is installed", () => {
     const alone = capturing();
     wrapIt(() => {}, () => {}, alone)("bare leaf", () => {});
     expect(alone.asked).toEqual(["bare leaf"]);
+  });
+
+  it("names a leaf whose call carries no name after its body", () => {
+    const capture = capturing();
+    const passed: unknown[] = [];
+    const it_ = wrapIt(
+      (body: unknown) => passed.push(body),
+      () => {},
+      capture,
+    );
+    it_(() => {});
+    it_(function kept() {});
+    // A body with no name of its own names the leaf with the empty
+    // string, which is the last element of the chain the runner reports
+    // it under.
+    expect(capture.asked).toEqual(["", "kept"]);
+    // Each body reaches the real function as it was given rather than
+    // through a wrapper of another name, so the name the runner takes
+    // from it is the one recorded here.
+    expect(passed.map((arg) => bodyOf([arg])?.body.name))
+      .toEqual(capture.asked);
+  });
+
+  it("names a leaf given an empty name by that name and not its body", () => {
+    const capture = capturing();
+    wrapIt(() => {}, () => {}, capture)({
+      name: "",
+      fn: function unused() {},
+    });
+    expect(capture.asked).toEqual([""]);
   });
 
   it("registers a listed leaf as ignored rather than running it", () => {

@@ -277,6 +277,7 @@ export async function runMultiUserTestPattern(
           dataFilePaths: options.dataFilePaths,
           patternCoverageDir: options.patternCoverageDir,
           continuousUI: options.continuousUI,
+          noIdempotencyCheck: options.noIdempotencyCheck,
           participant: spec.name,
           participants: meta.participants.map((p) => p.name),
           seedDefaults: index === 0,

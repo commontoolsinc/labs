@@ -1028,22 +1028,40 @@ export type Engine = {
   stagedDocumentCache?: Map<string, DocumentCacheEntry>;
 };
 
+/** The first stale confirmed read of an entity on a branch in a declared scope. */
+export type ConfirmedReadConflict = {
+  of: string;
+  scope: CellScope;
+  /** Absent for the default branch. */
+  branch?: BranchName;
+  seq: number;
+  conflictSeq: number;
+};
+
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
   readonly of?: string;
 
+  /** Scope of the entity whose confirmed read went stale, when one is named. */
+  readonly scope?: CellScope;
+  readonly branch?: BranchName;
+
   readonly seq?: number;
   readonly conflictSeq?: number;
+  readonly conflicts?: readonly ConfirmedReadConflict[];
   constructor(
     message: string,
-    details?: { of: string; seq: number; conflictSeq: number },
+    conflicts?: readonly ConfirmedReadConflict[],
   ) {
     super(message);
     this.name = "ConflictError";
-    if (details !== undefined) {
-      this.of = details.of;
-      this.seq = details.seq;
-      this.conflictSeq = details.conflictSeq;
+    if (conflicts !== undefined && conflicts.length > 0) {
+      this.conflicts = [...conflicts];
+      this.of = conflicts[0].of;
+      this.scope = conflicts[0].scope;
+      this.branch = conflicts[0].branch;
+      this.seq = conflicts[0].seq;
+      this.conflictSeq = conflicts[0].conflictSeq;
     }
   }
 }
@@ -6171,10 +6189,19 @@ const validateConfirmedReads = (
   // Every confirmed read in the commit resolves declared user/session scope
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
+  const conflicts: ConfirmedReadConflict[] = [];
+  const staleInstances = new Map<BranchName, Map<ScopeKey, Set<EntityId>>>();
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
+    const scope = read.scope ?? DEFAULT_SCOPE;
+    let staleScopes = staleInstances.get(readBranch);
+    let staleIds = staleScopes?.get(scopeKey);
+    // Further path scans cannot change a known-stale entity's recovery address.
+    // Every read still validates its branch and scope before skipping the scan,
+    // so invalid addresses take precedence over stale-read conflicts.
+    if (staleIds?.has(read.id)) continue;
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -6185,11 +6212,43 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
-      throw new ConflictError(
-        `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
-        { of: read.id, seq: read.seq, conflictSeq },
-      );
+      if (staleScopes === undefined) {
+        staleScopes = new Map();
+        staleInstances.set(readBranch, staleScopes);
+      }
+      if (staleIds === undefined) {
+        staleIds = new Set();
+        staleScopes.set(scopeKey, staleIds);
+      }
+      staleIds.add(read.id);
+      conflicts.push({
+        of: read.id,
+        scope,
+        ...(readBranch === DEFAULT_BRANCH ? {} : { branch: readBranch }),
+        seq: read.seq,
+        conflictSeq,
+      });
     }
+  }
+  if (conflicts.length > 0) {
+    // Message-only clients recover by entity ID. Multiple scopes or branches
+    // of one entity must not crowd other entities out of the bounded preview.
+    // The array carries every stale instance and its diagnostic sequences.
+    const messages = new Map<EntityId, string>();
+    for (const { of, seq, conflictSeq } of conflicts) {
+      if (!messages.has(of)) {
+        messages.set(
+          of,
+          `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`,
+        );
+      }
+    }
+    const preview = [...messages.values()].slice(0, 3);
+    if (messages.size > preview.length) {
+      const remaining = messages.size - preview.length;
+      preview.push(`${remaining} more conflict${remaining === 1 ? "" : "s"}`);
+    }
+    throw new ConflictError(preview.join("; "), conflicts);
   }
 };
 

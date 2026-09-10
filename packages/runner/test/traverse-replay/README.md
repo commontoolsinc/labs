@@ -31,8 +31,8 @@ cd packages/runner && deno run --allow-read --allow-write test/traverse-replay/r
 ```
 
 The recorder logs every `SchemaObjectTraverser.traverse()` call (address,
-selector, link, `includeMeta`, shared context/memo identity) and snapshots each
-doc read during traversal into the corpus. `CF_TRAVERSE_CAPTURE_MAX` caps
+selector, link, `traverseCells`, shared context/memo identity) and snapshots
+each doc read during traversal into the corpus. `CF_TRAVERSE_CAPTURE_MAX` caps
 recorded invocations (default 20k). Edit `meta` in the fixture JSON to give it a
 name/description before gzipping.
 
@@ -53,7 +53,7 @@ behavior-preserving optimization must keep byte-identical:
    no unit test catches it. (Verified: commenting out a single
    `READ_FOR_SCHEDULING` read in `traverseDAG` fails the test with "reads
    missing".)
-3. **Schema-tracker contents** for shared/`includeMeta` contexts — the
+3. **Schema-tracker contents** for shared/`traverseCells` contexts — the
    server-side subscription surface.
 
 `deno task test` runs `traverse-replay.test.ts`, which asserts replay matches
@@ -85,7 +85,7 @@ with a counter explanation.
 - `shopping-list-test` — small array/handler-heavy client load; 474 invocations,
   77 docs, fast inner-loop fixture (~20ms).
 - `piece-query-legacy` — a captured server query dataset (36 docs);
-  server-shaped (`includeMeta`, single big traversal). Converted from the old
+  server-shaped (`traverseCells`, single big traversal). Converted from the old
   `integration/traverse_timing.test.ts` dataset. The fixture keeps the original
   `selectedPiece` selector and keys the corpus by the capture space, which links
   in the docs carry explicitly. The timing test, its JSON, and the one-off
