@@ -292,7 +292,7 @@ const deleteSelectedNotes = handler<
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    pieceRegistry: Writable<NotePiece[] | Default<[]>>;
+    pieceRegistry: Writable<MinimalPiece[] | Default<[]>>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, { notes, selectedNoteIndices, pieceRegistry, notebooks }) => {
@@ -552,11 +552,11 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const notebooks = notebookWish.candidates;
 
     // The registry is writable for creating notes and notebooks.
-    const pieceRegistryWish = wish<Writable<NotePiece[]>>({
+    const pieceRegistryWish = wish<Writable<MinimalPiece[]>>({
       query: "#pieceRegistry",
       headless: true,
     });
-    const pieceRegistry: Writable<NotePiece[]> = resultOf(
+    const pieceRegistry: Writable<MinimalPiece[]> = resultOf(
       pieceRegistryWish.result,
     );
 
