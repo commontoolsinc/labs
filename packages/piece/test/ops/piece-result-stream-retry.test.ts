@@ -80,12 +80,16 @@ async function runRetryScenario(
     );
 
     const provider = storageManager.open(pieces.getSpace());
-    const originalReconciliation = provider.loadUnexaminedAbsences;
+    const originalAbsences = provider.unexaminedAbsences;
+    const originalPresentCount = provider.presentCount;
+    const originalPendingLoadGeneration = storageManager.pendingLoadGeneration
+      .bind(storageManager);
+    const originalLoadsSettled = storageManager.loadsSettled.bind(
+      storageManager,
+    );
     const replica = provider.replica;
     const originalEnqueue = replica.enqueueEventAppend;
-    if (
-      originalReconciliation === undefined || originalEnqueue === undefined
-    ) {
+    if (originalAbsences === undefined || originalEnqueue === undefined) {
       throw new Error("test storage does not support event reconciliation");
     }
     const cellSet = spy(Object.getPrototypeOf(piece), "set");
@@ -100,9 +104,26 @@ async function runRetryScenario(
       });
     }
 
+    // Force one absence-reconciliation round: the edit's first attempt waits
+    // on a fabricated in-flight load, finds its document present, and
+    // re-runs; the second attempt finds nothing present and commits.
     let reconciliationCalls = 0;
     const eventIds: string[] = [];
-    provider.loadUnexaminedAbsences = () => {
+    provider.unexaminedAbsences = () => [{
+      space: pieces.getSpace(),
+      id: "of:forced-reconciliation",
+      scope: "space",
+    }];
+    const isForcedReconciliation = (key: string) =>
+      key.endsWith("/space/of:forced-reconciliation");
+    storageManager.pendingLoadGeneration = (key) =>
+      isForcedReconciliation(key) ? 1 : originalPendingLoadGeneration(key);
+    storageManager.loadsSettled = (keys) => {
+      const realKeys = keys.filter((key) => !isForcedReconciliation(key));
+      const realLoadsSettled = realKeys.length === 0
+        ? Promise.resolve()
+        : originalLoadsSettled(realKeys);
+      if (!keys.some(isForcedReconciliation)) return realLoadsSettled;
       reconciliationCalls++;
       if (
         reconciliationCalls === 1 && identityMode === "replace-session"
@@ -112,8 +133,9 @@ async function runRetryScenario(
           sessionId: `replacement-${crypto.randomUUID()}`,
         };
       }
-      return Promise.resolve(reconciliationCalls === 1 ? 1 : 0);
+      return realLoadsSettled;
     };
+    provider.presentCount = () => reconciliationCalls === 1 ? 1 : 0;
     replica.enqueueEventAppend = (append) => {
       eventIds.push(append.eventId);
       return Promise.resolve({ delivered: true });
@@ -142,7 +164,10 @@ async function runRetryScenario(
       if (identityMode !== "session") {
         Reflect.deleteProperty(activeRuntime, "scopeKeyIdentity");
       }
-      provider.loadUnexaminedAbsences = originalReconciliation;
+      provider.unexaminedAbsences = originalAbsences;
+      provider.presentCount = originalPresentCount;
+      storageManager.pendingLoadGeneration = originalPendingLoadGeneration;
+      storageManager.loadsSettled = originalLoadsSettled;
       replica.enqueueEventAppend = originalEnqueue;
       cellSet.restore();
       removeHandler();

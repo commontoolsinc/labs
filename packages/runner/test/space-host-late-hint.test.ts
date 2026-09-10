@@ -9,8 +9,10 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import {
   type Options,
   type SessionFactory,
+  type SpaceReplica,
   StorageManager,
 } from "../src/storage/v2.ts";
+import type { ISpaceReplica } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { loadSchemaDocument } from "../src/cfc/prepare.ts";
 import {
@@ -82,6 +84,20 @@ const makeServer = (name: string): MemoryV2Server.Server =>
     },
     sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
+
+/**
+ * Pins that `replica` holds a record for `id` and no value under it: the
+ * read reached this replica and found nothing. `getDocument()` reads
+ * `undefined` for a document this replica never looked at as well. Each
+ * caller below asserts before any transaction writes `id`, which is the
+ * other way a record appears.
+ */
+function expectExaminedAbsent(replica: ISpaceReplica, id: URI): void {
+  expect(
+    (replica as SpaceReplica).accessForTestingOnly.hasDocumentRecord(id),
+  ).toBe(true);
+  expect(replica.getDocument(id)).toBeUndefined();
+}
 
 describe("late space host hints", () => {
   it("confirms the default host without rebuilding its provider", async () => {
@@ -318,7 +334,7 @@ describe("late space host hints", () => {
         schema: true,
       });
       expect(firstRead.error).toBeUndefined();
-      expect(provider.replica.getDocument(targetId)).toBeUndefined();
+      expectExaminedAbsent(provider.replica, targetId);
 
       expect(
         reader.registerSpaceHost(
@@ -417,8 +433,8 @@ describe("late space host hints", () => {
         ).toBeUndefined();
       }
       expect((await provider.sync(secondId)).error).toBeUndefined();
-      expect(provider.replica.getDocument(firstId)).toBeUndefined();
-      expect(provider.replica.getDocument(secondId)).toBeUndefined();
+      expectExaminedAbsent(provider.replica, firstId);
+      expectExaminedAbsent(provider.replica, secondId);
 
       expect(
         reader.registerSpaceHost(
@@ -478,7 +494,7 @@ describe("late space host hints", () => {
 
       const provider = reader.open(targetSpace);
       expect((await provider.sync(targetId)).error).toBeUndefined();
-      expect(provider.replica.getDocument(targetId)).toBeUndefined();
+      expectExaminedAbsent(provider.replica, targetId);
 
       const stale = reader.edit();
       const address = {
@@ -819,7 +835,7 @@ describe("late space host hints", () => {
 
       const targetProvider = reader.open(targetSpace);
       expect((await targetProvider.sync(targetId)).error).toBeUndefined();
-      expect(targetProvider.replica.getDocument(targetId)).toBeUndefined();
+      expectExaminedAbsent(targetProvider.replica, targetId);
 
       const stale = reader.edit();
       const target = stale.read({
