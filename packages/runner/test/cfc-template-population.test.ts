@@ -461,7 +461,11 @@ describe("CFC template population (Stage A): the two under-taints", () => {
       { path: [], label: { confidentiality: ["memb-secret"] } },
     ]);
     const listId = await buildList(rt, "tp-list-i", criteriaId, ["tp-el-i"]);
-    const before = entriesOf(listId);
+    const beforeEntries = entriesOf(listId);
+    // The container metadata that must re-derive byte-identically is there to
+    // re-derive.
+    expect(beforeEntries.some((e) => e.origin === "structure")).toBe(true);
+    const before = JSON.stringify(beforeEntries);
 
     const again = rt.edit();
     again.readOrThrow(readAddress(criteriaId, []));
@@ -477,7 +481,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     );
     expect(wroteCfc).toBe(false);
     expect((await again.commit()).ok).toBeDefined();
-    expect(entriesOf(listId)).toEqual(before);
+    expect(JSON.stringify(entriesOf(listId))).toEqual(before);
   });
 
   it("the re-deriving tx's own slot readback does not ratchet J (readback exclusion)", async () => {
@@ -1173,6 +1177,13 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
       ifc: { confidentiality: ["root-label"] },
     } as JSONSchema, { k: 1 });
     const stored = entriesOf(id);
+    // The root declaration is stamped, so an absent `*` entry is a fact about
+    // a label map that was written.
+    expect(stored).toContainEqual({
+      path: [],
+      label: { confidentiality: ["root-label"] },
+      origin: "declared",
+    });
     expect(stored.some((e) => e.path.includes("*"))).toBe(false);
   });
 });

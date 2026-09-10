@@ -45,7 +45,8 @@ function buildProgram(
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
     jsx: ts.JsxEmit.React,
-    jsxFactory: "h",
+    jsxFactory: "__cfHelpers.h",
+    jsxFragmentFactory: "__cfHelpers.h.fragment",
     strict: true,
   };
   const host: ts.CompilerHost = {

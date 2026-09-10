@@ -95,12 +95,14 @@ export async function batchTypeCheckFixtures(
     return acc;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.jsonc for consistent type-checking
+  // JSX emit and module kind mirror the js-compiler's getCompilerOptions()
+  // (packages/js-compiler/typescript/options.ts) so the factory bindings match
+  // production; the target and strictness flags below are the harness's own.
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
     jsx: ts.JsxEmit.React,
-    jsxFactory: "h",
+    jsxFactory: "__cfHelpers.h",
     jsxFragmentFactory: "__cfHelpers.h.fragment",
     strict: true,
     noImplicitAny: true,
@@ -344,12 +346,14 @@ export async function transformFiles(
     return files;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.jsonc for consistent type-checking
+  // JSX emit and module kind mirror the js-compiler's getCompilerOptions()
+  // (packages/js-compiler/typescript/options.ts) so the factory bindings match
+  // production; the target and strictness flags below are the harness's own.
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
     jsx: ts.JsxEmit.React,
-    jsxFactory: "h",
+    jsxFactory: "__cfHelpers.h",
     jsxFragmentFactory: "__cfHelpers.h.fragment",
     strict: true,
     noImplicitAny: true,
@@ -683,12 +687,14 @@ export async function validateFiles(
     return files;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.jsonc for consistent type-checking
+  // JSX emit and module kind mirror the js-compiler's getCompilerOptions()
+  // (packages/js-compiler/typescript/options.ts) so the factory bindings match
+  // production; the target and strictness flags below are the harness's own.
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
     jsx: ts.JsxEmit.React,
-    jsxFactory: "h",
+    jsxFactory: "__cfHelpers.h",
     jsxFragmentFactory: "__cfHelpers.h.fragment",
     strict: true,
     noImplicitAny: true,
