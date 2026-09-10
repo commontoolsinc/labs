@@ -371,74 +371,74 @@ export class EmptyValueVisitor<Domain, ResultType>
   extends BaseValueVisitor<Domain, ResultType> {
   /** @inheritDoc */
   visitArrayContentsItem(
-    index: number,
-    value: Domain,
+    _index: number,
+    _value: Domain,
   ): ContainerIterationResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitCycle(
-    value: Domain,
-    originalDepth: number,
-    thisDepth: number,
+    _value: Domain,
+    _originalDepth: number,
+    _thisDepth: number,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricArray(
-    value: Domain & FabricArray,
+    _value: Domain & FabricArray,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricInstance(
-    value: Domain & FabricInstance,
+    _value: Domain & FabricInstance,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
-    value: Domain & FabricPlainObject,
+    _value: Domain & FabricPlainObject,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricContainer(
-    value: Domain & FabricContainerValue,
+    _value: Domain & FabricContainerValue,
   ): DispatchingVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitMapContentsItem(
-    key: Domain,
-    value: Domain,
+    _key: Domain,
+    _value: Domain,
   ): ContainerIterationResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitNonFabricValue(
-    value: Domain,
+    _value: Domain,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitPrimitive(
-    value: Domain & (Primitive | FabricPrimitive),
-    type: ValueTag,
+    _value: Domain & (Primitive | FabricPrimitive),
+    _type: ValueTag,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
-  visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType> {
+  visitValue(_value: Domain): DispatchingVisitorResult<Domain, ResultType> {
     return undefined;
   }
 }
