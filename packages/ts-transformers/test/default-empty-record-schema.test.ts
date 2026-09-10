@@ -18,6 +18,7 @@ describe("default-empty-record-schema", () => {
         literal: "{}",
         stringKeys: "Record<string, never>",
         propertyKeys: "Record<PropertyKey, never>",
+        indexSignature: "{ [key: string]: never }",
         alias: "EmptyRecord",
         literalAlias: "EmptyObject",
       };
@@ -39,6 +40,7 @@ describe("default-empty-record-schema", () => {
           literal: state.literal,
           stringKeys: state.stringKeys,
           propertyKeys: state.propertyKeys,
+          indexSignature: state.indexSignature,
           alias: state.alias,
           literalAlias: state.literalAlias,
         }));
@@ -145,5 +147,42 @@ describe("default-empty-record-schema", () => {
         warning.start + warning.length,
       ),
     ).toContain("pattern<Input>");
+  });
+
+  it("warns instead of emitting partial object and tuple defaults", async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `/// <cts-enable />
+      import { Default, pattern, Writable } from "commonfabric";
+      interface Input {
+        object: Writable<Default<Record<string, unknown>, { known: 1; missing: string }>>;
+        tuple: Writable<Default<unknown[], [1, string]>>;
+        unionObject: Writable<Record<string, unknown> | Default<{ nested: { missing: string } }>>;
+        unionTuple: Writable<unknown[] | Default<[{ nested: [0, string] }]>>;
+      }
+      export default pattern<Input>((state) => ({
+        object: state.object,
+        tuple: state.tuple,
+        unionObject: state.unionObject,
+        unionTuple: state.unionTuple,
+      }));
+      `,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+    const { input } = patternSchemas(parseModule(output));
+    const schemas = input.properties as Record<string, Record<string, unknown>>;
+
+    for (const name of ["object", "tuple", "unionObject", "unionTuple"]) {
+      expect(schemas[name]).not.toHaveProperty("default");
+    }
+    const warnings = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "schema-default:unresolved"
+    );
+    expect(warnings).toHaveLength(4);
+    expect(warnings.map((warning) => warning.line)).toEqual([5, 6, 7, 8]);
   });
 });

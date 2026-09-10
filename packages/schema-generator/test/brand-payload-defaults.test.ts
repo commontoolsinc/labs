@@ -59,6 +59,7 @@ describe("brand-payload default recovery (expanded Default<T, V>)", () => {
     const code = `${DEFAULT_PRELUDE}
       interface Tagged<V extends string> {
         note: Default<string, V>;
+        config: Default<{ tag: string }, { tag: V }>;
       }
       interface Holder {
         tagged: Tagged<"from-generic">;
@@ -78,6 +79,9 @@ describe("brand-payload default recovery (expanded Default<T, V>)", () => {
     expect(tagged.properties?.note).toEqual({
       type: "string",
       default: "from-generic",
+    });
+    expect(tagged.properties?.config).toHaveProperty("default", {
+      tag: "from-generic",
     });
     expect(diagnostics).toEqual([]);
   });

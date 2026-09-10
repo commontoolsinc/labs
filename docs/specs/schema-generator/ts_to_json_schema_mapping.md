@@ -54,13 +54,13 @@ instance (`anonymousNames` WeakMap + counter, `src/schema-generator.ts`)
 
 ## 2. Generation Entry Points And Analysis-Path Selection
 
-Two public methods (`src/interface.ts`, implemented in
-`src/schema-generator.ts`): `generateSchema(type, checker, typeNode?,
-{widenLiterals?}?, schemaHints?, sourceFile?)` — the normal,
+Two public methods on `SchemaGenerator` (`src/schema-generator.ts`):
+`generateSchema(type, checker, typeNode?,
+options?: SchemaGenerationOptions, schemaHints?, sourceFile?)` — the normal,
 type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
-typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
-passes `checker.getAnyType()` as the type, forcing the auto-detection
-below onto the node-based path.
+typeRegistry?, schemaHints?, sourceFile?, options?: SchemaGenerationOptions)`,
+a thin wrapper that passes `checker.getAnyType()` as the type, forcing the
+auto-detection below onto the node-based path.
 
 **Path selection** (`shouldUseNodeBasedAnalysis`,
 `src/schema-generator.ts`): node-based analysis is used iff a
@@ -468,7 +468,11 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    type nodes, and `typeof CONST` queries resolved
    through import aliases to the variable initializer (unwrapping
    `as`/`satisfies`/parens/type assertions; shorthand properties via
-   `getShorthandAssignmentValueSymbol`).
+   `getShorthandAssignmentValueSymbol`). Inline object and tuple types are
+   extracted as a whole: an unresolved member at any depth makes the entire
+   value unresolved. Non-property type members require the complete type to
+   qualify as an empty record; they cannot be silently skipped. The applicable
+   type/brand fallbacks still run before an unresolved-default warning is emitted.
 2. **Type-based extraction** (both formatters): literal values, symbol value
    declarations, empty object-literal types, and empty records. An alias of `{}`
    yields `{}`, including through alias chains and imports, without requiring a

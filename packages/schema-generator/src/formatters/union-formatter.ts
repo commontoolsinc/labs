@@ -858,25 +858,35 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     if (ts.isTupleTypeNode(typeNode)) {
-      return typeNode.elements.map((element) =>
-        this.#extractDefaultValueFromNode(element, context)
-      );
+      const values: unknown[] = [];
+      for (const element of typeNode.elements) {
+        const value = this.#extractDefaultValueFromNode(element, context);
+        if (value === undefined) return undefined;
+        values.push(value);
+      }
+      return values;
     }
 
     if (ts.isTypeLiteralNode(typeNode)) {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
         if (!ts.isPropertySignature(member) || !member.name || !member.type) {
-          continue;
+          const type = context.typeRegistry?.get(typeNode) ??
+            context.typeChecker.getTypeFromTypeNode(typeNode);
+          return isEmptyObjectDefaultType(type, context.typeChecker)
+            ? {}
+            : undefined;
         }
         const propName = getPropertyNameText(member.name, context.typeChecker);
-        if (!propName) {
-          continue;
-        }
-        obj[propName] = this.#extractDefaultValueFromNode(
-          member.type,
-          context,
-        );
+        if (propName === undefined) return undefined;
+        const value = this.#extractDefaultValueFromNode(member.type, context);
+        if (value === undefined) return undefined;
+        Object.defineProperty(obj, propName, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return obj;
     }
