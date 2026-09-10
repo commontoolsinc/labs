@@ -45,7 +45,7 @@ export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
  */
 export type IterateArrayForm<DomainExtra> = {
   type: "iterateArray";
-  values: readonly DomainFor<DomainExtra>[];
+  elements: readonly DomainFor<DomainExtra>[];
 };
 
 /**
@@ -126,9 +126,9 @@ export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
  * the visitor engine to "do" something.
  */
 export function doIterateArray<DomainExtra>(
-  values: readonly DomainFor<DomainExtra>[],
+  elements: readonly DomainFor<DomainExtra>[],
 ): IterateArrayForm<DomainExtra> {
-  return { type: "iterateArray", values };
+  return { type: "iterateArray", elements };
 }
 
 /**
@@ -629,7 +629,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
     switch (result.type) {
       case "iterateArray": {
-        return this.#subvisitArray(value, result.values);
+        return this.#subvisitArray(value, result.elements);
       }
 
       case "mainResult": {
