@@ -34,10 +34,14 @@ ordinary rules, at the end of action execution before commit preparation. A
 fanned-out node reports each executed instance separately; this count is not the
 union subscription retained for all instances.
 
-The disabled read sites check one shared boolean and allocate nothing. Active
-collectors are keyed by the underlying transaction, so overlapping runtimes do
-not attribute reads to each other. The `read-stats.bench.ts` benchmark measures
-enabled versus disabled accounting over a reduction of 1,000 linked rows.
+When no collector is active, read sites check one shared boolean and perform no
+counter lookup or allocation. While any collector is active in the same isolate,
+unmeasured transactions also perform a lookup but do not accumulate counts.
+Active collectors are keyed by the underlying transaction, so overlapping
+runtimes do not attribute reads to each other. The `read-stats.bench.ts`
+benchmark measures enabled versus disabled read-hook accounting over a reduction
+of 1,000 linked rows. It excludes scheduler dependency compaction and commit
+preparation.
 
 Use access counts and run counts to test collection-size scaling after a
 single-element edit. Pair them with runtime benchmarks: these counters measure

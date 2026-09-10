@@ -68,6 +68,42 @@ describe("action-read-report", () => {
     expect(report.format("next update", 10)[0]).toContain("0 runs, 0 accesses");
   });
 
+  it("ranks combined authored-source work above a larger individual action", () => {
+    const report = new ActionReadReport();
+    for (let i = 0; i < 14; i++) {
+      report.record({
+        type: "scheduler.run.complete",
+        actionId: `card-${i}`,
+        src: "cf:module/example/card.tsx:10:2",
+        durationMs: 1,
+        reads: {
+          proxyAccesses: 20,
+          linkResolutions: 3,
+          distinctDocuments: 2,
+          registeredDependencies: 4,
+        },
+      });
+    }
+    report.record({
+      type: "scheduler.run.complete",
+      actionId: "tally",
+      src: "cf:module/example/tally.tsx:20:2",
+      durationMs: 1,
+      reads: {
+        proxyAccesses: 100,
+        linkResolutions: 1,
+        distinctDocuments: 1,
+        registeredDependencies: 1,
+      },
+    });
+    const lines = report.format("update", 1);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("15 runs, 380 accesses, 43 link hops");
+    expect(lines[2].trim().replaceAll(/\s+/g, " ")).toBe(
+      "14 280 20 42 28 56 cf:module/example/card.tsx:10:2",
+    );
+  });
+
   it("ignores unmeasured completions and run-start events", () => {
     const report = new ActionReadReport();
     report.record({ type: "scheduler.run", actionId: "unmeasured" });

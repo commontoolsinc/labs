@@ -5,7 +5,7 @@ import type {
   RuntimeTelemetryMarker,
 } from "@commonfabric/runner";
 
-/** Read totals and maximum per-run accesses for one scheduler action. */
+/** Read totals and maximum per-run accesses for one source or builtin. */
 interface ActionRow {
   /** Authored source location or builtin name. */
   label: string;
@@ -31,7 +31,12 @@ export class ActionReadReport {
   record(marker: RuntimeTelemetryMarker): void {
     if (marker.type !== "scheduler.run.complete" || !marker.reads) return;
     const reads = marker.reads;
-    const row = this.#rows.get(marker.actionId);
+    const key = marker.src !== undefined
+      ? `source:${marker.src}`
+      : marker.actionInfo?.moduleName !== undefined
+      ? `builtin:${marker.actionInfo.moduleName}`
+      : `action:${marker.actionId}`;
+    const row = this.#rows.get(key);
     if (row) {
       row.runs++;
       row.maxAccesses = Math.max(row.maxAccesses, reads.proxyAccesses);
@@ -40,7 +45,7 @@ export class ActionReadReport {
       row.reads.distinctDocuments += reads.distinctDocuments;
       row.reads.registeredDependencies += reads.registeredDependencies;
     } else {
-      this.#rows.set(marker.actionId, {
+      this.#rows.set(key, {
         label: marker.src ?? marker.actionInfo?.moduleName ?? marker.actionId,
         runs: 1,
         reads: { ...reads },
@@ -55,7 +60,7 @@ export class ActionReadReport {
   }
 
   /**
-   * Formats totals over all runs and the most expensive actions by accesses.
+   * Formats totals over all runs and the most expensive sources by accesses.
    * Document and dependency totals sum per-run counts, including repeat runs.
    */
   format(label: string, limit: number): string[] {

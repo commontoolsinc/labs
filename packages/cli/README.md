@@ -4,9 +4,10 @@
 
 `cf test <file.test.tsx> --verbose --stats-threshold 0` reports read costs for
 each step of a single-runtime test, including assertions, explicit renders, and
-settles. Initialization is reported separately. Each report sorts actions by
-total proxy accesses and includes their authored file, line, and column when
-available. Builtins use their runtime name or action ID.
+settles. Initialization is reported separately. Each report groups actions by
+authored file, line, and column, then sorts those sources by total proxy
+accesses. Actions without an authored source are grouped by builtin name, or by
+action ID when no name is available.
 
 The counters measure reactive data property and element reads (including array
 method materialization and cached reads), stored link hops traversed on cache

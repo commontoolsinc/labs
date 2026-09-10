@@ -2,6 +2,12 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import type {
+  Entity,
+  Revision,
+  State,
+  URI,
+} from "@commonfabric/memory/interface";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -10,7 +16,15 @@ import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { readStatsActive, startReadStats } from "../src/read-stats.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler/types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
+import {
+  createDefaultTraversalContext,
+  getAtPath,
+  type IMemorySpaceValueAttestation,
+  ManagedStorageTransaction,
+} from "../src/traverse.ts";
 
 const signer = await Identity.fromPassphrase("read-stats");
 const space = signer.did();
@@ -347,6 +361,63 @@ describe("read-stats", () => {
       expect(second.distinctDocuments).toBe(2);
       tx1.abort();
       tx2.abort();
+    }
+  });
+
+  for (const size of [1, 2, 10]) {
+    it(`counts each stored link when eagerly materializing ${size} array items`, async () => {
+      const write = runtime.edit();
+      const rows = runtime.getCell<{ n: number }[]>(
+        space,
+        "rows",
+        rowsSchema,
+        write,
+      );
+      const values = Array.from({ length: size }, (_, n) => ({ n }));
+      rows.set(values);
+      await write.commit();
+      const tx = runtime.edit();
+      const finish = startReadStats(tx);
+      try {
+        expect(rows.withTx(tx).get()).toEqual(values);
+      } finally {
+        const reads = finish(0);
+        tx.abort();
+        expect(reads.linkResolutions).toBe(size);
+        expect(reads.distinctDocuments).toBe(size + 1);
+      }
+    });
+  }
+
+  it("does not count a link traversal rejected by cycle detection", () => {
+    const id = "of:self" as URI;
+    const value = { "/": { "link@1": { id, space, path: [] } } };
+    const store = new Map<string, Revision<State>>([
+      [`${id}/application/json`, {
+        the: "application/json",
+        of: id as Entity,
+        is: { value },
+        since: 1,
+      }],
+    ]);
+    const tx = new ExtendedStorageTransaction(
+      new ManagedStorageTransaction(new StoreObjectManager(store)),
+    );
+    const doc: IMemorySpaceValueAttestation = {
+      address: { id, type: "application/json", path: ["value"], space },
+      value,
+    };
+    const context = createDefaultTraversalContext({
+      principal: space,
+      sessionId: "test",
+    });
+    const finish = startReadStats(tx);
+    try {
+      const [result] = getAtPath(tx, doc, [], context);
+      expect(result.value).toBeUndefined();
+    } finally {
+      const reads = finish(0);
+      expect(reads.linkResolutions).toBe(1);
     }
   });
 

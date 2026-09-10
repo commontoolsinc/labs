@@ -2447,7 +2447,6 @@ function followPointer(
     ]);
     return [notFound(target), selector];
   }
-  if (readStatsActive) recordLinkResolution(tx);
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
@@ -2479,6 +2478,7 @@ function followPointer(
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
   // We use a nonRecursive read, since we may not need everything at the target.
+  if (readStatsActive) recordLinkResolution(tx);
   const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
@@ -4492,6 +4492,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
     const target = this.#plainArrayItemLinkTarget(doc, selector);
     if (target === undefined) return undefined;
+    if (readStatsActive) recordLinkResolution(this.tx);
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined) {
       if (error.name !== "NotFoundError" || error.path.length !== 0) {
@@ -4720,6 +4721,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
             this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
           }
           const preparedTarget = preparedPlainLinks?.targets[batchIndex];
+          if (readStatsActive && preparedTarget !== undefined) {
+            recordLinkResolution(this.tx);
+          }
           const preparedResult = preparedTarget === undefined
             ? undefined
             : this.tx.read(preparedTarget, READ_NON_RECURSIVE);
