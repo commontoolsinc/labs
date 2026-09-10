@@ -138,19 +138,32 @@ the recorded CI report alone measured 5,509. This is a coverage diagnosis, not a
 replacement for a successful CI run.
 
 `verifier-path-controls.json` records relative-directory and absolute-directory
-with spaces controls. A source mutation that accepts only topic count 5 passes
-the recorded verifier but fails the current verifier on count 1. The current
-verifier checks the default and positive counts 1, 2, and 5 against the positive
-integer contract. The original verifier is available at the PR's parent commit
-6ac3f8a2624463be00a14eea4b22ca0fc17c6ccc; commands in the control record
-preserve the capture machine's provenance.
+with spaces controls for the verifier captured at
+6292fa2ba60d1ab3a4c92682cd7b90c63e91ddb4. A source mutation that accepts only
+topic count 5 passes the earlier verifier from
+6ac3f8a2624463be00a14eea4b22ca0fc17c6ccc but fails that captured verifier on
+count 1. Commands and the verifier hash preserve the capture provenance.
+
+`helper-review-controls.json` records the subsequent helper fixes, their exact
+source hashes, synthetic LCOV inputs, commands, and outcomes. The count verifier
+checks both acceptance and the returned count for default, 1, 2, and 5, and
+rejects a missing replay declaration. A mutation that increments valid counts
+passes the 6292 verifier and fails this verifier. Unchanged inputs pass with
+relative paths and absolute paths containing spaces. LCOV controls cover UTF-8
+paths under an ASCII locale, checkout ancestors named `tasks` or `packages`, and
+unrelated source paths. Each control reproduces the earlier helper's failure and
+passes with the recorded fix. These are helper controls, not latency trials.
 
 The LCOV inputs remain in the durable archive named in
 `coverage-discovery.json`, with its SHA-256 and retrieval/normalization/scoring
 commands. `coverage-inputs.sha256` lists every extracted input. The archive
 contains all 228 CI reports and the focused report, so replay does not depend on
-GitHub artifact retention. `merge-coverage-inputs.py.txt` rewrites source paths
-to the replay checkout and produces both joined reports. The scorer is the
+GitHub artifact retention. `merge-coverage-inputs.py.txt` reads and writes UTF-8
+and relocates only paths under explicitly supplied capture roots. Pass both
+`/home/runner/work/labs/labs` and
+`/Users/berni/.codex/worktrees/topics-campaign-events/labs` after the
+destination checkout argument, as shown in the manifest. Unrelated paths remain
+unchanged. The helper produces both joined reports. The scorer is the
 repository's `collectCoverageDebtMetricsFromLcov`, invoked by the exact
 JavaScript recorded in the manifest. Report byte hashes depend on the checkout
 path; the expected metric values do not.

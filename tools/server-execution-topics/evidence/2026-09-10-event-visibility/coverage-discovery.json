@@ -158,13 +158,13 @@
       },
       {
         "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/coverage/ci-normalized.lcov",
-        "bytes": 104830469,
-        "sha256": "bae0cf10a6032f6a73e8b88af2ab1ff8a58d8a5ef1e32174f1252cb8d4f64df4"
+        "bytes": 104830829,
+        "sha256": "b37b28e3db72bd7f0ed7bd5187ab297794ef327c086aec73418a905d18e9b6e7"
       },
       {
         "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/coverage/ci-plus-controls.lcov",
-        "bytes": 106557063,
-        "sha256": "f90eb856206785689caa3af7f864deb11afbf65e1d1347041f7a99a526e3c45e"
+        "bytes": 106557423,
+        "sha256": "07b0376c267e0a2200519792a7babca00cba177d99a52b0de82bfe1492ce219b"
       },
       {
         "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/coverage/runner-metric-comparison.json",
@@ -194,9 +194,12 @@
       "COVERAGE/6ac3",
       "COVERAGE/focused-after.lcov",
       "COVERAGE",
-      "CHECKOUT"
+      "CHECKOUT",
+      "/home/runner/work/labs/labs",
+      "/Users/berni/.codex/worktrees/topics-campaign-events/labs"
     ],
     "scoreJavaScript": "import { collectCoverageDebtMetricsFromLcov } from \"./tasks/coverage-metrics.ts\"; const rootDir = Deno.cwd(); for (const name of [\"ci-normalized.lcov\", \"ci-plus-controls.lcov\"]) { const metrics = await collectCoverageDebtMetricsFromLcov({ rootDir, lcov: await Deno.readTextFile(`COVERAGE/${name}`) }); console.log(name, metrics.find(metric => metric.name.includes(\"packages/runner \"))); }",
-    "scoreInvocation": "Run the scoreJavaScript with deno eval from CHECKOUT after substituting the extracted COVERAGE path. Recomputed metric values are 5509 and 5484; normalized output hashes match only when CHECKOUT has the recorded absolute path."
+    "scoreInvocation": "Run the scoreJavaScript with deno eval from CHECKOUT after substituting the extracted COVERAGE path. Recomputed metric values are 5509 and 5484; normalized output hashes match only when CHECKOUT has the recorded absolute path.",
+    "sourceRoots": "Only the explicitly listed capture roots are relocated; unrelated source paths are retained. Inputs and outputs use UTF-8."
   }
 }

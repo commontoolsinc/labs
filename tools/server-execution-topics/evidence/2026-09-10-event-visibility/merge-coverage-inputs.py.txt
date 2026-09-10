@@ -1,27 +1,51 @@
-"""Normalize captured source paths and join CI/focused LCOV inputs for scoring."""
+"""Relocate explicitly named capture roots and join CI/focused LCOV inputs."""
 
-from pathlib import Path
-import sys
+import argparse
+from pathlib import Path, PurePosixPath
 
-ci_directory, focused_file, output_directory, checkout = map(Path, sys.argv[1:])
-output_directory.mkdir(parents=True, exist_ok=True)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("ci_directory", type=Path)
+parser.add_argument("focused_file", type=Path)
+parser.add_argument("output_directory", type=Path)
+parser.add_argument("checkout", type=Path)
+parser.add_argument("source_roots", nargs="+", help="Captured POSIX checkout roots")
+args = parser.parse_args()
+source_roots = sorted(
+    {str(PurePosixPath(root)).rstrip("/") for root in args.source_roots},
+    key=len,
+    reverse=True,
+)
+if any(not root.startswith("/") for root in source_roots):
+    parser.error("Captured source roots must be absolute POSIX paths")
+checkout = args.checkout.resolve()
 
 
 def normalize(text):
     lines = []
     for line in text.splitlines():
         if line.startswith("SF:"):
-            positions = [line.find(marker) for marker in ("/packages/", "/tasks/")]
-            positions = [position for position in positions if position >= 0]
-            if positions:
-                line = "SF:" + str(checkout.resolve()) + line[min(positions):]
+            source = line[3:]
+            for root in source_roots:
+                prefix = root + "/"
+                if source.startswith(prefix):
+                    line = "SF:" + str(checkout / source[len(prefix):])
+                    break
         lines.append(line)
     return "\n".join(lines) + "\n"
 
 
-reports = [normalize(path.read_text()) for path in sorted(ci_directory.rglob("*.lcov"))]
+reports = [
+    normalize(path.read_text(encoding="utf-8"))
+    for path in sorted(args.ci_directory.rglob("*.lcov"))
+]
 if not reports:
     raise ValueError("No CI LCOV files found")
-(output_directory / "ci-normalized.lcov").write_text("\n".join(reports))
-reports.append(normalize(focused_file.read_text()))
-(output_directory / "ci-plus-controls.lcov").write_text("\n".join(reports))
+focused = normalize(args.focused_file.read_text(encoding="utf-8"))
+args.output_directory.mkdir(parents=True, exist_ok=True)
+(args.output_directory / "ci-normalized.lcov").write_text(
+    "\n".join(reports), encoding="utf-8"
+)
+reports.append(focused)
+(args.output_directory / "ci-plus-controls.lcov").write_text(
+    "\n".join(reports), encoding="utf-8"
+)

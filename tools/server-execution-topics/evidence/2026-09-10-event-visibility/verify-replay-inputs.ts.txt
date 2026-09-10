@@ -11,7 +11,11 @@ for (const file of variants) {
     new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
     (b) => b.toString(16).padStart(2, "0"),
   ).join("");
+  const enforceValidation = file === "seed-check.ts.txt";
   const countStart = source.indexOf("const topicCount =");
+  if (enforceValidation && countStart < 0) {
+    throw new Error("Replay source is missing its topic-count declaration.");
+  }
   const countCode = countStart < 0
     ? 'return Number(Deno.env.get("CF_TOPIC_BOARD_TOPICS") ?? 5);'
     : source.slice(countStart, source.indexOf("const identity =", countStart)) +
@@ -30,7 +34,10 @@ for (const file of variants) {
     rows.push({ file, hash, case: "topicCount", configured, result, error });
     const expectedCount = Number(configured ?? 5);
     const valid = Number.isInteger(expectedCount) && expectedCount > 0;
-    if (countStart >= 0 && (valid !== (error === undefined))) {
+    if (
+      enforceValidation &&
+      (valid !== (error === undefined) || (valid && result !== expectedCount))
+    ) {
       throw new Error(`Wrong validation for ${configured}`);
     }
   }
@@ -68,7 +75,7 @@ for (const file of variants) {
     }
     rows.push({ file, hash, case: "stats", status, writes, error });
     if (
-      countStart >= 0 &&
+      enforceValidation &&
       (status === 503
         ? error === undefined || writes.length !== 0
         : error !== undefined || writes.length !== 1)
