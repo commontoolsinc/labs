@@ -6699,5 +6699,13 @@
         "controlSha256": "170b394d1adceb93d4a9a2affcd78a3185bba088796a505830f8627deb138caf"
       }
     ]
+  },
+  "manifestPortabilityControl": {
+    "baselineHead": "a873c0c73b4c6a24c1c7cf5e336bef299b32fd95",
+    "baselineSource": {
+      "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/source/baseline-health-controller-a873.py",
+      "sha256": "809aa814ab32c84a57c746cc575b6d1f78f7f4ce05896aa335b085b05918a14e"
+    },
+    "scope": "Manifest writer only, six cases; no health workload rerun or changed package source."
   }
 }

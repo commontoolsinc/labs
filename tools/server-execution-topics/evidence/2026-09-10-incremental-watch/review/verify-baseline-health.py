@@ -34,7 +34,35 @@ manifest = {
 
 
 def save():
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    # Exact process paths stay with the local capture. The shareable manifest
+    # uses named roots that a replay supplies, including command arguments.
+    captured = json.dumps(manifest, indent=2) + "\n"
+    provenance = output / "capture-provenance.json"
+    provenance.write_text(captured)
+    def portable(value):
+        if isinstance(value, str):
+            for root, name in sorted(
+                [(str(checkout), "${CHECKOUT}"), (str(output), "${OUTPUT}")],
+                key=lambda pair: len(pair[0]), reverse=True,
+            ):
+                value = value.replace(root, name)
+            return value
+        if isinstance(value, list):
+            return [portable(item) for item in value]
+        if isinstance(value, dict):
+            return {key: portable(item) for key, item in value.items()}
+        return value
+
+    document = portable(manifest)
+    document["pathRoots"] = {
+        "CHECKOUT": "baseline checkout passed as the first argument",
+        "OUTPUT": "capture directory passed as the second argument",
+    }
+    document["externalProvenance"] = {
+        "file": provenance.name,
+        "sha256": hashlib.sha256(captured.encode()).hexdigest(),
+    }
+    (output / "manifest.json").write_text(json.dumps(document, indent=2) + "\n")
 
 
 def verify_source(phase, expected):

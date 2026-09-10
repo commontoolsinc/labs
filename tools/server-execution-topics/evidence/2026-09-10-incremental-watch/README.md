@@ -178,7 +178,13 @@ python3 tools/server-execution-topics/evidence/2026-09-10-incremental-watch/revi
 The script uses the captured helper and a freshly built binary; the helper
 version and hashes are explicit. The two helper files remain in the disposable
 checkout as capture inputs, so each repetition requires a new checkout. The
-script never modifies the baseline's tracked source.
+script never modifies the baseline's tracked source. Its `manifest.json` uses
+`${CHECKOUT}` and `${OUTPUT}` roots in paths and commands. The separate
+`capture-provenance.json` retains exact local paths and command working
+directories; the manifest records its hash. Keep that provenance file with the
+external capture when sharing the portable manifest. The nested `arm` directory
+comes from the immutable helper and retains that helper's original capture
+format; it is also external provenance, not a portable manifest to commit.
 
 `review/baseline-health-02.json` records the successful seven-suite, 27-step
 replay with those source checks. `review/baseline-root-dirty-control.json`
@@ -190,3 +196,17 @@ candidate's home-identity scheduler errors; their marginal cause remains
 unclassified. These counts describe the captured schedules, not invariants or
 latency improvements. Full logs and manifests remain in the external archive
 with hashes.
+
+The manifest-only control runs the controller's actual writer in isolated
+capture directories. It checks success and failure states with plain, quoted,
+and non-ASCII paths, and verifies that the external provenance retains exact
+commands and matches its recorded hash. It does not run or simulate the health
+workload:
+
+```sh
+python3 tools/server-execution-topics/evidence/2026-09-10-incremental-watch/review/verify-manifest-portability.py tools/server-execution-topics/evidence/2026-09-10-incremental-watch/review/verify-baseline-health.py
+```
+
+The captured `review/manifest-portability-{red,green}.log` files record the
+failure on `a873c0c` and success on the corrected writer. The health workload
+and its earlier raw captures are unchanged.
