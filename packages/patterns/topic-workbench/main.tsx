@@ -298,11 +298,10 @@ const defaultPromptOf = lift((
     body: string;
   },
 ): string => {
-  const head = snippet(body, 400);
+  // One sentence. The kickoff's context block carries the document excerpt,
+  // so the sentence must not repeat it.
   const name = shortName ? `topic #${shortName}` : "the topic";
-  return head
-    ? `Work on ${name}, "${title}". Its living document begins: ${head}`
-    : `Work on ${name}, "${title}".`;
+  return title.trim() ? `Work on ${name}, "${title}".` : "";
 });
 
 /** The prompt a session actually starts from: the person's own words first,
