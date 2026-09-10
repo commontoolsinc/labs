@@ -24,7 +24,7 @@ The status corrections in this register are bounded to the rows below:
 | --- | --- |
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Open: no served compile outbox/completion path or real-host completion regression test. |
-| OW28-createRef | Closed: the compile cache snapshots program content, separates source-only evaluation from persistent compilation, and persists shared compiles into each requested space. |
+| OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
 | OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
@@ -2600,18 +2600,21 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
 - OW28-createRef — CLOSED: program-value hashing at the compile-cache boundary.
   `PatternManager.compileOrGetPattern` snapshots the complete resolved program
   with `snapshotQueryResult` and uses that same detached value for its key and
-  compiler input. Source-only evaluation and persistent compilation use
-  separate cache entries. Concurrent persistent requests share compilation
-  across spaces and register closure replication into every requested space;
-  replicated data files retain their compiled-cache data marker.
+  compiler input. Requests with and without a space use separate cache entries.
+  With CFC enforcement, concurrent requests share compilation across spaces and
+  register closure replication into every requested space; replicated data
+  files retain their compiled-cache data marker. With CFC disabled, requests
+  share compilation without scheduling closure replication.
 
   `pattern-manager.test.ts` proves that a same-cell program edit selects the new
   contents, identical content shares a result across addresses, and a delayed
   compile retains the program's source and options. `compile-cache-space-aware.test.ts`
   proves a fresh runtime loads a follower space's piece and attached data
   from the compiled cache, with recompilation refused, for persistent and
-  source-only pending/cached leaders. This cache boundary is shared by OFF and
-  the served compiler; closing it does not discharge OW28's serving port.
+  source-only pending/cached leaders. It also proves concurrent and cached
+  CFC-disabled calls share compilation without issuing replication. This cache
+  boundary is shared by OFF and the served compiler; closing it does not
+  discharge OW28's serving port.
 - OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
   inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
   reports that run-counter cancellation abandons a completion to which the

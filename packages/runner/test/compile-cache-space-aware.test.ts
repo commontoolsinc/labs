@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
@@ -103,6 +104,59 @@ describe("compileOrGetPattern persists the closure per requested space", () => {
       await rt1.dispose();
     }
   });
+
+  for (const follower of ["concurrent", "cached"]) {
+    it(`shares a ${follower} compile without replication when CFC is disabled`, async () => {
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        cfcEnforcementMode: "disabled",
+      });
+      const release = Promise.withResolvers<void>();
+      const replication = spy(
+        runtime.patternManager,
+        "replicatePatternToSpace",
+      );
+      try {
+        const compilePattern = runtime.patternManager.compilePattern.bind(
+          runtime.patternManager,
+        );
+        let compileCount = 0;
+        runtime.patternManager.compilePattern = async (program, context) => {
+          compileCount++;
+          await release.promise;
+          return await compilePattern(program, context);
+        };
+        const compilationA = runtime.patternManager.compileOrGetPattern(
+          PROGRAM,
+          spaceA,
+        );
+        if (follower === "cached") {
+          release.resolve();
+          await compilationA;
+        }
+        const compilationB = runtime.patternManager.compileOrGetPattern(
+          PROGRAM,
+          spaceB,
+        );
+        release.resolve();
+        const [patternA, patternB] = await Promise.all([
+          compilationA,
+          compilationB,
+        ]);
+        await runtime.patternManager.flushCompileCacheWrites();
+        expect(patternB).toBe(patternA);
+        expect(compileCount).toBe(1);
+        expect(
+          replication.calls.filter(({ args }) => args[1] !== args[2]),
+        ).toHaveLength(0);
+      } finally {
+        release.resolve();
+        replication.restore();
+        await runtime.dispose();
+      }
+    });
+  }
 
   for (
     const leader of ["persistent", "source-only pending", "source-only cached"]
