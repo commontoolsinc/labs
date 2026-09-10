@@ -26,7 +26,8 @@ named aggregates on explicit Cell/Writable array inputs, with contracts in
 covers initialization, single-row updates, scheduler runs, and total read work
 at 10, 100, and 1,000 elements. Timings include maintenance and commits and
 record the startup cost and machine-load limitations alongside update savings.
-B2's `groupBy` and `keyBy` are the next collection-algebra priority.
+B1's `groupBy`/`keyBy` indexes and B2's keyed lookup are the next
+collection-algebra priority.
 
 A0's specified headless command is measured, but it does not reproduce the
 reported 74-vote deployed workload. Keep the deployed figures unconfirmed until

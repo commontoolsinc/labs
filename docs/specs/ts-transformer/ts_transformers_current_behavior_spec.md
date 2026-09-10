@@ -263,6 +263,11 @@ Remaining fallback behavior is intentionally narrow:
   of every family that fail symbol resolution still require a reactive
   receiver to classify
 
+The `*WithPattern` argument-hoisting path also requires a synthetic callee.
+Only closure-stage output guarantees that callback captures have been threaded
+through the params argument; an authored inline pattern stays in its enclosing
+scope.
+
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
 `handler()` invocations.

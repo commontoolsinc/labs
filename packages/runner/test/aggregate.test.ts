@@ -31,6 +31,13 @@ describe("aggregate", () => {
     await storageManager.close();
   });
 
+  it("requires transformation for raw predicate and score callbacks", () => {
+    const items = runtime.getCell<number[]>(space, "raw callbacks");
+    expect(() => items.count((value) => value > 0)).toThrow("count");
+    expect(() => items.minBy((value) => value)).toThrow("minBy");
+    expect(() => items.maxBy((value) => value)).toThrow("maxBy");
+  });
+
   it("updates a sum through its tree and reconciles changed membership", async () => {
     const aggregate = createNodeFactory({
       type: "ref",

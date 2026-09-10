@@ -10,6 +10,7 @@ import { createNodeFactory } from "../builder/module.ts";
 import { pattern } from "../builder/pattern.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
+import { MAX_PATH_RESOLUTION_LENGTH } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { snapshotQueryResult } from "../query-result-proxy.ts";
@@ -242,11 +243,31 @@ export function aggregate(
     action: async (tx) => {
       const elementAwaitSync = resumeBatchAwaitSync;
       if (elementAwaitSync) {
-        // Storage confirmation happens before interpreting defaults or absence
-        // as membership. The child runs retain the same initial-sync intent.
-        await inputs.withTx(tx).key("list").sync();
-        await inputs.withTx(tx).key("elements").sync();
-        if (!active) return;
+        // Resolve cold link targets in disposable read transactions so absence
+        // observed before sync cannot pin the reconcile's snapshot.
+        for (const field of ["list", "elements"] as const) {
+          let target: Cell<unknown> = inputs.withTx(tx).key(field);
+          for (let depth = 0;; depth++) {
+            await target.sync();
+            if (!active) return;
+            const planTx = runtime.edit();
+            let resolved: Cell<unknown>;
+            try {
+              if (tx.tx?.scopeKeyIdentity !== undefined && planTx.tx) {
+                planTx.tx.scopeKeyIdentity = tx.tx.scopeKeyIdentity;
+              }
+              resolved = inputs.withTx(planTx).key(field).resolveAsCell()
+                .withTx();
+            } finally {
+              planTx.abort("aggregate resume: read-only link resolution");
+            }
+            if (resolved.equalLinks(target)) break;
+            if (depth >= MAX_PATH_RESOLUTION_LENGTH) {
+              throw new Error("Aggregate input link resolution limit reached");
+            }
+            target = resolved.withTx(tx);
+          }
+        }
       }
       const rollback = trackListSetupRollback(tx, runtime, runs);
       const operation = inputs.withTx(tx).key("operation").get();

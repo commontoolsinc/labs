@@ -4,12 +4,121 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { aggregate } from "../src/builtins/aggregate.ts";
+import { aggregate, aggregateNode } from "../src/builtins/aggregate.ts";
 import { useCancelGroup } from "../src/cancel.ts";
 import { isRawBuiltinResult } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("aggregate lifecycle", () => {
+  it("rejects nonnumeric leaves and combines a populated subtree with an empty one", async () => {
+    const signer = await Identity.fromPassphrase("aggregate node validation");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    try {
+      const inputs = runtime.getCell<Record<string, unknown>>(
+        signer.did(),
+        "node inputs",
+        undefined,
+        tx,
+      );
+      const parent = runtime.getCell(
+        signer.did(),
+        "node parent",
+        undefined,
+        tx,
+      );
+      let published: unknown;
+      const node = aggregateNode(
+        inputs,
+        (_tx, value) => {
+          published = value;
+        },
+        () => {},
+        undefined,
+        parent,
+        runtime,
+      );
+      if (typeof node !== "function") throw new Error("Expected node action");
+      for (const operation of ["sum", "min", "max", "minBy", "maxBy"]) {
+        inputs.set({
+          operation,
+          mode: "leaf",
+          values: ["invalid"],
+          keys: ["a"],
+          elements: [parent.getAsNormalizedFullLink()],
+          final: true,
+        });
+        expect(() => node(tx)).toThrow("requires numeric values");
+        expect(published).toBeUndefined();
+      }
+      inputs.set({
+        operation: "min",
+        mode: "combine",
+        left: {
+          candidate: {
+            score: 7,
+            key: "a",
+            element: parent.getAsNormalizedFullLink(),
+          },
+        },
+        right: {},
+        final: true,
+      });
+      node(tx);
+      expect(published).toBe(7);
+    } finally {
+      tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("waits for matching score membership and requires a stable output binding", async () => {
+    const signer = await Identity.fromPassphrase("aggregate score membership");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    const [cancel, addCancel] = useCancelGroup();
+    try {
+      const inputs = runtime.getCell<
+        { list: number[]; elements: number[]; operation: "minBy" }
+      >(signer.did(), "inputs", undefined, tx);
+      inputs.set({ list: [1], elements: [], operation: "minBy" });
+      const parent = runtime.getCell(signer.did(), "parent", undefined, tx);
+      let published = false;
+      const builtin = aggregate(
+        inputs,
+        () => {
+          published = true;
+        },
+        addCancel,
+        undefined,
+        parent,
+        runtime,
+      );
+      if (!isRawBuiltinResult(builtin)) throw new Error("Expected coordinator");
+      await builtin.action(tx);
+      expect(published).toBe(false);
+      inputs.key("elements").set([1]);
+      await expect(builtin.action(tx)).rejects.toThrow(
+        "requires an output binding",
+      );
+      expect(published).toBe(false);
+    } finally {
+      cancel();
+      tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("repairs an aborted initial reconcile and publishes later membership changes", async () => {
     const signer = await Identity.fromPassphrase("aggregate setup repair");
     const storageManager = StorageManager.emulate({ as: signer });

@@ -3,6 +3,9 @@ import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 
+import { aggregate } from "../src/builtins/aggregate.ts";
+import { useCancelGroup } from "../src/cancel.ts";
+import { isRawBuiltinResult } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   EmulatedStorageManager,
@@ -12,6 +15,87 @@ import {
 const signer = await Identity.fromPassphrase("aggregate-resume");
 
 describe("aggregate resume", () => {
+  it("confirms a cold linked collection before reconciling membership", async () => {
+    const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+    const firstStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const secondStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const first = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: firstStorage,
+    });
+    const second = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: secondStorage,
+    });
+    const [cancel, addCancel] = useCancelGroup();
+    try {
+      const setup = first.edit();
+      const list = first.getCell<number[]>(
+        signer.did(),
+        "cold list",
+        undefined,
+        setup,
+      );
+      list.set([1, 2, 3]);
+      const inputs = first.getCell<{ list: number[]; operation: "count" }>(
+        signer.did(),
+        "cold wrapper",
+        undefined,
+        setup,
+      );
+      inputs.set({ list, operation: "count" });
+      const parent = first.getCell(
+        signer.did(),
+        "cold parent",
+        undefined,
+        setup,
+      );
+      parent.set({});
+      await setup.commit();
+      await firstStorage.synced();
+      const coldInputs = second.getCellFromLink<
+        { list: number[]; operation: "count" }
+      >(inputs.getAsNormalizedFullLink());
+      await coldInputs.key("list").sync();
+      const output = second.getCell<unknown>(signer.did(), "cold output");
+      const coldParent = second.getCellFromLink(
+        parent.getAsNormalizedFullLink(),
+      );
+      await coldParent.sync();
+      const builtin = aggregate(
+        coldInputs,
+        (tx, value) => output.withTx(tx).set(value),
+        addCancel,
+        undefined,
+        coldParent,
+        second,
+        output.getAsNormalizedFullLink(),
+        true,
+      );
+      if (!isRawBuiltinResult(builtin)) throw new Error("Expected coordinator");
+      const reconcile = second.edit();
+      if (!reconcile.tx) throw new Error("Expected storage transaction");
+      reconcile.tx.scopeKeyIdentity = second.scopeKeyIdentity;
+      await builtin.action(reconcile);
+      expect(output.withTx(reconcile).get()).toBe(3);
+      second.prepareTxForCommit(reconcile);
+      const committed = await reconcile.commit();
+      expect(committed.error).toBeUndefined();
+      expect(await output.pull()).toBe(3);
+    } finally {
+      cancel();
+      await first.dispose({ closeStorage: false });
+      await second.dispose({ closeStorage: false });
+      await firstStorage.close();
+      await secondStorage.close();
+      await server.close();
+    }
+  });
+
   for (const clearBeforeResume of [false, true]) {
     it(`restores ${clearBeforeResume ? "cleared" : "populated"} aggregates and accepts membership edits`, async () => {
       const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });

@@ -1,4 +1,4 @@
-import type { ReadonlyCell } from "@commonfabric/api";
+import type { AnyBrandedCell, ReadonlyCell } from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -3584,7 +3584,7 @@ export class CellImpl<T extends FabricValue>
 
   /** @inheritDoc */
   count(
-    this: IsThisObject,
+    this: AnyBrandedCell<unknown[]>,
     predicate?: (
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
       index: Reactive<number>,
@@ -3598,23 +3598,23 @@ export class CellImpl<T extends FabricValue>
   }
 
   /** @inheritDoc */
-  sum(this: IsThisObject): Reactive<number> {
+  sum(this: AnyBrandedCell<number[]>): Reactive<number> {
     return createAggregate(this, "sum");
   }
 
   /** @inheritDoc */
-  min(this: IsThisObject): Reactive<number> {
+  min(this: AnyBrandedCell<number[]>): Reactive<number> {
     return createAggregate(this, "min");
   }
 
   /** @inheritDoc */
-  max(this: IsThisObject): Reactive<number> {
+  max(this: AnyBrandedCell<number[]>): Reactive<number> {
     return createAggregate(this, "max");
   }
 
   /** @inheritDoc */
   countWithPattern(
-    this: IsThisObject,
+    this: AnyBrandedCell<unknown[]>,
     op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
     params: Record<string, any>,
   ): Reactive<number> {
@@ -3624,6 +3624,7 @@ export class CellImpl<T extends FabricValue>
 
   /** @inheritDoc */
   minBy(
+    this: AnyBrandedCell<unknown[]>,
     _score: (
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
       index: Reactive<number>,
@@ -3635,7 +3636,7 @@ export class CellImpl<T extends FabricValue>
 
   /** @inheritDoc */
   minByWithPattern(
-    this: IsThisObject,
+    this: AnyBrandedCell<unknown[]>,
     op: PatternFactory<T extends Array<infer U> ? U : T, number>,
     params: Record<string, any>,
   ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
@@ -3645,6 +3646,7 @@ export class CellImpl<T extends FabricValue>
 
   /** @inheritDoc */
   maxBy(
+    this: AnyBrandedCell<unknown[]>,
     _score: (
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
       index: Reactive<number>,
@@ -3656,7 +3658,7 @@ export class CellImpl<T extends FabricValue>
 
   /** @inheritDoc */
   maxByWithPattern(
-    this: IsThisObject,
+    this: AnyBrandedCell<unknown[]>,
     op: PatternFactory<T extends Array<infer U> ? U : T, number>,
     params: Record<string, any>,
   ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {

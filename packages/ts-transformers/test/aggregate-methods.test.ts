@@ -42,6 +42,25 @@ describe("aggregate methods", () => {
     });
   }
 
+  it("keeps authored WithPattern callbacks with their enclosing captures", async () => {
+    for (const method of ["map", "count", "minBy", "maxBy"]) {
+      const output = await transformSource(
+        `
+        import { pattern } from "commonfabric";
+        declare const receiver: any;
+        export default pattern<{n: number}>(({n}) => ({
+          output: receiver.${method}WithPattern(pattern(() => n), {})
+        }));
+      `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      const calls = callsNamed(parseModule(output), `${method}WithPattern`);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].arguments[0].getText()).toContain("pattern(");
+      expect(calls[0].arguments[0].getText()).toContain("n");
+    }
+  });
+
   it("retains direct calls for argument-free aggregates", async () => {
     const output = await transformSource(
       `

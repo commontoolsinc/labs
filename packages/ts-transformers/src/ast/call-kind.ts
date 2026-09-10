@@ -364,7 +364,7 @@ export function getWithPatternHoistablePatternCall(
   checker: ts.TypeChecker,
 ): ts.CallExpression | undefined {
   const callee = stripWrappers(call.expression);
-  if (!ts.isPropertyAccessExpression(callee)) {
+  if (!ts.isPropertyAccessExpression(callee) || !isSyntheticNode(callee)) {
     return undefined;
   }
   const accessKind = getArrayMethodAccessKindByName(callee.name.text);
