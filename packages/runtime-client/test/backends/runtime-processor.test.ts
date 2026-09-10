@@ -5392,6 +5392,66 @@ describe("runtime-processor", () => {
         }
       });
 
+      it("lets a later loopback row retire an earlier route for the same space", async () => {
+        // The table is last-row-wins. A space that has moved to the writer's own
+        // toolshed says so with a loopback row, and the earlier row must not go
+        // on being applied — skipping the loopback row alone would leave it.
+
+        const { runtime } = createRuntime(
+          undefined,
+          new URL("https://host.ts.net:8001/"),
+        );
+        const registered: Array<[string, string]> = [];
+        let sawOther = () => {};
+        const otherRegistered = new Promise<void>((resolve) => {
+          sawOther = resolve;
+        });
+        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        const movedSpace = "did:key:z6Mk-moved" as MemorySpace;
+        const otherSpace = "did:key:z6Mk-other" as MemorySpace;
+        Object.assign(runtime, {
+          registerSpaceHost: (space: string, host: string) => {
+            registered.push([space, host]);
+            if (space === otherSpace) sawOther();
+            return registerSpaceHost(space as MemorySpace, host);
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: movedSpace, host: "http://was-remote.test/" },
+          { did: movedSpace, host: "http://localhost:8001/" },
+          { did: otherSpace, host: "http://host-other.test/" },
+        ]);
+        await tx.commit();
+
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          await otherRegistered;
+          expect(registered).toEqual([[otherSpace, "http://host-other.test/"]]);
+          expect(runtime.hostForSpace(movedSpace).toString()).toBe(
+            "https://host.ts.net:8001/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
       it("registers a loopback entry when the page reached loopback too", async () => {
         const { runtime } = createRuntime();
         const registered: Array<[string, string]> = [];
