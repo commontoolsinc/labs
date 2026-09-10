@@ -111,8 +111,8 @@ export interface NoteOutput extends NotePiece {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in cf-code-editor - binds mentionable and pieceRegistry
-const handleNewBacklink = handler<
+/** Register a backlink created by the editor and optionally navigate to it. */
+export const handleNewBacklink = handler<
   {
     detail: {
       piece: Writable<MentionablePiece>;
@@ -235,6 +235,11 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Backlinks - populated by backlinks-index.tsx
     const backlinks = new Writable<MentionablePiece[]>([]);
+
+    const createBacklink = handleNewBacklink({
+      mentionable,
+      pieceRegistry,
+    });
 
     // Summary - truncated content for search indexing
     const summary = computed(() => {
@@ -523,10 +528,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         $references={references!}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
-        onbacklink-create={handleNewBacklink({
-          mentionable,
-          pieceRegistry,
-        })}
+        onbacklink-create={createBacklink}
         language="text/markdown"
         mode="prose"
         wordWrap

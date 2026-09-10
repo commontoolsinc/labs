@@ -4375,10 +4375,12 @@ function convertOneToLinks(
       // layer, so the two tests below run once over the pair.
       const layer = minted ?? (value as FabricValueLayer);
 
-      if (layer instanceof FabricPrimitive) {
+      if (layer instanceof FabricPrimitive || isDataUnavailable(layer)) {
         // An opaque scalar whose state lives in private fields, so it has zero
         // enumerable own properties and the object branch below would rebuild
-        // it from its (empty) entries as a bare `{}`. It leaves whole instead.
+        // it from its (empty) entries as a bare `{}`. `DataUnavailable` is the
+        // control-value counterpart: its codec state is closed and contains no
+        // live cell for this conversion to find. Both leave whole instead.
         return layer;
       } else if (layer instanceof FabricInstance) {
         // Not a leaf: a container reached by its codec contents, which this

@@ -17,68 +17,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "object",
     properties: {
         request: {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["pending"]
-                        },
-                        pending: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "pending"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["error"]
-                        },
-                        error: {
-                            $ref: "#/$defs/FabricError"
-                        }
-                    },
-                    required: ["reason", "error"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["syncing"]
-                        },
-                        syncing: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "syncing"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["schema-mismatch"]
-                        },
-                        schemaMismatch: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "schemaMismatch"]
-                }]
+            type: ["object", "string"]
         }
     },
-    required: ["request"],
-    $defs: {
-        FabricError: {
-            type: "object"
-        }
-    }
+    required: ["request"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { unavailableInputPolicy: [{ path: ["request"], reasons: ["pending"] }] });
@@ -88,68 +30,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     type: "object",
     properties: {
         request: {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["pending"]
-                        },
-                        pending: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "pending"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["error"]
-                        },
-                        error: {
-                            $ref: "#/$defs/FabricError"
-                        }
-                    },
-                    required: ["reason", "error"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["syncing"]
-                        },
-                        syncing: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "syncing"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["schema-mismatch"]
-                        },
-                        schemaMismatch: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "schemaMismatch"]
-                }]
+            type: ["object", "string"]
         }
     },
-    required: ["request"],
-    $defs: {
-        FabricError: {
-            type: "object"
-        }
-    }
+    required: ["request"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });

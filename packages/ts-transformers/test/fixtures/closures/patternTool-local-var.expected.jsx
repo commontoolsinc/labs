@@ -55,55 +55,10 @@ const __cfLift_3 = __cfHelpers.lift<{
     type: "object",
     properties: {
         genResult: {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["error"]
-                        },
-                        error: {
-                            $ref: "#/$defs/FabricError"
-                        }
-                    },
-                    required: ["reason", "error"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["syncing"]
-                        },
-                        syncing: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "syncing"]
-                }, {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            "enum": ["schema-mismatch"]
-                        },
-                        schemaMismatch: {
-                            type: "boolean",
-                            "enum": [true]
-                        }
-                    },
-                    required: ["reason", "schemaMismatch"]
-                }]
+            type: ["object", "string"]
         }
     },
-    required: ["genResult"],
-    $defs: {
-        FabricError: {
-            type: "object"
-        }
-    }
+    required: ["genResult"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true, unavailableInputPolicy: [{ path: ["genResult"], reasons: ["pending"] }] });

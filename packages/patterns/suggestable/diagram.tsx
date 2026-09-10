@@ -2,9 +2,13 @@ import {
   computed,
   Default,
   generateText,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -48,7 +52,19 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
     prompt,
     context,
   });
-  const response = resultOf(responseRequest);
+  const observedResponse = observeAvailability(responseRequest);
+  const responseState = computed(() => {
+    if (isPending(observedResponse)) {
+      return { response: "", pending: true };
+    }
+    if (
+      hasError(observedResponse) || isSyncing(observedResponse) ||
+      hasSchemaMismatch(observedResponse)
+    ) {
+      return { response: "", pending: false };
+    }
+    return { response: resultOf(observedResponse), pending: false };
+  });
 
   return {
     [NAME]: computed(() => (topic ? `Diagram: ${topic}` : "Diagram")),
@@ -62,20 +78,20 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
 
         <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
-            isPending(responseRequest),
+            responseState.pending,
             <div style="color: var(--cf-theme-color-text-secondary);">
               <cf-loader show-elapsed /> Generating diagram...
             </div>,
             <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--cf-theme-color-surface, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
-              {response}
+              {responseState.response}
             </pre>,
           )}
         </cf-vstack>
       </cf-screen>
     ),
     topic,
-    diagram: computed(() => response || ""),
-    pending: isPending(responseRequest),
+    diagram: responseState.response,
+    pending: responseState.pending,
   };
 });
 
