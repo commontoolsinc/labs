@@ -299,7 +299,8 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 Complete A3's review and CI gates, then add A4's remaining read-count regression
 limits. The A4 browser benchmark is available in
 [PR #7261](https://github.com/commontoolsinc/labs/pull/7261); A5 still needs
-cross-space and deployed comparisons. Continue C1's nested-swatch invalidation
-repair and retain the production workaround until its full regressions pass. Do
-not implement collection operators before the measurement and semantic gates
-above are satisfied.
+cross-space and deployed comparisons. Continue C1's nested-filter and remote-row
+reproductions, and validate C3's remote-row invalidation repair. Retain the
+production workaround until its full regressions pass. Do not implement
+collection operators before the measurement and semantic gates above are
+satisfied.
