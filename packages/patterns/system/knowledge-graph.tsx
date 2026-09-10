@@ -220,8 +220,9 @@ const KnowledgeGraph = pattern<Input>(() => {
       >;
     }
   >({ query: "#summaryIndex" });
+  const summaryResult = resultOf(summaryWish.result);
   const observedSummaryEntries = observeAvailability(
-    resultOf(summaryWish.result).entries,
+    summaryResult.entries,
   );
   const summaryEntries = computed(() => {
     const result = observedSummaryEntries;
