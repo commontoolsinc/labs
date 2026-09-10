@@ -72,6 +72,7 @@ import type {
 } from "./builder/types.ts";
 import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import type { LastNode } from "./link-resolution.ts";
 import {
@@ -5703,7 +5704,7 @@ function schemaTypeValidity(
     let match: TypeValidity.True | TypeValidity.Unknown | undefined;
     for (const option of schemaObj.allOf) {
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       // ignore undefined result (unknown type), but if any option returns
@@ -5730,7 +5731,7 @@ function schemaTypeValidity(
         break;
       }
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       if (valid === TypeValidity.False) {
@@ -5757,7 +5758,7 @@ function schemaTypeValidity(
         break;
       }
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       if (valid === TypeValidity.False) {
@@ -5819,15 +5820,4 @@ export function schemaAcceptsType(
   valueType: JSONSchemaTypes,
 ): boolean {
   return schemaTypeValidity(schema, valueType) !== TypeValidity.False;
-}
-
-function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
-  // We need to preserve any parent $defs in the branch
-  if (!parent.$defs || !isObjectOrArray(option)) {
-    return option;
-  }
-  return {
-    ...option,
-    $defs: parent.$defs,
-  };
 }

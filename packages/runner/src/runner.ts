@@ -80,6 +80,7 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import {
@@ -384,7 +385,9 @@ function narrowChildSchema(schema: JSONSchema, key: string): JSONSchema {
 // picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
 // undefined` is a handle rather than something read through. The depth bound
 // terminates a declaration that refers to itself, which resolves to itself
-// however many times it is followed.
+// however many times it is followed. A union's arms carry no `$defs` of their
+// own, so each is checked carrying the union's, where a `$ref` inside it
+// resolves.
 function isReferenceOnlySchema(
   schema: JSONSchema | undefined,
   depth: number = 4,
@@ -416,7 +419,12 @@ function isReferenceOnlySchema(
     ? [...anyOf, ...oneOf]
     : anyOf ?? oneOf;
   if (arms !== undefined && arms.length > 0) {
-    return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1));
+    return arms.some((arm) =>
+      isReferenceOnlySchema(
+        cfcSchemaWithInheritedDefs(arm, schema.$defs),
+        depth - 1,
+      )
+    );
   }
   return false;
 }
@@ -9459,14 +9467,10 @@ export class Runner {
       return;
     }
 
-    const eventDependencySchema: JSONSchema = {
-      type: "object",
-      properties: { $event: eventSchema as JSONSchema },
-      ...(argumentSchema.$defs !== undefined &&
-        { $defs: argumentSchema.$defs }),
-      ...(argumentSchema.definitions !== undefined &&
-        { definitions: argumentSchema.definitions }),
-    };
+    const eventDependencySchema = cfcSchemaWithInheritedDefs(
+      { type: "object", properties: { $event: eventSchema as JSONSchema } },
+      argumentSchema.$defs,
+    );
     const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
       { $event: event },
@@ -9677,25 +9681,11 @@ export class Runner {
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
-    const rootSchema = argumentSchema;
     const factoryContext = createFactoryTraversalContext();
     const factoryAncestors = new Set<object>();
-
-    const schemaWithRootDefinitions = (
-      schema: JSONSchema | undefined,
-    ): JSONSchema | undefined => {
-      if (!isObjectOrArray(schema) || !isObjectOrArray(rootSchema)) {
-        return schema;
-      }
-      return {
-        ...schema,
-        ...(schema.$defs === undefined && rootSchema.$defs !== undefined &&
-          { $defs: rootSchema.$defs }),
-        ...(schema.definitions === undefined &&
-          rootSchema.definitions !== undefined &&
-          { definitions: rootSchema.definitions }),
-      };
-    };
+    const rootDefinitions = isObjectOrArray(argumentSchema)
+      ? argumentSchema.$defs
+      : undefined;
 
     const visit = (
       schema: unknown,
@@ -9728,9 +9718,11 @@ export class Runner {
         const link = parseLink(currentValue, processCell);
         links.push({
           ...link,
-          schema: link.schema ?? schemaWithRootDefinitions(
-            schema as JSONSchema | undefined,
-          ),
+          schema: link.schema ??
+            (schema === undefined ? undefined : cfcSchemaWithInheritedDefs(
+              schema as JSONSchema,
+              rootDefinitions,
+            )),
         });
         return;
       }
