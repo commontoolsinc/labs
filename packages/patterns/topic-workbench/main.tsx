@@ -522,315 +522,333 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
               </cf-text>
             </cf-vstack>
 
-            <cf-hstack
-              gap="3"
-              align="start"
-              padding="4"
-              style="flex-wrap: wrap;"
-            >
-              {/* ── Left: the topic's own material ── */}
-              <cf-vstack gap="3" style="flex: 1 1 24rem; min-width: 0;">
-                <cf-card>
-                  <cf-vstack gap="2">
-                    <cf-heading level={5}>Living document</cf-heading>
-                    {hasBody
-                      ? <cf-markdown content={body} />
-                      : (
-                        <cf-text tone="muted" block>
-                          The topic has no body yet.
-                        </cf-text>
-                      )}
-                  </cf-vstack>
-                </cf-card>
-
-                <cf-card>
-                  <cf-vstack gap="2">
-                    <cf-hstack justify="between" align="center">
-                      <cf-heading level={5}>Links</cf-heading>
-                      <cf-text variant="caption" tone="muted">
-                        PRs first
-                      </cf-text>
-                    </cf-hstack>
-                    {hasLinks
-                      ? (
-                        <cf-vstack gap="1">
-                          {links.map((link) => (
-                            <cf-hstack gap="2" align="center" data-link-row="">
-                              <cf-badge
-                                size="xs"
-                                color={link.kind === "pr"
-                                  ? "primary"
-                                  : "neutral"}
-                              >
-                                {link.kind}
-                              </cf-badge>
-                              <a
-                                href={link.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style="color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                              >
-                                {link.label || link.url}
-                              </a>
-                            </cf-hstack>
-                          ))}
-                        </cf-vstack>
-                      )
-                      : (
-                        <cf-text tone="muted" block>
-                          The topic has no links yet.
-                        </cf-text>
-                      )}
-                  </cf-vstack>
-                </cf-card>
-              </cf-vstack>
-
-              {/* ── Right: your sessions, and the next one ── */}
-              <cf-vstack gap="3" style="flex: 1 1 24rem; min-width: 0;">
-                <cf-card>
-                  <cf-vstack gap="2">
-                    <cf-hstack justify="between" align="center">
-                      <cf-heading level={5}>Sessions on this topic</cf-heading>
-                      <cf-text variant="caption" tone="muted">
-                        {attachedSessions.length} attached
-                      </cf-text>
-                    </cf-hstack>
-                    {hasAttached
-                      ? (
-                        <cf-vstack gap="2">
-                          {attachedSessions.map((row) => (
-                            <cf-hstack
-                              gap="2"
-                              align="center"
-                              data-session-row=""
-                            >
-                              <span
-                                style={`display:inline-block;width:0.5rem;height:0.5rem;border-radius:50%;flex:0 0 auto;background:${
-                                  row.active ? "#2A7A55" : "#C2CAD0"
-                                }`}
-                              >
-                              </span>
-                              <cf-vstack gap="0" style="flex: 1; min-width: 0;">
-                                <cf-text
-                                  block
-                                  truncate
-                                  style="font-weight: 600;"
-                                >
-                                  {row.title || "(untitled session)"}
-                                </cf-text>
-                                <cf-text
-                                  variant="caption"
-                                  tone="muted"
-                                  truncate
-                                >
-                                  {captionOf(row)}
-                                </cf-text>
-                              </cf-vstack>
-                              <cf-button
-                                variant="ghost"
-                                size="sm"
-                                data-detach=""
-                                onClick={detachFromRow({
-                                  attached,
-                                  sourceId: row.sourceId,
-                                  nativeSessionId: row.nativeSessionId,
-                                })}
-                              >
-                                Detach
-                              </cf-button>
-                            </cf-hstack>
-                          ))}
-                        </cf-vstack>
-                      )
-                      : (
-                        <cf-text tone="muted" block>
-                          No sessions attached. Attach one below, or start one.
-                        </cf-text>
-                      )}
-                  </cf-vstack>
-                </cf-card>
-
-                {hasRelated
-                  ? (
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-hstack justify="between" align="center">
-                          <cf-heading level={5}>Looks related</cf-heading>
-                          <cf-text variant="caption" tone="muted">
-                            titles that name this topic
+            <cf-vstack gap="3" padding="4">
+              {/* Two panes side by side; one column when the window is narrow. */}
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(24rem, 100%), 1fr)); gap: 0.75rem; align-items: start;">
+                {/* ── Left: the topic's own material ── */}
+                <cf-vstack gap="3" style="min-width: 0;">
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-heading level={5}>Living document</cf-heading>
+                      {hasBody
+                        ? <cf-markdown content={body} />
+                        : (
+                          <cf-text tone="muted" block>
+                            The topic has no body yet.
                           </cf-text>
-                        </cf-hstack>
-                        <cf-vstack gap="2">
-                          {relatedSessions.map((row) => (
-                            <cf-hstack
-                              gap="2"
-                              align="center"
-                              data-session-row=""
-                            >
-                              <span
-                                style={`display:inline-block;width:0.5rem;height:0.5rem;border-radius:50%;flex:0 0 auto;background:${
-                                  row.active ? "#2A7A55" : "#C2CAD0"
-                                }`}
-                              >
-                              </span>
-                              <cf-vstack gap="0" style="flex: 1; min-width: 0;">
-                                <cf-text
-                                  block
-                                  truncate
-                                  style="font-weight: 600;"
-                                >
-                                  {row.title || "(untitled session)"}
-                                </cf-text>
-                                <cf-text
-                                  variant="caption"
-                                  tone="muted"
-                                  truncate
-                                >
-                                  {captionOf(row)}
-                                </cf-text>
-                              </cf-vstack>
-                              <cf-button
-                                variant="secondary"
-                                size="sm"
-                                data-attach=""
-                                onClick={attachFromRow({
-                                  attached,
-                                  sourceId: row.sourceId,
-                                  nativeSessionId: row.nativeSessionId,
-                                  title: row.title,
-                                })}
-                              >
-                                Attach
-                              </cf-button>
-                            </cf-hstack>
-                          ))}
-                        </cf-vstack>
-                      </cf-vstack>
-                    </cf-card>
-                  )
-                  : null}
+                        )}
+                    </cf-vstack>
+                  </cf-card>
 
-                <cf-card>
-                  <cf-vstack gap="2">
-                    <cf-hstack justify="between" align="center">
-                      <cf-heading level={5}>Recent sessions</cf-heading>
-                      <cf-text variant="caption" tone="muted">
-                        newest first
-                      </cf-text>
-                    </cf-hstack>
-                    {hasRecent
-                      ? (
-                        <cf-vstack gap="2">
-                          {recentSessions.map((row) => (
-                            <cf-hstack
-                              gap="2"
-                              align="center"
-                              data-session-row=""
-                            >
-                              <span
-                                style={`display:inline-block;width:0.5rem;height:0.5rem;border-radius:50%;flex:0 0 auto;background:${
-                                  row.active ? "#2A7A55" : "#C2CAD0"
-                                }`}
-                              >
-                              </span>
-                              <cf-vstack gap="0" style="flex: 1; min-width: 0;">
-                                <cf-text
-                                  block
-                                  truncate
-                                  style="font-weight: 600;"
-                                >
-                                  {row.title || "(untitled session)"}
-                                </cf-text>
-                                <cf-text
-                                  variant="caption"
-                                  tone="muted"
-                                  truncate
-                                >
-                                  {captionOf(row)}
-                                </cf-text>
-                              </cf-vstack>
-                              <cf-button
-                                variant="secondary"
-                                size="sm"
-                                data-attach=""
-                                onClick={attachFromRow({
-                                  attached,
-                                  sourceId: row.sourceId,
-                                  nativeSessionId: row.nativeSessionId,
-                                  title: row.title,
-                                })}
-                              >
-                                Attach
-                              </cf-button>
-                            </cf-hstack>
-                          ))}
-                        </cf-vstack>
-                      )
-                      : (
-                        <cf-text tone="muted" block>
-                          {hasIndex
-                            ? "Every session the connector knows is attached."
-                            : "No session index linked, or the connector has not collected yet."}
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-hstack justify="between" align="center">
+                        <cf-heading level={5}>Links</cf-heading>
+                        <cf-text variant="caption" tone="muted">
+                          PRs first
                         </cf-text>
-                      )}
-                  </cf-vstack>
-                </cf-card>
+                      </cf-hstack>
+                      {hasLinks
+                        ? (
+                          <cf-vstack gap="1">
+                            {links.map((link) => (
+                              <cf-hstack
+                                gap="2"
+                                align="center"
+                                data-link-row=""
+                              >
+                                <cf-badge
+                                  size="xs"
+                                  color={link.kind === "pr"
+                                    ? "primary"
+                                    : "neutral"}
+                                >
+                                  {link.kind}
+                                </cf-badge>
+                                <a
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style="color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                >
+                                  {link.label || link.url}
+                                </a>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
+                        )
+                        : (
+                          <cf-text tone="muted" block>
+                            The topic has no links yet.
+                          </cf-text>
+                        )}
+                    </cf-vstack>
+                  </cf-card>
+                </cf-vstack>
 
-                <cf-card>
-                  <cf-vstack gap="2">
-                    <cf-heading level={5}>Start a session</cf-heading>
-                    <cf-text variant="caption" tone="muted">
-                      Your words go first; the topic's context and links follow.
-                    </cf-text>
-                    <cf-field label="Prompt">
-                      <cf-textarea
-                        $value={spawnPrompt}
-                        rows={3}
-                        placeholder={defaultPrompt}
-                      />
-                    </cf-field>
-                    <cf-hstack gap="2" align="end" style="flex-wrap: wrap;">
-                      <cf-field label="Checkout" style="flex: 1 1 14rem;">
-                        <cf-select $value={spawnRoot} items={checkoutOptions} />
-                      </cf-field>
-                      <cf-button
-                        variant="ghost"
-                        onClick={useDefaultPrompt({
-                          spawnPrompt,
-                          defaultPrompt,
-                        })}
-                      >
-                        Add the topic's words
-                      </cf-button>
-                    </cf-hstack>
-                    {hasPrompt
-                      ? (
+                {/* ── Right: your sessions, and the next one ── */}
+                <cf-vstack gap="3" style="min-width: 0;">
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-hstack justify="between" align="center">
+                        <cf-heading level={5}>
+                          Sessions on this topic
+                        </cf-heading>
+                        <cf-text variant="caption" tone="muted">
+                          {attachedSessions.length} attached
+                        </cf-text>
+                      </cf-hstack>
+                      {hasAttached
+                        ? (
+                          <cf-vstack gap="2">
+                            {attachedSessions.map((row) => (
+                              <cf-hstack
+                                gap="2"
+                                align="center"
+                                data-session-row=""
+                              >
+                                <span
+                                  style={`display:inline-block;width:0.5rem;height:0.5rem;border-radius:50%;flex:0 0 auto;background:${
+                                    row.active ? "#2A7A55" : "#C2CAD0"
+                                  }`}
+                                >
+                                </span>
+                                <cf-vstack
+                                  gap="0"
+                                  style="flex: 1; min-width: 0;"
+                                >
+                                  <cf-text
+                                    block
+                                    truncate
+                                    style="font-weight: 600;"
+                                  >
+                                    {row.title || "(untitled session)"}
+                                  </cf-text>
+                                  <cf-text
+                                    variant="caption"
+                                    tone="muted"
+                                    truncate
+                                  >
+                                    {captionOf(row)}
+                                  </cf-text>
+                                </cf-vstack>
+                                <cf-button
+                                  variant="ghost"
+                                  size="sm"
+                                  data-detach=""
+                                  onClick={detachFromRow({
+                                    attached,
+                                    sourceId: row.sourceId,
+                                    nativeSessionId: row.nativeSessionId,
+                                  })}
+                                >
+                                  Detach
+                                </cf-button>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
+                        )
+                        : (
+                          <cf-text tone="muted" block>
+                            No sessions attached. Attach one below, or start
+                            one.
+                          </cf-text>
+                        )}
+                    </cf-vstack>
+                  </cf-card>
+
+                  {hasRelated
+                    ? (
+                      <cf-card>
                         <cf-vstack gap="2">
-                          <cf-field label="Kickoff prompt, as it will be sent">
-                            <cf-text
-                              block
-                              data-kickoff=""
-                              style="font-family: ui-monospace, monospace; font-size: 0.82em; white-space: pre-wrap;"
-                            >
-                              {kickoff}
+                          <cf-hstack justify="between" align="center">
+                            <cf-heading level={5}>Looks related</cf-heading>
+                            <cf-text variant="caption" tone="muted">
+                              titles that name this topic
                             </cf-text>
-                          </cf-field>
-                          <cf-field label="Command">
-                            <cf-text
-                              block
-                              data-spawn-command=""
-                              style="font-family: ui-monospace, monospace; font-size: 0.82em; white-space: pre-wrap; word-break: break-all;"
-                            >
-                              {spawnCommand}
-                            </cf-text>
-                          </cf-field>
+                          </cf-hstack>
+                          <cf-vstack gap="2">
+                            {relatedSessions.map((row) => (
+                              <cf-hstack
+                                gap="2"
+                                align="center"
+                                data-session-row=""
+                              >
+                                <span
+                                  style={`display:inline-block;width:0.5rem;height:0.5rem;border-radius:50%;flex:0 0 auto;background:${
+                                    row.active ? "#2A7A55" : "#C2CAD0"
+                                  }`}
+                                >
+                                </span>
+                                <cf-vstack
+                                  gap="0"
+                                  style="flex: 1; min-width: 0;"
+                                >
+                                  <cf-text
+                                    block
+                                    truncate
+                                    style="font-weight: 600;"
+                                  >
+                                    {row.title || "(untitled session)"}
+                                  </cf-text>
+                                  <cf-text
+                                    variant="caption"
+                                    tone="muted"
+                                    truncate
+                                  >
+                                    {captionOf(row)}
+                                  </cf-text>
+                                </cf-vstack>
+                                <cf-button
+                                  variant="secondary"
+                                  size="sm"
+                                  data-attach=""
+                                  onClick={attachFromRow({
+                                    attached,
+                                    sourceId: row.sourceId,
+                                    nativeSessionId: row.nativeSessionId,
+                                    title: row.title,
+                                  })}
+                                >
+                                  Attach
+                                </cf-button>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
                         </cf-vstack>
-                      )
-                      : null}
-                  </cf-vstack>
-                </cf-card>
-              </cf-vstack>
-            </cf-hstack>
+                      </cf-card>
+                    )
+                    : null}
+
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-hstack justify="between" align="center">
+                        <cf-heading level={5}>Recent sessions</cf-heading>
+                        <cf-text variant="caption" tone="muted">
+                          newest first
+                        </cf-text>
+                      </cf-hstack>
+                      {hasRecent
+                        ? (
+                          <cf-vstack gap="2">
+                            {recentSessions.map((row) => (
+                              <cf-hstack
+                                gap="2"
+                                align="center"
+                                data-session-row=""
+                              >
+                                <span
+                                  style={`display:inline-block;width:0.5rem;height:0.5rem;border-radius:50%;flex:0 0 auto;background:${
+                                    row.active ? "#2A7A55" : "#C2CAD0"
+                                  }`}
+                                >
+                                </span>
+                                <cf-vstack
+                                  gap="0"
+                                  style="flex: 1; min-width: 0;"
+                                >
+                                  <cf-text
+                                    block
+                                    truncate
+                                    style="font-weight: 600;"
+                                  >
+                                    {row.title || "(untitled session)"}
+                                  </cf-text>
+                                  <cf-text
+                                    variant="caption"
+                                    tone="muted"
+                                    truncate
+                                  >
+                                    {captionOf(row)}
+                                  </cf-text>
+                                </cf-vstack>
+                                <cf-button
+                                  variant="secondary"
+                                  size="sm"
+                                  data-attach=""
+                                  onClick={attachFromRow({
+                                    attached,
+                                    sourceId: row.sourceId,
+                                    nativeSessionId: row.nativeSessionId,
+                                    title: row.title,
+                                  })}
+                                >
+                                  Attach
+                                </cf-button>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
+                        )
+                        : (
+                          <cf-text tone="muted" block>
+                            {hasIndex
+                              ? "Every session the connector knows is attached."
+                              : "No session index linked, or the connector has not collected yet."}
+                          </cf-text>
+                        )}
+                    </cf-vstack>
+                  </cf-card>
+
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-heading level={5}>Start a session</cf-heading>
+                      <cf-text variant="caption" tone="muted">
+                        Your words go first; the topic's context and links
+                        follow.
+                      </cf-text>
+                      <cf-field label="Prompt">
+                        <cf-textarea
+                          $value={spawnPrompt}
+                          rows={3}
+                          placeholder={defaultPrompt}
+                        />
+                      </cf-field>
+                      <cf-hstack gap="2" align="end" style="flex-wrap: wrap;">
+                        <cf-field label="Checkout" style="flex: 1 1 14rem;">
+                          <cf-select
+                            $value={spawnRoot}
+                            items={checkoutOptions}
+                          />
+                        </cf-field>
+                        <cf-button
+                          variant="ghost"
+                          onClick={useDefaultPrompt({
+                            spawnPrompt,
+                            defaultPrompt,
+                          })}
+                        >
+                          Add the topic's words
+                        </cf-button>
+                      </cf-hstack>
+                      {hasPrompt
+                        ? (
+                          <cf-vstack gap="2">
+                            <cf-field label="Kickoff prompt, as it will be sent">
+                              <cf-text
+                                block
+                                data-kickoff=""
+                                style="font-family: ui-monospace, monospace; font-size: 0.82em; white-space: pre-wrap;"
+                              >
+                                {kickoff}
+                              </cf-text>
+                            </cf-field>
+                            <cf-field label="Command">
+                              <cf-text
+                                block
+                                data-spawn-command=""
+                                style="font-family: ui-monospace, monospace; font-size: 0.82em; white-space: pre-wrap; word-break: break-all;"
+                              >
+                                {spawnCommand}
+                              </cf-text>
+                            </cf-field>
+                          </cf-vstack>
+                        )
+                        : null}
+                    </cf-vstack>
+                  </cf-card>
+                </cf-vstack>
+              </div>
+            </cf-vstack>
           </cf-screen>
         </cf-theme>
       ),
