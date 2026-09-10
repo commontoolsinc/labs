@@ -1490,28 +1490,27 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       );
     });
     const todayVoteCount = computed(() => todaysVotes.length);
-    // The "Recently eaten" card: the 8 most-recent visits (newest first),
-    // derived straight from the `visits` array. An array-shaped computed (not a
-    // lift-returned VNode) is what lets the card keep its plain-JSX `.map(...)`
-    // with interactive onClick delete buttons — those must NOT live inside a
-    // lift (they'd mis-lower as "$event in inputs" / a non-idempotent write).
-    const recentVisits = computed(() =>
-      [...visits].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8)
+    // The visit log newest first, sorted once for every reader below.
+    const newestFirstVisits = computed(() =>
+      [...visits].sort((a, b) => b.wentAt - a.wentAt)
     );
+    // The "Recently eaten" card: the 8 most-recent visits. An array-shaped
+    // computed (not a lift-returned VNode) is what lets the card keep its
+    // plain-JSX `.map(...)` with interactive onClick delete buttons — those
+    // must NOT live inside a lift (they'd mis-lower as "$event in inputs" / a
+    // non-idempotent write).
+    const recentVisits = computed(() => newestFirstVisits.slice(0, 8));
     // Total visit count + "is there any history?" — derived directly from the
     // array, so they always agree (no two queries settling independently).
     const historyCount = visits.length;
     const hasHistory = computed(() => visits.length > 0);
-    const mostRecentTitle = computed(() => {
-      const sorted = [...visits].sort((a, b) => b.wentAt - a.wentAt);
-      return sorted[0]?.title ?? "";
-    });
+    const mostRecentTitle = computed(() => newestFirstVisits[0]?.title ?? "");
     // 📊 Lunch stats — per-place visit + green/yellow/red tallies from the
     // embedded vote snapshots (see summarizePlaces for the per-place scoping).
-    const placeStats = computed(() => summarizePlaces([...visits]));
+    const placeStats = computed(() => summarizePlaces(visits));
     // Total embedded vote snapshots across all visits.
     const voteHistoryCount = computed(() =>
-      [...visits].reduce((n, v) => n + v.votes.length, 0)
+      visits.reduce((n, v) => n + v.votes.length, 0)
     );
     // The viewer's display name, resolved from their STORED roster entry so a
     // The viewer's own roster entry as a 0-or-1 array: the header chip renders

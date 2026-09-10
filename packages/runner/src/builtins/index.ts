@@ -7,6 +7,7 @@ import type {
 import type { Cell } from "../cell.ts";
 import { raw } from "../module.ts";
 import type { Runtime } from "../runtime.ts";
+import { aggregate, aggregateNode } from "./aggregate.ts";
 import { cellFromUrl } from "./cell-from-url.ts";
 import { compileAndRun, compileAndRunResult } from "./compile-and-run.ts";
 import { fetchProgram } from "./fetch-program.ts";
@@ -55,6 +56,8 @@ export function registerBuiltins(runtime: Runtime) {
   const moduleRegistry = runtime.moduleRegistry;
 
   moduleRegistry.addModuleByRef("cellFromUrl", raw(cellFromUrl));
+  moduleRegistry.addModuleByRef("aggregate", raw(aggregate));
+  moduleRegistry.addModuleByRef("aggregateNode", raw(aggregateNode));
   moduleRegistry.addModuleByRef("map", raw(map));
   moduleRegistry.addModuleByRef("filter", raw(filter));
   moduleRegistry.addModuleByRef("flatMap", raw(flatMap));

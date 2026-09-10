@@ -41,6 +41,8 @@
  * and is on its way to probing hosts over the network).
  */
 export const REPLAYABLE_BUILTIN_REFS: ReadonlySet<string> = new Set([
+  "aggregate",
+  "aggregateNode",
   "map",
   "filter",
   "flatMap",
