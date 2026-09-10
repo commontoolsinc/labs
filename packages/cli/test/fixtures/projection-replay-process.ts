@@ -1,3 +1,10 @@
+/**
+ * Runs one projection against a persistent synthetic store. Takes three
+ * positional arguments: mode (`seed`, `read`, or `change`), store directory,
+ * and frame-log path. Writes one JSON line to stdout containing the selected
+ * values, runtime errors, and storage effects for the parent test to inspect.
+ */
+
 import { toFileUrl } from "@std/path";
 
 import { Identity } from "@commonfabric/identity";
@@ -32,9 +39,14 @@ interface Frame {
 }
 
 const [mode, directory, framesPath] = Deno.args;
+if (Deno.args.length !== 3 || !directory || !framesPath) {
+  throw new Error("Expected replay mode, store directory, and frame-log path");
+}
 if (mode !== "seed" && mode !== "read" && mode !== "change") {
   throw new Error(`Unknown replay mode: \`${mode}\``);
 }
+// The logger appends frames; an empty observation window is a valid log.
+await Deno.writeTextFile(framesPath, "");
 const signer = await Identity.fromPassphrase("cli-projection-replay");
 const space = signer.did();
 const server = newLoopbackServer({
@@ -63,7 +75,8 @@ const schema = { type: "array", items: itemSchema } as const;
 
 /** Reads the structural frame log captured by this process. */
 async function readFrames(): Promise<Frame[]> {
-  return (await Deno.readTextFile(framesPath)).trim().split("\n")
+  return (await Deno.readTextFile(framesPath)).split("\n")
+    .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as Frame);
 }
 
@@ -106,7 +119,9 @@ try {
   await runtime.idle();
   await storageManager.synced();
   const frames = (await readFrames()).slice(before);
-  const requests = frames.filter((frame) => frame.type === "transact");
+  const requests = frames.filter((frame) =>
+    frame.dir === "out" && frame.type === "transact"
+  );
   const responses = new Map(
     frames.filter((frame) => frame.dir === "in" && frame.requestId)
       .map((frame) => [frame.requestId, frame]),

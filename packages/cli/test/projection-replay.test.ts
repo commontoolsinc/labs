@@ -79,11 +79,23 @@ async function replay(
 }
 
 describe("CLI projection replay", () => {
-  it("reuses stored mapped children without conflicting and reads source updates", async () => {
+  it("reuses stored mapped children without shared writes and reads source updates", async () => {
+    // This single-client store pins redundant writes, which cause conflicts
+    // with concurrent clients on a shared server. Rejection counts here check
+    // storage health; they do not exercise multi-client contention.
+
     const directory = await Deno.makeTempDir({ prefix: "projection-replay-" });
     try {
       const seed = await replay(directory, "seed");
-      expect(seed.value).toHaveLength(8);
+      expect(seed.value).toEqual(
+        Array.from({ length: 8 }, (_, index) => ({
+          $link: expect.any(String),
+          title: `Row ${index}`,
+          createdAt: index,
+          lastActivityAt: index,
+          commentCount: index,
+        })),
+      );
       expect(seed.mutableSharedWrites).toBeGreaterThan(0);
       expect(seed.rejected).toEqual([]);
       expect(seed.unanswered).toBe(0);
