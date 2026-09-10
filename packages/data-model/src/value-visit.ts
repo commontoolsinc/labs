@@ -457,6 +457,50 @@ export class EmptyValueVisitor<DomainExtra, ResultType>
   }
 }
 
+/**
+ * Visitor which handles all containers by requesting that the engine iterate
+ * over their contents. This class leaves all non-container `visit*()` methods
+ * `abstract`.
+ *
+ * Because this class will cause `FabricContainer`s to be deconstructed into
+ * `FabricValue`s -- including `string`s for `FabricPlainObject` keys and
+ * general `FabricValue`s for array contents and both elements of map-like
+ * mappings -- `FabricValue` must be compatible with the `Domain` of instances.
+ * This is enforced by the class.
+ */
+export abstract class ContainerIteratingVisitor<DomainExtra, ResultType>
+  extends BaseValueVisitor<DomainExtra, ResultType> {
+  /** @inheritDoc */
+  visitFabricArray(
+    value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    return doArrayContents<DomainExtra>(value);
+  }
+
+  /** @inheritDoc */
+  visitFabricInstance(
+    value: FabricInstance,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    // TODO(danfuzz): This is where we finally need to sort out `FabricInstance`
+    // iteration.
+    throw new Error("`FabricInstance` not yet visitable");
+  }
+
+  /** @inheritDoc */
+  visitFabricPlainObject(
+    value: FabricPlainObject,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    return doMapContents(Object.entries(value));
+  }
+
+  /** @inheritDoc */
+  visitFabricContainer(
+    value: FabricContainerValue,
+  ): DispatchingVisitorResult<DomainExtra, ResultType> {
+    return DO_VISIT_SUBTYPE;
+  }
+}
+
 //
 // Visitor engine
 //
