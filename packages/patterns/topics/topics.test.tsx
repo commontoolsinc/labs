@@ -592,6 +592,17 @@ export default pattern(() => {
         .length === 2
   );
 
+  const assert_repeated_mentions_contribute_one_edge_per_source_entry = assert(
+    () => {
+      const inbound = mentionedBy(
+        twinB,
+        [twinA, twinB, twinA],
+        [[undefined, twinB, twinB], [twinB], undefined],
+      );
+      return inbound.length === 1 && equals(inbound[0], twinA);
+    },
+  );
+
   // A source mid-sync reads back as undefined, and taking `.mentions` of that
   // throws — which killed the pivot and, with it, the append that produced the
   // half-written source. The first two entries are what a settled board looks
@@ -1201,6 +1212,10 @@ export default pattern(() => {
       { action: action_seed_row_universe },
       { assertion: assert_row_universe_accepted },
       { assertion: assert_self_mention_inert_through_a_twin },
+      {
+        assertion:
+          assert_repeated_mentions_contribute_one_edge_per_source_entry,
+      },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
       { action: action_mention_subject_gets_a_link },
       { assertion: assert_plain_link_is_no_mention },
