@@ -34,7 +34,7 @@ import { toCompactDebugString } from "./value-debug.ts";
 //
 
 /** Full domain for a `ValueVisitor` class, given its `DomainExtra`. */
-type DomainFor<DomainExtra> = FabricValue | DomainExtra;
+export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
 
 /**
  * An `arrayContents` form. This is returned by visitor methods which wish to
