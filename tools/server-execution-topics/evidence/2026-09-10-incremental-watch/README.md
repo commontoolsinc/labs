@@ -144,5 +144,49 @@ The script creates and removes disposable Git fixtures; its stub capability
 stops after the build boundary, so it launches no server. The separate baked
 integration captures establish the real server boundary.
 `review/source-controls.json` records the ten passing cases. The seed-posture
-expression control is retained as `.ts.txt` capture source and requires the
-repository Deno configuration when run from outside the checkout.
+expression control ending in `.ts.txt` preserves the original capture's exact
+source, including its local paths. Use the portable verifier to inspect any
+checkout, with that checkout's Deno configuration:
+
+```sh
+deno run --config deno.jsonc --no-lock -A tools/server-execution-topics/evidence/2026-09-10-incremental-watch/review/verify-seed-posture.ts "$PWD"
+```
+
+It checks unset, false, and true under both defaults and requires an inverted
+parser to fail the seed check's independent assertion. It reads the probe from
+the supplied checkout and imports that checkout's parser. Its captured red and
+green results in `review/seed-independent-{baseline,candidate}.log` are separate
+from the original expression control. The baseline is `ef40ea5`; exact commands
+and both source hashes are in the external capture metadata.
+
+The original baseline-health controller checked only `packages` and `tasks`.
+That guard alone does not establish that every build input matched its recorded
+head. `review/verify-baseline-health.py` checks the entire checkout before
+adding the two recorded helpers, checks their hashes and the complete source
+state before and after building, and checks again after the workload. A modified
+root `deno.jsonc` control must fail before any helper copy or build.
+
+To replay, create a fresh disposable checkout at
+`27f10d2d4f02f125c0492e5d6288acb3f0da148b`. Its Git object store must contain
+this PR's history, including the captured helper commit `f6bc2af`. Run from this
+evidence checkout, passing that baseline checkout and a new output directory:
+
+```sh
+python3 tools/server-execution-topics/evidence/2026-09-10-incremental-watch/review/verify-baseline-health.py /absolute/new/baseline-checkout /absolute/new/health-results
+```
+
+The script uses the captured helper and a freshly built binary; the helper
+version and hashes are explicit. The two helper files remain in the disposable
+checkout as capture inputs, so each repetition requires a new checkout. The
+script never modifies the baseline's tracked source.
+
+`review/baseline-health-02.json` records the successful seven-suite, 27-step
+replay with those source checks. `review/baseline-root-dirty-control.json`
+records the rejected root configuration change. This baseline again recorded 40
+foreign-write refusals and seal failures, two non-settling warnings and three
+remounts. It also recorded six dropped contributions, establishing that this
+event class can occur before the optimization. It did not reproduce the
+candidate's home-identity scheduler errors; their marginal cause remains
+unclassified. These counts describe the captured schedules, not invariants or
+latency improvements. Full logs and manifests remain in the external archive
+with hashes.

@@ -24,9 +24,16 @@ import {
 const apiUrl = new URL(Deno.env.get("API_URL")!);
 const runDir = Deno.env.get("CF_CAMPAIGN_RUN_DIR")!;
 const spaceName = Deno.env.get("SPACE_NAME")!;
-const expectedPosture =
-  experimentalOptionsFromEnv(Deno.env.get).serverExecution ??
-    SERVER_EXECUTION_DEFAULT_ENABLED;
+const rawPosture = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+const environmentPosture = rawPosture === "true"
+  ? true
+  : rawPosture === "false"
+  ? false
+  : undefined;
+expect(experimentalOptionsFromEnv(Deno.env.get).serverExecution).toBe(
+  environmentPosture,
+);
+const expectedPosture = environmentPosture ?? SERVER_EXECUTION_DEFAULT_ENABLED;
 const topicCount = Number(Deno.env.get("CF_TOPIC_BOARD_TOPICS") ?? 5);
 if (!Number.isInteger(topicCount) || topicCount < 1) {
   throw new Error("CF_TOPIC_BOARD_TOPICS must be a positive integer.");
