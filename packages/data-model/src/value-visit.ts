@@ -37,7 +37,7 @@ export type ArrayContentsForm<Domain> = {
  *
  * See the included result types for details on what they mean. As for
  * `undefined`, if a visitor returns it in the context of this type, it means
- * that the visit of the given value was completed; the visitor ngine will not
+ * that the visit of the given value was completed; the visitor engine will not
  * process it further, and there is no specific value to return from (this part
  * of) the visit.
  */
@@ -119,7 +119,7 @@ export type RecurseForm = { type: "recurse"; value: true };
  * A `replace` form. `value` is a value that is to be used in place of the value
  * originally received by the visitor method which returns this. This tells the
  * visitor engine to redo visitor dispatch with the replacement (as if the
- * replacement were the value in the same posistion as the original).
+ * replacement were the value in the same position as the original).
  */
 export type ReplaceForm<Domain> = { type: "replace"; value: Domain };
 
@@ -212,7 +212,7 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
 
   /**
    * Visits the given primitive value, which can be either a native JavaScript
-   * primitve or a `FabricPrimitive`.
+   * primitive or a `FabricPrimitive`.
    */
   visitPrimitive(
     value: Domain & (Primitive | FabricPrimitive),
@@ -495,8 +495,8 @@ class VisitInProgress<Domain, ResultType> {
 
   /**
    * Iteratively call `visitValue()`, `visitCycle()`, and the subtype-specific
-   * visitor methods, until the vistor returns something other than a `replace`
-   * or `subType` result.
+   * visitor methods, until the visitor returns something other than a `replace`
+   * or `visitSubtype` result.
    */
   #visitResolvingSubtype(
     value: Domain,
