@@ -66,7 +66,9 @@ export type TraverseFixtureInvocation = {
 };
 
 export type TraverseFixture = {
-  version: 1;
+  /** Format version; 2 is the one whose invocations carry `traverseCells`. */
+  version: 2;
+
   meta: {
     name: string;
     source: string;
@@ -265,7 +267,7 @@ export class TraverseCaptureRecorder {
 
   toFixture(name: string, source: string): TraverseFixture {
     return {
-      version: 1,
+      version: 2,
       meta: {
         name,
         source,

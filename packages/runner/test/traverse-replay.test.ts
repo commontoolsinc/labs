@@ -10,6 +10,7 @@
  */
 
 import { assert } from "@std/assert";
+import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
@@ -64,7 +65,7 @@ Deno.test("traverse replay records batched plain-schema reads", () => {
     value: { label: "Second" },
   };
   const fixture: TraverseFixture = {
-    version: 1,
+    version: 2,
     meta: { name: "batched-plain-schema", source: "focused regression" },
     selectors: [{
       path: ["value"],
@@ -119,7 +120,7 @@ Deno.test("plain primitive-array traversal records indices after failure", () =>
     value: [[1, "still-read"]],
   };
   const fixture: TraverseFixture = {
-    version: 1,
+    version: 2,
     meta: { name: "invalid-primitive-tail", source: "focused regression" },
     selectors: [{
       path: ["value"],
@@ -152,4 +153,23 @@ Deno.test("plain primitive-array traversal records indices after failure", () =>
       read.endsWith('|["value","1"]|nt')
     ),
   );
+});
+
+Deno.test("traverse replay refuses a fixture of another format version", async () => {
+  // A version-1 fixture names the traversal flag `includeMeta`, which this
+  // replay does not read, so every invocation in it would replay as a
+  // value-shaped traversal; the loader names the version instead.
+  const path = await Deno.makeTempFile({ suffix: ".json" });
+  await Deno.writeTextFile(
+    path,
+    JSON.stringify({
+      version: 1,
+      meta: { name: "stale", source: "focused regression" },
+      selectors: [],
+      links: [],
+      docs: {},
+      invocations: [],
+    }),
+  );
+  await expect(loadFixture(path)).rejects.toThrow("format version 1");
 });

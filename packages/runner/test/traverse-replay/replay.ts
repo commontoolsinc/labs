@@ -425,6 +425,22 @@ export function replayFixture(
   };
 }
 
+/**
+ * Reads a fixture from `path`, gzipped or not. A fixture of another format
+ * version is refused rather than replayed: its invocations would carry the
+ * traversal flag under another name, and replay would read every one of
+ * them as a value-shaped traversal.
+ */
 export async function loadFixture(path: string): Promise<TraverseFixture> {
-  return JSON.parse(await readMaybeGzippedText(path)) as TraverseFixture;
+  const fixture = JSON.parse(
+    await readMaybeGzippedText(path),
+  ) as TraverseFixture;
+  const version: number = fixture.version;
+  if (version !== 2) {
+    throw new Error(
+      `Fixture \`${path}\` is format version ${version}; replay reads ` +
+        "version 2, whose invocations carry `traverseCells`",
+    );
+  }
+  return fixture;
 }

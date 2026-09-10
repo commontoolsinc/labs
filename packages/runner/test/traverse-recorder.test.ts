@@ -218,7 +218,7 @@ describe("traverse-recorder", () => {
       expect(fixture.meta.name).toBe("fx");
       expect(fixture.meta.source).toBe("src.ts");
       expect(typeof fixture.meta.capturedAt).toBe("string");
-      expect(fixture.version).toBe(1);
+      expect(fixture.version).toBe(2);
     });
 
     it("describes a run that traversed nothing", () => {
