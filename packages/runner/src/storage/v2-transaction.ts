@@ -21,6 +21,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
+import { readStatsActive, recordDocumentRead } from "../read-stats.ts";
 import {
   patchOpIsStructural,
   patchOpPointerFields,
@@ -1558,6 +1559,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
+    if (readStatsActive && !hasDataUriScheme(address.id)) {
+      recordDocumentRead(this, doc);
+    }
     // The one place a read chooses which root it is reading. A materialized
     // read walking under an epoch describes the state that epoch names; every
     // other read describes the transaction's current state. The epoch is only
@@ -1830,6 +1834,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
     if (hasDataUriScheme(address.id)) return { ok: {} };
+    if (readStatsActive) recordDocumentRead(this, doc);
 
     const readMeta = options?.meta ?? EMPTY_META;
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);

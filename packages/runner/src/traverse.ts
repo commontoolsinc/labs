@@ -38,6 +38,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
@@ -2465,6 +2466,7 @@ function followPointer(
     ]);
     return [notFound(target), selector];
   }
+  if (readStatsActive) recordLinkResolution(tx);
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
@@ -5736,6 +5738,7 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
+    if (readStatsActive) recordLinkResolution(tx);
     // This extra hop bypasses followPointer, so it carries the crossing
     // seam itself.
     markIfcBearingLinkCrossing(

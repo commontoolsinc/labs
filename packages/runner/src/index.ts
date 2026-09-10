@@ -312,6 +312,7 @@ export {
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {
+  type ActionReadStats,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,

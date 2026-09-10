@@ -1,12 +1,10 @@
 # Making pattern computation cost declarable and visible
 
-A pattern author today can write a derivation that reads a thousand documents,
-and nothing in the authoring surface, the type system, the compiler output, or
-the test run says so until somebody profiles it. This plan closes that gap from
-two directions at once: give the collection algebra the operators an author
-needs so the expensive shape has a cheap spelling, and give the author a number
-for what a derivation costs so the expensive shape is visible when it is
-written rather than when it ships.
+A pattern author can write a derivation that reads a thousand documents. The
+single-runtime pattern test runner exposes that work through per-action read
+counts, while the collection algebra and opt-in test budgets remain the next
+steps. This plan gives expensive collection operations an incremental form and
+makes their cost visible before they ship.
 
 It is deliberately not a proposal to hand execution planning to the compiler.
 The reasoning for that boundary is under
@@ -18,6 +16,21 @@ The reasoning for that boundary is under
 - [x] Complete and verified
 
 Mark a parent checkbox complete only after all of its child checks pass.
+
+## Implementation priority
+
+The first implementation batch delivers A1 and A2 and establishes generic
+`reduce` baselines at 10, 100, and 1,000 elements. The next priority is B3's
+contracts and named aggregates, so their update costs can be compared with
+those baselines before building `groupBy` and `keyBy`. Each comparison must
+include initialization, one-element updates, scheduler runs, and total read
+work across the graph; benchmarks must include aggregate maintenance and commits.
+
+A0's specified headless command is measured, but it does not reproduce the
+reported 74-vote deployed workload. Keep the deployed figures unconfirmed until
+the representative workload and probe/deployed comparison in A4/A5 are ready.
+The [first-batch measurement record](../history/development/performance/2026-09-pattern-read-accounting.md)
+contains the observed headless counts and the aggregate baseline matrix.
 
 ## Problem
 
@@ -74,13 +87,11 @@ reactive map re-renders per-item content unreliably when a remote vote updates a
 row. While those hold, adding operators to the algebra will not move authors
 onto it.
 
-**Cost is invisible at authoring time.** The scheduler graph node in
-[`packages/runner/src/telemetry.ts`](../../packages/runner/src/telemetry.ts)
-carries `runCount`, `totalTime`, and a `src` naming the authored `computed`,
-`lift`, or `handler` site. It carries no count of what a run read. So the test
-runner can say a derivation ran fourteen times and took 30 ms, and cannot say it
-performed two thousand reactive accesses to do it. The count is the number that
-scales; the milliseconds are the number that varies by machine.
+**Cost needs an enforceable contract.** Scheduler action statistics carry
+per-run and cumulative read counts alongside timing, and the single-runtime
+pattern test runner reports them by authored source. Opt-in per-run and
+whole-step budgets remain to be implemented. Counts expose scaling work;
+milliseconds additionally reflect machine speed, storage, and scheduling.
 
 ## What already exists
 
@@ -140,11 +151,11 @@ only one that helps patterns nobody rewrites. Do it first.
 
 - [ ] **A0. Reconfirm the baseline.** Reproduce the table above with
       `deno task cf test packages/patterns/lunch-poll/main.test.tsx --verbose
-      --stats-threshold 0`, gating off `enableIdempotencyCheck` before quoting
+      --stats-threshold 0 --no-idempotency-check`, disabling verification before quoting
       any duration, per the instrument notes in
       [`skills/perf-investigation/SKILL.md`](../../skills/perf-investigation/SKILL.md).
       Record counts, not milliseconds, as the durable baseline.
-- [ ] **A1. Count accesses per action run.** Add read accounting to
+- [x] **A1. Count accesses per action run.** Add read accounting to
       `ActionStats` in `packages/runner/src/telemetry.ts`, accumulated the way
       `runCount` and `totalTime` already are.
 
@@ -167,10 +178,15 @@ only one that helps patterns nobody rewrites. Do it first.
       Take link resolutions at `resolveLink` and the schema traversal in
       `packages/runner/src/schema.ts` rather than inferring them from read
       records.
-- [ ] **A2. Attribute it to an authored site.** The node already carries `src`
+- [x] **A2. Attribute it to an authored site.** The node already carries `src`
       pointing at the `computed` or `lift` that produced it. Print accesses
       alongside run count in the per-step deltas, sorted by accesses, so a step
       report names the file and line responsible for the largest read count.
+      Reports cover assertion, render, and settle steps as well as actions;
+      initialization is separate. Totals collect completion events, including
+      actions absent from the final graph snapshot. The
+      [CLI reference](../../packages/cli/README.md#pattern-test-read-costs)
+      defines each counter and its boundary.
 - [ ] **A3. Give a pattern test a budget.** Opt-in per pattern, not a
       repository-wide gate, so a pattern can defend its own hot path the way a
       benchmark defends a duration. Two budgets, because one alone is
@@ -255,8 +271,8 @@ reconciliation; follow their keying rules rather than inventing new ones.
       `find((x) => x.id === k)`, `find((u) => equals(u.profile, p))`, and
       `some((x) => x.id === k)`. The nested form
       `filter((a) => !current.some((b) => b === a))` is a set difference written
-      as a quadratic scan, and appears several times. Rank this stage ahead of
-      B3 by expected value.
+      as a quadratic scan, and appears several times. Keep this stage as the next collection-algebra priority after the initial
+      aggregate comparison.
 - [ ] **B3. Named aggregates, not a general incremental `reduce`.** A survey of
       the authored patterns finds 33 `reduce` call sites, of which the large
       majority are a sum, and the rest an average (a sum over a count), an
@@ -405,24 +421,15 @@ interaction.
       deliberately deferred.
 - [ ] **D2. Re-run the Track A baseline after each stage of it lands**, so the
       per-access improvement is attributed rather than assumed.
-- [ ] **D3. Decide the snapshot-memo boundary explicitly.** The per-transaction
-      snapshot memo keyed by link is withheld inside an ambient-read-meta scope:
+- [ ] **D3. Audit and measure the scoped snapshot memo.**
       `getSnapshotMemo()` in
       [`packages/runner/src/storage/extended-storage-transaction.ts`](../../packages/runner/src/storage/extended-storage-transaction.ts)
-      returns undefined whenever `#ambientReadMeta` is set, because serving an
-      entry across that boundary in either direction would journal the wrong
-      reads. Child-view label derivation runs under exactly that scope, at
-      `deriveDereferenceLabelView` in
-      [`packages/runner/src/schema.ts`](../../packages/runner/src/schema.ts),
-      so on that path the label view is derived cold on every access even within
-      a single lift run.
-
-      That is a deliberate correctness boundary, not an oversight, and this plan
-      does not propose moving it. It proposes deciding about it with the numbers
-      in hand: the label-view derivation is most of the gap between a ~0.2 ms
-      access and a ~0.8 ms one, so whether it can be memoized within a scope
-      without journaling the wrong reads is worth answering rather than
-      inheriting.
+      maintains separate memos by read epoch and ambient metadata identity.
+      Child-view label derivation in `deriveDereferenceLabelView` uses an
+      ambient-read-meta scope. Measure reuse within these scopes with Track A's
+      counters and establish whether repeated label-view derivation remains a
+      significant per-access cost. Entries must stay within the epoch and
+      metadata boundaries whose journaled reads they represent.
 
 ## Track E — Fix the guidance
 
@@ -476,9 +483,10 @@ tally and the roster lookup can turn out to want incompatible semantics, and
 that is cheap to discover on paper and expensive to discover in two landed
 operators. Write them down, then build.
 
-Within Track B, rank B2 ahead of B3 by expected value: the tree holds roughly
+After the aggregate comparison prioritized above, rank B2 ahead of further
+aggregate extensions by expected value: the tree holds roughly
 250 linear-scan lookups against a handful of aggregates worth incrementalizing.
-B1 still comes first, since both depend on the index it defines.
+B1 still precedes B2, since keyed lookup and join depend on its index contracts.
 
 Suggested split for three parallel efforts: one on Track A plus E, one on Track
 C's reproduction and fixes, one settling the Track B contracts and then building
