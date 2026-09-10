@@ -7,7 +7,9 @@ import {
 } from "@commonfabric/memory/v2/execution-lease";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageTransaction,
@@ -124,70 +126,68 @@ describe("editWithRetry absence reconciliation", () => {
     }
   });
 
-  it("removes the temporary watch after confirming an absence", async () => {
+  it("leaves a document read by address alone to the commit verdict", async () => {
     const server = newSharedServer();
-    const readerStorage = EmulatedStorageManager.connectTo(server, {
-      as: signer,
-    });
-    const readerRuntime = new Runtime({
+    const smA = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtimeA = new Runtime({
       apiUrl: new URL(import.meta.url),
-      storageManager: readerStorage,
+      storageManager: smA,
     });
-    let writerStorage: EmulatedStorageManager | undefined;
-    let writerRuntime: Runtime | undefined;
-    let probedAddress:
-      | ReturnType<typeof toMemorySpaceAddress>
-      | undefined;
+    let smB: EmulatedStorageManager | undefined;
+    let runtimeB: Runtime | undefined;
     try {
-      const result = await readerRuntime.editWithRetry((tx) => {
-        const probed = readerRuntime.getCell(
-          space,
-          "temporary-absence-watch-doc",
-          valueSchema,
-          tx,
-        );
-        probedAddress = toMemorySpaceAddress(probed.getAsNormalizedFullLink());
-        tx.read(probedAddress, { trackReadWithoutLoad: true });
-        readerRuntime.getCell(
-          space,
-          "temporary-absence-watch-output",
-          valueSchema,
-          tx,
-        ).set({ value: 1 });
-      });
-      expect(result.error).toBeUndefined();
-
-      // Create the probed document only after the absence transaction has
-      // committed. If reconciliation retained its one-shot watch, this later
-      // update would be pushed into the reader's replica.
-      writerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
-      writerRuntime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: writerStorage,
-      });
-      const create = writerRuntime.edit();
-      writerRuntime.getCell(
+      const txA = runtimeA.edit();
+      const shared = runtimeA.getCell(
         space,
-        "temporary-absence-watch-doc",
+        "address-read-doc",
         valueSchema,
-        create,
-      ).set({ value: 9 });
-      expect((await create.commit()).error).toBeUndefined();
-      await writerStorage.synced();
-      await server.flushSessions([space]);
-      await readerStorage.synced();
+        txA,
+      );
+      shared.set({ value: 5 });
+      const address = toMemorySpaceAddress(shared.getAsNormalizedFullLink());
+      await txA.commit();
+      await smA.synced();
 
-      expect(
-        readerStorage.open(space).replica.getDocument(
-          probedAddress!.id,
-          probedAddress!.scope,
-        ),
-      ).toBeUndefined();
+      smB = EmulatedStorageManager.connectTo(server, { as: signer });
+      runtimeB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smB,
+      });
+      let readinessConsulted = 0;
+      const readiness = runtimeB.awaitCommitRetryReadiness.bind(runtimeB);
+      runtimeB.awaitCommitRetryReadiness = (error: unknown) => {
+        readinessConsulted++;
+        return readiness(error);
+      };
+      let loadsAwaited = 0;
+      const settled = smB.loadsSettled.bind(smB);
+      smB.loadsSettled = (keys) => {
+        loadsAwaited++;
+        return settled(keys);
+      };
+
+      let runs = 0;
+      const result = await runtimeB.editWithRetry((tx) => {
+        runs++;
+        // A read by address starts no load, so nothing is in flight for the
+        // wait to join: the absence claim goes to the server as it stands.
+        tx.read(address);
+        runtimeB!.getCell(space, "address-read-own-doc", valueSchema, tx)
+          .set({ value: runs });
+      });
+
+      expect(result.error).toBeUndefined();
+      // Nothing was waited on locally. The server rejects the claim, and the
+      // conflict machinery converges it: one wire round, one consult of the
+      // retry gate.
+      expect(loadsAwaited).toBe(0);
+      expect(runs).toBe(2);
+      expect(readinessConsulted).toBe(1);
     } finally {
-      await writerRuntime?.dispose();
-      await readerRuntime.dispose();
-      await writerStorage?.close();
-      await readerStorage.close();
+      await runtimeB?.dispose();
+      await runtimeA.dispose();
+      await smB?.close();
+      await smA.close();
       await server.close();
     }
   });
@@ -257,7 +257,7 @@ describe("editWithRetry absence reconciliation", () => {
     }
   });
 
-  it("falls back to the commit verdict when reconciliation providers fail", async () => {
+  it("falls back to the commit verdict when the provider or the awaited loads fail", async () => {
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
@@ -265,58 +265,98 @@ describe("editWithRetry absence reconciliation", () => {
       storageManager: sm,
     });
     const provider = sm.open(space);
-    const original = provider.loadUnexaminedAbsences;
-    try {
-      const failures = [
-        () => {
-          throw new Error("synchronous reconciliation failure");
-        },
-        () => Promise.reject(new Error("asynchronous reconciliation failure")),
-      ];
-      for (let index = 0; index < failures.length; index++) {
-        provider.loadUnexaminedAbsences = failures[index];
-        let runs = 0;
-        const result = await runtime.editWithRetry((tx) => {
-          runs++;
-          runtime.getCell(
-            space,
-            `provider-failure-cold-${index}`,
-            valueSchema,
-            tx,
-          ).get();
-          runtime.getCell(
-            space,
-            `provider-failure-output-${index}`,
-            valueSchema,
-            tx,
-          ).set({ value: 1 });
-        });
-        expect(result.error).toBeUndefined();
-        expect(runs).toBe(1);
-      }
-
-      // The capability is optional. A provider that predates absence
-      // reconciliation must retain the original server-judged commit path.
-      provider.loadUnexaminedAbsences = undefined;
+    const originalAbsences = provider.unexaminedAbsences;
+    const originalSettled = sm.loadsSettled.bind(sm);
+    const commitsColdRead = async (name: string): Promise<number> => {
+      let runs = 0;
       const result = await runtime.editWithRetry((tx) => {
-        runtime.getCell(
+        runs++;
+        runtime.getCell(space, `${name}-cold`, valueSchema, tx).get();
+        runtime.getCell(space, `${name}-output`, valueSchema, tx)
+          .set({ value: 1 });
+      });
+      expect(result.error).toBeUndefined();
+      return runs;
+    };
+    try {
+      provider.unexaminedAbsences = () => {
+        throw new Error("synchronous reconciliation failure");
+      };
+      expect(await commitsColdRead("provider-failure")).toBe(1);
+      provider.unexaminedAbsences = originalAbsences;
+
+      sm.loadsSettled = () => Promise.reject(new Error("awaited load failure"));
+      expect(await commitsColdRead("load-failure")).toBe(1);
+      sm.loadsSettled = originalSettled;
+
+      // The capability is optional. A provider without it keeps the
+      // server-judged commit path.
+      provider.unexaminedAbsences = undefined;
+      expect(await commitsColdRead("provider-without-capability")).toBe(1);
+    } finally {
+      provider.unexaminedAbsences = originalAbsences;
+      sm.loadsSettled = originalSettled;
+      await runtime.dispose();
+      await sm.close();
+      await server.close();
+    }
+  });
+
+  it("counts a document that landed as present when another awaited load failed", async () => {
+    const server = newSharedServer();
+    const smA = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtimeA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smA,
+    });
+    let smB: EmulatedStorageManager | undefined;
+    let runtimeB: Runtime | undefined;
+    try {
+      const txA = runtimeA.edit();
+      runtimeA.getCell(space, "landed-beside-failure", valueSchema, txA)
+        .set({ value: 3 });
+      await txA.commit();
+      await smA.synced();
+
+      smB = EmulatedStorageManager.connectTo(server, { as: signer });
+      runtimeB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smB,
+      });
+      // Every load settles, then the wait reports one of them failed.
+      const settled = smB.loadsSettled.bind(smB);
+      smB.loadsSettled = (keys) =>
+        settled(keys).then(() => Promise.reject(new Error("one load failed")));
+      let readinessConsulted = 0;
+      const readiness = runtimeB.awaitCommitRetryReadiness.bind(runtimeB);
+      runtimeB.awaitCommitRetryReadiness = (error: unknown) => {
+        readinessConsulted++;
+        return readiness(error);
+      };
+
+      let runs = 0;
+      let observed: { value?: number } | undefined;
+      const result = await runtimeB.editWithRetry((tx) => {
+        runs++;
+        observed = runtimeB!.getCell(
           space,
-          "provider-without-reconciliation-capability",
+          "landed-beside-failure",
           valueSchema,
           tx,
         ).get();
-        runtime.getCell(
-          space,
-          "provider-without-reconciliation-output",
-          valueSchema,
-          tx,
-        ).set({ value: 1 });
+        runtimeB!.getCell(space, "landed-beside-failure-own", valueSchema, tx)
+          .set({ value: runs });
       });
+
       expect(result.error).toBeUndefined();
+      expect(runs).toBe(2);
+      expect(observed).toEqual({ value: 3 });
+      expect(readinessConsulted).toBe(0);
     } finally {
-      provider.loadUnexaminedAbsences = original;
-      await runtime.dispose();
-      await sm.close();
+      await runtimeB?.dispose();
+      await runtimeA.dispose();
+      await smB?.close();
+      await smA.close();
       await server.close();
     }
   });
@@ -477,15 +517,17 @@ describe("editWithRetry absence reconciliation", () => {
       storageManager: sm,
     });
     const provider = sm.open(space);
-    const original = provider.loadUnexaminedAbsences;
-    const reconciliation = Promise.withResolvers<number>();
+    const originalSettled = sm.loadsSettled.bind(sm);
+    const reconciliation = Promise.withResolvers<void>();
     let reconciliationCalled = false;
     let disposed = false;
     let outputAddress:
       | ReturnType<typeof toMemorySpaceAddress>
       | undefined;
     try {
-      provider.loadUnexaminedAbsences = () => {
+      // The cold read below starts a load, and the wait for it is held
+      // open here across the disposal.
+      sm.loadsSettled = () => {
         reconciliationCalled = true;
         return reconciliation.promise;
       };
@@ -511,7 +553,7 @@ describe("editWithRetry absence reconciliation", () => {
 
       await runtime.dispose({ closeStorage: false });
       disposed = true;
-      reconciliation.resolve(0);
+      reconciliation.resolve();
       const result = await editing;
 
       expect(result.error?.name).toBe("StorageTransactionAborted");
@@ -522,8 +564,8 @@ describe("editWithRetry absence reconciliation", () => {
         ),
       ).toBeUndefined();
     } finally {
-      provider.loadUnexaminedAbsences = original;
-      reconciliation.resolve(0);
+      sm.loadsSettled = originalSettled;
+      reconciliation.resolve();
       if (!disposed) await runtime.dispose({ closeStorage: false });
       await sm.close();
       await server.close();
@@ -620,7 +662,40 @@ describe("editWithRetry absence reconciliation", () => {
       }, { trackReadWithoutLoad: true });
 
       const provider = servingStorage.open(space);
-      expect(await provider.loadUnexaminedAbsences!(tx.tx)).toBe(2);
+      const absences = provider.unexaminedAbsences!(tx.tx);
+      expect(absences.map((absence) => absence.id).sort()).toEqual(
+        [userId, sessionId].sort(),
+      );
+      // Each names the actor's instance, the way a load for it is keyed.
+      for (const absence of absences) {
+        expect(absence.scopeKey).toBe(
+          resolveScopeKey(absence.scope, actorIdentity),
+        );
+      }
+      expect(provider.presentCount!(absences)).toBe(0);
+      // The loads a served run's reads register name that instance too, and
+      // under the key the runtime waits on; once they land, the absences
+      // count as present.
+      const loads = absences.map((absence) =>
+        servingStorage!.syncCell(
+          servingRuntime!.getCellFromLink({
+            space,
+            id: absence.id,
+            path: [],
+            scope: absence.scope,
+          }),
+          { scopeKeyIdentity: actorIdentity },
+        )
+      );
+      for (const absence of absences) {
+        expect(
+          servingStorage.pendingLoadGeneration(
+            entityKey(absence, servingRuntime.scopeKeyIdentity),
+          ),
+        ).toBeDefined();
+      }
+      await Promise.all(loads);
+      expect(provider.presentCount!(absences)).toBe(2);
       expect(
         (provider.replica.getDocument(userId, "user", actorIdentity)?.value as
           | { value?: number }
@@ -633,9 +708,16 @@ describe("editWithRetry absence reconciliation", () => {
           actorIdentity,
         )?.value as { value?: number } | undefined)?.value,
       ).toBe(22);
-      expect(provider.replica.getDocument(userId, "user")).toBeUndefined();
-      expect(provider.replica.getDocument(sessionId, "session"))
-        .toBeUndefined();
+      // Both loads are keyed under the ACTOR's instance. The serving
+      // replica holds no record at all for its OWN instance of either
+      // document.
+      const replica = provider.replica as SpaceReplica;
+      expect(
+        replica.accessForTestingOnly.hasDocumentRecord(userId, "user"),
+      ).toBe(false);
+      expect(
+        replica.accessForTestingOnly.hasDocumentRecord(sessionId, "session"),
+      ).toBe(false);
       tx.abort("inspection only");
     } finally {
       lease?.release();
@@ -647,7 +729,7 @@ describe("editWithRetry absence reconciliation", () => {
     }
   });
 
-  it("reports through the provider how many unexamined absences exist", async () => {
+  it("names the unexamined absences through the provider, and counts them present once loaded", async () => {
     const server = newSharedServer();
     const smA = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtimeA = new Runtime({
@@ -669,28 +751,38 @@ describe("editWithRetry absence reconciliation", () => {
         storageManager: smB,
       });
       const txB = runtimeB.edit();
+      const present = runtimeB.getCell(
+        space,
+        "provider-level-doc",
+        valueSchema,
+        txB,
+      );
+      const absent = runtimeB.getCell(
+        space,
+        "provider-level-absent",
+        valueSchema,
+        txB,
+      );
       const presentAddress = toMemorySpaceAddress(
-        runtimeB.getCell(space, "provider-level-doc", valueSchema, txB)
-          .getAsNormalizedFullLink(),
+        present.getAsNormalizedFullLink(),
       );
       const absentAddress = toMemorySpaceAddress(
-        runtimeB.getCell(space, "provider-level-absent", valueSchema, txB)
-          .getAsNormalizedFullLink(),
+        absent.getAsNormalizedFullLink(),
       );
 
-      // Recording the reads loads neither document, so reconciliation is
-      // what fetches them.
+      // Recording the reads loads neither document, so what the provider
+      // names below cannot depend on a load landing first.
       txB.read(presentAddress, { trackReadWithoutLoad: true });
       txB.read(absentAddress, { trackReadWithoutLoad: true });
 
       const provider = smB.open(space);
-      expect(provider.loadUnexaminedAbsences).toBeDefined();
-      expect(await provider.loadUnexaminedAbsences!(undefined)).toBe(0);
+      expect(provider.unexaminedAbsences).toBeDefined();
+      expect(provider.unexaminedAbsences!(undefined)).toEqual([]);
       expect(
-        await provider.loadUnexaminedAbsences!({
+        provider.unexaminedAbsences!({
           getReadActivities: () => undefined,
         } as unknown as IStorageTransaction),
-      ).toBe(0);
+      ).toEqual([]);
 
       // A write in another space is irrelevant to this replica's own-write
       // exclusion, and must be skipped rather than keyed here.
@@ -699,19 +791,27 @@ describe("editWithRetry absence reconciliation", () => {
       )).did();
       runtimeB.getCell(otherSpace, "unrelated-write", valueSchema, txB)
         .set({ value: 1 });
-      // The provider counts the documents this replica lacks at the moment
-      // it is asked. The count below rests on `provider-level-doc` being
-      // one of them, which holds once everything the replica owes has
+      // The provider names the documents this replica lacks at the moment
+      // it is asked. The list below rests on `provider-level-doc` being one
+      // of them, which holds once everything the replica owes has
       // synchronized.
       await smB.synced();
       expect(
         provider.replica.getDocument(presentAddress.id, presentAddress.scope),
       ).toBeUndefined();
-      // Of the two cold reads, exactly one document turns out to exist; the
-      // other's absence is examined and stays a sound claim.
-      expect(await provider.loadUnexaminedAbsences!(txB.tx)).toBe(1);
-      // Loaded is loaded: a second pass finds nothing left unexamined.
-      expect(await provider.loadUnexaminedAbsences!(txB.tx)).toBe(0);
+      const absences = provider.unexaminedAbsences!(txB.tx);
+      expect(absences.map((absence) => absence.id).sort()).toEqual(
+        [presentAddress.id, absentAddress.id].sort(),
+      );
+      for (const absence of absences) {
+        expect(absence.space).toBe(space);
+        expect(absence.scopeKey).toBeUndefined();
+      }
+      expect(provider.presentCount!(absences)).toBe(0);
+      // Once the loads a read would have started land, exactly the document
+      // that exists counts as present.
+      await Promise.all([smB.syncCell(present), smB.syncCell(absent)]);
+      expect(provider.presentCount!(absences)).toBe(1);
       txB.abort("inspection only");
 
       // A partial served identity cannot name a session instance on the wire.
@@ -725,7 +825,7 @@ describe("editWithRetry absence reconciliation", () => {
         scope: "session",
         path: [],
       }, { trackReadWithoutLoad: true });
-      expect(await provider.loadUnexaminedAbsences!(incomplete.tx)).toBe(0);
+      expect(provider.unexaminedAbsences!(incomplete.tx)).toEqual([]);
       incomplete.abort("inspection only");
     } finally {
       await runtimeB?.dispose();

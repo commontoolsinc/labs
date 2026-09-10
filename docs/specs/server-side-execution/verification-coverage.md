@@ -10,6 +10,38 @@ is unverified by accident.** When that claim stops holding (a new
 rule lands without a row here), this file is stale and the next
 mapping pass is due.
 
+## Current status
+
+The first-party default is OFF and the ON soak is paused. The
+[`serverExecution` registry](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
+owns the current default and flip records. A renewed ON rollout must satisfy
+the plan's ordered gates, including the still-open OW28 served compilation
+port; earlier gate-completion claims do not establish that port exists.
+
+The status corrections in this register are bounded to the rows below:
+
+| Row | Current disposition |
+| --- | --- |
+| OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
+| OW28 | Open: no served compile outbox/completion path or real-host completion regression test. |
+| OW28-createRef | Open: distinct schema-backed program values can collide in the compile cache, including under OFF. |
+| OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
+| OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
+| OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
+| OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
+| OW56 finding 2 | Closed: source following has one owner, the opener. Server-owned materialization/compilation remains future work. |
+| OW58 | Closed: resolved-error notice commits release the drain guard. |
+| OW60 | Open: unresolved flag-ON client echoes are still skipped. |
+
+The [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
+records the investigation's inspected head, provenance, probes, and limits.
+It is a historical record; the row's current implementation and tests govern
+its disposition. In particular, runtime-supplied sidecars are explicitly opened
+by the serving wish builtin; the audit's blanket statement that serving tenures
+open no pieces is too broad. The dated execution records below do not describe
+the current deployment posture or establish that every owed row has been
+re-audited.
+
 ## 1. The map
 
 300 binding rules. Instruments: the scenario traces (T1–T12), the
@@ -272,10 +304,9 @@ acceptances only — no rule counts move):
   on the loop's own sealed commit vs foreign novelty): ACCEPTED for
   Phase 1, revisit trigger Phase 2. The two named revisit items —
   the parked-on-own-seal distinction (or excluding unapplied frames'
-  seqs from `batchHead`) and the pattern-updater CHECK-half
-  verification in the `sx2-serving-loop` integration surface — are
-  carried in the plan's Phase 2 section so its gates cannot rely on
-  W before they resolve.
+  seqs from `batchHead`) and source-check verification — are carried in
+  the plan's Phase 2 section. The source-check obligation is superseded by
+  explicit-open source following (OW18); it is not an owed tenure-wide probe.
 - Flag 2 (watermark-only derived commits): CONFIRMED — protocol §4's
   "never its own commit" now carries the ruled parenthetical: an
   advance-only wave commits the advance as the batch's ONE derived
@@ -588,8 +619,10 @@ client does not; this PR):
   own-echo exemption). The stage-F residual comment at `inputSynced`
   is rewritten to the resolved posture.
 - The Phase-2 revisit (b) — the source-following half: RETIRED, not
-  covered. A serving tenure opens no piece, so it follows no piece's
-  source origin, and there is no server-side half left to verify. The
+  covered as a tenure-wide source probe. Tenure activation ensures root
+  existence without following the root's origin. Runtime-supplied wish
+  sidecars are explicitly opened and follow their origins through that open;
+  their lifecycle is a separate surface from root ensuring. The
   `sx2-serving-loop` integration surface
   (`packages/patterns/integration/sx2-serving-loop.test.ts`) keeps its
   remaining gates and runs in both arms, its ON-arm skip having been
@@ -1299,21 +1332,23 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   reconciled to the new classification (terminal + re-arm counters,
   failures still zero). The `sx2-serving-loop` skip-list entry is
   RETIRED with this row — the surface runs in CI's ON arm, carrying
-  the amplification-ratio gate and the pattern-updater CHECK-half
-  witness (the plan's Phase-2 revisit (b), now ticked).
+  the amplification-ratio gate. Source-following ownership and the
+  server's root-existence coverage are recorded by OW18 below.
 
-- OW18 — the ensurer move (owner direction, 2026-08-07; recorded with
-  the scheduler-tell batch, NOT implemented by it):
-  `ensure-default-app-is-running` and pattern updating are
-  outside-scheduler CLIENT acts today — authored under the scheduler
-  tell, protocol §1 — and under the flag they can move server-side,
-  triggered by a pull on a qualifying pattern (in the current setup:
-  a system pattern from `/api/patterns`), after which flag-ON clients
-  simply STOP calling those ensurers/updaters. Owed when it lands:
-  the trigger's coverage (pull on a qualifying pattern ensures/
-  updates server-side; flag-ON clients make no ensurer calls) beside
-  the §3e watcher surface in `sx2-serving-loop`. Trigger: a Phase-2
-  follow-on PR, no later than Phase 3.
+- OW18 — CLOSED as a move-everything obligation. Tenure activation ensures
+  that the space root exists without following the root's source. Source
+  following belongs to whoever explicitly opens a piece, as specified by
+  [piece-source-lifecycle.md](../piece-source-lifecycle.md) and serving-loop.md
+  §3e. Under ON, the serving wish builtin opens its runtime-supplied sidecars
+  through `openSidecarSurface` → `SourceReconciler.open`; existing sidecars
+  reconcile their origins there. ON clients reference those served sidecars
+  without opening them. The server still reacts to accepted pattern-pointer
+  writes by swapping the served graph. Coverage belongs to
+  `packages/runner/test/executor-space-root-ensure.test.ts`,
+  `packages/runner/test/ensure-space-root.test.ts`, and
+  `packages/piece/test/piece-source-lifecycle.test.ts`. OW45's root-existence
+  work and explicit-open lifecycle gaps retain their own scope; no tenure-wide
+  source updater move is owed here.
 
 **Phase 3 follow-ups (the independent review's owed rows,
 2026-08-11):**
@@ -2536,37 +2571,64 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
 
 **Phase 7 (the flip): rows opened by the flip's own gates, 2026-08-15:**
 
-- OW28 — the `compile-and-run` SERVING PORT (stage G's out-of-scope
-  note; builtins.md §3): under the flag fresh `compile-and-run` is
-  INERT everywhere — the client gate suppresses fresh compiles for
-  every non-wave run and the serving side's async writebacks are
-  unstamped, so they refuse at the wave seal — and the flip ships that
-  inertness by default (`common-fabric.tsx`'s piece-creation flow among
-  the consumers). CHARACTERIZED by the P7 independent review
-  (2026-08-15) as a product regression relative to OFF: on a flag-ON
-  runtime whose tx carries no wave run context (every CLIENT run —
-  derivation, handler, imperative) `builtins/compile-and-run.ts` sets
-  `pending = true` and RETURNS before launching the compile — no
-  compile, no result, no error, `pending` never clears; on the SERVER
-  (wave-stamped run) the compile launches but its writebacks
-  (`runtime.editWithRetry`, `runSynced`) are UNSTAMPED floating
-  transactions on a serving runtime → refused at the wave seal
-  (`unstampedSealRefusals`), so `pending=false`/`result`/`error` never
-  land either. User-visible under ON: every `compileAndRun` consumer
-  shows "compiling…" forever — `fetchAndRunPattern` in
-  `packages/patterns/system/common-fabric.tsx` (the LLM/tool piece-
-  instantiation flow: `ifElse(pending || …)` never resolves),
-  `packages/patterns/compiler.tsx`, `write-and-run.tsx`,
-  `email-pattern-launcher.tsx`. The pins in `compile-and-run.test.ts`
-  assert exactly the gate (0 launches non-wave, 1 launch wave-stamped),
-  not a working port. FIX SHAPE (owning layer: runner
-  `builtins/compile-and-run.ts` + `executor/outbox.ts` /
-  `effect-completion.ts`, following the request-hash builtins):
-  compilation as an OUTBOX EFFECT KIND memoized on the program hash,
-  the instantiation landing as a COMPLETION-CLASS stamped writeback;
-  the client keeps reading through (speculation.md §2). Trigger: a
-  named flip blocker — third in the flip's ordered gates (plan Phase 7
-  task 1); nothing in CI exercises fresh compile-and-run in the ON arm.
+- OW28 — OPEN: the `compile-and-run` serving port (builtins.md §3).
+  A flag-ON non-wave run sets `pending=true` and returns before launching a
+  fresh compile. A wave-stamped server run launches the floating compiler
+  promise, but the asynchronous `editWithRetry` writebacks and `runSynced`
+  child launch have no completion stamp. The wave destination refuses
+  unstamped transactions, so a fresh served compile has no durable completion
+  path. Local optimistic values after a refused write are not evidence of
+  durable `pending`, `result`, or `error` state.
+
+  `compile-and-run.test.ts` covers the launch gate with a never-resolving
+  compiler stub (zero launches without a wave, one with a wave); it does not
+  prove a served child becomes usable. The missing regression must exercise
+  a real ExecutorHost through compiler completion, durable result/pending
+  state, child execution, failure, recovery, supersession, and demanded
+  instances. The port must put compilation on the post-wave outbox and stamp
+  completion writeback, with child instantiation inside the served graph's
+  transaction discipline. The ON client reads through the served result.
+
+  Restoration input: [PR #5968](https://github.com/commontoolsinc/labs/pull/5968),
+  preserved at `463ea3887b64459fbf58b5d208764e42198daa25`, contains a port and
+  tests that require reconciliation with the current runtime. The
+  [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
+  establishes that the integration squash and inspected main omit those
+  changes despite the PR's closing claim. A closed sibling PR does not
+  discharge this row. Trigger: third in the plan's ordered flip gates;
+  required before a renewed ON rollout.
+- OW28-createRef — OPEN: program-value hashing at the compile-cache boundary.
+  `PatternManager.compileOrGetPattern` keys `createRef({ src: program })`.
+  With a schema-backed query-result proxy, different nested source contents
+  can select the same cached Pattern in a warm process. A controlled probe
+  through the real cache method compiles A only for proxy values A then B;
+  plain-object A/B controls compile separately. This applies under OFF,
+  independently of OW28's serving port. Owed: normalize the resolved program
+  at the cache boundary using the canonical value machinery and add a
+  regression proving a same-cell program edit selects the new contents.
+  Trigger: a warm-process same-node program edit, including a code editor.
+- OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
+  inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
+  reports that run-counter cancellation abandons a completion to which the
+  final A attaches through outbox deduplication. Current `llm.ts` retains
+  run-counter cancellation, but the family has no fresh reproduction in the
+  coverage audit. Reproduce the current request/partial/completion lifecycle
+  before choosing a fix; completion must either land for the current request
+  or release the superseded effect. Trigger: the next served LLM supersession
+  scenario. This is an investigation obligation, not a confirmed-current
+  claim that every LLM or fetch builtin wedges.
+- OW28-instance-family — INVESTIGATE with OW53's residuals: `effectTargetKey`
+  includes the target document and scope name but accepts no principal/session
+  instance. The preserved OW28 branch reports collapsed completions for two
+  demanders and service-instance hash-guard reads for a narrowed request.
+  OW53 closes SQLite's served acting-identity/clearance fixes and separately
+  names non-SQLite unstamped hash-guard reads, non-clearance instance keys,
+  and the provider READ partition. Those residuals are the current scope;
+  do not reopen the fixed SQLite cases. Owed: live one- and two-demander
+  regressions for narrowed requests, plus a reactive child case to establish
+  whether the runtime child registry also collapses demanded instances.
+  Reconcile any confirmed family fix with OW53 rather than counting the same
+  obligation twice. No new multi-demander reproduction is claimed here.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,
@@ -2627,19 +2689,24 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   under the suite's fake clock; the per-demander pin stays FLAGGED, OW17
   residual viii). The lunch gate STAYS SKIP-LISTED with the residual
   named below.
-- OW30 — the controller-side write-destination validation RACE under
-  the flag (`piece-controller.ts` `validateWriteDestination`, the
-  #4717 guard as narrowed 2026-08-07): under the full ON posture
-  `counter` failed once in three runs on the Phase-7 tree ("current
-  producer value is not accepted as an array container" — the
-  controller read a served-late/speculative producer value of the wrong
-  shape) and `topics-navigation` fails fast on the same class ("missing
-  required property myName"); green on re-run and at the base. Owed:
-  the convergence step the 2026-08-07 narrowing anticipated (validate
-  against a settled view — `waitForSettled` on the piece's space —
-  before judging the written subtree), and its pin. Trigger: the flip
-  soak (an intermittent red in the ON lanes; `topics-navigation` is
-  ON-skip-listed on it).
+- OW30 — PARTIAL: controller write-destination validation under ON.
+  Stream sends validate their event payload against the producer-owned event
+  contracts, but do not stage or validate the unchanged producer root.
+  `piece-controller.ts` guards `validateDurableSourceRoots` with
+  `issue === undefined && !isStream(txCell)`. The regression in
+  `packages/piece/test/pull-materialization.test.ts` sends a valid Stream
+  event past an invalid producer sibling and still rejects an invalid event
+  payload. This closes the Stream sibling-validation defect.
+
+  The Topics navigation test's separate barriered capture closes its flake
+  and its ON skip is lifted (OW33); the unresolved echo behavior is OW60.
+  Neither result establishes closure of the non-Stream counter observation
+  ("current producer value is not accepted as an array container"). Owed:
+  reproduce and attribute that served/speculative destination-shape case,
+  then pin the required convergence behavior. A blanket pre-validation
+  `waitForSettled` is not implemented and should not be treated as an already
+  established fix. Trigger: a non-Stream destination-shape refusal during
+  ON testing or renewed soak.
 
 **Rows opened by the Phase 7 independent review and the fixer pass
 (2026-08-15/16; the flip landed DARK — constant `false`):**
@@ -2844,15 +2911,15 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   then refused forever by the sink's INV-13 mirror — a fail-closed
   livelock unreachable in sanctioned flows; its watcher signature is
   nonzero `foreignWriteRefusals` naming a HOME space (the review's F3).
-  (vii) a serving session revoked by the owner-resolution-change
-  trigger does not remount: `Provider.#sessionHandle` memoizes the
-  terminated session, so an ownership TRANSFER of an actively-served
-  space stops its serving reads until the provider/route lifecycle
-  recycles — fail-closed and rare; the reopen would succeed under the
-  new owner once a revocation-remount path is wired with the takeover
-  machinery's care (parked accepts, marker epoch, commit replay —
-  `onSessionReplaced`'s duties). Named follow-up from the delta
-  review's D1; not forced into the build PR.
+  (vii) CLOSED for read-triggered remount. An admitted ACL change latches
+  `Provider.noteAclChanged`; the next load discards a session terminated by
+  an ACL verdict and reopens through the server's full `session.open`
+  admission. The watched-document tracker is cleared so a previously watched
+  document is fetched again on its next read. `executor-session-remount.test.ts`
+  pins the ACL-change/host path, owner rebinding, denial without widened
+  authority, and refetch after remount. Automatic replay of the entire dead
+  session's watch set remains a distinct follow-up; read-triggered refetch
+  does not establish that stronger guarantee.
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the
@@ -3313,18 +3380,15 @@ findings; the OWNER RULING — the flip lands DARK):
   posture today. Recorded in the plan; the browser number waits for the
   two-user family.
 
-Delta 2026-08-29 — THE FLIP: the first-party default goes ON (the
-separate one-line flip PR the 2026-08-16 ruling above made owed —
-recorded here rather than inside that delta, whose own bullets state
-the pre-flip posture they were written in):
+The current rollout posture is the
+[`serverExecution` registry](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution):
+first-party default OFF, ON soak paused. The following flip record describes
+#6535's changes, not a current gate verdict. OW28 remains an unmet ordered gate
+and must be implemented and verified before a renewed ON rollout.
 
-**THE FLIP PR (#6535, 2026-08-28, base e16780fca — rebased onto it
-2026-08-29 from the original base 4e02f75c4, with every gate claim
-re-verified there; every ordered gate met: the
-ON-skip registry EMPTY across all four suites (#6528, the
-ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
-OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
-personally; the soak starts at ITS merge.** What it carries:
+**Flip record — PR #6535.** Its ON-skip registry and topology checks do not
+exercise fresh served `compileAndRun` completion. Its merge therefore does not
+discharge OW28. The flip's changes and validation record follow:
 
 - The one-liner: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
   (`packages/memory/v2/server-execution-default.ts`), and the absolute
@@ -3974,17 +4038,11 @@ supply; OW29/OW32/OW34 closed):
   evidence beside it is
   [`docs/history/plans/server-execution-v2/stage-c-closeout.md`](../../history/plans/server-execution-v2/stage-c-closeout.md)
   (the two benchmarks, the attribution, the three stage-C review
-  reports, the fan-out design + panel). Bookkeeping about the SIBLING
-  stage-C branches, so a reader of THIS branch is not misled: OW28's
-  LANDED delta and its three owed rows (`OW28-supersession-family`,
-  `OW28-instance-family`, `OW28-createRef`) live on #5968's branch
-  (`463ea3887`); OW32's stage-C block was REWRITTEN into the
-  double-dispatch dossier on #5969's branch (`eb64d8694`) — the row
-  above still carries the pre-dossier "served-wish timing" wording,
-  which #5969 REFUTED (`nowTick` is valid at every served dispatch; the
-  residual is double dispatch, OW35 below); both arrive when the
-  siblings are stacked. Rows minted here (the siblings mint no new
-  numbers; the coordination delta owns OW35–OW38):
+  reports, the fan-out design + panel). OW28 remains open: its preserved
+  #5968 branch supplies restoration inputs, and its three follow-ups are
+  recorded beside OW28 above. The sibling branch's existence is not a landing
+  guarantee. The lunch double-dispatch work is tracked by OW35; the frozen
+  closeout carries the stage-C branch and review record.
   - **OW35 — the served-handler DOUBLE-DISPATCH parity gap: (α) + the
     cross-producer invariant sentence — RULED 2026-08-18 (owner:
     "agreed with your recommendations" — (ii) as stated, NOT (iii));
@@ -5887,23 +5945,14 @@ supply; OW29/OW32/OW34 closed):
     **SERVER-ENSURE STAGE 1 BUILT 2026-08-23 (design PR #6209,
     owner-green-lit; build report
     `../../history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-stage1-report.md`).**
-    The space-root ensure — existence + freshness, the START not moved —
-    runs at the SpaceServer's activation as a lease-guarded owed step,
-    single-flight STRUCTURALLY (a SpaceServer is single-tenure:
-    `#parkRequested` never resets and the host builds a replacement per
-    re-activation, so the guard's lifetime is the tenure's). The ensure
-    core is extracted into the runner (`ensure-space-root.ts`) and the
-    client controller's creation arm delegates to it (OFF one code
-    path); attribution is owner-resolved fail-closed through the memory
-    server's new `resolveSpaceOwner` (the OW31-ruled service-identity
-    ACL read; the OW59 Q3 caveat's named follow-up — the creation tx
-    AND the freshness half's write arms carry
-    `trustSnapshotForPrincipal(owner)`, both pinned live on the minted
-    transactions; the reconcile arm was the build review's F1 — it
-    shipped first under the ambient SERVICE snapshot, exactly OW59's
-    restage shape, caught by live probe and fixed red-first by
-    threading the ensure's snapshot hook through `checkDefaultPattern`'s
-    two default-root write arms). Design §4(b)'s ACTING-IDENTITY
+    The space-root ensure owns existence only. It runs at the SpaceServer's
+    activation as a lease-guarded owed step, single-flight for the tenure.
+    `ensure-space-root.ts` returns an existing root without checking or
+    following its source. When creation is required, the creation transaction
+    carries the owner-resolved trust snapshot from `resolveSpaceOwner` and
+    `trustSnapshotForPrincipal(owner)`. Source following belongs to the opener
+    under piece-source-lifecycle.md; no freshness write arm is owed to the
+    server ensure. Design §4(b)'s ACTING-IDENTITY
     carriage is NOT built (review F3, recorded): the stamp carries no
     `acting`, so `homeSpacePrincipalFor`/`getHomeSpaceCell` would
     fail-closed-throw if a served setup resolved home — inert today
@@ -7166,14 +7215,12 @@ supply; OW29/OW32/OW34 closed):
     recovery). D3 therefore stays scoped to REACTIVE first-runs with
     no durable retry record behind them — the wish case above, where
     a dropped first-ever derivation leaves neither basis rows nor any
-    entry to re-drain. (ii) The client and server auto-updaters
-    ping-pong the ensure-created root's summary-index child between
-    its closure-embedded pattern identity and the standalone compile
-    of the same source (alternating authored/derived
-    `pieceSourceHistory` + `/value` replaces;
-    `pattern-swap-setup-withdrawn` fires in greens and reds alike) —
-    the contention population that multiplies pre-resolve wish
-    re-runs; its own defect, untouched. (iii) The lunch FILE entry's
+    entry to re-drain. (ii) The dual-updater contention finding is CLOSED:
+    following a piece's source belongs to its explicit opener, while root
+    ensuring does not follow source (piece-source-lifecycle.md; OW56 finding
+    2). The serving runtime explicitly opens wish sidecars; it also performs
+    the hot-swap after an accepted pointer change.
+    (iii) The lunch FILE entry's
     third member (ensure-OFF: the guest's ~98-101-op
     program-materialization commit never landing) is a DIFFERENT,
     post-click stage; it is now resolved by the served-event
@@ -9152,31 +9199,22 @@ supply; OW29/OW32/OW34 closed):
     OQ-19's foreign-derived
     freshness mechanism remains its separate currentness design and is
     not part of this closure.
-  - **OW55 — the serving runtimes' pattern-fetch trust surface
-    (adversarial review of PR #6157, F7; the OW48 investigation's
-    security-adjacent residual; minted 2026-08-21).** Under ON,
-    `env.API_URL` alone decides which server the serving runtimes
-    fetch and compile system patterns from (`startServerExecutionHost`
-    hands it to every serving runtime; the wish sidecars and the
-    pattern updater fetch `apiUrl + api/patterns/system/…`), and its
-    DEFAULT names another process's port (localhost:8000). A
-    stale-but-healthy neighbor on that port produced the entire OW48
-    misdiagnosis: pre-#6019 bytes compiled by current transformers,
-    silent wish-path kills that presented as a main defect. The
-    cross-vintage case is the demonstrated one; the cross-ORIGIN case
-    is the security-adjacent one (whose bytes does the server
-    compile?). Owed: a deliberate posture — pin the serving runtimes'
-    pattern source to self when co-hosted, or verify the served
-    `?identity` against the local patterns route — plus a
-    local-repro runbook note (API_URL/MEMORY_URL must be set
-    explicitly when the default port is occupied). Follow-up class
-    (flip-follow-up family): no lift trigger; close with the ruled
-    posture landed. CONSUMER ADDED 2026-08-23: the stage-1 server-side
-    space-root ensure's creation fetch rides the same
-    `apiUrl`-over-self-HTTP loop (deliberately — design #6209 open
-    question 9's self-pin recommendation is flagged, not filled, in the
-    stage-1 report; the ruled posture, when it lands, covers this
-    consumer with the updater's).
+  - **OW55 — OPEN: the serving runtimes' pattern-fetch trust surface.**
+    `packages/toolshed/index.ts` passes `new URL(env.API_URL)` into
+    `startServerExecutionHost`, which supplies the serving runtime's API URL.
+    The default is `http://localhost:8000`. Wish sidecars and space-root
+    creation resolve system program sources through this URL. Existing wish
+    sidecars also reconcile their origins when `openSidecarSurface` explicitly
+    opens them on the serving runtime. Tenure activation does not follow the
+    root's source or run a general source updater. Owed: a deliberate posture
+    that pins the serving source to self
+    when co-hosted, or verifies its identity against the local patterns route,
+    plus a local-reproduction runbook note requiring explicit API_URL and
+    MEMORY_URL when the default port is occupied. Root creation is within
+    this obligation. A configured URL alone does not establish local source
+    identity. The coverage audit does not claim a new cross-origin experiment.
+    Trigger: the serving pattern-source trust pass; close when the chosen
+    posture and its regression coverage land.
   - **OW56 — FUTURE (optimize-phase-future) — the server owns program
     materialization AND compilation; clients wait (minted 2026-08-21
     with the S-C ruling).** The owner's stated ideal, verbatim:
@@ -9248,9 +9286,12 @@ supply; OW29/OW32/OW34 closed):
       `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
     - **Finding 2 — version-update was a dual-write under ON, client AND
       server, unarbitrated.** CLOSED: following a piece's source origin
-      now runs only where a piece is OPENED, and a serving tenure opens
-      none, so the server no longer fetches, compiles, or swaps on a
-      piece's behalf. What follows is the finding as recorded. Both
+      runs where a piece is explicitly OPENED; tenure activation no longer
+      follows the root's source. Under ON, the serving wish builtin opens its
+      sidecars and the client references the served cells, preserving one
+      source-following owner for that surface too. The server still swaps
+      served graphs after accepted pointer writes. What follows is the
+      finding as recorded. Both
       runtimes defaulted the update posture on, so both ran the
       check/fetch/compile/persist and attempted the pointer swap; they
       RACED — OCC-guarded so the loser failed clean,
@@ -9331,39 +9372,22 @@ supply; OW29/OW32/OW34 closed):
     passed; the standard repository checks are recorded on the closing
     PR. No lift trigger (test-harness item; no product-side seam or
     behavior change).
-  - **OW58 — the consequence-notice resolved-error guard wedge
-    (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
-    minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by
-    #6186).** `#sealEventConsequenceNotice` (executor/space-server.ts)
-    seals the skip/error/drop consequences in its own transaction,
-    and its guard-release paths do not cover a commit that RESOLVES
-    `{error}`: the `.catch` beside the seal releases the
-    drain-in-flight guard on promise REJECTION only, and the
-    wave-outcome release covers only eventIds the wave actually
-    carried — a notice refused PRE-destination
-    (`rejectCommitBeforeStorage`, extended-storage-transaction.ts,
-    which resolves the commit promise with `{error}` rather than
-    rejecting it) never enters a wave, so NEITHER path fires. The
-    guard stays "marked", every re-drain skips the guarded id, and
-    park's `#drainInFlight.clear()` is the only remaining release:
-    the entry strands unconsequenced for the space's whole active
-    tenure — the OPPOSITE failure of OW54's forever-re-drain.
-    Probe evidence (the #6186 reviewer): a flag-gated patch forcing
-    the notice commit to resolve `{error}` left 3 events with
-    runsByKind 1/1/1 and ALL unconsequenced across two scanned waves,
-    reproduced through the THROW arm — the OW54 diff uninvolved.
-    Reachability: PLAUSIBLE, no live repro yet — a LABELED sidecar
-    doc under enforce mode makes the notice tx CFC-relevant (its
-    entry-field writes), and nothing prepares that tx (`commit()`
-    self-prepares only in observe mode), so the commit resolves the
-    CFC pre-storage `{error}` — the wedge shape. Owed: the small
-    guard fix — consume the commit RESULT (`sealed.then((r) => …)`
-    releasing the guard when `r?.error` is set, beside the existing
-    `.catch`) — and consider preparing the notice tx before commit;
-    the seal path is (α)-critical, so the fix belongs to its own
-    deliberate pass, not a side-swipe. Trigger: next seal-machinery
-    pass, or first live sighting of a stranded-unconsequenced entry
-    with a guarded id and no notice.
+  - **OW58 — CLOSED: resolved-error consequence-notice commits release the
+    drain guard.** `#sealEventConsequenceNotice` consumes the commit result
+    and routes `result.error` through `#recordEventNoticeFailure`, as it does
+    a rejected promise or staging failure. The helper deletes the event's
+    drain-in-flight guard so a notice refused before the wave destination
+    cannot strand the event for the tenure. A needs-attention notice failure
+    also preserves the failed head and its later-event barrier until the
+    allowed recovery wake.
+
+    `executor-events-down.test.ts`'s rejected-terminal-notice regression
+    injects a resolved `{error}` before storage, verifies the pending head
+    and later arrival remain blocked, then verifies ordered recovery when a
+    newer input permits the cover. The full 35-step file passed in the
+    coverage audit; no mutation check of this fix is claimed. Preparing
+    ordinary notices in CFC enforce mode is a separate hardening question,
+    not an unimplemented drain-guard fix.
   - **OW59 — OW34-family: per-run CFC trust attribution for served
     runs (the FLAG-5 seam; design RULED 2026-08-21, all seven §10
     recommendations adopted): CLOSED (2026-08-21, the OW34-family
@@ -9435,7 +9459,11 @@ supply; OW29/OW32/OW34 closed):
   - **OW60 — the echo-drop smell: the stream-action validation guard
     silently skips a client echo run whose composite `$ctx` has not
     materialized (OW33 triage review pass, 2026-08-22; the canary
-    moved here from the topics-navigation flake).** The trace, exact
+    moved here from the topics-navigation flake).** This remains open:
+    `scheduler/events.ts` requeues client/OFF handler-not-run dispatches, but
+    explicitly excludes the flag-ON speculative echo, which still seals its skip. That
+    requeue path does not restore this row's missing speculative cover.
+    The trace, exact
     (ow33-triage-report.md §6): on a flag-ON Deno controller,
     `board.result.set(..., ["addTopic"])` fires the stream handler
     whose `$ctx` schema REQUIRES `myName`/`topics`/`crossrefs`; at

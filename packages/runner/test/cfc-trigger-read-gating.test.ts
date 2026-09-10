@@ -7,6 +7,7 @@ import {
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
@@ -184,7 +185,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       const secretId = await seedConfidential(runtime, "h5-on-secret");
       const tx = scheduledEgress(runtime, "h5-on-out", secretId);
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "exceeds ceiling for fetchJson",
       );
@@ -316,7 +317,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       );
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "exceeds ceiling for fetchJson",
       );
@@ -414,7 +415,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       );
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "exceeds ceiling for fetchJson",
       );

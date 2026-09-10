@@ -14,6 +14,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { prepareAndCommit } from "./refused-commit.ts";
@@ -75,7 +76,7 @@ describe("CFC privileged system write (S18)", () => {
       // rather than the generic relevant-but-unprepared guard.
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "unprivileged write to protected cfc path",
       );
@@ -228,7 +229,7 @@ describe("CFC privileged system write (S18)", () => {
       tx.setCfcEnforcementMode("enforce-explicit");
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "unprivileged write to protected cfc path",
       );

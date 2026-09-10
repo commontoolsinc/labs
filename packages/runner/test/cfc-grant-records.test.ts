@@ -35,6 +35,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isStorageTransactionInconsistent } from "../src/storage/rejection.ts";
 import { prepareAndCommit } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-grant-records");
@@ -1580,7 +1581,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       // revocation then takes effect on the next evaluation (design §2.2:
       // "rules stop firing on next evaluation").
       await withRuntime({}, async (runtime) => {
-        await writeGrant(runtime);
+        const grant = await writeGrant(runtime);
         await seedLabeledCell(runtime, "grant-mutated", {
           confidentiality: [cfcAtom.user(signer.did())],
         });
@@ -1616,7 +1617,8 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         // The prepared decision consumed the live grant; the commit must not
         // go through over the revoked one.
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(isStorageTransactionInconsistent(result.error)).toBe(true);
+        expect(String((result.error as Error).message)).toContain(grant.id);
       });
     });
   });
