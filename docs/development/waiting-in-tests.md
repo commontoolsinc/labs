@@ -901,11 +901,13 @@ boundary the test can await without adding one to production code.
   before its first check so an arrival cannot slip between the two; the engine
   holds any such state before delivering it, which is what makes an engine
   predicate safe to re-check on the client's wake. Its deadline is the same
-  kind of stuck-condition net, sized far past any healthy arrival so machine
-  load cannot carry a passing run across it — the failure mode a deadline
-  close to the healthy latency has under contention. The bounded poll stays
-  for the rest: the watermark, the stats counters, and engine rows nothing
-  delivers.
+  kind of stuck-condition net, and crossing it proves only that the predicate
+  did not come true within the window — no fixed bound can tell a stuck wait
+  from one delayed past it. Its width, generous headroom over any healthy
+  arrival observed, is what keeps a crossing pointing at a stuck wait rather
+  than at contention stretching a passing run — the reading a deadline close
+  to the healthy latency cannot support. The bounded poll stays for the rest:
+  the watermark, the stats counters, and engine rows nothing delivers.
 
 ### A pull that drives its own loading
 

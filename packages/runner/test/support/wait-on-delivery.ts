@@ -4,9 +4,9 @@ import type {
   MemorySpace,
 } from "../../src/storage/interface.ts";
 
-/** The stuck-condition net (two minutes): sized far past any healthy
- * delivery in these suites, so machine load cannot carry a passing run
- * across it. */
+/** The stuck-condition net (two minutes): generous headroom over any
+ * healthy delivery observed in these suites, so that a crossing points
+ * at a stuck wait rather than a slow one. */
 const STUCK_NET_MS = 120_000;
 
 /**
@@ -29,10 +29,12 @@ const STUCK_NET_MS = 120_000;
  * awaited work may take: the serving loop holds the event loop open
  * through its lease-renew interval, so a wait with no net would wedge
  * the run instead of failing it (see "Where the polling `waitFor`
- * stays" in `docs/development/waiting-in-tests.md`). Crossing it says
- * the delivery never came, never that it came slowly. Under the
- * package's fake clock the net freezes with every other test-armed
- * timer and the wait is purely event-driven.
+ * stays" in `docs/development/waiting-in-tests.md`). Crossing it
+ * proves only that no delivery satisfied the predicate within the
+ * window — a fixed bound cannot tell a stuck wait from one delayed
+ * past it; the width just makes the stuck reading the likely one.
+ * Under the package's fake clock the net freezes with every other
+ * test-armed timer and the wait is purely event-driven.
  */
 export const waitOnDelivery = async (options: {
   /** The client storage manager whose notification relay carries the
