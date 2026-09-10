@@ -8,6 +8,11 @@ read_base_ports
 PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
 TOOLSHED_PORT=${TOOLSHED_PORT:-}
+# The console is stopped only when asked for, the same way it is started. Its
+# port is not offset, so one machine's fabrics share it, and a stop that reached
+# for it unasked would take down a console another fabric is serving.
+CF_HARNESS=false
+CONSOLE_PORT=${CF_HARNESS_CONSOLE_PORT:-8135}
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -18,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --port-offset=*)
             PORT_OFFSET="${1#*=}"
+            shift
+            ;;
+        --cf-harness)
+            CF_HARNESS=true
             shift
             ;;
         --shell-port)
@@ -62,6 +71,9 @@ kill_deno_on_port() {
 
 kill_deno_on_port "$SHELL_PORT"
 kill_deno_on_port "$TOOLSHED_PORT"
+if [[ "$CF_HARNESS" == "true" ]]; then
+    kill_deno_on_port "$CONSOLE_PORT"
+fi
 
 # Kill background-piece-service if running (tracked via PID file)
 BG_PID_FILE="$SCRIPT_DIR/../.bg-piece-service.pid"
