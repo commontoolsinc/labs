@@ -173,6 +173,18 @@ durations are used as performance evidence.
   - [ ] Establish failure before repair, or demonstrate that the current system
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
+
+  Initial probes cover separately stored same-space votes and voter profiles:
+  [independent replicas](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+  assert nested-filter membership and derived tally updates;
+  [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
+  assert remotely updated row colors and resolved profile names. The browser
+  subscribes before the writer creates the linked entities. Headless result
+  reads explicitly pull data, so browser rendering owns the passive-update
+  check. C1 remains open for cold cross-space links, removals and reconnects,
+  ranking changes, profile-only updates, and production-shaped nested swatches.
+  These probes do not authorize removing the lunch-poll workaround.
+
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
