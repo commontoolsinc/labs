@@ -140,7 +140,7 @@ export type LeafVisitorResult<Domain, ResultType> =
   | MapContentsForm<Domain>;
 
 //
-// Other type declarations
+// Visitor interface and exported implementations thereof
 //
 
 /**
@@ -239,10 +239,6 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    */
   visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType>;
 }
-
-//
-// Classes
-//
 
 /**
  * Base implementation of `ValueVisitor`, which leaves all visitor methods
@@ -400,6 +396,10 @@ export class EmptyValueVisitor<Domain, ResultType>
     return undefined;
   }
 }
+
+//
+// Visitor engine
+//
 
 /**
  * State of a visit currently in progress, along with most of the visit
