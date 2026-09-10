@@ -6707,5 +6707,18 @@
       "sha256": "809aa814ab32c84a57c746cc575b6d1f78f7f4ce05896aa335b085b05918a14e"
     },
     "scope": "Manifest writer only, six cases; no health workload rerun or changed package source."
+  },
+  "manifestPlatformControl": {
+    "baselineHead": "ce7ab1dd6c887563035e73c67e26c9f43fe6c560",
+    "baselineSource": {
+      "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/source/baseline-health-controller-ce7a.py",
+      "sha256": "014940bcfc148a8498765cf66484dbe4fd9809f4d389496b133540944a0cb052"
+    },
+    "environment": {
+      "LC_ALL": "C",
+      "PYTHONUTF8": "0",
+      "PYTHONCOERCECLOCALE": "0"
+    },
+    "mechanism": "Simulated CRLF text translation; old hash red/new UTF-8 byte writer green. JSON outputs are ASCII-escaped, so original JSON-read locale failure not reproduced."
   }
 }

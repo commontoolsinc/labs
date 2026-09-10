@@ -210,3 +210,11 @@ python3 tools/server-execution-topics/evidence/2026-09-10-incremental-watch/revi
 The captured `review/manifest-portability-{red,green}.log` files record the
 failure on `a873c0c` and success on the corrected writer. The health workload
 and its earlier raw captures are unchanged.
+
+The same writer control simulates CRLF translation by text writers. The
+`review/manifest-platform-{red,green}.log` captures run with `LC_ALL=C`,
+`PYTHONUTF8=0`, and `PYTHONCOERCECLOCALE=0`: the writer at `ce7ab1d` fails its
+on-disk provenance hash, and the explicit UTF-8 byte writer passes all six
+cases. JSON/source reads specify UTF-8. Existing JSON captures use ASCII
+escaping, so the original JSON reads did not themselves reproduce a locale
+failure.

@@ -10,8 +10,9 @@ import hashlib
 import json
 import sys
 import tempfile
+from unittest.mock import patch
 
-source = Path(sys.argv[1]).read_text()
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
 parsed = ast.parse(source)
 save = next(node for node in parsed.body
             if isinstance(node, ast.FunctionDef) and node.name == "save")
@@ -38,8 +39,14 @@ for label in ["plain", 'spaces and "quotes"', "nonascii-é"]:
         for status in ["passed", "failed"]:
             manifest["status"] = status
             manifest["error"] = "failed at " + str(output / "arm")
-            namespace["save"]()
-            portable = json.loads((output / "manifest.json").read_text())
+            # Model Windows text newline translation on every host. The
+            # published hash must cover the exact provenance bytes on disk.
+            write_text = Path.write_text
+            def crlf_text(path, text, *args, **kwargs):
+                return write_text(path, text.replace("\n", "\r\n"), *args, **kwargs)
+            with patch.object(Path, "write_text", crlf_text):
+                namespace["save"]()
+            portable = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             assert portable["checkout"] == "${CHECKOUT}"
             command = portable["commands"][0]
             assert command["cwd"] == "${CHECKOUT}"
@@ -48,8 +55,8 @@ for label in ["plain", 'spaces and "quotes"', "nonascii-é"]:
             assert portable["status"] == status
             assert portable["sourceChecks"] == manifest["sourceChecks"]
             provenance = output / portable["externalProvenance"]["file"]
-            assert json.loads(provenance.read_text()) == manifest
+            assert json.loads(provenance.read_text(encoding="utf-8")) == manifest
             assert hashlib.sha256(provenance.read_bytes()).hexdigest() == portable["externalProvenance"]["sha256"]
             assert str(checkout) not in json.dumps(portable, ensure_ascii=False)
             assert str(output) not in json.dumps(portable, ensure_ascii=False)
-            print(label, status, "portable paths and exact hashed provenance passed")
+            print(ascii(label), status, "portable paths and exact hashed provenance passed")

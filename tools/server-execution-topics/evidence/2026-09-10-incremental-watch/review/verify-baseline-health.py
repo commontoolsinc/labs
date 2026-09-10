@@ -38,7 +38,7 @@ def save():
     # uses named roots that a replay supplies, including command arguments.
     captured = json.dumps(manifest, indent=2) + "\n"
     provenance = output / "capture-provenance.json"
-    provenance.write_text(captured)
+    provenance.write_bytes(captured.encode("utf-8"))
     def portable(value):
         if isinstance(value, str):
             for root, name in sorted(
@@ -60,9 +60,11 @@ def save():
     }
     document["externalProvenance"] = {
         "file": provenance.name,
-        "sha256": hashlib.sha256(captured.encode()).hexdigest(),
+        "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
     }
-    (output / "manifest.json").write_text(json.dumps(document, indent=2) + "\n")
+    (output / "manifest.json").write_bytes(
+        (json.dumps(document, indent=2) + "\n").encode("utf-8")
+    )
 
 
 def verify_source(phase, expected):
