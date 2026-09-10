@@ -1313,10 +1313,10 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
   (`structureLoadTerminal`) — no per-cycle ensure churn — and a
   commit touching one of the load's observed docs RE-ARMS it
-  (`structureLoadRearmed`); the re-armed retry is SETTLE-GATED
-  (retrying inside the re-arming cycle reads the replica's stale
-  pre-commit state and would re-terminalize the not-yet case the
-  re-arm exists to keep sound — caught red during the build). The
+  (`structureLoadRearmed`); the retry follows replica application within the
+  settle loop and finishes its demanded derivations before watermark coverage.
+  Admissions racing confirmation also invalidate a missing-metadata verdict.
+  The
   demanded-structure load pass moved UNDER the wave's flush deadline
   (single-flighted across cycles; completion wakes the loop), so a
   slow ensure no longer throttles input consumption. The conflation
@@ -1334,6 +1334,13 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   RETIRED with this row — the surface runs in CI's ON arm, carrying
   the amplification-ratio gate. Source-following ownership and the
   server's root-existence coverage are recorded by OW18 below.
+  The `executor/space-server-terminal-structure.test.ts` controls observe the
+  real engine's durable result at every covering commit for creation during
+  confirmation, across a flush deadline, through an owning backlink, and with
+  sealed writes pending. `executor/space-server-terminal-confirmation.test.ts`
+  covers traversed-address demand, departure and return, sync failure, and
+  teardown. `ensure-piece-running-scope.test.ts` distinguishes same-ID links
+  across scopes from true cycles under both execution postures.
 
 - OW18 — CLOSED as a move-everything obligation. Tenure activation ensures
   that the space root exists without following the root's source. Source

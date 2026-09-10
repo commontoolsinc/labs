@@ -1,7 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
-import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
+import {
+  areNormalizedLinksSame,
+  getMetaLink,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
@@ -30,11 +34,6 @@ const logger = getLogger("ensure-piece-running", {
 
 const MAX_RESULT_LINK_DEPTH = 10;
 
-function cellTraversalKey(cell: Cell<any>): string {
-  const { space, id, path } = cell.getAsNormalizedFullLink();
-  return JSON.stringify([space, id, path]);
-}
-
 /**
  * Follows `result` backlinks from `rootCell` to the result document that
  * owns the chain, naming each document before its metadata is read: the
@@ -50,19 +49,19 @@ async function followResultCellChain(
   observedDocIds: string[],
 ): Promise<Cell<any> | undefined> {
   let currentCell = rootCell;
-  const visited = new Set<string>();
+  const visited: NormalizedFullLink[] = [];
   let depth = 0;
 
   while (true) {
-    const key = cellTraversalKey(currentCell);
-    if (visited.has(key)) {
+    const link = currentCell.getAsNormalizedFullLink();
+    if (visited.some((previous) => areNormalizedLinksSame(previous, link))) {
       logger.debug("ensure-piece", () => [
         `Cycle found while following result metadata at ${currentCell.getAsNormalizedFullLink().id}`,
       ]);
       return undefined;
     }
-    visited.add(key);
-    const currentId = currentCell.getAsNormalizedFullLink().id;
+    visited.push(link);
+    const currentId = link.id;
     if (!observedDocIds.includes(currentId)) observedDocIds.push(currentId);
 
     await currentCell.sync();
@@ -106,13 +105,7 @@ export type EnsurePieceVerdict = {
      * first (the caller's confirm step). */
     | "no-pattern-meta"
     /** Meta present but `loadPatternByIdentity` found nothing. */
-    | "pattern-unloadable"
-    /** Minted by the serving loop's confirm step (space-server's
-     * `#confirmNoPatternMeta`), never by the traversal here: an
-     * observed-doc pull failed, so the no-meta verdict stays
-     * UNCONFIRMED — no terminal decision; the caller's deferred arm
-     * retries next cycle. */
-    | "confirm-pull-failed";
+    | "pattern-unloadable";
 
   /** Whether the started piece has a pattern graph installed AT THE
    * MOMENT THIS IS CALLED. `started` reports what the start walk did,
