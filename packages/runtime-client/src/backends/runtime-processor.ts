@@ -59,6 +59,7 @@ import {
   type IOperationStorageCapability,
   isCell,
   isCellResult,
+  isLoopbackHostname,
   markDurableReadTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
@@ -953,6 +954,25 @@ export class RuntimeProcessor {
                   `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
                   error.message,
                 );
+                continue;
+              }
+              // A loopback entry names the toolshed from the machine that
+              // wrote it, so a page served from anywhere else cannot reach it
+              // — and a browser on an https page refuses the ws:// socket it
+              // implies. Leave those spaces on the URL this runtime already
+              // reached its toolshed at.
+              if (
+                isLoopbackHostname(host.hostname) &&
+                !isLoopbackHostname(this.#runtime.apiUrl.hostname)
+              ) {
+                const key = `${entry.did}|${host.toString()}`;
+                if (!this.#siteTableWarned.has(key)) {
+                  this.#siteTableWarned.add(key);
+                  console.debug(
+                    `[RuntimeProcessor] Ignoring loopback site-table entry for ${entry.did} ` +
+                      `(${host.toString()}); using ${this.#runtime.apiUrl.toString()}`,
+                  );
+                }
                 continue;
               }
               latestEntries.set(entry.did, {

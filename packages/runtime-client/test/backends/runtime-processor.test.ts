@@ -124,7 +124,10 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
   }
 }
 
-const createRuntime = (actingPrincipal?: string) => {
+const createRuntime = (
+  actingPrincipal?: string,
+  apiUrl = new URL("http://localhost/"),
+) => {
   const server = new MemoryV2Server.Server({
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
@@ -140,7 +143,7 @@ const createRuntime = (actingPrincipal?: string) => {
     memoryHost: new URL("memory://"),
   }, server);
   const runtime = new Runtime({
-    apiUrl: new URL("http://localhost/"),
+    apiUrl,
     storageManager,
     ...(actingPrincipal === undefined ? {} : {
       trustSnapshotProvider: () => ({
@@ -5313,6 +5316,129 @@ describe("runtime-processor", () => {
             .toBe(false);
           expect(runtime.mappedHostFor(tableRoute)).toBe(
             "http://host-a-new.test/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
+      it("leaves a loopback entry on apiUrl when the page did not reach loopback", async () => {
+        // loom's daemon writes its own toolshed URL into the table, so a space
+        // it serves reads as `http://localhost:8001`. A page served over the
+        // tailnet cannot reach that, and WebKit refuses the ws:// socket it
+        // implies from an https page — every pane then fails with "No data at
+        // cell". The entry means "the toolshed this runtime is talking to".
+
+        const { runtime } = createRuntime(
+          undefined,
+          new URL("https://host.ts.net:8001/"),
+        );
+        const registered: Array<[string, string]> = [];
+        let sawRemote = () => {};
+        const remoteRegistered = new Promise<void>((resolve) => {
+          sawRemote = resolve;
+        });
+        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        const loopbackSpace = "did:key:z6Mk-loopback" as MemorySpace;
+        const remoteSpace = "did:key:z6Mk-remote" as MemorySpace;
+        Object.assign(runtime, {
+          registerSpaceHost: (space: string, host: string) => {
+            registered.push([space, host]);
+            if (space === remoteSpace) sawRemote();
+            return registerSpaceHost(space as MemorySpace, host);
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: loopbackSpace, host: "http://localhost:8001/" },
+          { did: remoteSpace, host: "http://host-remote.test/" },
+        ]);
+        await tx.commit();
+
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          // The non-loopback entry still registers, and the loop decides both
+          // in one pass, so its arrival is when the loopback one has been
+          // decided too.
+          await remoteRegistered;
+          expect(registered).toEqual([[
+            remoteSpace,
+            "http://host-remote.test/",
+          ]]);
+          expect(registered.map(([space]) => space)).not.toContain(
+            loopbackSpace,
+          );
+          expect(runtime.hostForSpace(loopbackSpace).toString()).toBe(
+            "https://host.ts.net:8001/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
+      it("registers a loopback entry when the page reached loopback too", async () => {
+        const { runtime } = createRuntime();
+        const registered: Array<[string, string]> = [];
+        let sawLoopback = () => {};
+        const loopbackRegistered = new Promise<void>((resolve) => {
+          sawLoopback = resolve;
+        });
+        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        Object.assign(runtime, {
+          registerSpaceHost: (space: string, host: string) => {
+            registered.push([space, host]);
+            sawLoopback();
+            return registerSpaceHost(space as MemorySpace, host);
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const loopbackSpace = "did:key:z6Mk-loopback-local" as MemorySpace;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: loopbackSpace, host: "http://localhost:8001/" },
+        ]);
+        await tx.commit();
+
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          await loopbackRegistered;
+          expect(registered).toEqual([[
+            loopbackSpace,
+            "http://localhost:8001/",
+          ]]);
+          expect(runtime.hostForSpace(loopbackSpace).toString()).toBe(
+            "http://localhost:8001/",
           );
         } finally {
           await processor.dispose();
