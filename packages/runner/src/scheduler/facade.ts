@@ -1853,7 +1853,10 @@ export class Scheduler {
     this.#filterStats.executed = 0;
   }
 
-  /** Enables or disables per-action read accounting for subsequent runs. */
+  /**
+   * Enables or disables read accounting for subsequent action runs. A fan-out
+   * run retains its starting setting across every instance.
+   */
   setReadStatsEnabled(enabled: boolean): void {
     this.#collectReadStats = enabled;
   }

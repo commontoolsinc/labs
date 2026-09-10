@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-10T20:33:42.667895+00:00",
+  "updated": "2026-09-10T20:44:23.018814+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "head": "af49d7d30a",
-  "activity": "Worker control is under CI and Cubic review in PR #7256. #7241 reconciliation passes type checks, 598 documentation blocks, and the refreshed lunch-poll fixture. Full runner validation continues. A3 accounting migration passes 64 focused steps.",
-  "review": "Latest #7241 Cubic review found zero new issues, but its earlier fan-out finding remains open. Main integration requires fresh checks and review. Mike authorizes merging after all gates pass.",
+  "head": "f12c01fddc",
+  "activity": "Merged worker read-statistics control in #7256 after all 69 checks and clean Cubic/antagonistic reviews. #7241 reconciliation remains under CI. The browser workload fixture and A3 lifecycle failure regressions are in progress.",
+  "review": "Worker control #7256 landed as 8d3c7dbc3c. Cubic skipped #7241\u2019s merge-only revision; this checkpoint requests a normal incremental review. All remaining gates must pass before merging #7241.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -34,7 +34,8 @@
     "#7241 reconciliation: repository type checks and 598 documentation blocks passed",
     "#7241 refreshed controlled lunch-poll: five assertions passed; demo uses shipped #7246 counters",
     "A3 migration: accounting suites passed 64 steps",
-    "Worker control #7256: full runtime-client suite passed 30 tests / 650 steps; antagonistic review clean"
+    "Worker control #7256: full runtime-client suite passed 30 tests / 650 steps; antagonistic review clean",
+    "#7256 merged: all 69 checks complete without failure; actual Cubic review found no issues in five files; antagonistic review clean"
   ],
   "stages": [
     {
@@ -65,7 +66,7 @@
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Worker control bbd0ac8907 passed 30 tests / 650 steps locally. Adapt to the shipped accounting API, then build the on-screen scaling benchmark."
+      "detail": "Worker read-statistics control shipped in #7256 (8d3c7dbc3c). The on-screen workload fixture is being tested; scaling benchmark remains in progress."
     },
     {
       "id": "A5",
