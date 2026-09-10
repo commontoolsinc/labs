@@ -70,7 +70,11 @@ import type { CfcAddress } from "./cfc/types.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  excludeReadFromConflict,
+  internalVerifierRead,
+  linkResolutionProbe,
+} from "./storage/reactivity-log.ts";
 import {
   canBranchMatch,
   combineOptionalSchema,
@@ -94,10 +98,9 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   path: [...link.path],
 });
 
-// Creation-only: stamp the asCell entry's declared scope onto a newly created
-// cell's link. Never use this on a link that was followed/resolved during a
-// read — there the link's own storage-resolved scope is authoritative and
-// schema scope acts only as a follow cap (see link-resolution.ts).
+// The `asCell` declaration chooses the scope of a new slot. Existing values
+// and references keep their storage-resolved scope; their schema scope only
+// constrains which links a read may follow.
 const linkWithAsCellScope = (
   link: NormalizedFullLink,
   entry:
@@ -1219,6 +1222,37 @@ export function validateAndTransform(
       link.schema = SchemaObjectTraverser.hasAsCell(combined)
         ? combined
         : effectiveSchema!;
+    }
+    const handleSchema = resolveSchema(link.schema);
+    const handleEntry = ContextualFlowControl.getAsCellValues(handleSchema)[0];
+    if (
+      isObjectOrArray(handleSchema) && handleSchema.default !== undefined &&
+      isCellScope(ContextualFlowControl.getAsCellScope(handleEntry))
+    ) {
+      // Inspect the addressed slot before following its leaf reference: an
+      // existing reference retains its target even when that target is absent.
+      // This handle-only probe remains reactive to the slot's arrival.
+      const absentSlot = tx.runWithAmbientReadMeta(
+        excludeReadFromConflict,
+        () => {
+          let blocked = false;
+          const sourceLink = isCellViewRef(sourceRef)
+            ? sourceRef.link
+            : sourceRef;
+          const slot = resolveLink(runtime, tx, sourceLink, "top", {
+            onScopeBlocked: () => {
+              blocked = true;
+            },
+          });
+          return !blocked && !slot.pendingHopDoc &&
+            !slot.id.startsWith("data:") &&
+            tx.readValueOrThrow(slot, {
+                nonRecursive: true,
+                meta: linkResolutionProbe,
+              }) === undefined;
+        },
+      );
+      if (absentSlot) link = linkWithAsCellScope(link, handleEntry);
     }
     objectCreator.setBase(link, cfcLabelView);
     return objectCreator.createObject(link, undefined);
