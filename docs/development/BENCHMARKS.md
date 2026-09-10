@@ -348,3 +348,46 @@ a question the workflow's list answers.
 half of the same property: it counts rolled-back writes instead of timing them,
 and requires none, so a regression that this benchmark shows as trend drift
 also fails a test.
+
+## Rendered lunch-poll read scaling
+
+`packages/patterns/integration/lunch-poll-read-scale.bench.ts` measures a vote
+change with the production lunch poll's cards and summary demanded by a browser.
+Its three series hold 74, 296, and 1184 votes over 14 options, with 8, 24, and 87
+voters respectively. Voter links point to separate entities in the same space.
+Seeding, navigation, sign-in, viewer selection, warmup, and teardown are outside
+the timed interval. The timer includes click-helper readiness, browser/protocol
+overhead, and a trusted green-vote click through view
+settlement and the matching selected button and summary swatch.
+
+An untimed yellow-vote change collects reactive-body runs, proxy accesses,
+maximum per-run accesses, link traversals, and successful/failed event-commit
+markers from the browser worker. Accounting and telemetry are disabled before
+the timed change. These body counters exclude event-handler and commit-preparation
+reads; event-commit markers are counted separately and do not describe every
+storage transaction. Diagnostics go to stderr. Missing successful event commits, event-commit
+errors, and browser exceptions fail the run.
+
+The workflow pins the shell build, toolshed, and benchmark process to
+`EXPERIMENTAL_SERVER_EXECUTION=false`. This keeps its client-execution series
+stable across changes to the product default. The benchmark checks toolshed
+metadata and the served shell posture before seeding. The contention benchmark
+remains a separate workload.
+
+For a local run, start matching client-execution dev servers as described in
+[Local dev servers](LOCAL_DEV_SERVERS.md), then run:
+
+```sh
+EXPERIMENTAL_SERVER_EXECUTION=false \
+API_URL=http://localhost:8000 FRONTEND_URL=http://localhost:5173 \
+CF_LOG_LEVEL=silent \
+deno bench --json -A \
+  packages/patterns/integration/lunch-poll-read-scale.bench.ts \
+  > /tmp/lunch-read-scale.json 2> /tmp/lunch-read-scale.log
+```
+
+Set `CF_READ_SCALE_ARTIFACT_DIR` to a local output directory to save one screenshot
+and the latest diagnostic sample per size, after the timed interval. The fixture
+uses a dedicated space and a synthetic viewer. It supplies repeatable local
+measurements; comparisons to a deployed board require matching its execution
+posture, data, and cross-space links.

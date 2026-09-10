@@ -7,6 +7,13 @@ reconciled in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's
 local implementation requires adaptation to the shipped accounting API before
 review.
 
+B3's named aggregates are implemented and validated in
+[PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
+[contracts](../features/collection-aggregates.md) and
+[measured update and initialization costs](../history/development/performance/2026-09-incremental-aggregates.md).
+The aggregate comparison precedes B1/B2; index contracts and keyed lookup are
+the next collection-operator priority.
+
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
 `147e7518c9d03bc9808c56e1488d2ae0965ea655`. The design owns the rationale and
@@ -45,7 +52,7 @@ deferred and does not block completion of the active work.
 | 6     | B1/B2 contracts      | 2; incorporate C1 findings                  | Written index, lookup, and join contracts              |
 | 7     | B1, B4               | 6                                           | Incremental grouping and unique-key indexing           |
 | 8     | B2, B4               | 7                                           | Keyed lookup and incremental join                      |
-| 9     | B3 contracts, B3, B4 | 8                                           | Deterministic named aggregates                         |
+| 9     | B3 contracts, B3, B4 | 2                                           | Deterministic named aggregates                         |
 | 10    | C2, C3, C4           | 5; use 2 for cost evidence                  | Remote updates work through reactive rows              |
 | 11    | B5, B6               | 3, 4, 8, 9; coordinate with 10              | Measured lunch-poll migration                          |
 | 12    | E1, E2, E3           | 2 for measurements; 7–9 for operator advice | Measured guidance and warning diagnostic               |
@@ -238,21 +245,24 @@ durations are used as performance evidence.
         consumers do not rerun and measure maintenance work as size grows.
 - [ ] **B2 implementation — Build keyed lookup, then join.** Test lookup and
       join contracts, both-side updates, and affected-row-only invalidation.
-- [ ] **B3 contract — Specify deterministic aggregates.**
-  - [ ] Define combine order from the current collection, independent of edit
+- [x] **B3 contract — Specify deterministic aggregates.**
+  - [x] Define combine order from the current collection, independent of edit
         history; define floating-point behavior explicitly.
-  - [ ] Define ties, empty collections, NaN, infinities, and signed zero for
+  - [x] Define ties, empty collections, NaN, infinities, and signed zero for
         `sum`, `min`, `max`, `minBy`, and `maxBy`; define predicate counting.
-- [ ] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
-  - [ ] Maintain partial aggregates using existing element identities and
+- [x] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
+  - [x] Maintain partial aggregates using existing element identities and
         deterministic combination; avoid inverse subtraction.
-  - [ ] Reach identical results through different insertion, deletion, reorder,
+  - [x] Reach identical results through different insertion, deletion, reorder,
         and edit histories. Test count bounds on single-element updates and
         initialization separately.
-  - [ ] Keep ordinary `reduce` as the full-rerun order-dependent operation.
+  - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
 - [ ] **B4 — Publish contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
       in the same slice that ships the API.
+      The aggregate portion is documented in
+      [collection aggregates](../features/collection-aggregates.md); index and
+      join documentation remains pending.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -328,6 +338,8 @@ Define A3's budget declaration and extend measurement to event dispatch and
 commit work before enforcing whole-step budgets. Preserve separate
 initialization limits and include short-lived actions and failed attempts. The
 controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. Do not
-implement collection operators before the measurement and semantic gates above
-are satisfied.
+browser and cross-space measurements before product performance claims.
+For the pending collection operators, settle B1's index contracts before
+implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
+measurements use the shipped counters and the aggregate comparison method;
+A4/A5 gate deployed-product claims rather than operator implementation.
