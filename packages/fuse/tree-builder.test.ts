@@ -1,10 +1,11 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
   classifyCallableEntry,
-  isPatternToolValue,
+  isPatternFactoryValue,
 } from "./callables.ts";
 import {
   buildFsProjection,
@@ -24,6 +25,23 @@ import {
 import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
+
+function patternFactoryValue(params: Record<string, unknown> = {}) {
+  return createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "search",
+    },
+    argumentSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    resultSchema: true,
+    paramsSchema: true,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  });
+}
 
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const ino = tree.lookup(parentIno, name);
@@ -987,15 +1005,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
   const tree = new FsTree();
   const data = {
     count: 3,
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactoryValue({ source: "items" }),
   };
 
   const resultIno = buildJsonTree(
@@ -1005,7 +1015,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     data,
     undefined,
     0,
-    (value) => isPatternToolValue(value),
+    (value) => isPatternFactoryValue(value),
   );
   const script = buildCallableScript("/tmp/cf-exec");
   const callableIno = tree.addCallable(
@@ -1035,15 +1045,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   const data = {
     count: 3,
     addItem: { $stream: true },
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactoryValue({ source: "items" }),
   };
 
   buildJsonTree(
@@ -1053,10 +1055,10 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     data,
     undefined,
     0,
-    (value) => isHandlerCell(value) || isPatternToolValue(value),
+    (value) => isHandlerCell(value) || isPatternFactoryValue(value),
     (_key, value) => {
       if (isHandlerCell(value) || isStreamValue(value)) return "handler";
-      return isPatternToolValue(value) ? "tool" : null;
+      return isPatternFactoryValue(value) ? "tool" : null;
     },
   );
 
@@ -1317,15 +1319,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
 
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
+    patternFactoryValue({ source: "bound-source" }),
     undefined,
   );
   const resultCell = makeCell(
@@ -1431,15 +1425,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const titleCell = makeCell("hello", { type: "string" });
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
+    patternFactoryValue({ source: "bound-source" }),
     undefined,
   );
   const resultCell = makeCell(

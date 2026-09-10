@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { ValidationError } from "@cliffy/command";
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  createFactoryShell,
+  factoryStateOf,
+} from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
@@ -57,13 +61,23 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import {
-  executePieceCallable,
+  executePieceCallable as executePieceCallableImpl,
   LinkValidationError,
   PieceResultProjectionError,
   PieceVerbReadError,
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
+
+async function executePieceCallable(
+  ...args: Parameters<typeof executePieceCallableImpl>
+): ReturnType<typeof executePieceCallableImpl> {
+  const [config, callableName, rawArgs, deps = {}] = args;
+  return await executePieceCallableImpl(config, callableName, rawArgs, {
+    prepareFactory: (factory: unknown) => Promise.resolve(factory),
+    ...deps,
+  });
+}
 
 /**
  * The runner's own stream-send options, derived from `Cell["send"]` rather
@@ -561,11 +575,12 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.resolved.callableKind).toBe("tool");
-    expect(harness.tracker.toolRunPattern).toBe(toolPattern);
+    expect(factoryStateOf(harness.tracker.toolRunPattern).params).toEqual({
+      source: "bound-source",
+    });
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
       help: "",
-      source: "bound-source",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       summary: "bound-source:tea",
@@ -1584,24 +1599,24 @@ function createPieceCallableHarness(options: {
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
     ? {
-      type: "object",
-      properties: {
-        pattern: {
-          type: "object",
-          properties: {
-            argumentSchema: { type: "object" },
-            resultSchema: { type: "object" },
-          },
-        },
-        extraParams: { type: "object" },
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: options.inputSchema,
+        resultSchema: options.pattern?.resultSchema ?? true,
       },
     }
     : options.inputSchema;
   const callableValue = options.callableKind === "tool"
-    ? {
-      pattern: options.pattern,
-      extraParams: options.extraParams ?? {},
-    }
+    ? createFactoryShell({
+      kind: "pattern",
+      ref: { identity: "A".repeat(43), symbol: options.cellKey },
+      argumentSchema: options.inputSchema,
+      resultSchema: options.pattern?.resultSchema ?? true,
+      paramsSchema: true,
+      ...(options.extraParams === undefined
+        ? {}
+        : { params: options.extraParams }),
+    })
     : { $stream: true };
   const runtimeErrors: Array<{ message: string }> = [];
   const callableCell = createMockCell(

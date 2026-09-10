@@ -8,6 +8,7 @@ import {
 } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { defer } from "@commonfabric/utils/defer";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -53,6 +54,23 @@ import {
 //
 
 const decoder = new TextDecoder();
+
+function patternFactoryValue(params: Record<string, unknown> = {}) {
+  return createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "search",
+    },
+    argumentSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    resultSchema: true,
+    paramsSchema: true,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  });
+}
 
 class IterationCountingMap<K, V> extends Map<K, V> {
   iteratedEntries = 0;
@@ -2176,15 +2194,7 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
 
   const makeResultCell = (title: string): FakeCell => {
     const searchToolCell = makeCell(
-      {
-        pattern: {
-          argumentSchema: {
-            type: "object",
-            properties: { query: { type: "string" } },
-          },
-        },
-        extraParams: { title },
-      },
+      patternFactoryValue({ title }),
       undefined,
     );
     return makeCell(
@@ -2899,15 +2909,7 @@ Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuil
   const state = buildTestSpace(bridge, "home", []);
 
   const initialToolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "before" },
-    },
+    patternFactoryValue({ source: "before" }),
     undefined,
   );
   const initialResultCell = makeCell(
@@ -2961,15 +2963,7 @@ Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuil
   assertEquals(initialToolIno !== undefined, true);
 
   const rebuiltToolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "after" },
-    },
+    patternFactoryValue({ source: "after" }),
     undefined,
   );
   const rebuiltResultCell = makeCell(

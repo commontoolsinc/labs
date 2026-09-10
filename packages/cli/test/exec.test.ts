@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  createFactoryShell,
+  factoryStateOf,
+} from "@commonfabric/data-model/fabric-factory";
 import { undeclaredVerbFieldError } from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -15,13 +19,29 @@ import {
   resolveParsedExecInput,
 } from "../lib/exec-schema.ts";
 import {
-  executeMountedCallableFile,
+  executeMountedCallableFile as executeMountedCallableFileImpl,
   resolveMountedCallableFile,
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import type { SpaceConfig } from "../lib/piece.ts";
 import { cf, relevantStderr } from "./utils.ts";
+
+async function executeMountedCallableFile(
+  ...args: Parameters<typeof executeMountedCallableFileImpl>
+): ReturnType<typeof executeMountedCallableFileImpl> {
+  const [filePath, rawArgs, deps = {}, options] = args;
+  const testDeps = {
+    ...deps,
+    prepareFactory: (factory: unknown) => Promise.resolve(factory),
+  };
+  return await executeMountedCallableFileImpl(
+    filePath,
+    rawArgs,
+    testDeps,
+    options,
+  );
+}
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -2703,7 +2723,7 @@ describe("mounted callable resolution and execution", () => {
     ).rejects.toThrow(/Handler "add" failed: Mounted handler failed/);
   });
 
-  it("dispatches tools with extraParams merged into the runtime input and returns JSON output", async () => {
+  it("keeps factory params separate from public tool input and returns JSON output", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/search.tool",
@@ -2786,6 +2806,8 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
       help: "",
+    });
+    expect(factoryStateOf(harness.tracker.toolRunPattern).params).toEqual({
       source: "bound-source",
       result: "bound-result",
     });
@@ -3071,7 +3093,6 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.toolRunInput).toEqual({
       query: "explicit",
       help: "schema-field",
-      source: "bound-source",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       query: "explicit",
@@ -3309,7 +3330,6 @@ describe("mounted callable resolution and execution", () => {
 
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
-      source: "bound-source",
     });
   });
 
@@ -3371,7 +3391,6 @@ describe("mounted callable resolution and execution", () => {
 
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
-      source: "bound-source",
     });
   });
 
@@ -3616,23 +3635,30 @@ function createExecHarness(options: {
       value: unknown;
     }>,
     toolRunInput: undefined as unknown,
+    toolRunPattern: undefined as unknown,
     toolResultSpace: undefined as string | undefined,
   };
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
     ? {
-      type: "object",
-      properties: {
-        pattern: { type: "object" },
-        extraParams: { type: "object" },
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: options.inputSchema,
+        resultSchema: options.pattern?.resultSchema ?? true,
       },
     }
     : options.inputSchema;
   const callableValue = options.callableKind === "tool"
-    ? {
-      pattern: options.pattern,
-      extraParams: options.extraParams ?? {},
-    }
+    ? createFactoryShell({
+      kind: "pattern",
+      ref: { identity: "A".repeat(43), symbol: options.cellKey },
+      argumentSchema: options.inputSchema,
+      resultSchema: options.pattern?.resultSchema ?? true,
+      paramsSchema: true,
+      ...(options.extraParams === undefined
+        ? {}
+        : { params: options.extraParams }),
+    })
     : options.sparseHandlerCell
     ? undefined
     : { $stream: true };
@@ -3770,11 +3796,12 @@ function createExecHarness(options: {
       },
       run: (
         _tx: unknown,
-        _pattern: unknown,
+        pattern: unknown,
         input: unknown,
         _result: unknown,
       ) => {
         tracker.events.push("run");
+        tracker.toolRunPattern = pattern;
         tracker.toolRunInput = input;
         if (options.toolRunError !== undefined) {
           runtimeErrors.push({ message: options.toolRunError });
