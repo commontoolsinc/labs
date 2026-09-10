@@ -87,7 +87,7 @@ Deno.test("traverse replay records batched plain-schema reads", () => {
         scope: "space",
       },
       selector: 0,
-      includeMeta: false,
+      traverseCells: false,
       context: 0,
     }],
   };
@@ -139,7 +139,7 @@ Deno.test("plain primitive-array traversal records indices after failure", () =>
         scope: "space",
       },
       selector: 0,
-      includeMeta: false,
+      traverseCells: false,
       context: 0,
     }],
   };

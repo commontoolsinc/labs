@@ -65,7 +65,7 @@ export type ReplayOracle = {
 
   /**
    * Per context id: sorted `trackerKey::selectorHash` entries. Only contexts
-   * shared by multiple invocations or with includeMeta (the server query
+   * shared by multiple invocations or with traverseCells (the server query
    * path, where tracker contents drive subscriptions) are dumped — fresh
    * per-call client contexts would only mirror the read set.
    */
@@ -255,12 +255,12 @@ const REPLAY_SCOPE_IDENTITY = {
   sessionId: "replay-session",
 };
 
-function makeContext(includeMeta: boolean): TraversalContext {
+function makeContext(traverseCells: boolean): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker(),
     new MapSetStringToPathSelectors(true),
     REPLAY_SCOPE_IDENTITY,
-    includeMeta,
+    traverseCells,
   );
 }
 
@@ -289,7 +289,7 @@ export function replayFixture(
 
   const contexts = new Map<number, TraversalContext>();
   const contextUses = new Map<number, number>();
-  const contextIncludesMeta = new Map<number, boolean>();
+  const contextTraversesCells = new Map<number, boolean>();
   const memos = new Map<number, ReturnType<typeof createSchemaMemo>>();
 
   const invocationOracles: ReplayInvocationOracle[] = [];
@@ -314,15 +314,15 @@ export function replayFixture(
     invocationIndex++;
     let context = contexts.get(invocation.context);
     if (context === undefined) {
-      context = makeContext(invocation.includeMeta);
+      context = makeContext(invocation.traverseCells);
       contexts.set(invocation.context, context);
     }
     contextUses.set(
       invocation.context,
       (contextUses.get(invocation.context) ?? 0) + 1,
     );
-    if (invocation.includeMeta) {
-      contextIncludesMeta.set(invocation.context, true);
+    if (invocation.traverseCells) {
+      contextTraversesCells.set(invocation.context, true);
     }
     let memo = undefined;
     if (invocation.memo !== undefined) {
@@ -400,8 +400,8 @@ export function replayFixture(
     const schemaTrackers: Record<string, string[]> = {};
     for (const [contextId, context] of contexts) {
       const shared = (contextUses.get(contextId) ?? 0) > 1;
-      const includesMeta = contextIncludesMeta.get(contextId) ?? false;
-      if (!shared && !includesMeta) continue;
+      const traversesCells = contextTraversesCells.get(contextId) ?? false;
+      if (!shared && !traversesCells) continue;
       const entries: string[] = [];
       for (const [key, selectors] of context.schemaTracker) {
         for (const selector of selectors) {
