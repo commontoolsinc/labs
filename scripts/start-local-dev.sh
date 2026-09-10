@@ -55,6 +55,14 @@ while [[ $# -gt 0 ]]; do
             WATCH=true
             shift
             ;;
+        --console)
+            CONSOLE=true
+            shift
+            ;;
+        --no-console)
+            CONSOLE=false
+            shift
+            ;;
         --bg-updater)
             BG_UPDATER=true
             shift
@@ -113,8 +121,28 @@ SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
 TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 
+# The cf-harness console runs beside the toolshed when this is a loom
+# instance's stack, so that nobody has to start it by hand and there is one
+# console per instance rather than one per person who remembered. `--console`
+# asks for it without loom; `--no-console` declines it within loom.
+if [[ -z "${CONSOLE:-}" ]]; then
+    if [[ -n "${LOOM_INSTANCE_ID:-}" ]]; then
+        CONSOLE=true
+    else
+        CONSOLE=false
+    fi
+fi
+
+# Not derived from PORT_OFFSET: this is the port Weaver pairs with and loom's
+# `/harness-console/*` proxy resolves the same way, so an instance that needs
+# another one records it and both sides read it from there.
+CONSOLE_PORT=${CF_HARNESS_CONSOLE_PORT:-8135}
+
 require_reachable_port "shell" "$SHELL_PORT"
 require_reachable_port "toolshed" "$TOOLSHED_PORT"
+if [[ "$CONSOLE" == "true" ]]; then
+    require_reachable_port "cf-harness console" "$CONSOLE_PORT"
+fi
 if [[ "$INSPECT" == "true" ]]; then
     require_reachable_port "inspector" "$INSPECT_PORT"
 fi
@@ -139,9 +167,11 @@ fi
 SHELL_LOG="$SCRIPT_DIR/../packages/shell/local-dev-shell.log"
 TOOLSHED_LOG="$SCRIPT_DIR/../packages/toolshed/local-dev-toolshed.log"
 BG_LOG="$SCRIPT_DIR/../packages/background-piece-service/local-dev-bg.log"
+CONSOLE_LOG="$SCRIPT_DIR/../packages/cf-harness/local-dev-console.log"
 SHELL_PID=""
 TOOLSHED_PID=""
 BG_PID=""
+CONSOLE_PID=""
 
 # With --force, kill anything already listening on the port so the server can
 # bind it. Without --force the port is left untouched: each server reports a
@@ -169,6 +199,9 @@ free_port_if_forced() {
 
 free_port_if_forced "$TOOLSHED_PORT"
 free_port_if_forced "$SHELL_PORT"
+if [[ "$CONSOLE" == "true" ]]; then
+    free_port_if_forced "$CONSOLE_PORT"
+fi
 
 show_recent_log() {
     local name=$1
@@ -348,6 +381,115 @@ wait_for_http \
 wait_for_http \
     "shell through toolshed" "http://localhost:$TOOLSHED_PORT/" \
     "$TOOLSHED_PID" "$TOOLSHED_LOG"
+
+# The cf-harness console, on the fabric the toolshed above is now serving.
+#
+# It never fails this script. The toolshed and the shell are the stack; the
+# console is a surface on top of it, and a person whose Docker is off or whose
+# model provider is not connected should still get a working loom. So every
+# way the console can fail to come up is reported here, written to its log, and
+# left for `loom status` and `loom doctor` to name — and none of them stops the
+# servers that did come up.
+console_unavailable() {
+    local reason=$1
+
+    echo "Error: cf-harness console did not start: $reason" >&2
+    echo "  The toolshed and shell are unaffected." >&2
+    echo "  Console log file: packages/cf-harness/local-dev-console.log" >&2
+    kill_tree "$CONSOLE_PID"
+    CONSOLE_PID=""
+    CONSOLE_STATUS="$reason"
+    CONSOLE=false
+}
+
+# Where the console's two non-derivable values come from. They belong to a
+# deployment rather than to loom, so a stack that asks for a console and names
+# neither is a stack whose operator has not finished saying what they want:
+# that is reported rather than resolved to a default nobody chose. `--no-`
+# waives one deliberately, which is a decision and so is not an error.
+console_registry_arguments() {
+    local -n out=$1
+
+    if [[ -n "${CF_HARNESS_PATTERN_INDEX_URL:-}" ]]; then
+        out+=(--pattern-index-url "$CF_HARNESS_PATTERN_INDEX_URL")
+    elif [[ "${CF_HARNESS_NO_PATTERN_INDEX:-}" == "1" ]]; then
+        out+=(--no-pattern-index)
+    else
+        return 1
+    fi
+
+    if [[ -n "${CF_HARNESS_SKILLS_REGISTRY_URL:-}" ]]; then
+        out+=(--skills-registry-url "$CF_HARNESS_SKILLS_REGISTRY_URL")
+    elif [[ "${CF_HARNESS_NO_SKILLS_REGISTRY:-}" == "1" ]]; then
+        out+=(--no-skills-registry)
+    else
+        return 2
+    fi
+    return 0
+}
+
+if [[ "$CONSOLE" == "true" ]]; then
+    CONSOLE_ARGS=(--port "$CONSOLE_PORT")
+    if [[ -n "${LOOM_INSTANCE_ID:-}" ]]; then
+        CONSOLE_ARGS+=(--instance "$LOOM_INSTANCE_ID")
+    fi
+
+    CONSOLE_REGISTRY_ARGS=()
+    console_registry_arguments CONSOLE_REGISTRY_ARGS
+    case $? in
+        1)
+            console_unavailable \
+                "no pattern index is configured. Record one in the loom instance's \
+\`pieces.json\` as \`harness_console_pattern_index_url\`, or set \
+\`CF_HARNESS_PATTERN_INDEX_URL\`; \`CF_HARNESS_NO_PATTERN_INDEX=1\` runs without one."
+            ;;
+        2)
+            console_unavailable \
+                "no skills registry is configured. Record one in the loom instance's \
+\`pieces.json\` as \`harness_console_skills_registry_url\`, or set \
+\`CF_HARNESS_SKILLS_REGISTRY_URL\`; \`CF_HARNESS_NO_SKILLS_REGISTRY=1\` runs without one."
+            ;;
+    esac
+fi
+
+if [[ "$CONSOLE" == "true" ]]; then
+    CONSOLE_ARGS+=("${CONSOLE_REGISTRY_ARGS[@]}")
+    echo "Starting cf-harness console on port $CONSOLE_PORT..."
+    # `MEMORY_DIR` is deliberately not forwarded: loom sets it to the `file://`
+    # URL the toolshed reads it as, and the console reads that variable as a
+    # directory to walk. The launcher resolves the store for itself and hands
+    # the console the path.
+    (
+        cd "$SCRIPT_DIR/.."
+        unset MEMORY_DIR
+        exec deno task --cwd packages/cf-harness console:loom "${CONSOLE_ARGS[@]}"
+    ) > "$CONSOLE_LOG" 2>&1 &
+    CONSOLE_PID=$!
+
+    console_deadline=$((SECONDS + LOCAL_DEV_STARTUP_TIMEOUT))
+    while (( SECONDS < console_deadline )); do
+        if ! kill -0 "$CONSOLE_PID" 2>/dev/null; then
+            wait "$CONSOLE_PID" 2>/dev/null
+            console_unavailable "it exited before answering (exit $?)"
+            break
+        fi
+        if [[ "$(
+            curl -s -o /dev/null -w "%{http_code}" --max-time 2 \
+                "http://127.0.0.1:$CONSOLE_PORT/api/health" 2>/dev/null
+        )" == "200" ]]; then
+            echo "  cf-harness console is ready."
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$CONSOLE" == "true" && -n "$CONSOLE_PID" ]] && (( SECONDS >= console_deadline )); then
+        console_unavailable \
+            "it did not answer /api/health within ${LOCAL_DEV_STARTUP_TIMEOUT}s"
+    fi
+    if [[ "$CONSOLE" == "true" ]]; then
+        show_recent_log "cf-harness console" "$CONSOLE_LOG"
+    fi
+fi
 
 # Print the toolshed URL on success (when not using --bg-updater, which prints after health check)
 if [[ "$BG_UPDATER" != "true" ]]; then
