@@ -9,8 +9,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--extract", type=Path, help="New directory for verified artifacts")
 args = parser.parse_args()
 root = Path(__file__).resolve().parent
-manifest = json.loads((root / "manifest.json").read_text())
-bundle = json.loads((root / manifest["artifactBundle"]).read_text())
+manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+bundle = json.loads((root / manifest["artifactBundle"]).read_text(encoding="utf-8"))
 if bundle["encoding"] != "utf-8":
     raise ValueError("Unsupported bundle encoding")
 if set(bundle["files"]) != {entry["path"] for entry in manifest["artifactFiles"]}:
@@ -18,7 +18,12 @@ if set(bundle["files"]) != {entry["path"] for entry in manifest["artifactFiles"]
 verified = {}
 for entry in manifest["artifactFiles"]:
     path = PurePosixPath(entry["path"])
-    if path.is_absolute() or ".." in path.parts:
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "\\" in entry["path"]
+        or ":" in entry["path"]
+    ):
         raise ValueError(f"Artifact path leaves the extraction directory: {path}")
     data = bundle["files"][entry["path"]].encode("utf-8")
     actual = hashlib.sha256(data).hexdigest()
