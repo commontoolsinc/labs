@@ -24,7 +24,7 @@ The status corrections in this register are bounded to the rows below:
 | --- | --- |
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Open: no served compile outbox/completion path or real-host completion regression test. |
-| OW28-createRef | Open: distinct schema-backed program values can collide in the compile cache, including under OFF. |
+| OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
 | OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
@@ -2597,16 +2597,24 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   changes despite the PR's closing claim. A closed sibling PR does not
   discharge this row. Trigger: third in the plan's ordered flip gates;
   required before a renewed ON rollout.
-- OW28-createRef — OPEN: program-value hashing at the compile-cache boundary.
-  `PatternManager.compileOrGetPattern` keys `createRef({ src: program })`.
-  With a schema-backed query-result proxy, different nested source contents
-  can select the same cached Pattern in a warm process. A controlled probe
-  through the real cache method compiles A only for proxy values A then B;
-  plain-object A/B controls compile separately. This applies under OFF,
-  independently of OW28's serving port. Owed: normalize the resolved program
-  at the cache boundary using the canonical value machinery and add a
-  regression proving a same-cell program edit selects the new contents.
-  Trigger: a warm-process same-node program edit, including a code editor.
+- OW28-createRef — CLOSED: program-value hashing at the compile-cache boundary.
+  `PatternManager.compileOrGetPattern` snapshots the complete resolved program
+  with `snapshotQueryResult` and uses that same detached value for its key and
+  compiler input. Requests with and without a space use separate cache entries.
+  With CFC enforcement, concurrent requests share compilation across spaces and
+  register closure replication into every requested space; replicated data
+  files retain their compiled-cache data marker. With CFC disabled, requests
+  share compilation without scheduling closure replication.
+
+  `pattern-manager.test.ts` proves that a same-cell program edit selects the new
+  contents, identical content shares a result across addresses, and a delayed
+  compile retains the program's source and options. `compile-cache-space-aware.test.ts`
+  proves a fresh runtime loads a follower space's piece and attached data
+  from the compiled cache, with recompilation refused, for persistent and
+  source-only pending/cached leaders. It also proves concurrent and cached
+  CFC-disabled calls share compilation without issuing replication. This cache
+  boundary is shared by OFF and the served compiler; closing it does not
+  discharge OW28's serving port.
 - OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
   inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
   reports that run-counter cancellation abandons a completion to which the
@@ -9597,8 +9605,9 @@ supply; OW29/OW32/OW34 closed):
     following the ruling asks for EXISTED at the graph layer —
     `assembleSchemaDocClosures` (memory/v2/query.ts, since #5833)
     scans every delivered snapshot for embedded cid refs and stages
-    the verified closure, beside the meta-link following
-    (`loadMetaLinkedDocs`, runner traverse.ts) that ships computed
+    the verified closure, beside the meta-link following in runner
+    traverse.ts (as of #7193 a traversal follows a document's `cfc`
+    envelope alone, through `loadLabelSchemaDoc`) that shipped computed
     results at all — but it stages a closure doc only while the
     tracked graph has never delivered it, and the frame builders
     additionally elide entries the session cache says were delivered
