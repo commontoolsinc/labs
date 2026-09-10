@@ -1,71 +1,46 @@
 {
-  "updated": "2026-09-10T20:57:09.639581+00:00",
+  "updated": "2026-09-10T23:20:03.571259+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Worker control #7256 is merged. #7241 passes the full runner suite: 1,410 tests / 8,750 steps. A3 also passes its full runner suite: 1,410 tests / 8,761 steps, including lifecycle fixes. The first browser benchmark is being debugged.",
-  "review": "Cubic identified ambiguous revision labeling in this dashboard; the pointer now names validated implementation code, not the moving PR head. Its earlier fan-out finding is fixed and regression-tested but still awaits acknowledgement. CI gates remain required.",
+  "activity": "Both full runtime suites passed: 1,417 tests for read budgets integrated with main, and 1,411 for the C3 row invalidation fix. Correcting the synthetic cross-space fixture to use separate space transactions.",
+  "review": "Antagonistic reviews are clean for the C1 candidate fix and resolved budget merge. Normal follow-up pushes have resumed Cubic review on #7257; latest code/checkpoint reviews remain landing gates. #7264 is completing review and CI.",
   "checks": [
-    "Current fixes: runner accounting regression 20 steps passed",
-    "Current fixes: CLI render-demand regression 13 steps passed",
-    "Current CLI suite: 1,817 passed; same two pre-existing color failures",
-    "Current repository type checks, formatting, and lint passed",
-    "Current full runner suite: 1,405 passed / 8,643 steps / zero failures",
-    "Dashboard: browser rendering, interval switching, stage filter, and live updates verified",
-    "Published baseline: patterns package and all 412 authoritative pattern checks passed",
-    "After main integration: 15 focused suites / 230 steps passed",
-    "After main integration: type checks, formatting, lint, history index, and conflict-marker checks passed",
-    "A3 worktree: budget parser/evaluator test passed all seven steps (not yet harness enforcement)",
-    "A3 worktree: three real harness budget regressions and 24 accounting steps pass; recorded CLI pass/fail outcomes verified",
-    "#7241 coverage repair: initialization/action/assertion/settle report test passes; missing line verified executed twice",
-    "A3 API package: 27 tests / five steps pass",
-    "A3 full CLI package: 1,819 pass; the same two pre-existing color-mode failures",
-    "A3 runtime: 26 focused accounting steps pass; CLI budget harness: eight cases pass",
-    "A3 repository type check passed all 46 groups before the latest CLI review fixes; focused checks cover those fixes",
-    "A3 generated public types are current; static package tests pass, including browser tests",
-    "A3 CLI review: uncapped settlement, multi-user override rejection, and functional error preservation fixed; ten harness cases pass",
-    "Final A3 runner suite: 1,403 passed / 8,678 steps / zero failures",
-    "Final A3 CLI suite: 1,819 passed / 2,899 steps; same two baseline color-mode failures",
-    "Final A3 repository type checks, formatting, lint, 597 documentation blocks, package-cycle and conflict checks pass",
-    "Final A3 antagonistic review: no outstanding blockers after five substantive findings were fixed",
-    "A4 worker diagnostic control: enable/disable verified through client request routing against a real runtime",
-    "A4 runtime-client full suite: 30 tests / 650 steps passed, zero failures",
-    "#7241 reconciliation: repository type checks and 598 documentation blocks passed",
-    "#7241 refreshed controlled lunch-poll: five assertions passed; demo uses shipped #7246 counters",
-    "A3 migration: accounting suites passed 64 steps",
-    "Worker control #7256: full runtime-client suite passed 30 tests / 650 steps; antagonistic review clean",
-    "#7256 merged: all 69 checks complete without failure; actual Cubic review found no issues in five files; antagonistic review clean"
+    "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
+    "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
+    "#7257: current-main integration passed 1,417 runner tests / 8,843 steps; focused accounting includes 21 steps. Full CLI completed with 1,821 passed and two known baseline color failures. All 46 type-check groups passed before the final two regression cases.",
+    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below."
   ],
   "stages": [
     {
       "id": "A0",
       "title": "Controlled workload and baseline",
-      "status": "review",
-      "detail": "14 options, eight voters, 74 keyed votes; normal and continuous-UI tests pass."
+      "status": "done",
+      "detail": "Controlled workload and attributed baseline landed in #7241 with all review and CI gates passing."
     },
     {
       "id": "A1",
       "title": "Reactive read accounting",
       "status": "done",
-      "detail": "Core instrumentation shipped in #7246. Additional accounting and reporting regressions are being reconciled in #7241."
+      "detail": "Core instrumentation shipped in #7246; additional accounting and reporting regressions landed in #7241."
     },
     {
       "id": "A2",
       "title": "Attributed CLI reports",
       "status": "done",
-      "detail": "Core instrumentation shipped in #7246. Additional accounting and reporting regressions are being reconciled in #7241."
+      "detail": "Core instrumentation shipped in #7246; additional accounting and reporting regressions landed in #7241."
     },
     {
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
-      "status": "active",
-      "detail": "Local implementation f37d25f6d6 passed validation and antagonistic review. Adapting to the accounting API shipped by #7246 is required before publication."
+      "status": "review",
+      "detail": "Six initial findings fixed. Current-main integration passes 1,417 runner tests / 8,843 steps plus new guard accounting and selector-failure regressions. Fresh publication, CI, and review remain."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Worker read-statistics control shipped in #7256 (8d3c7dbc3c). The on-screen workload fixture is being tested; scaling benchmark remains in progress."
+      "detail": "Browser benchmark landed in #7261 with three recorded sizes. Remaining A4 work: assert read-count regression limits after A3 lands."
     },
     {
       "id": "A5",
@@ -76,8 +51,8 @@
     {
       "id": "C1",
       "title": "Multi-replica reproductions",
-      "status": "next",
-      "detail": "Reproduce nested-filter and remote-row failures before choosing repairs."
+      "status": "active",
+      "detail": "Reproduced missing/stale nested swatches. Candidate fix records the mutable inline element used to derive snapshot identity; before/after unit, narrow invalidation, and remote browser updates pass. Initial #7265 probes are held for this fix; cross-space/removal/reconnect work remains."
     },
     {
       "id": "B1",
@@ -112,8 +87,8 @@
     {
       "id": "C3",
       "title": "Remote row invalidation",
-      "status": "todo",
-      "detail": "Guard affected-row updates and stable identity."
+      "status": "active",
+      "detail": "Mutable inline-element dependency fix passes the full runner suite and same-space remote browser updates. Cross-space fixture validation and PR gates remain."
     },
     {
       "id": "C4",
@@ -174,9 +149,9 @@
     {
       "id": "Q1",
       "title": "Where should the dashboard live?",
-      "proposal": "Local browser page backed by checked-in status; Markdown tracker remains the acceptance checklist.",
-      "blocks": "Dashboard hosting choice only; implementation continues.",
-      "status": "Awaiting answer"
+      "proposal": "Keep the dashboard local as it is.",
+      "blocks": "None.",
+      "status": "Approved"
     },
     {
       "id": "Q2",
@@ -188,16 +163,16 @@
     {
       "id": "Q3",
       "title": "Any priority, deadline, or environment constraints?",
-      "proposal": "Follow the plan sequence, emphasizing observable demos.",
-      "blocks": "No current work.",
-      "status": "Awaiting answer"
+      "proposal": "No constraints at this time.",
+      "blocks": "None.",
+      "status": "Answered"
     },
     {
       "id": "Q4",
       "title": "Which deployed lunch-poll board should anchor A5/B6?",
-      "proposal": "Provide its URL or space/piece identifier. Continue on the local controlled fixture meanwhile.",
-      "blocks": "Deployed comparison only; local implementation and demos continue.",
-      "status": "Awaiting answer"
+      "proposal": "Do not touch the live poll until coordinated with Mike. Continue synthetic local workloads.",
+      "blocks": "Live poll access only.",
+      "status": "Coordination required"
     },
     {
       "id": "Q5",
@@ -209,9 +184,9 @@
     {
       "id": "Q6",
       "title": "May I post signed code-review replies?",
-      "proposal": "Reply in implementation PR review threads, including asking Cubic to acknowledge already-fixed findings. Explicit permission is required by the session communication rule.",
-      "blocks": "Review-thread communication only; other implementation work continues.",
-      "status": "Awaiting answer"
+      "proposal": "Signed implementation review replies and fresh Cubic review requests are authorized.",
+      "blocks": "None.",
+      "status": "Approved"
     }
   ],
   "milestones": [
@@ -236,5 +211,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "f12c01fddc"
+  "validatedRevision": "7aaac0b7fe"
 }

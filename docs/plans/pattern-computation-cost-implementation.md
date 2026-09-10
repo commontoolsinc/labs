@@ -150,11 +150,13 @@ durations are used as performance evidence.
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
 - [ ] **A4 — Add the read-side benchmark.**
-  - [ ] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
+  - [x] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
         settling with its tally on screen across declared collection sizes.
-  - [ ] Preserve the existing write-burst benchmark as a separate workload.
-        Record reads, runs, commits, and timing; assert counts in regression
-        tests and report timing as benchmark trends.
+  - [x] Preserve the existing write-burst benchmark as a separate workload.
+        Record reads, runs, commits, and timing in
+        [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
+  - [ ] Add read-count regression limits after A3 lands; benchmark timing is
+        reported as a trend.
 - [ ] **A5 — Explain probe/product differences.**
   - [ ] Compare matched inputs in the headless probe and browser, varying worker
         boundary and single-space/cross-space voter links separately.
@@ -167,7 +169,7 @@ durations are used as performance evidence.
 ### Validation evidence for the A3 slice
 
 [PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
-checked A3 acceptance items. The full runner suite passed 1,410 tests / 8,765
+checked A3 acceptance items. The full runner suite integrated with current main passed 1,417 tests / 8,843
 steps;
 [read-accounting.test.ts](../../packages/runner/test/read-accounting.test.ts)
 covers transaction ownership, aborted attempts, event/preflight failures,
@@ -308,10 +310,12 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 ## Next task
 
 Complete A3's CI and fresh Cubic review after its six review fixes. Continue
-C1's remote-row probes from
+C1's nested-filter and remote-row reproductions from
 [PR #7265](https://github.com/commontoolsinc/labs/pull/7265), including nested
-swatches, profile-only updates, and ranking changes. The controlled A0 fixture
+swatches, profile-only updates, and ranking changes. Validate the C3 inline-element
+dependency repair while retaining the production workaround. The controlled A0 fixture
 and A4 browser benchmark are available for count comparisons; A5 still needs
-cross-space and deployed measurements before product performance claims. Do not
+cross-space and deployed measurements before product performance claims. Live
+poll access requires coordination with Mike. Do not
 implement collection operators before the measurement and semantic gates above
 are satisfied.

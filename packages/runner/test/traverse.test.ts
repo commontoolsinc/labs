@@ -36,6 +36,7 @@ import {
   mergeAnyOfBranchSchemas,
   mergeAnyOfMatches,
   PointerCycleTracker,
+  schemaAcceptsType,
   type SchemaMemo,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
@@ -4683,5 +4684,25 @@ describe("SchemaObjectTraverser schema memo keys", () => {
 
     expect(large.idLength).toBeGreaterThan(small.idLength * 3);
     expect(perVisit(large)).toBeLessThan(perVisit(small) * 1.1);
+  });
+});
+
+describe("schemaAcceptsType()", () => {
+  it("returns `true` when a union arm's `$ref` names a definition only the union declares", () => {
+    expect(schemaAcceptsType({
+      $defs: { Name: { type: "string" } },
+      anyOf: [{ $ref: "#/$defs/Name" }],
+    }, "string")).toBe(true);
+  });
+
+  it("returns `true` when a union arm's own `$defs` define its `$ref` as the type and the union's define it otherwise", () => {
+    // The arm declares its own scope, so its `$ref` names the string there,
+    // not the number the union defines under the same name. That is the CFC
+    // reading of a nested `$defs`; JSON Schema resolves `#/$defs/Name`
+    // against the root's.
+    expect(schemaAcceptsType({
+      $defs: { Name: { type: "number" } },
+      anyOf: [{ $ref: "#/$defs/Name", $defs: { Name: { type: "string" } } }],
+    }, "string")).toBe(true);
   });
 });

@@ -181,6 +181,97 @@ describe("read-accounting", () => {
     expect(preflights.every((m) => m.reads.proxyAccesses === 1)).toBe(true);
   });
 
+  it("accounts for implementation selection with preflight and event reads", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const markers: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+    });
+    const read = (tx: IExtendedStorageTransaction) =>
+      runtime.getCell<{ value: number }>(space, "source", undefined, tx).get()
+        .value;
+    const handler: EventHandler = (tx) => {
+      expect(read(tx)).toBe(7);
+      expect(read(tx)).toBe(7);
+    };
+    handler.implementationSelection = {
+      key: "accounted-implementation",
+      matches: (tx) => read(tx) === 7,
+    };
+    handler.populateDependencies = (tx) => {
+      expect(read(tx)).toBe(7);
+    };
+    const link = runtime.getCell(space, "guarded-budget-event")
+      .getAsNormalizedFullLink();
+    runtime.scheduler.addEventHandler(handler, link);
+    runtime.scheduler.queueEvent(link, undefined);
+    await runtime.settled();
+    const attempts = markers.filter((m) => m.type === "scheduler.read-attempt");
+    expect(
+      attempts.filter((m) => m.kind === "event").map((m) =>
+        m.reads.proxyAccesses
+      ),
+    ).toEqual([3]);
+    const preflights = attempts.filter((m) => m.kind === "preflight");
+    expect(preflights.length).toBeGreaterThan(0);
+    expect(preflights.every((m) => m.reads.proxyAccesses === 2)).toBe(true);
+    expect(readStatsActive).toBe(false);
+  });
+
+  it("completes an accounted event when selection throws after presync", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const markers: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+    });
+    let presynced = false;
+    let invoked = false;
+    const failure = new Error("selection failed after presync");
+    const handler: EventHandler = () => {
+      invoked = true;
+    };
+    handler.implementationSelection = {
+      key: "throwing-selection",
+      matches: (tx) => {
+        const value =
+          runtime.getCell<{ value: number }>(space, "source", undefined, tx)
+            .get().value;
+        if (presynced) throw failure;
+        return value === 7;
+      },
+    };
+    handler.presyncInputs = () => {
+      presynced = true;
+      return Promise.resolve();
+    };
+    const link = runtime.getCell(space, "throwing-guarded-budget-event")
+      .getAsNormalizedFullLink();
+    const commits: IExtendedStorageTransaction[] = [];
+    const outcomes: ServedEventFailureOutcome[] = [];
+    runtime.scheduler.addEventHandler(handler, link);
+    runtime.scheduler.queueEvent(
+      link,
+      undefined,
+      false,
+      (tx) => commits.push(tx),
+      false,
+      {
+        served: { onFailure: (outcome) => outcomes.push(outcome) },
+      },
+    );
+    await runtime.settled();
+    expect(invoked).toBe(false);
+    expect(commits).toHaveLength(1);
+    expect(commits[0].status().status).toBe("error");
+    expect(outcomes).toEqual([{ kind: "error", message: failure.message }]);
+    expect(
+      markers.filter((m) => m.type === "scheduler.read-attempt")
+        .filter((m) => m.kind === "event")
+        .map((m) => m.reads.proxyAccesses),
+    ).toEqual([1]);
+    expect(readStatsActive).toBe(false);
+  });
+
   it("closes read-only preflight accounting when error reporting throws", () => {
     runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
     const markers: RuntimeTelemetryMarker[] = [];
