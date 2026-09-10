@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-10T17:57:22.240844+00:00",
+  "updated": "2026-09-10T18:02:20.011367+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "head": "91959194f7",
-  "activity": "Dashboard and measured-run demo delivered. Cubic fixes and main integration validated; pushing the integrated revision for CI and review. A3 contract is ready for implementation.",
-  "review": "Four prior Cubic findings addressed and independently reviewed. Main integrated locally; post-merge accounting regressions and type checks pass. Awaiting CI and a fresh Cubic review on the pushed revision; not merge-ready.",
+  "head": "4c61faae67",
+  "activity": "A3 parser and limit evaluator implemented in isolated worktree; seven tests pass. Next: transaction-attempt coverage and harness integration. #7241 is running CI and fresh review.",
+  "review": "Four earlier Cubic findings fixed and antagonistically reviewed. CI is running. Cubic skipped the merge commit; the dashboard checkpoint requests an actual review on a regular commit. A success badge for a skipped review does not satisfy the merge gate.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -15,7 +15,8 @@
     "Dashboard: browser rendering, interval switching, stage filter, and live updates verified",
     "Published baseline: patterns package and all 412 authoritative pattern checks passed",
     "After main integration: 15 focused suites / 230 steps passed",
-    "After main integration: type checks, formatting, lint, history index, and conflict-marker checks passed"
+    "After main integration: type checks, formatting, lint, history index, and conflict-marker checks passed",
+    "A3 worktree: budget parser/evaluator test passed all seven steps (not yet harness enforcement)"
   ],
   "stages": [
     {
@@ -40,7 +41,7 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "active",
-      "detail": "Budget contract drafted: pre-initialization opt-in, separate per-run and settled-step limits, and a real pass/fail demo. Execution coverage comes first."
+      "detail": "Parser and evaluator implemented; seven tests pass for opt-in, malformed limits, overrides, and exact/one-over boundaries. Runtime enforcement and the CLI pass/fail demo are still pending."
     },
     {
       "id": "A4",
