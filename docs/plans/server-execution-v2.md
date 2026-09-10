@@ -1237,10 +1237,14 @@ Tasks:
       scopes.md §1) — and its run-supply half (one instance per
       demanding principal, materialized on demand, ragged below the
       space→user hop) RULED 2026-08-16 and LANDED by fan-out stages A
-      and B 2026-08-16/17 (scopes.md §2; verification-coverage.md OW17
-      CLOSED; `packages/runner/src/scheduler/fan-out.ts`). The one
-      residual is session-data GC (scopes.md §8 item 2), tracked as a
-      deferred design, not as a blocker. Q6's non-quota remainder —
+      and B 2026-08-16/17 (scopes.md §2; verification-coverage.md OW17,
+      CLOSED as a row — its flagged residuals, the served-host wish
+      pin, the sidecar per-demander refinement, and the unstamped
+      non-sqlite effect writebacks, stay owed THERE, as refinements to
+      the built mechanism; `packages/runner/src/scheduler/fan-out.ts`).
+      What the scopes review itself still owes is session-data GC
+      (scopes.md §8 item 2), a deferred design, not a blocker. Q6's
+      non-quota remainder —
       per-run identity for served effects — RULED 2026-08-02, R-Q6b:
       service-identity envelope, attribution within the derived
       commit (protocol.md §1/§7; runtime-mapping.md N57 resolved).

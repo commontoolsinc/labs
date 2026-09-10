@@ -463,7 +463,8 @@ stays tripwired. The Phase 0 review is complete apart from the
 session-data GC design (README §6, was ledger L10): the run-supply
 half — a narrowed node runs once per demanding principal,
 materialized on demand — was RULED 2026-08-16 and landed by fan-out
-stages A and B (scopes.md §2; verification-coverage.md OW17 CLOSED).
+stages A and B (scopes.md §2; verification-coverage.md OW17, CLOSED as
+a row with its flagged residuals owed there).
 The 2026-08-02 scout pass verified scopes.md's anchors
 and recorded in scopes.md §7 the five assumptions of main's scope
 machinery that a SpaceServer breaks (M1–M5: per-identity scope

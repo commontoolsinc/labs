@@ -477,7 +477,8 @@ of every scoped node, and scope keys instances, never authority
 half — a node narrowed to `user` runs once per demanding principal,
 `session` once per session-deep principal, materialized on demand —
 was RULED 2026-08-16 and landed by fan-out stages A and B (scopes.md
-§2; verification-coverage.md OW17, CLOSED). Q6's non-quota remainder,
+§2; verification-coverage.md OW17, CLOSED as a row, its flagged
+residuals owed there as refinements). Q6's non-quota remainder,
 which that review had inherited (was ledger L10), is ruled — R-Q6b
 (§3.8; protocol.md §1, §7). Two former questions dropped outright:
 the 34× suite-context mechanism (v1-run minutiae; the
@@ -492,7 +493,8 @@ read clearance (Phase 5 builds it by construction). Still open:
    retires a retired session's scoped instances, which must also
    cover the basis rows narrowing strands at `space` and `user:<p>`
    keys. A deferred design, not a gap in the built mechanism
-   (verification-coverage.md §1).
+   (verification-coverage.md §1); the mechanism's own flagged
+   residuals are OW17's, in the register.
 
 ## 7. Relationship to prior documents
 
