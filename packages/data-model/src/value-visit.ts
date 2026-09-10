@@ -946,7 +946,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     | IterateMapForm<DomainExtra>
     | IterateMapOfForm<DomainExtra>
     | VisitSubtypeForm
-    | VisitSubtypeOfForm<DomainExtra>
+    | VisitSubtypeOfForm<DomainExtra>;
   #adjustResultForm(
     origValue: DomainFor<DomainExtra>,
     finalValue: DomainFor<DomainExtra>,
