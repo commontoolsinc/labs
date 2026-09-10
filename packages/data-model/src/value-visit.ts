@@ -244,28 +244,28 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits the given _known-valid_ `FabricArray`.
+   * Visits the given `FabricArray`.
    */
   visitFabricArray(
     value: FabricArray,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits the given _known-valid_ `FabricInstance`.
+   * Visits the given `FabricInstance`.
    */
   visitFabricInstance(
     value: FabricInstance,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits the given _known-valid_ `FabricPlainObject`.
+   * Visits the given `FabricPlainObject`.
    */
   visitFabricPlainObject(
     value: FabricPlainObject,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits the given _known-valid_ `FabricContainerValue`. If this returns type
+   * Visits the given `FabricContainerValue`. If this returns type
    * `visitSubtype`, then the visitor system will call one of
    * `visitFabricArray()`, `visitFabricInstance()`, or
    * `visitFabricPlainObject()`.
